@@ -250,7 +250,6 @@ Workflow_Automation/
 | `feature/req-XXX-*` | REQ 단위 기능 개발 | `development` 에서 분기 → `development` 으로 머지 |
 | `fix/XXX-*` | 버그 수정 | `development` 에서 분기 |
 | `release` | 프로덕션 배포 트리거 | `development` → `release` 머지 시 자동 배포 |
-| `docs` | 문서 전용 (`docs/context/` 편집) | `main` 에서 분기 |
 
 ### 5.2 흐름
 
@@ -433,7 +432,13 @@ release → main       : 안정 병합 (수동)
 /modules/storage/                   @dhwang0803-glitch
 /database/                          @dhwang0803-glitch
 /infra/                             @dhwang0803-glitch
+
+# 위키 보호 (조장 approve 필수)
+/docs/context/                      @dhwang0803-glitch
+/MONOREPO_STRUCTURE.md              @dhwang0803-glitch
 ```
+
+> **위키 보호 정책**: `docs/context/`와 `MONOREPO_STRUCTURE.md`는 CODEOWNERS로 조장(@dhwang0803-glitch)만 approve 가능. 별도 브랜치 격리 대신 PR 리뷰 규칙으로 보호한다.
 
 ---
 
