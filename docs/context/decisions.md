@@ -21,4 +21,4 @@
 
 | # | Title | Status | Date |
 |---|-------|--------|------|
-| — | _아직 등록된 ADR이 없습니다_ | — | — |
+| 0001 | [브랜치-per-모듈에서 모노레포 구조로 전환](./adr/ADR-0001-monorepo-structure.md) | Accepted | 2026-05-03 |
