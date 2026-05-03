@@ -1,1 +1,36 @@
+# 전체
 * @billionaireahreum @dhwang0803-glitch
+
+# REQ-012: Common Schemas
+/packages/common-schemas/ @dhwang0803-glitch
+
+# REQ-009: API Server
+/services/api-server/ @dhwang0803-glitch
+
+# REQ-007: Execution Engine
+# /services/execution-engine/ TBD
+
+# REQ-010: Frontend
+# /services/frontend/ 황동환 GitHub 계정 추가 예정
+
+# REQ-002, REQ-003: Auth + Nodes-Graph
+/modules/auth/ @billionaireahreum
+/modules/nodes-graph/ @billionaireahreum
+
+# REQ-004: AI Agent
+# /modules/ai-agent/ 신정혜 GitHub 계정 추가 예정
+
+# REQ-005: Toolset
+# /modules/toolset/ 햄햄 GitHub 계정 추가 예정
+
+# REQ-006: doc-parser
+# /modules/doc-parser/ 김진형 GitHub 계정 추가 예정
+
+# REQ-008: Storage
+/modules/storage/ @dhwang0803-glitch
+
+# REQ-001: Database
+/database/ @dhwang0803-glitch
+
+# REQ-011: Infrastructure
+/infra/ @dhwang0803-glitch
