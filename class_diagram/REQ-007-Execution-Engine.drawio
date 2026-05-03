@@ -1,0 +1,580 @@
+<mxfile host="app.diagrams.net" agent="Claude Code" version="26.0.0">
+  <diagram id="req007-execution-engine" name="REQ-007 Execution Engine">
+    <mxGraphModel dx="2800" dy="3600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="4000" pageHeight="5000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ============================== -->
+        <!-- TITLE                          -->
+        <!-- ============================== -->
+        <mxCell id="title" value="REQ-007 Execution Engine — LangGraph StateGraph + Strategy + State Machine Pattern" style="text;html=1;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="600" y="30" width="2800" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ============================== -->
+        <!-- 2-TIER ARCHITECTURE NOTE       -->
+        <!-- ============================== -->
+        <mxCell id="tier_note" value="&lt;b&gt;2-Tier Execution Architecture&lt;/b&gt;&lt;hr&gt;&lt;b&gt;Tier 1: LangGraph StateGraph (Primary)&lt;/b&gt;&lt;br&gt;- Supports conditional cycles (circular edges)&lt;br&gt;- Self-Refine loop: evaluate → re-work → re-evaluate&lt;br&gt;- PostgresSaver checkpointer for durability&lt;br&gt;&lt;br&gt;&lt;b&gt;Tier 2: Celery + Redis (Secondary)&lt;/b&gt;&lt;br&gt;- Heavy task offload only (NOT primary orchestrator)&lt;br&gt;- Queues: default, llm (Gemma4 Modal, concurrency 5), external_api&lt;br&gt;- Invoked from within LangGraph nodes via CeleryAsyncBridge" style="shape=note;whiteSpace=wrap;html=1;size=18;align=left;spacingLeft=10;fillColor=#FFF9C4;strokeColor=#F57F17;fontSize=11;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="2980" y="100" width="420" height="220" as="geometry" />
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- TIER 1 SEPARATOR                                             -->
+        <!-- ============================================================ -->
+        <mxCell id="tier1_sep" value="TIER 1 — LangGraph StateGraph (Primary Execution Framework)" style="shape=mxgraph.basic.rect;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=16;fontStyle=1;fontColor=#1565C0;align=center;verticalAlign=middle;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="100" y="100" width="2800" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ============================== -->
+        <!-- TOP ROW: Facade + Builder + CompiledStateGraph -->
+        <!-- ============================== -->
+
+        <!-- 1. StateGraphExecutor — Facade Pattern -->
+        <mxCell id="c1" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;Facade&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;StateGraphExecutor&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- graph_builder: StateGraphBuilder&lt;br&gt;- execution_repo: ExecutionRepository&lt;br&gt;- credential_store: CredentialStore&lt;br&gt;- checkpointer: PostgresSaver&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ async execute(execution_id: UUID, workflow_id: UUID,&lt;br&gt;&amp;nbsp;&amp;nbsp;execution_mode: str, payload: dict): ExecutionResult&lt;br&gt;+ async cancel(execution_id: UUID): None&lt;br&gt;+ async pause(execution_id: UUID): None&lt;br&gt;+ async resume(execution_id: UUID): None&lt;br&gt;- _resolve_mode(mode: str): ExecutionModeStrategy&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="100" y="180" width="500" height="280" as="geometry" />
+        </mxCell>
+
+        <!-- 2. StateGraphBuilder — Builder Pattern -->
+        <mxCell id="c2" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;Builder&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;StateGraphBuilder&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- graph: StateGraph[ExecutionState]&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ build(workflow: WorkflowSchema,&lt;br&gt;&amp;nbsp;&amp;nbsp;tool_registry: ToolRegistry): CompiledStateGraph&lt;br&gt;- _add_workflow_nodes(workflow: WorkflowSchema): None&lt;br&gt;- _add_edges(workflow: WorkflowSchema): None&lt;br&gt;- _add_conditional_edges(node_id: str,&lt;br&gt;&amp;nbsp;&amp;nbsp;evaluator: QAEvaluatorNode): None&lt;br&gt;- _add_self_refine_loop(drafter_node: str,&lt;br&gt;&amp;nbsp;&amp;nbsp;evaluator_node: str, max_retries: int): None&lt;br&gt;- _compile(checkpointer: PostgresSaver): CompiledStateGraph&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="700" y="180" width="500" height="290" as="geometry" />
+        </mxCell>
+
+        <!-- 3. ExecutionState — TypedDict -->
+        <mxCell id="c3" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;LangGraph TypedDict&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;ExecutionState&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- execution_id: UUID&lt;br&gt;- workflow_id: UUID&lt;br&gt;- current_node: str&lt;br&gt;- node_outputs: dict[str, dict]&lt;br&gt;&amp;nbsp;&amp;nbsp;&lt;i&gt;# Annotated[dict, operator.ior] (reducer)&lt;/i&gt;&lt;br&gt;- messages: list[BaseMessage]&lt;br&gt;&amp;nbsp;&amp;nbsp;&lt;i&gt;# Annotated[list, operator.add] (append reducer)&lt;/i&gt;&lt;br&gt;- eval_score: Optional[float]&lt;br&gt;- refine_count: int&lt;br&gt;- retry_counts: dict[str, int]&lt;br&gt;- credential_ids: list[str]&lt;br&gt;- permission_source: PermissionSource&lt;br&gt;- status: Literal[&amp;quot;running&amp;quot;, &amp;quot;succeeded&amp;quot;,&lt;br&gt;&amp;nbsp;&amp;nbsp;&amp;quot;failed&amp;quot;, &amp;quot;cancelled&amp;quot;, &amp;quot;paused&amp;quot;]&lt;br&gt;- error_summary: Optional[str]&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:10px;color:#666;&quot;&gt;&lt;i&gt;(no methods — pure state channel)&lt;/i&gt;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="180" width="420" height="340" as="geometry" />
+        </mxCell>
+
+        <!-- 4. CompiledStateGraph — External LangGraph -->
+        <mxCell id="c4" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;LangGraph External&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;CompiledStateGraph&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- graph: StateGraph&lt;br&gt;- checkpointer: PostgresSaver&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ async ainvoke(state: ExecutionState,&lt;br&gt;&amp;nbsp;&amp;nbsp;config: RunnableConfig): ExecutionState&lt;br&gt;+ async astream(state: ExecutionState,&lt;br&gt;&amp;nbsp;&amp;nbsp;config: RunnableConfig): AsyncIterator[ExecutionState]&lt;br&gt;+ get_state(config: RunnableConfig): StateSnapshot&lt;br&gt;+ update_state(config: RunnableConfig, values: dict): None&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1820" y="180" width="470" height="240" as="geometry" />
+        </mxCell>
+
+        <!-- ============================== -->
+        <!-- UPPER-MIDDLE ROW: Strategy Pattern -->
+        <!-- ============================== -->
+
+        <!-- 5. ExecutionModeStrategy — Abstract / Strategy Pattern -->
+        <mxCell id="c5" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;abstract&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;&amp;laquo;Strategy Pattern&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;&lt;i&gt;ExecutionModeStrategy&lt;/i&gt;&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;&lt;i&gt;(no fields)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ &lt;i&gt;async dispatch(execution_id: UUID,&lt;br&gt;&amp;nbsp;&amp;nbsp;compiled_graph: CompiledStateGraph,&lt;br&gt;&amp;nbsp;&amp;nbsp;initial_state: ExecutionState): ExecutionResult&lt;/i&gt;&lt;br&gt;+ &lt;i&gt;async cancel(execution_id: UUID): None&lt;/i&gt;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=0;" vertex="1" parent="1">
+          <mxGeometry x="200" y="560" width="450" height="210" as="geometry" />
+        </mxCell>
+
+        <!-- 6. ServerlessExecutor -->
+        <mxCell id="c6" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;ServerlessExecutor&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- compiled_graph: CompiledStateGraph&lt;br&gt;- celery_app: Celery&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ async dispatch(execution_id: UUID,&lt;br&gt;&amp;nbsp;&amp;nbsp;compiled_graph: CompiledStateGraph,&lt;br&gt;&amp;nbsp;&amp;nbsp;initial_state: ExecutionState): ExecutionResult&lt;br&gt;+ async cancel(execution_id: UUID): None&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:10px;color:#666;&quot;&gt;&lt;i&gt;Primary: LangGraph graph.ainvoke()&lt;br&gt;Celery for async offload within nodes&lt;/i&gt;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#d0cee2;strokeColor=#56517e;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="100" y="860" width="400" height="260" as="geometry" />
+        </mxCell>
+
+        <!-- 7. AgentExecutor -->
+        <mxCell id="c7" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;AgentExecutor&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- ws_pool: dict[UUID, WebSocket]&lt;br&gt;- hybrid_crypto: HybridCryptoHelper&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ async dispatch(execution_id: UUID,&lt;br&gt;&amp;nbsp;&amp;nbsp;compiled_graph: CompiledStateGraph,&lt;br&gt;&amp;nbsp;&amp;nbsp;initial_state: ExecutionState): ExecutionResult&lt;br&gt;+ async cancel(execution_id: UUID): None&lt;br&gt;- _encrypt_credentials_for_agent(&lt;br&gt;&amp;nbsp;&amp;nbsp;credentials: list, agent_public_key: str): bytes&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#d0cee2;strokeColor=#56517e;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="560" y="860" width="430" height="240" as="geometry" />
+        </mxCell>
+
+        <!-- ============================== -->
+        <!-- CENTER ROW: LangGraph Nodes    -->
+        <!-- ============================== -->
+
+        <!-- 8. ToolExecutorNode -->
+        <mxCell id="c8" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;LangGraph Node&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;ToolExecutorNode&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- tool_registry: ToolRegistry&lt;br&gt;- retry_policy: RetryPolicy&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ async __call__(state: ExecutionState): dict&lt;br&gt;&amp;nbsp;&amp;nbsp;&lt;i&gt;# returns state update&lt;/i&gt;&lt;br&gt;+ async _execute_tool(node_id: str, tool_name: str,&lt;br&gt;&amp;nbsp;&amp;nbsp;input: dict, state: ExecutionState): dict&lt;br&gt;+ async _handle_error(error: Exception,&lt;br&gt;&amp;nbsp;&amp;nbsp;state: ExecutionState): dict&lt;br&gt;- _should_retry(error: Exception): bool&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="600" width="420" height="250" as="geometry" />
+        </mxCell>
+
+        <!-- 9. QAEvaluatorNode -->
+        <mxCell id="c9" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;LangGraph Node&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;QAEvaluatorNode&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- evaluation_threshold: float = 8.0&lt;br&gt;- max_refine_count: int = 3&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ async __call__(state: ExecutionState): dict&lt;br&gt;&amp;nbsp;&amp;nbsp;&lt;i&gt;# returns {eval_score, refine_count}&lt;/i&gt;&lt;br&gt;+ async _evaluate(node_output: dict): EvaluationResult&lt;br&gt;- _should_refine(score: float, refine_count: int): bool&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1600" y="600" width="430" height="220" as="geometry" />
+        </mxCell>
+
+        <!-- 10. ConditionalRouter -->
+        <mxCell id="c10" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;conditional_edge&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;ConditionalRouter&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;&lt;i&gt;(no fields — stateless routing functions)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ route_by_score(state: ExecutionState): str&lt;br&gt;&amp;nbsp;&amp;nbsp;&lt;i&gt;# returns &amp;quot;next_node&amp;quot; | &amp;quot;drafter&amp;quot; | &amp;quot;force_pass&amp;quot;&lt;/i&gt;&lt;br&gt;+ route_by_status(state: ExecutionState): str&lt;br&gt;&amp;nbsp;&amp;nbsp;&lt;i&gt;# returns next node or END&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:10px;color:#666;&quot;&gt;&lt;i&gt;Used with graph.add_conditional_edges(&lt;br&gt;&amp;nbsp;&amp;nbsp;&amp;quot;qa_evaluator&amp;quot;, route_by_score, {...})&lt;/i&gt;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2100" y="600" width="420" height="240" as="geometry" />
+        </mxCell>
+
+        <!-- 11. ParallelBranchNode -->
+        <mxCell id="c11" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;LangGraph Node&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;ParallelBranchNode&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;&lt;i&gt;(no fields — uses LangGraph Send() API)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ async __call__(state: ExecutionState): list[Send]&lt;br&gt;&amp;nbsp;&amp;nbsp;&lt;i&gt;# returns Send() for each branch&lt;/i&gt;&lt;br&gt;- _build_branch_states(&lt;br&gt;&amp;nbsp;&amp;nbsp;branches: list[NodeInstance]): list[Send]&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2600" y="600" width="400" height="190" as="geometry" />
+        </mxCell>
+
+        <!-- ============================== -->
+        <!-- SELF-REFINE LOOP ANNOTATION    -->
+        <!-- ============================== -->
+        <mxCell id="self_refine" value="&lt;b&gt;Self-Refine Loop (LangGraph conditional_edge)&lt;/b&gt;&lt;hr&gt;&lt;pre style=&quot;font-size:12px;margin:4px;&quot;&gt;&#10;  drafter (ToolExecutorNode)&#10;     │&#10;     ▼&#10;  qa_evaluator (QAEvaluatorNode)&#10;     │&#10;     ├── [score &amp;gt;= 8.0] ──────→ next_node ✓&#10;     │&#10;     ├── [score &amp;lt; 8.0 &amp;amp;&amp;amp;      ──→ drafter (CYCLE ↺)&#10;     │    refine_count &amp;lt; 3]&#10;     │&#10;     └── [refine_count &amp;gt;= 3] ──→ force_pass → next_node&#10;&#10;  graph.add_conditional_edges(&#10;    &amp;quot;qa_evaluator&amp;quot;,&#10;    route_by_score,&#10;    {&amp;quot;pass&amp;quot;: &amp;quot;next_node&amp;quot;,&#10;     &amp;quot;fail&amp;quot;: &amp;quot;tool_executor&amp;quot;,&#10;     END: END}&#10;  )&#10;&lt;/pre&gt;" style="shape=note;whiteSpace=wrap;html=1;size=20;align=left;spacingLeft=6;fillColor=#FFCCBC;strokeColor=#E64A19;fontSize=11;verticalAlign=top;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1600" y="880" width="440" height="360" as="geometry" />
+        </mxCell>
+
+        <!-- ============================== -->
+        <!-- LOWER-MIDDLE: State Machine + Data Classes -->
+        <!-- ============================== -->
+
+        <!-- 12. NodeRunner — State Machine -->
+        <mxCell id="c12" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;State Machine&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;NodeRunner&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- node_instance: NodeInstance&lt;br&gt;- retry_policy: RetryPolicy&lt;br&gt;- current_status: NodeStatus&lt;br&gt;- attempt: int&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ async run(input_payload: dict): NodeRunResult&lt;br&gt;+ async transition(new_status: NodeStatus): None&lt;br&gt;+ async retry(): bool&lt;br&gt;- _calculate_backoff(attempt: int): float&lt;br&gt;- async _record_node_log(result: NodeRunResult): None&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="1300" width="400" height="270" as="geometry" />
+        </mxCell>
+
+        <!-- 13. NodeStatus Enum -->
+        <mxCell id="c13" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;enum&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;NodeStatus&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;PENDING&lt;br&gt;RUNNING&lt;br&gt;SUCCEEDED&lt;br&gt;FAILED&lt;br&gt;RETRYING&lt;br&gt;CANCELLED&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="700" y="1300" width="200" height="200" as="geometry" />
+        </mxCell>
+
+        <!-- 14. NodeRunResult -->
+        <mxCell id="c14" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;dataclass&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;NodeRunResult&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- node_id: str&lt;br&gt;- status: NodeStatus&lt;br&gt;- attempt: int&lt;br&gt;- output_payload: dict&lt;br&gt;- error_message: Optional[str]&lt;br&gt;- duration_ms: int&lt;br&gt;- worker_id: str&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:10px;color:#666;&quot;&gt;&lt;i&gt;(no methods — pure data)&lt;/i&gt;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1560" y="1300" width="280" height="240" as="geometry" />
+        </mxCell>
+
+        <!-- 15. RetryPolicy -->
+        <mxCell id="c15" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;dataclass&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;RetryPolicy&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- max_attempts: int = 3&lt;br&gt;- backoff_strategy: Literal[&amp;quot;exponential&amp;quot;,&lt;br&gt;&amp;nbsp;&amp;nbsp;&amp;quot;linear&amp;quot;, &amp;quot;fixed&amp;quot;] = &amp;quot;exponential&amp;quot;&lt;br&gt;- backoff_base_seconds: float = 2.0&lt;br&gt;- backoff_max_seconds: float = 60.0&lt;br&gt;- retryable_errors: list[str] = [&amp;quot;TimeoutError&amp;quot;,&lt;br&gt;&amp;nbsp;&amp;nbsp;&amp;quot;HTTPError(5xx)&amp;quot;, &amp;quot;RateLimitError&amp;quot;]&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ get_delay(attempt: int): float&lt;br&gt;+ is_retryable(error: Exception): bool&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1900" y="1300" width="380" height="270" as="geometry" />
+        </mxCell>
+
+        <!-- 16. ExecutionResult -->
+        <mxCell id="c16" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;dataclass&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;ExecutionResult&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- execution_id: UUID&lt;br&gt;- status: Literal[&amp;quot;succeeded&amp;quot;, &amp;quot;failed&amp;quot;,&lt;br&gt;&amp;nbsp;&amp;nbsp;&amp;quot;cancelled&amp;quot;, &amp;quot;paused&amp;quot;]&lt;br&gt;- node_results: list[NodeRunResult]&lt;br&gt;- total_duration_ms: int&lt;br&gt;- error_summary: Optional[str]&lt;br&gt;- refine_iterations: int&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:10px;color:#666;&quot;&gt;&lt;i&gt;(no methods — pure data)&lt;/i&gt;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2350" y="1300" width="340" height="240" as="geometry" />
+        </mxCell>
+
+        <!-- 17. EvaluationResult -->
+        <mxCell id="c17" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;dataclass&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;EvaluationResult&lt;/b&gt;&lt;br&gt;&lt;i style=&quot;font-size:10px;&quot;&gt;(from REQ-012)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- score: float&lt;br&gt;- pass_flag: bool&lt;br&gt;- reason: str&lt;br&gt;- feedback: str&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:10px;color:#666;&quot;&gt;&lt;i&gt;(no methods — pure data)&lt;/i&gt;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2750" y="1300" width="260" height="200" as="geometry" />
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- TIER 2 SEPARATOR                                             -->
+        <!-- ============================================================ -->
+        <mxCell id="tier2_sep" value="TIER 2 — Celery + Redis (Secondary Async Worker Layer)" style="shape=mxgraph.basic.rect;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=16;fontStyle=1;fontColor=#7B1FA2;align=center;verticalAlign=middle;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="100" y="1650" width="2800" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ============================== -->
+        <!-- BOTTOM: Celery Secondary Layer -->
+        <!-- ============================== -->
+
+        <!-- 18. CeleryAsyncBridge -->
+        <mxCell id="c18" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;Bridge&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;CeleryAsyncBridge&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- celery_app: Celery&lt;br&gt;- redis_client: Redis&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ async offload_heavy_task(task_name: str,&lt;br&gt;&amp;nbsp;&amp;nbsp;args: dict, queue: str): Any&lt;br&gt;+ async offload_llm_call(prompt: str,&lt;br&gt;&amp;nbsp;&amp;nbsp;model: str): str&lt;br&gt;+ async offload_external_api(method: str,&lt;br&gt;&amp;nbsp;&amp;nbsp;url: str, payload: dict): dict&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="100" y="1740" width="420" height="240" as="geometry" />
+        </mxCell>
+
+        <!-- 19. CeleryWorkerConfig -->
+        <mxCell id="c19" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;dataclass&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;CeleryWorkerConfig&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- broker_url: str&lt;br&gt;- result_backend: str&lt;br&gt;- queues: list[QueueConfig]&lt;br&gt;- task_serializer: str = &amp;quot;json&amp;quot;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:10px;color:#666;&quot;&gt;&lt;i&gt;(no methods — pure config)&lt;/i&gt;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="620" y="1740" width="300" height="200" as="geometry" />
+        </mxCell>
+
+        <!-- 20. QueueConfig -->
+        <mxCell id="c20" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;laquo;dataclass&amp;raquo;&lt;/b&gt;&lt;br&gt;&lt;b&gt;QueueConfig&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- name: Literal[&amp;quot;default&amp;quot;, &amp;quot;llm&amp;quot;, &amp;quot;external_api&amp;quot;]&lt;br&gt;- routing_key: str&lt;br&gt;- concurrency: int&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:10px;color:#666;&quot;&gt;&lt;i&gt;llm queue concurrency = 5 (Modal limit)&lt;/i&gt;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="1740" width="360" height="180" as="geometry" />
+        </mxCell>
+
+        <!-- 21. CronScheduleManager -->
+        <mxCell id="c21" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;CronScheduleManager&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;- scheduler: AsyncIOScheduler&lt;br&gt;- distributed_lock: Redis&lt;/p&gt;&lt;hr size=&quot;1&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;text-align:left;font-size:11px;&quot;&gt;+ register_cron(workflow_id: UUID,&lt;br&gt;&amp;nbsp;&amp;nbsp;cron_expression: str): None&lt;br&gt;+ unregister_cron(workflow_id: UUID): None&lt;br&gt;- _on_cron_fire(workflow_id: UUID): None&lt;br&gt;- _acquire_lock(key: str): bool&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="1740" width="380" height="220" as="geometry" />
+        </mxCell>
+
+        <!-- ================================================== -->
+        <!-- RELATIONSHIPS                                       -->
+        <!-- ================================================== -->
+
+        <!-- R1: StateGraphExecutor ──◆── StateGraphBuilder (composition) -->
+        <mxCell id="r1" style="endArrow=none;startArrow=diamondThin;startFill=1;startSize=14;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;strokeWidth=2;" edge="1" source="c1" target="c2" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_label" value="composition" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r1">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R2: StateGraphExecutor ──◆── ExecutionModeStrategy (composition) -->
+        <mxCell id="r2" style="endArrow=none;startArrow=diamondThin;startFill=1;startSize=14;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;" edge="1" source="c1" target="c5" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_label" value="composition" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r2">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R3: StateGraphExecutor ──▷── ExecutionRepository (dependency) -->
+        <mxCell id="r3" style="endArrow=open;endSize=12;dashed=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;strokeWidth=1.5;" edge="1" source="c1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="30" y="320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r3_label" value="&amp;laquo;uses&amp;raquo;&#10;ExecutionRepository" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=9;fontColor=#999;" vertex="1" connectable="0" parent="r3">
+          <mxGeometry x="-0.2" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R4: StateGraphExecutor ──▷── CredentialStore (dependency) -->
+        <mxCell id="r4" style="endArrow=open;endSize=12;dashed=1;exitX=0;exitY=0.7;exitDx=0;exitDy=0;strokeWidth=1.5;" edge="1" source="c1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="30" y="376" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r4_label" value="&amp;laquo;uses&amp;raquo;&#10;CredentialStore" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=9;fontColor=#999;" vertex="1" connectable="0" parent="r4">
+          <mxGeometry x="-0.2" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R5: StateGraphBuilder ──▷ creates ──▷ CompiledStateGraph -->
+        <mxCell id="r5" style="endArrow=open;endSize=12;dashed=1;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.4;entryDx=0;entryDy=0;strokeWidth=1.5;" edge="1" source="c2" target="c4" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r5_label" value="&amp;laquo;creates&amp;raquo;" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r5">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R6: StateGraphBuilder uses ExecutionState (dependency) -->
+        <mxCell id="r6" style="endArrow=open;endSize=12;dashed=1;exitX=1;exitY=0.7;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;strokeWidth=1.5;" edge="1" source="c2" target="c3" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r6_label" value="&amp;laquo;uses&amp;raquo;" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r6">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R7: ServerlessExecutor implements ExecutionModeStrategy -->
+        <mxCell id="r7" style="endArrow=block;endFill=0;endSize=14;dashed=1;exitX=0.4;exitY=0;exitDx=0;exitDy=0;entryX=0.3;entryY=1;entryDx=0;entryDy=0;strokeWidth=2;" edge="1" source="c6" target="c5" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r7_label" value="&amp;laquo;implements&amp;raquo;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r7">
+          <mxGeometry x="-0.2" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R8: AgentExecutor implements ExecutionModeStrategy -->
+        <mxCell id="r8" style="endArrow=block;endFill=0;endSize=14;dashed=1;exitX=0.4;exitY=0;exitDx=0;exitDy=0;entryX=0.7;entryY=1;entryDx=0;entryDy=0;strokeWidth=2;" edge="1" source="c7" target="c5" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r8_label" value="&amp;laquo;implements&amp;raquo;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r8">
+          <mxGeometry x="-0.2" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R9: ServerlessExecutor has CompiledStateGraph (association) -->
+        <mxCell id="r9" style="endArrow=open;endSize=12;exitX=0.7;exitY=0;exitDx=0;exitDy=0;entryX=0.3;entryY=1;entryDx=0;entryDy=0;strokeWidth=1.5;" edge="1" source="c6" target="c4" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="380" y="830" />
+              <mxPoint x="1960" y="830" />
+              <mxPoint x="1960" y="440" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r9_label" value="association" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r9">
+          <mxGeometry x="0.3" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R10: ServerlessExecutor ──◆── CeleryAsyncBridge (composition) -->
+        <mxCell id="r10" style="endArrow=none;startArrow=diamondThin;startFill=1;startSize=14;exitX=0.3;exitY=1;exitDx=0;exitDy=0;entryX=0.3;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;" edge="1" source="c6" target="c18" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="220" y="1200" />
+              <mxPoint x="226" y="1640" />
+              <mxPoint x="226" y="1740" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r10_label" value="composition" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r10">
+          <mxGeometry x="0.5" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R11: ToolExecutorNode creates NodeRunner -->
+        <mxCell id="r11" style="endArrow=open;endSize=12;dashed=1;exitX=0.4;exitY=1;exitDx=0;exitDy=0;entryX=0.4;entryY=0;entryDx=0;entryDy=0;strokeWidth=1.5;" edge="1" source="c8" target="c12" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r11_label" value="&amp;laquo;creates&amp;raquo;" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r11">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R12: ToolExecutorNode ──◆── RetryPolicy (composition) -->
+        <mxCell id="r12" style="endArrow=none;startArrow=diamondThin;startFill=1;startSize=14;exitX=0.8;exitY=1;exitDx=0;exitDy=0;entryX=0.3;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;" edge="1" source="c8" target="c15" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1436" y="1250" />
+              <mxPoint x="2014" y="1250" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r12_label" value="composition" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r12">
+          <mxGeometry x="0.3" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R13: ToolExecutorNode uses CeleryAsyncBridge (dependency) -->
+        <mxCell id="r13" style="endArrow=open;endSize=12;dashed=1;exitX=0;exitY=0.8;exitDx=0;exitDy=0;entryX=0.8;entryY=0;entryDx=0;entryDy=0;strokeWidth=1.5;" edge="1" source="c8" target="c18" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1060" y="800" />
+              <mxPoint x="1060" y="1680" />
+              <mxPoint x="436" y="1680" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r13_label" value="&amp;laquo;uses&amp;raquo;&#10;heavy task offload" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=9;fontColor=#999;" vertex="1" connectable="0" parent="r13">
+          <mxGeometry x="0.5" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R14: QAEvaluatorNode produces EvaluationResult (dependency) -->
+        <mxCell id="r14" style="endArrow=open;endSize=12;dashed=1;exitX=0.8;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=1.5;" edge="1" source="c9" target="c17" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1944" y="1260" />
+              <mxPoint x="2880" y="1260" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r14_label" value="&amp;laquo;produces&amp;raquo;" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r14">
+          <mxGeometry x="0.3" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R15: ConditionalRouter reads ExecutionState (dependency) -->
+        <mxCell id="r15" style="endArrow=open;endSize=12;dashed=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=1;entryY=0.7;entryDx=0;entryDy=0;strokeWidth=1.5;" edge="1" source="c10" target="c3" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2310" y="560" />
+              <mxPoint x="1760" y="560" />
+              <mxPoint x="1760" y="418" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r15_label" value="&amp;laquo;reads&amp;raquo;" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r15">
+          <mxGeometry x="-0.3" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R16: NodeRunner ──◆── RetryPolicy (composition) -->
+        <mxCell id="r16" style="endArrow=none;startArrow=diamondThin;startFill=1;startSize=14;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;" edge="1" source="c12" target="c15" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1560" y="1435" />
+              <mxPoint x="1860" y="1435" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r16_label" value="composition" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r16">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R17: NodeRunner uses NodeStatus (dependency) -->
+        <mxCell id="r17" style="endArrow=open;endSize=12;dashed=1;exitX=0;exitY=0.4;exitDx=0;exitDy=0;entryX=1;entryY=0.4;entryDx=0;entryDy=0;strokeWidth=1.5;" edge="1" source="c12" target="c13" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r17_label" value="&amp;laquo;uses&amp;raquo;" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r17">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R18: NodeRunner produces NodeRunResult -->
+        <mxCell id="r18" style="endArrow=open;endSize=12;dashed=1;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;strokeWidth=1.5;" edge="1" source="c12" target="c14" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r18_label" value="&amp;laquo;produces&amp;raquo;" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r18">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R19: CeleryAsyncBridge ──◆── CeleryWorkerConfig (composition) -->
+        <mxCell id="r19" style="endArrow=none;startArrow=diamondThin;startFill=1;startSize=14;exitX=1;exitY=0.4;exitDx=0;exitDy=0;entryX=0;entryY=0.4;entryDx=0;entryDy=0;strokeWidth=2;" edge="1" source="c18" target="c19" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r19_label" value="composition" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r19">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R20: CeleryWorkerConfig ──◆── QueueConfig (composition, 3) -->
+        <mxCell id="r20" style="endArrow=none;startArrow=diamondThin;startFill=1;startSize=14;exitX=1;exitY=0.4;exitDx=0;exitDy=0;entryX=0;entryY=0.4;entryDx=0;entryDy=0;strokeWidth=2;" edge="1" source="c19" target="c20" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r20_label" value="composition&#10;{3}" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r20">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R21: CronScheduleManager uses StateGraphExecutor (dependency) -->
+        <mxCell id="r21" style="endArrow=open;endSize=12;dashed=1;exitX=0.3;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeWidth=1.5;" edge="1" source="c21" target="c1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1614" y="1700" />
+              <mxPoint x="60" y="1700" />
+              <mxPoint x="60" y="500" />
+              <mxPoint x="350" y="500" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="r21_label" value="&amp;laquo;uses&amp;raquo;" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r21">
+          <mxGeometry x="0.5" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R22: QAEvaluatorNode + ConditionalRouter Self-Refine annotation link -->
+        <mxCell id="r22a" style="endArrow=none;dashed=1;dashPattern=5 5;strokeColor=#E64A19;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.2;entryY=0;entryDx=0;entryDy=0;" edge="1" source="c9" target="self_refine" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="r22b" style="endArrow=none;dashed=1;dashPattern=5 5;strokeColor=#E64A19;strokeWidth=2;exitX=0.3;exitY=1;exitDx=0;exitDy=0;entryX=0.8;entryY=0;entryDx=0;entryDy=0;" edge="1" source="c10" target="self_refine" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- R23: ExecutionResult contains NodeRunResult -->
+        <mxCell id="r23" style="endArrow=none;startArrow=diamondThin;startFill=1;startSize=14;exitX=0;exitY=0.4;exitDx=0;exitDy=0;entryX=1;entryY=0.4;entryDx=0;entryDy=0;strokeWidth=2;" edge="1" source="c16" target="c14" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r23_label" value="composition&#10;{*}" style="edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];fontSize=10;fontColor=#666666;" vertex="1" connectable="0" parent="r23">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- R24: ParallelBranchNode uses Send() API annotation -->
+        <mxCell id="r24_note" value="&lt;i&gt;Uses LangGraph Send() API&lt;br&gt;for dynamic fan-out&lt;/i&gt;" style="shape=note;whiteSpace=wrap;html=1;size=14;align=center;fillColor=#E8EAF6;strokeColor=#5C6BC0;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="2640" y="820" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="r24_link" style="endArrow=none;dashed=1;dashPattern=3 3;strokeColor=#5C6BC0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="c11" target="r24_note" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ================================================== -->
+        <!-- LEGEND                                              -->
+        <!-- ================================================== -->
+        <mxCell id="legend_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="2980" y="360" width="420" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_title" value="&lt;b&gt;Legend&lt;/b&gt;" style="text;html=1;fontSize=14;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="3100" y="365" width="180" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Color legend items -->
+        <mxCell id="leg1" value="" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="400" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1t" value="LangGraph Core Classes" style="text;html=1;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3040" y="398" width="200" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg2" value="" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="430" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2t" value="Abstract Classes" style="text;html=1;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3040" y="428" width="200" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg3" value="" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="460" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3t" value="Data Classes / TypedDict" style="text;html=1;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3040" y="458" width="200" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg4" value="" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="490" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4t" value="Enums" style="text;html=1;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3040" y="488" width="200" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg5" value="" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="520" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5t" value="Celery Classes (Tier 2)" style="text;html=1;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3040" y="518" width="200" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg6" value="" style="rounded=1;fillColor=#d0cee2;strokeColor=#56517e;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="550" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6t" value="Strategy Implementations" style="text;html=1;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3040" y="548" width="200" height="24" as="geometry" />
+        </mxCell>
+
+        <!-- Relationship legend -->
+        <mxCell id="leg_rel_title" value="&lt;b&gt;Relationships&lt;/b&gt;" style="text;html=1;fontSize=12;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="585" width="200" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg_r1s" value="" style="ellipse;fillColor=#333;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="616" width="8" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r1e" value="" style="ellipse;fillColor=#333;" vertex="1" parent="1">
+          <mxGeometry x="3060" y="616" width="8" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r1" style="endArrow=none;startArrow=diamondThin;startFill=1;startSize=14;strokeWidth=2;" edge="1" source="leg_r1s" target="leg_r1e" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r1t" value="Composition (has)" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3075" y="610" width="200" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg_r2s" value="" style="ellipse;fillColor=#333;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="640" width="8" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r2e" value="" style="ellipse;fillColor=#333;" vertex="1" parent="1">
+          <mxGeometry x="3060" y="640" width="8" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r2" style="endArrow=block;endFill=0;endSize=14;dashed=1;strokeWidth=2;" edge="1" source="leg_r2s" target="leg_r2e" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r2t" value="Implementation (realizes)" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3075" y="634" width="200" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg_r3s" value="" style="ellipse;fillColor=#333;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="664" width="8" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r3e" value="" style="ellipse;fillColor=#333;" vertex="1" parent="1">
+          <mxGeometry x="3060" y="664" width="8" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r3" style="endArrow=open;endSize=12;dashed=1;strokeWidth=1.5;" edge="1" source="leg_r3s" target="leg_r3e" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r3t" value="Dependency / Creates / Uses" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3075" y="658" width="220" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg_r4s" value="" style="ellipse;fillColor=#333;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="688" width="8" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r4e" value="" style="ellipse;fillColor=#333;" vertex="1" parent="1">
+          <mxGeometry x="3060" y="688" width="8" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r4" style="endArrow=open;endSize=12;strokeWidth=1.5;" edge="1" source="leg_r4s" target="leg_r4e" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_r4t" value="Association" style="text;html=1;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3075" y="682" width="200" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- Stereotype legend -->
+        <mxCell id="leg_stereo_title" value="&lt;b&gt;Stereotypes&lt;/b&gt;" style="text;html=1;fontSize=12;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="715" width="200" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_stereo" value="&lt;span style=&quot;font-size:10px;&quot;&gt;&amp;laquo;Facade&amp;raquo; &amp;laquo;Builder&amp;raquo; &amp;laquo;abstract&amp;raquo;&lt;br&gt;&amp;laquo;Strategy Pattern&amp;raquo; &amp;laquo;State Machine&amp;raquo;&lt;br&gt;&amp;laquo;LangGraph Node&amp;raquo; &amp;laquo;LangGraph TypedDict&amp;raquo;&lt;br&gt;&amp;laquo;conditional_edge&amp;raquo; &amp;laquo;Bridge&amp;raquo;&lt;br&gt;&amp;laquo;enum&amp;raquo; &amp;laquo;dataclass&amp;raquo;&lt;/span&gt;" style="text;html=1;fontSize=10;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="3000" y="735" width="380" height="80" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,676 @@
+<mxfile host="app.diagrams.net" modified="2026-05-03T00:00:00.000Z" agent="Claude Code" etag="REQ012" version="21.0.0" type="device">
+  <diagram id="REQ-012-Common-Schemas" name="REQ-012 Common Schemas">
+    <mxGraphModel dx="2800" dy="3800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3000" pageHeight="4000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- ============================================================ -->
+        <!-- DIAGRAM TITLE                                                 -->
+        <!-- ============================================================ -->
+        <mxCell id="title" value="&lt;b&gt;REQ-012: Common Schemas (Pydantic v2 + TypeScript SSOT)&lt;/b&gt;&lt;br/&gt;&lt;i&gt;&amp;lt;&amp;lt;Value Object / DTO Pattern&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;Internal AI Automation Skill Marketplace Platform" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=16;" vertex="1" parent="1">
+          <mxGeometry x="900" y="20" width="600" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- ABSTRACT BASE: BaseModel (Pydantic v2)                        -->
+        <!-- ============================================================ -->
+        <mxCell id="BaseModel" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;abstract&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;i&gt;&amp;lt;&amp;lt;Value Object / DTO Pattern&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;BaseModel&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;i&gt;(Pydantic v2 base class)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ model_validate(data: dict): Self&lt;br/&gt;+ model_dump(): dict&lt;br/&gt;+ model_json_schema(): dict&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#d5e8d4;strokeColor=#82b366;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="120" width="280" height="170" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- CORE WORKFLOW TYPES (TOP CENTER)                              -->
+        <!-- ============================================================ -->
+
+        <!-- WorkflowSchema -->
+        <mxCell id="WorkflowSchema" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;WorkflowSchema&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ workflow_id: UUID&lt;br/&gt;+ name: str&lt;br/&gt;+ scope: Literal[&amp;quot;Private&amp;quot;,&amp;quot;Team&amp;quot;,&amp;quot;Public&amp;quot;]&lt;br/&gt;+ is_draft: bool&lt;br/&gt;+ draft_spec: Optional[DraftSpec]&lt;br/&gt;+ nodes: list[NodeInstance]&lt;br/&gt;+ connections: list[Edge]&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ validate_graph(): bool&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="550" y="420" width="340" height="220" as="geometry"/>
+        </mxCell>
+
+        <!-- NodeInstance -->
+        <mxCell id="NodeInstance" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;NodeInstance&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ instance_id: UUID&lt;br/&gt;+ node_id: UUID&lt;br/&gt;+ parameters: dict[str, Any]&lt;br/&gt;+ position: Position&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="250" y="720" width="280" height="150" as="geometry"/>
+        </mxCell>
+
+        <!-- Position -->
+        <mxCell id="Position" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;Position&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ x: float&lt;br/&gt;+ y: float&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="50" y="960" width="200" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- Edge -->
+        <mxCell id="Edge" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;Edge&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ from_instance_id: UUID&lt;br/&gt;+ to_instance_id: UUID&lt;br/&gt;+ from_handle: str&lt;br/&gt;+ to_handle: str&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="600" y="720" width="250" height="150" as="geometry"/>
+        </mxCell>
+
+        <!-- NodeConfig -->
+        <mxCell id="NodeConfig" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;NodeConfig&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ node_id: UUID&lt;br/&gt;+ node_type: str&lt;br/&gt;+ name: str&lt;br/&gt;+ category: str&lt;br/&gt;+ version: str&lt;br/&gt;+ input_schema: dict&lt;br/&gt;+ output_schema: dict&lt;br/&gt;+ parameter_schema: dict&lt;br/&gt;+ risk_level: Literal[&amp;quot;Low&amp;quot;,&amp;quot;Medium&amp;quot;,&amp;quot;High&amp;quot;,&amp;quot;Restricted&amp;quot;]&lt;br/&gt;+ required_connections: list[str]&lt;br/&gt;+ description: str&lt;br/&gt;+ is_mvp: bool&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="930" y="720" width="340" height="310" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- AGENT STATE (CENTER)                                          -->
+        <!-- ============================================================ -->
+
+        <!-- AgentState -->
+        <mxCell id="AgentState" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;AgentState&lt;/b&gt;&lt;br/&gt;&lt;i&gt;(LangGraph state)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ messages: list[BaseMessage]&lt;br/&gt;+ draft_spec: Optional[DraftSpec]&lt;br/&gt;+ intent_result: Optional[IntentResult]&lt;br/&gt;+ node_candidates: list[NodeConfig]&lt;br/&gt;+ workflow_draft: Optional[WorkflowSchema]&lt;br/&gt;+ mode: str&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="1120" width="320" height="210" as="geometry"/>
+        </mxCell>
+
+        <!-- IntentResult -->
+        <mxCell id="IntentResult" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;IntentResult&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ intent: Literal[&amp;quot;clarify&amp;quot;,&amp;quot;draft&amp;quot;,&amp;quot;refine&amp;quot;,&amp;quot;propose&amp;quot;]&lt;br/&gt;+ confidence: float&lt;br/&gt;+ analyzed_entities: dict&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="1200" width="340" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- DraftSpec -->
+        <mxCell id="DraftSpec" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;DraftSpec&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ natural_language_intent: str&lt;br/&gt;+ unresolved_nodes: list[UnresolvedNode]&lt;br/&gt;+ discovered_entities: dict&lt;br/&gt;+ slot_filling_state: SlotFillingState&lt;br/&gt;+ consultant_turn_count: int&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="550" y="1120" width="310" height="180" as="geometry"/>
+        </mxCell>
+
+        <!-- UnresolvedNode -->
+        <mxCell id="UnresolvedNode" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;UnresolvedNode&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ placeholder_id: str&lt;br/&gt;+ hint: str&lt;br/&gt;+ candidate_node_types: list[str]&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="250" y="1380" width="280" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- SlotFillingState -->
+        <mxCell id="SlotFillingState" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;SlotFillingState&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ asked: list[str]&lt;br/&gt;+ pending: list[str]&lt;br/&gt;+ filled: dict[str, Any]&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="600" y="1380" width="260" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- SSE TYPES (RIGHT SIDE)                                        -->
+        <!-- ============================================================ -->
+
+        <!-- SSEFrame base -->
+        <mxCell id="SSEFrame" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;discriminated union&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;SSEFrame&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ frame_type: str &lt;i&gt;(discriminator)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="2100" y="420" width="280" height="110" as="geometry"/>
+        </mxCell>
+
+        <!-- SessionFrame -->
+        <mxCell id="SessionFrame" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;SessionFrame&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ session_id: UUID&lt;br/&gt;+ langgraph_thread_id: UUID&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1900" y="640" width="240" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- AgentNodeFrame -->
+        <mxCell id="AgentNodeFrame" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;AgentNodeFrame&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ agent_node_name: str&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="2170" y="640" width="220" height="110" as="geometry"/>
+        </mxCell>
+
+        <!-- RationaleDeltaFrame -->
+        <mxCell id="RationaleDeltaFrame" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;RationaleDeltaFrame&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ delta: str&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="2420" y="640" width="230" height="110" as="geometry"/>
+        </mxCell>
+
+        <!-- SlotFillQuestionFrame -->
+        <mxCell id="SlotFillQuestionFrame" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;SlotFillQuestionFrame&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ question: str&lt;br/&gt;+ field_name: str&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1900" y="790" width="240" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- DraftSpecDeltaFrame -->
+        <mxCell id="DraftSpecDeltaFrame" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;DraftSpecDeltaFrame&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ delta: dict&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="2170" y="790" width="220" height="110" as="geometry"/>
+        </mxCell>
+
+        <!-- ResultFrame -->
+        <mxCell id="ResultFrame" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;ResultFrame&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ intent: str&lt;br/&gt;+ payload: dict&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="2420" y="790" width="230" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- ErrorFrame -->
+        <mxCell id="ErrorFrame" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;ErrorFrame&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ code: str&lt;br/&gt;+ message: str&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="2680" y="640" width="220" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- VALIDATION / ERROR TYPES (BOTTOM CENTER-RIGHT)                -->
+        <!-- ============================================================ -->
+
+        <!-- ErrorCode Enum -->
+        <mxCell id="ErrorCode" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;enum&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;ErrorCode&lt;/b&gt;&lt;br/&gt;&lt;i&gt;(str, Enum)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;E_NODE_TYPE_MISMATCH&lt;br/&gt;E_CYCLE_DETECTED&lt;br/&gt;E_ISOLATED_NODE&lt;br/&gt;E_DUPLICATE_ID&lt;br/&gt;E_PERMISSION_DENIED&lt;br/&gt;E_MISSING_CONNECTION&lt;br/&gt;E_INVALID_TRIGGER&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#fff2cc;strokeColor=#d6b656;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1900" y="1600" width="250" height="230" as="geometry"/>
+        </mxCell>
+
+        <!-- ValidationErrorResponse -->
+        <mxCell id="ValidationErrorResponse" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;ValidationErrorResponse&lt;/b&gt;&lt;br/&gt;&lt;i&gt;(Standard Error Schema)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ validation_status: Literal[&amp;quot;passed&amp;quot;,&amp;quot;failed&amp;quot;]&lt;br/&gt;+ errors: list[ValidationErrorItem]&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="1420" width="320" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- ValidationErrorItem -->
+        <mxCell id="ValidationErrorItem" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;ValidationErrorItem&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ code: ErrorCode&lt;br/&gt;+ message: str&lt;br/&gt;+ node_ids: list[str]&lt;br/&gt;+ edge_id: Optional[str]&lt;br/&gt;+ validator: Literal[&amp;quot;SchemaValidation&amp;quot;,&amp;quot;RuntimeValidation&amp;quot;]&lt;br/&gt;+ hint: Optional[str]&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="1620" width="340" height="190" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- SECURITY CONTEXT (BOTTOM LEFT)                                -->
+        <!-- ============================================================ -->
+
+        <!-- PermissionSource -->
+        <mxCell id="PermissionSource" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;PermissionSource&lt;/b&gt;&lt;br/&gt;&lt;i&gt;(Security Context)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ user_id: UUID&lt;br/&gt;+ role: Literal[&amp;quot;User&amp;quot;,&amp;quot;Admin&amp;quot;]&lt;br/&gt;+ department_id: UUID&lt;br/&gt;+ session_id: UUID&lt;br/&gt;+ current_workflow_id: Optional[UUID]&lt;br/&gt;+ current_skill_id: Optional[UUID]&lt;br/&gt;+ granted_scopes: list[Literal[&amp;quot;Private&amp;quot;,&amp;quot;Team&amp;quot;,&amp;quot;Public&amp;quot;]]&lt;br/&gt;+ risk_ceiling: Literal[&amp;quot;High&amp;quot;,&amp;quot;Restricted&amp;quot;]&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1600" width="380" height="240" as="geometry"/>
+        </mxCell>
+
+        <!-- PlaintextCredential -->
+        <mxCell id="PlaintextCredential" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;PlaintextCredential&lt;/b&gt;&lt;br/&gt;&lt;i&gt;(In-Memory Only)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ credential_id: str&lt;br/&gt;+ credential_kind: Literal[&amp;quot;fernet&amp;quot;,&amp;quot;aes_gcm&amp;quot;]&lt;br/&gt;+ value: str&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ wipe(): None&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1900" width="340" height="170" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- DOCUMENT TYPES (BOTTOM RIGHT)                                 -->
+        <!-- ============================================================ -->
+
+        <!-- DocumentBlock -->
+        <mxCell id="DocumentBlock" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;DocumentBlock&lt;/b&gt;&lt;br/&gt;&lt;i&gt;(doc_parser output)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ document_id: UUID&lt;br/&gt;+ file_meta: FileMeta&lt;br/&gt;+ parser: str&lt;br/&gt;+ blocks: list[ContentBlock]&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="2200" y="1120" width="280" height="170" as="geometry"/>
+        </mxCell>
+
+        <!-- FileMeta -->
+        <mxCell id="FileMeta" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;FileMeta&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ file_name: str&lt;br/&gt;+ file_type: str&lt;br/&gt;+ file_size: int&lt;br/&gt;+ mime_type: str&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="2550" y="1120" width="230" height="150" as="geometry"/>
+        </mxCell>
+
+        <!-- ContentBlock -->
+        <mxCell id="ContentBlock" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;ContentBlock&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ block_id: str&lt;br/&gt;+ block_type: Literal[&amp;quot;text&amp;quot;,&amp;quot;table&amp;quot;,&amp;quot;image&amp;quot;,&amp;quot;heading&amp;quot;]&lt;br/&gt;+ content: str&lt;br/&gt;+ token_estimate: int&lt;br/&gt;+ importance_score: float&lt;br/&gt;+ source_ref: dict&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="2200" y="1370" width="340" height="190" as="geometry"/>
+        </mxCell>
+
+        <!-- AnalysisResult -->
+        <mxCell id="AnalysisResult" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;AnalysisResult&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ document_title: str&lt;br/&gt;+ category: str&lt;br/&gt;+ summary: str&lt;br/&gt;+ key_points: list[str]&lt;br/&gt;+ confidence: float&lt;br/&gt;+ source_refs: list[dict]&lt;br/&gt;+ warnings: list[str]&lt;br/&gt;+ questions: list[str]&lt;br/&gt;+ prompt_version: str&lt;br/&gt;+ template_type: str&lt;br/&gt;+ few_shot_count: int&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="2600" y="1370" width="280" height="290" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- LANGGRAPH HANDOFF / QA (BOTTOM CENTER)                        -->
+        <!-- ============================================================ -->
+
+        <!-- HandoffPayload -->
+        <mxCell id="HandoffPayload" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;HandoffPayload&lt;/b&gt;&lt;br/&gt;&lt;i&gt;(LangGraph Handoff)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ handoff_type: Literal[&amp;quot;recovery_mode&amp;quot;,&amp;quot;result_review&amp;quot;]&lt;br/&gt;+ direction: Literal[&amp;quot;forward&amp;quot;,&amp;quot;reverse&amp;quot;]&lt;br/&gt;+ error_codes: list[str]&lt;br/&gt;+ error_messages: list[str]&lt;br/&gt;+ state_data: dict&lt;br/&gt;+ correlation_id: UUID&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="550" y="1620" width="380" height="200" as="geometry"/>
+        </mxCell>
+
+        <!-- EvaluationResult -->
+        <mxCell id="EvaluationResult" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;i&gt;&amp;lt;&amp;lt;value object&amp;gt;&amp;gt;&lt;/i&gt;&lt;br/&gt;&lt;b&gt;EvaluationResult&lt;/b&gt;&lt;br/&gt;&lt;i&gt;(QA Evaluator FR-LGA-08)&lt;/i&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ score: float&lt;br/&gt;+ pass_flag: bool&lt;br/&gt;+ reason: str&lt;br/&gt;+ feedback: str&lt;/p&gt;&lt;hr size=&quot;1&quot;/&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&amp;nbsp;&lt;/p&gt;" style="verticalAlign=top;align=left;overflow=fill;fontSize=12;fontFamily=Helvetica;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="1620" width="300" height="170" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- INHERITANCE ARROWS (BaseModel -> subclasses)                  -->
+        <!-- Hollow triangle: endArrow=block;endFill=0                     -->
+        <!-- ============================================================ -->
+
+        <!-- WorkflowSchema -> BaseModel -->
+        <mxCell id="inh_WF" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;" edge="1" source="WorkflowSchema" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- NodeInstance -> BaseModel -->
+        <mxCell id="inh_NI" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;" edge="1" source="NodeInstance" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Position -> BaseModel -->
+        <mxCell id="inh_Pos" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;dashed=1;" edge="1" source="Position" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="150" y="400"/>
+              <mxPoint x="1100" y="400"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Edge -> BaseModel -->
+        <mxCell id="inh_Edge" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.3;entryY=1;entryDx=0;entryDy=0;" edge="1" source="Edge" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- NodeConfig -> BaseModel -->
+        <mxCell id="inh_NC" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" source="NodeConfig" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- AgentState -> BaseModel -->
+        <mxCell id="inh_AS" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;dashed=1;" edge="1" source="AgentState" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1260" y="1080"/>
+              <mxPoint x="1240" y="400"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- IntentResult -> BaseModel -->
+        <mxCell id="inh_IR" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.7;entryY=1;entryDx=0;entryDy=0;dashed=1;" edge="1" source="IntentResult" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1670" y="1080"/>
+              <mxPoint x="1296" y="400"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- DraftSpec -> BaseModel -->
+        <mxCell id="inh_DS" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;dashed=1;" edge="1" source="DraftSpec" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="705" y="1080"/>
+              <mxPoint x="1100" y="400"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- UnresolvedNode -> BaseModel -->
+        <mxCell id="inh_UN" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="UnresolvedNode" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="100" y="1350"/>
+              <mxPoint x="100" y="350"/>
+              <mxPoint x="1100" y="350"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- SlotFillingState -> BaseModel -->
+        <mxCell id="inh_SFS" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="SlotFillingState" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="730" y="1550"/>
+              <mxPoint x="70" y="1550"/>
+              <mxPoint x="70" y="350"/>
+              <mxPoint x="1100" y="350"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- SSEFrame -> BaseModel -->
+        <mxCell id="inh_SSE" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=1;entryY=1;entryDx=0;entryDy=0;" edge="1" source="SSEFrame" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ValidationErrorResponse -> BaseModel -->
+        <mxCell id="inh_VER" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="ValidationErrorResponse" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1660" y="1380"/>
+              <mxPoint x="1400" y="380"/>
+              <mxPoint x="1300" y="380"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ValidationErrorItem -> BaseModel -->
+        <mxCell id="inh_VEI" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="ValidationErrorItem" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1870" y="1700"/>
+              <mxPoint x="1870" y="380"/>
+              <mxPoint x="1380" y="380"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- PermissionSource -> BaseModel -->
+        <mxCell id="inh_PS" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="PermissionSource" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="40" y="1700"/>
+              <mxPoint x="40" y="330"/>
+              <mxPoint x="1100" y="330"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- PlaintextCredential -> BaseModel -->
+        <mxCell id="inh_PC" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="PlaintextCredential" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="20" y="1950"/>
+              <mxPoint x="20" y="310"/>
+              <mxPoint x="1100" y="310"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- DocumentBlock -> BaseModel -->
+        <mxCell id="inh_DB" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="DocumentBlock" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2340" y="1080"/>
+              <mxPoint x="2340" y="370"/>
+              <mxPoint x="1380" y="370"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- FileMeta -> BaseModel -->
+        <mxCell id="inh_FM" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="FileMeta" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2665" y="1080"/>
+              <mxPoint x="2665" y="360"/>
+              <mxPoint x="1380" y="360"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ContentBlock -> BaseModel -->
+        <mxCell id="inh_CB" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="ContentBlock" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2560" y="1350"/>
+              <mxPoint x="2700" y="1080"/>
+              <mxPoint x="2700" y="350"/>
+              <mxPoint x="1380" y="350"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- AnalysisResult -> BaseModel -->
+        <mxCell id="inh_AR" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="AnalysisResult" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2740" y="1340"/>
+              <mxPoint x="2740" y="340"/>
+              <mxPoint x="1380" y="340"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- HandoffPayload -> BaseModel -->
+        <mxCell id="inh_HP" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="HandoffPayload" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="500" y="1700"/>
+              <mxPoint x="500" y="380"/>
+              <mxPoint x="1100" y="380"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- EvaluationResult -> BaseModel -->
+        <mxCell id="inh_ER" style="endArrow=block;endFill=0;dashed=1;" edge="1" source="EvaluationResult" target="BaseModel" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1150" y="1580"/>
+              <mxPoint x="1400" y="390"/>
+              <mxPoint x="1300" y="390"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- SSE SUBTYPE INHERITANCE (all -> SSEFrame)                     -->
+        <!-- ============================================================ -->
+
+        <!-- SessionFrame -> SSEFrame -->
+        <mxCell id="inh_SF" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.2;entryY=1;entryDx=0;entryDy=0;" edge="1" source="SessionFrame" target="SSEFrame" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- AgentNodeFrame -> SSEFrame -->
+        <mxCell id="inh_ANF" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" source="AgentNodeFrame" target="SSEFrame" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- RationaleDeltaFrame -> SSEFrame -->
+        <mxCell id="inh_RDF" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.8;entryY=1;entryDx=0;entryDy=0;" edge="1" source="RationaleDeltaFrame" target="SSEFrame" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- SlotFillQuestionFrame -> SSEFrame -->
+        <mxCell id="inh_SFQF" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.2;entryY=1;entryDx=0;entryDy=0;" edge="1" source="SlotFillQuestionFrame" target="SSEFrame" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2020" y="770"/>
+              <mxPoint x="2156" y="600"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- DraftSpecDeltaFrame -> SSEFrame -->
+        <mxCell id="inh_DSDF" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" source="DraftSpecDeltaFrame" target="SSEFrame" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2280" y="770"/>
+              <mxPoint x="2240" y="600"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ResultFrame -> SSEFrame -->
+        <mxCell id="inh_ResF" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.8;entryY=1;entryDx=0;entryDy=0;" edge="1" source="ResultFrame" target="SSEFrame" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2535" y="770"/>
+              <mxPoint x="2324" y="600"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ErrorFrame -> SSEFrame -->
+        <mxCell id="inh_ErrF" style="endArrow=block;endFill=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=1;entryY=1;entryDx=0;entryDy=0;" edge="1" source="ErrorFrame" target="SSEFrame" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- COMPOSITION ARROWS (filled diamond)                           -->
+        <!-- startArrow=diamondThin;startFill=1                            -->
+        <!-- ============================================================ -->
+
+        <!-- WorkflowSchema --◆ DraftSpec (0..1) -->
+        <mxCell id="comp_WF_DS" value="0..1" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="WorkflowSchema" target="DraftSpec" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- WorkflowSchema --◆ NodeInstance (1..*) -->
+        <mxCell id="comp_WF_NI" value="1..*" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=0;exitY=0.7;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="WorkflowSchema" target="NodeInstance" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- WorkflowSchema --◆ Edge (0..*) -->
+        <mxCell id="comp_WF_E" value="0..*" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="WorkflowSchema" target="Edge" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="720" y="680"/>
+              <mxPoint x="725" y="680"/>
+            </Array>
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- NodeInstance --◆ Position -->
+        <mxCell id="comp_NI_P" value="1" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=0;exitY=0.7;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="NodeInstance" target="Position" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- AgentState --◆ DraftSpec (0..1) -->
+        <mxCell id="comp_AS_DS" value="0..1" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="AgentState" target="DraftSpec" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- AgentState --◆ WorkflowSchema (0..1) -->
+        <mxCell id="comp_AS_WF" value="0..1" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=0;exitY=0.2;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="AgentState" target="WorkflowSchema" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1050" y="1162"/>
+              <mxPoint x="1050" y="530"/>
+            </Array>
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- AgentState --◆ IntentResult (0..1) -->
+        <mxCell id="comp_AS_IR" value="0..1" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="AgentState" target="IntentResult" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- AgentState --> NodeConfig (association 0..*) -->
+        <mxCell id="assoc_AS_NC" value="0..*" style="endArrow=open;endFill=0;dashed=1;exitX=0;exitY=0.8;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" source="AgentState" target="NodeConfig" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1100" y="1288"/>
+              <mxPoint x="1100" y="1080"/>
+            </Array>
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="assoc_AS_NC_label" value="&lt;i&gt;&amp;lt;&amp;lt;references&amp;gt;&amp;gt;&lt;/i&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="assoc_AS_NC">
+          <mxGeometry x="0.3" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- DraftSpec --◆ UnresolvedNode (0..*) -->
+        <mxCell id="comp_DS_UN" value="0..*" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=0;exitY=0.8;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="DraftSpec" target="UnresolvedNode" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- DraftSpec --◆ SlotFillingState (1) -->
+        <mxCell id="comp_DS_SFS" value="1" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="DraftSpec" target="SlotFillingState" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ValidationErrorResponse --◆ ValidationErrorItem (0..*) -->
+        <mxCell id="comp_VER_VEI" value="0..*" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="ValidationErrorResponse" target="ValidationErrorItem" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- DocumentBlock --◆ FileMeta (1) -->
+        <mxCell id="comp_DB_FM" value="1" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;" edge="1" source="DocumentBlock" target="FileMeta" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- DocumentBlock --◆ ContentBlock (1..*) -->
+        <mxCell id="comp_DB_CB" value="1..*" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" source="DocumentBlock" target="ContentBlock" parent="1">
+          <mxGeometry x="0.5" y="10" relative="1" as="geometry">
+            <mxPoint as="offset"/>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- DEPENDENCY ARROWS                                             -->
+        <!-- ============================================================ -->
+
+        <!-- ValidationErrorItem ..> ErrorCode (dependency) -->
+        <mxCell id="dep_VEI_EC" value="&lt;i&gt;&amp;lt;&amp;lt;uses&amp;gt;&amp;gt;&lt;/i&gt;" style="endArrow=open;endFill=0;dashed=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="ValidationErrorItem" target="ErrorCode" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ============================================================ -->
+        <!-- GROUP LABELS / NOTES                                          -->
+        <!-- ============================================================ -->
+
+        <!-- Core Workflow group label -->
+        <mxCell id="grp_core" value="Core Workflow Types" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=#6c8ebf;fillColor=#dae8fc;fontSize=13;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="440" y="380" width="160" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- SSE Types group label -->
+        <mxCell id="grp_sse" value="SSE Frame Types (Discriminated Union)" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=#9673a6;fillColor=#e1d5e7;fontSize=13;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="2100" y="380" width="300" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Agent State group label -->
+        <mxCell id="grp_agent" value="Agent State (LangGraph)" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=#6c8ebf;fillColor=#dae8fc;fontSize=13;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="1080" width="180" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Security group label -->
+        <mxCell id="grp_sec" value="Security Context" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=#6c8ebf;fillColor=#dae8fc;fontSize=13;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1560" width="130" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Document group label -->
+        <mxCell id="grp_doc" value="Document Types (doc_parser)" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=#6c8ebf;fillColor=#dae8fc;fontSize=13;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="2200" y="1080" width="240" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Validation group label -->
+        <mxCell id="grp_val" value="Validation / Error Types" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=#6c8ebf;fillColor=#dae8fc;fontSize=13;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="1380" width="180" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- LangGraph Handoff group label -->
+        <mxCell id="grp_handoff" value="LangGraph Handoff / QA" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=#6c8ebf;fillColor=#dae8fc;fontSize=13;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="650" y="1580" width="180" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Legend -->
+        <mxCell id="legend_bg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="50" y="100" width="350" height="250" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_title" value="&lt;b&gt;Legend&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="180" y="105" width="60" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_abstract" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="70" y="140" width="30" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_abstract_t" value="Abstract BaseModel (Pydantic v2)" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="110" y="135" width="200" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_data" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="70" y="170" width="30" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_data_t" value="Value Object / DTO (data class)" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="110" y="165" width="200" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_enum" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="70" y="200" width="30" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_enum_t" value="Enum" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="110" y="195" width="50" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_union" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="70" y="230" width="30" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_union_t" value="Discriminated Union" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="110" y="225" width="130" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_inh_line" value="" style="endArrow=block;endFill=0;html=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="70" y="270" as="sourcePoint"/>
+            <mxPoint x="100" y="270" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="legend_inh_t" value="Inheritance" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="110" y="255" width="80" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_comp_line" value="" style="endArrow=open;endFill=0;startArrow=diamondThin;startFill=1;html=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="70" y="300" as="sourcePoint"/>
+            <mxPoint x="100" y="300" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="legend_comp_t" value="Composition" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="110" y="285" width="90" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_dep_line" value="" style="endArrow=open;endFill=0;dashed=1;html=1;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="70" y="330" as="sourcePoint"/>
+            <mxPoint x="100" y="330" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="legend_dep_t" value="Dependency / Association" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="110" y="315" width="160" height="30" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
