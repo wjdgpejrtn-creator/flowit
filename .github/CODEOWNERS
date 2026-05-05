@@ -34,3 +34,7 @@
 
 # REQ-011: Infrastructure
 /infra/ @dhwang0803-glitch
+
+# 위키 보호: 조장만 approve 가능 (기존 docs 브랜치 격리 대체)
+/docs/context/ @dhwang0803-glitch
+/MONOREPO_STRUCTURE.md @dhwang0803-glitch

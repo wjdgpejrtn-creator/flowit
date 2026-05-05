@@ -1,15 +1,16 @@
 # Monorepo Structure — 사내 AI 자동화 스킬 마켓플레이스
 
 > **Baseline**: v1.0 (2026-04-30)
-> **최종 갱신**: 2026-05-03
+> **최종 갱신**: 2026-05-05
 > **작성자**: 황대원 (조장)
+> **아키텍처**: Clean Architecture (의존성 역전 + Port/Adapter)
 
 ---
 
 ## 1. 개요
 
 본 프로젝트는 **마이크로서비스 아키텍처 기반의 사내 AI 자동화 스킬 마켓플레이스 플랫폼**이다.
-12개 REQ 문서(Baseline v1.0)를 단일 Git 저장소(모노레포)에서 관리하며, 4계층 아키텍처를 디렉토리 구조로 직접 반영한다.
+12개 REQ 문서(Baseline v1.0)를 단일 Git 저장소(모노레포)에서 관리하며, **Clean Architecture 동심원 모델**을 디렉토리 구조로 직접 반영한다.
 
 ### 1.1 왜 모노레포인가
 
@@ -20,6 +21,15 @@
 | 코드 리뷰 효율 | 서비스 간 영향도를 단일 diff로 확인 |
 | CI/CD 단순화 | 변경된 경로 기반으로 선택적 빌드·배포 |
 
+### 1.2 Clean Architecture 핵심 규칙
+
+| 규칙 | 설명 |
+|------|------|
+| **의존성 방향** | 바깥 → 안쪽만 허용. Domain은 어떤 프레임워크도 모른다 |
+| **의존성 역전 (DIP)** | 안쪽이 Port(인터페이스)를 정의하고, 바깥이 Adapter(구현체)를 제공한다 |
+| **경계 횡단** | 계층 간 데이터 전달은 DTO 또는 도메인 엔티티로만 한다. ORM 모델이 도메인을 넘지 않는다 |
+| **테스트 독립성** | Domain과 Application은 외부 시스템 없이 단위 테스트 가능 |
+
 ---
 
 ## 2. 디렉토리 구조
@@ -27,195 +37,247 @@
 ```
 Workflow_Automation/
 │
-├── packages/                            ← 공유 패키지
-│   └── common-schemas/                  REQ-012: Pydantic v2 → TypeScript SSOT
+├── packages/
+│   └── common-schemas/                     # REQ-012 SSOT (최내곽 원)
 │       ├── python/
-│       │   ├── common_schemas/          13개 Pydantic 모델 모듈
+│       │   ├── common_schemas/
+│       │   │   ├── __init__.py
+│       │   │   ├── workflow.py             # WorkflowSchema, NodeInstance, Edge, Position
+│       │   │   ├── node.py                 # NodeConfig
+│       │   │   ├── agent.py                # AgentState, DraftSpec, IntentResult, ...
+│       │   │   ├── document.py             # DocumentBlock, ContentBlock, FileMeta, ...
+│       │   │   ├── security.py             # PermissionSource, PlaintextCredential
+│       │   │   ├── validation.py           # ValidationErrorResponse, ...
+│       │   │   ├── transport.py            # SSEFrame 계열
+│       │   │   ├── handoff.py              # HandoffPayload, EvaluationResult
+│       │   │   ├── enums.py                # AgentMode, ExecutionStatus, RiskLevel, ErrorCode
+│       │   │   └── exceptions.py           # DomainError 계층
 │       │   └── pyproject.toml
 │       ├── typescript/
-│       │   ├── src/generated/           자동 생성된 TS 타입
+│       │   ├── src/generated/              # Python → TS 자동 생성
 │       │   └── package.json
-│       └── scripts/                     codegen 스크립트
+│       └── scripts/                        # codegen 스크립트
 │
-├── services/                            ← 배포 가능한 서비스 (각각 Dockerfile 보유)
-│   ├── api-server/                      REQ-009: FastAPI Core API
+├── modules/
+│   ├── auth/                               # REQ-002 Auth-Security
+│   │   ├── __init__.py
+│   │   ├── domain/
+│   │   │   ├── entities/                   # Session, OAuthConnection
+│   │   │   ├── value_objects/              # TokenPair
+│   │   │   ├── services/                   # PermissionResolver, CredentialInjection
+│   │   │   └── ports/                      # SessionRepository, OAuthRepository, CipherPort (ABC)
+│   │   ├── application/
+│   │   │   └── use_cases/                  # Authenticate, IssueToken, RefreshToken, InjectCredential
+│   │   ├── adapters/
+│   │   │   ├── cipher/                     # AESGCMCipher, FernetCipher
+│   │   │   └── ...                         # GoogleOAuth, JWTAdapter, Middleware
+│   │   └── tests/
+│   │       ├── conftest.py
+│   │       ├── unit/{domain,application}/
+│   │       └── integration/adapters/
+│   │
+│   ├── nodes-graph/                        # REQ-003 Nodes-Graph
+│   │   ├── __init__.py
+│   │   ├── domain/
+│   │   │   ├── entities/                   # NodeDefinition
+│   │   │   ├── services/                   # GraphValidator, GraphSerializer
+│   │   │   └── ports/                      # NodeDefinitionRepository (ABC)
+│   │   ├── application/
+│   │   │   └── use_cases/                  # ValidateGraph, SearchNodes
+│   │   ├── adapters/                       # ToolToNodeWrapper
+│   │   └── tests/
+│   │       ├── conftest.py
+│   │       ├── unit/{domain,application}/
+│   │       └── integration/adapters/
+│   │
+│   ├── ai-agent/                           # REQ-004 AI Agent
+│   │   ├── __init__.py
+│   │   ├── domain/
+│   │   │   ├── entities/                   # MemoryEntry, CorrectionPattern
+│   │   │   ├── value_objects/              # EvaluationResult
+│   │   │   ├── services/                   # IntentAnalyzer, QAEvaluator, Drafter, OnboardingConsultant
+│   │   │   └── ports/                      # AgentMemoryRepository, NodeRegistry, LLMPort (ABC)
+│   │   ├── application/
+│   │   │   └── use_cases/                  # ComposeWorkflow, Onboarding
+│   │   ├── adapters/
+│   │   │   ├── langgraph/
+│   │   │   │   ├── nodes/                  # 13개 AgentNode 구현
+│   │   │   │   └── ...                     # GraphBuilder, Checkpointer
+│   │   │   └── llm/                        # ModalAdapter
+│   │   └── tests/
+│   │       ├── conftest.py
+│   │       ├── unit/{domain,application}/
+│   │       └── integration/adapters/
+│   │
+│   ├── toolset/                            # REQ-005 Toolset
+│   │   ├── __init__.py
+│   │   ├── domain/
+│   │   │   ├── entities/                   # BaseTool (ABC)
+│   │   │   ├── services/                   # RuntimeValidator
+│   │   │   └── ports/                      # ToolRegistry, SecureConnectorPort (ABC)
+│   │   ├── application/
+│   │   │   └── use_cases/                  # ExecuteTool, RegisterTool
+│   │   ├── adapters/
+│   │   │   └── tools/                      # 8개 Tool 구현 (Google Drive, Gmail, Slack, ...)
+│   │   └── tests/
+│   │       ├── conftest.py
+│   │       ├── unit/{domain,application}/
+│   │       └── integration/adapters/
+│   │
+│   ├── doc-parser/                         # REQ-006 Doc Parser
+│   │   ├── __init__.py
+│   │   ├── domain/
+│   │   │   ├── entities/                   # ParserMeta
+│   │   │   ├── services/                   # ChunkingService, QualityGate
+│   │   │   └── ports/                      # ParserPort (ABC)
+│   │   ├── application/
+│   │   │   └── use_cases/                  # ParseDocument, ExtractChunks
+│   │   ├── adapters/
+│   │   │   └── parsers/                    # 7개 파서 (PDF, DOCX, XLSX, CSV, PPTX, HWP, HWPX)
+│   │   └── tests/
+│   │       ├── conftest.py
+│   │       ├── unit/{domain,application}/
+│   │       └── integration/adapters/
+│   │
+│   └── storage/                            # REQ-008 Persistence Adapter
+│       ├── __init__.py
+│       ├── orm/                            # SQLAlchemy ORM 모델 (DB 테이블 1:1)
+│       ├── repositories/                   # Repository ABC 구현체
+│       ├── mappers/                        # ORM ↔ 도메인 엔티티 변환
+│       ├── marketplace/                    # REQ-008 고유 도메인 (5-state machine)
+│       │   ├── domain/                     # SkillLifecycle, ApprovalWorkflow
+│       │   └── application/
+│       │       └── use_cases/              # PublishSkill, SearchSkills, ApproveSkill
+│       └── tests/
+│           ├── conftest.py
+│           ├── unit/
+│           └── integration/
+│
+├── services/
+│   ├── api-server/                         # REQ-009 Inbound Adapter (HTTP → Use Case)
 │   │   ├── app/
-│   │   │   ├── main.py                  FastAPI 엔트리포인트
-│   │   │   ├── routers/                 13개 라우터
-│   │   │   ├── dependencies/            DI 컨테이너
-│   │   │   └── middleware/              인증·CORS·로깅 미들웨어
+│   │   │   ├── __init__.py
+│   │   │   ├── main.py                     # FastAPI 엔트리포인트
+│   │   │   ├── routers/                    # 13개 라우터 (얇은 Inbound Adapter)
+│   │   │   ├── dependencies/               # ★ DI 컨테이너 — 전체 조립 지점
+│   │   │   ├── middleware/                 # 인증·CORS·로깅·에러핸들러
+│   │   │   └── sse/                        # SSE 스트리밍 핸들러
 │   │   ├── tests/
+│   │   │   └── conftest.py
 │   │   ├── Dockerfile
 │   │   └── pyproject.toml
 │   │
-│   ├── execution-engine/                REQ-007: Celery Worker + Agent Dispatcher
+│   ├── execution-engine/                   # REQ-007 Worker Adapter (Celery → Use Case)
 │   │   ├── src/
-│   │   │   ├── dispatcher/              워크플로우 디스패처
-│   │   │   ├── nodes/                   노드 실행기
-│   │   │   ├── runtime/                 런타임 검증·샌드박스
-│   │   │   └── agent/                   LangGraph Agent WS
+│   │   │   ├── __init__.py
+│   │   │   ├── domain/
+│   │   │   │   ├── services/               # TopologicalScheduler
+│   │   │   │   └── ports/                  # WorkflowRepositoryPort, NodeExecutorPort, TaskQueuePort (ABC)
+│   │   │   ├── application/
+│   │   │   │   └── use_cases/              # ExecuteWorkflow, DispatchNode
+│   │   │   ├── adapters/                   # CeleryAdapter, SandboxExecutor, LangGraphDispatcher
+│   │   │   └── dependencies/              # Celery worker DI
 │   │   ├── tests/
+│   │   │   ├── conftest.py
+│   │   │   ├── unit/
+│   │   │   └── integration/
 │   │   ├── Dockerfile
 │   │   └── pyproject.toml
 │   │
-│   └── frontend/                        REQ-010: Next.js 14 + React Flow
+│   └── frontend/                           # REQ-010 UI Layer
 │       ├── src/
-│       │   ├── app/                     Next.js App Router
-│       │   ├── components/              React 컴포넌트
-│       │   ├── stores/                  Zustand 상태 관리
-│       │   └── services/               API 클라이언트·SSE 파서
+│       │   ├── app/                        # Next.js 14 App Router
+│       │   ├── components/
+│       │   │   ├── canvas/                 # React Flow 기반 워크플로우 캔버스
+│       │   │   ├── chat/                   # AI Agent 채팅 패널
+│       │   │   ├── execution/              # 실행 결과 뷰어
+│       │   │   └── common/                 # 공통 컴포넌트
+│       │   ├── stores/                     # Zustand 상태 관리
+│       │   ├── services/                   # API 클라이언트·SSE 파서
+│       │   └── types/                      # TypeScript 타입 (REQ-012에서 생성)
 │       ├── public/
 │       ├── tests/
 │       ├── Dockerfile
 │       ├── package.json
 │       └── tsconfig.json
 │
-├── modules/                             ← 도메인 모듈 (서비스에서 import)
-│   ├── auth/                            REQ-002: Google SSO + JWT + 6차원 권한
-│   │   ├── __init__.py
-│   │   ├── oauth.py                     Google OAuth 플로우
-│   │   ├── jwt.py                       JWT 발급·검증
-│   │   ├── permissions.py               Permission Source 결정
-│   │   ├── middleware.py                인증 미들웨어
-│   │   └── tests/
-│   │
-│   ├── nodes-graph/                     REQ-003: 54종 노드 카탈로그
-│   │   ├── __init__.py
-│   │   ├── catalog/                     노드 정의 (8개 카테고리)
-│   │   ├── serializer.py               그래프 직렬화
-│   │   ├── validator.py                SchemaValidation
-│   │   └── tests/
-│   │
-│   ├── ai-agent/                        REQ-004: LangGraph 13 AgentNode + Skills Wizard
-│   │   ├── __init__.py
-│   │   ├── graph/                       LangGraph AgentNode 정의
-│   │   ├── skills_wizard/              Onboarding Consultant
-│   │   ├── memory/                      agent_memories + correction_patterns
-│   │   └── tests/
-│   │
-│   ├── toolset/                         REQ-005: 8개 Tool + Secure Connector
-│   │   ├── __init__.py
-│   │   ├── tools/                       8개 Tool 구현
-│   │   ├── connector/                   Secure Connector (OAuth/Credential)
-│   │   ├── state_manager.py            State Manager
-│   │   ├── validator.py                RuntimeValidation
-│   │   └── tests/
-│   │
-│   ├── doc-parser/                      REQ-006: 비정형 문서 처리
-│   │   ├── __init__.py
-│   │   ├── parsers/                     PDF/DOCX/XLSX/CSV/PPTX/HWP/HWPX
-│   │   ├── chunker.py                  문서 청킹
-│   │   ├── quality_gate.py             품질 게이트
-│   │   └── tests/
-│   │
-│   └── storage/                         REQ-008: Workflow + Skill + Marketplace
-│       ├── __init__.py
-│       ├── repositories/                Repository 패턴 구현
-│       ├── marketplace/                 Skill 5상태 + 하이브리드 검색
-│       └── tests/
-│
-├── database/                            ← REQ-001: PostgreSQL 16 + pgvector
-│   ├── schemas/                         15개 SQL 스키마 파일
-│   │   ├── 001_core.sql                 users / workflows / executions
-│   │   ├── 002_credentials_agents_webhooks.sql
-│   │   ├── 003_node_logs_partitioned.sql
-│   │   ├── 004_approval_notifications.sql
-│   │   ├── 005_skill_bootstrap.sql
-│   │   ├── 006_doc_parser.sql
-│   │   ├── 007_langgraph_checkpoints.sql
-│   │   ├── 008_oauth_security.sql
-│   │   ├── 009_node_definitions.sql     embedding vector(1024) + is_mvp
-│   │   ├── 010_intent_feedback.sql
-│   │   ├── 011_session_storage.sql
-│   │   ├── 012_agent_memory.sql
-│   │   ├── 013_marketplace.sql
-│   │   ├── 014_audit_logs.sql
-│   │   └── 015_node_logs_extended.sql
-│   ├── migrations/                      Alembic 마이그레이션
-│   ├── seeds/                           초기 데이터 (node_definitions 54종 등)
-│   ├── scripts/                         DB 유틸리티 스크립트
+├── database/                               # REQ-001 Infrastructure (순수 SQL)
+│   ├── schemas/                            # 15개 DDL 파일
+│   ├── migrations/                         # Alembic
+│   ├── seeds/                              # 초기 데이터 (node_definitions 54종 등)
+│   ├── scripts/                            # DB 유틸리티
 │   └── tests/
 │
-├── infra/                               ← REQ-011: Infrastructure
+├── infra/                                  # REQ-011 Infrastructure
 │   ├── terraform/
-│   │   ├── modules/                     재사용 가능 Terraform 모듈
-│   │   │   ├── cloud-run/               Cloud Run 서비스
-│   │   │   ├── cloud-sql/               Cloud SQL PostgreSQL 16
-│   │   │   ├── memorystore/             Memorystore Redis 7
-│   │   │   ├── gcs/                     GCS 버킷 (5개)
-│   │   │   ├── secret-manager/          Secret Manager (9개 시크릿)
-│   │   │   └── networking/              VPC·Serverless Connector
+│   │   ├── modules/                        # 재사용 가능 Terraform 모듈
+│   │   │   ├── cloud-run/                  # Cloud Run 서비스 (4개)
+│   │   │   ├── cloud-sql/                  # Cloud SQL PostgreSQL 16
+│   │   │   ├── memorystore/                # Memorystore Redis 7
+│   │   │   ├── gcs/                        # GCS 버킷 (5개)
+│   │   │   ├── secret-manager/             # Secret Manager (9개 시크릿)
+│   │   │   └── networking/                 # VPC·Serverless Connector
 │   │   └── envs/
-│   │       ├── staging/                 staging 환경 변수
-│   │       └── production/              production 환경 변수
+│   │       ├── staging/
+│   │       └── production/
 │   └── docker/
-│       └── docker-compose.dev.yml       로컬 개발 환경
+│       └── docker-compose.dev.yml          # 로컬 개발 환경
 │
-├── docs/                                ← 프로젝트 문서
-│   ├── context/                         위키 (architecture, decisions, MAP)
-│   │   ├── adr/                         Architecture Decision Records
+├── docs/
+│   ├── context/
 │   │   ├── architecture.md
+│   │   ├── clean_architecture.md           # Clean Architecture 전체 설계서
 │   │   ├── decisions.md
-│   │   └── MAP.md
-│   ├── specs/                           기술 명세 (error_codes.md 등)
-│   └── adrs/                            ADR 아카이브
+│   │   ├── MAP.md
+│   │   └── adr/                            # Architecture Decision Records
+│   ├── specs/
+│   └── adrs/
 │
-├── scripts/                             ← 프로젝트 레벨 스크립트
-│
-├── _agent_templates/                    ← Claude Agent 템플릿 (9개)
-│   ├── DEVELOPER.md
-│   ├── IMPACT_ASSESSOR.md
-│   ├── ORCHESTRATOR.md
-│   ├── REFACTOR.md
-│   ├── REPORTER.md
-│   ├── REVIEW.md
-│   ├── SECURITY_AUDITOR.md
-│   ├── TEST_WRITER.md
-│   └── TESTER.md
-│
+├── class_diagram/                          # 14개 .drawio 파일
+├── _agent_templates/                       # Claude Agent 템플릿 (9개)
+├── scripts/                                # 프로젝트 레벨 스크립트
 ├── .github/
-│   ├── CODEOWNERS                       모듈별 코드 소유자
-│   ├── pull_request_template.md         PR 템플릿 (한국어)
+│   ├── CODEOWNERS
+│   ├── pull_request_template.md
 │   └── workflows/
-│       ├── ci.yml                       전체 lint + test
-│       ├── deploy-prod.yml              Cloud Run 프로덕션 배포
-│       └── secret-scan.yml              Gitleaks 시크릿 스캔
 │
-├── CLAUDE.md                            프로젝트 Claude Code 지침
-├── MONOREPO_STRUCTURE.md                ← 본 문서
-├── pyproject.toml                       Python 워크스페이스 루트
-├── .gitignore
-└── README.md
+├── CLAUDE.md
+├── MONOREPO_STRUCTURE.md                   # ← 본 문서
+├── pyproject.toml
+└── .gitignore
 ```
 
 ---
 
-## 3. 4계층 아키텍처 ↔ 디렉토리 매핑
+## 3. Clean Architecture 동심원 ↔ 디렉토리 매핑
 
 ```
-┌──────────────────────────────────────────────────────┐
-│ Frontend Layer                                        │
-│   services/frontend/          REQ-010                 │
-├──────────────────────────────────────────────────────┤
-│ Core API Layer                                        │
-│   services/api-server/        REQ-009                 │
-├──────────────────────────────────────────────────────┤
-│ Domain Layer                                          │
-│   modules/auth/               REQ-002                 │
-│   modules/nodes-graph/        REQ-003                 │
-│   modules/ai-agent/           REQ-004                 │
-│   modules/toolset/            REQ-005                 │
-│   modules/doc-parser/         REQ-006                 │
-│   services/execution-engine/  REQ-007                 │
-├──────────────────────────────────────────────────────┤
-│ Persistence Layer                                     │
-│   database/                   REQ-001                 │
-│   modules/storage/            REQ-008                 │
-├──────────────────────────────────────────────────────┤
-│ Foundation                                            │
-│   packages/common-schemas/    REQ-012                 │
-│   infra/                      REQ-011                 │
-└──────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  Frameworks & Drivers (Infrastructure)                              │
+│                                                                     │
+│  database/                    REQ-001  SQL·Alembic·Seeds            │
+│  infra/                       REQ-011  Terraform·Docker             │
+│  services/frontend/           REQ-010  Next.js 14·React Flow        │
+│  External APIs                         Google·Slack·Modal GPU        │
+├─────────────────────────────────────────────────────────────────────┤
+│  Interface Adapters                                                 │
+│                                                                     │
+│  services/api-server/         REQ-009  Inbound (HTTP → Use Case)   │
+│  services/execution-engine/   REQ-007  Inbound (Celery → Use Case) │
+│  modules/storage/             REQ-008  Outbound (Use Case → DB)    │
+│  modules/*/adapters/          각 REQ   외부 SDK·프레임워크 래핑      │
+├─────────────────────────────────────────────────────────────────────┤
+│  Application (Use Cases)                                            │
+│                                                                     │
+│  modules/*/application/       REQ-002~006  유스케이스 오케스트레이션 │
+│  services/execution-engine/   REQ-007      워크플로우 실행 유스케이스 │
+│       src/application/                                              │
+├─────────────────────────────────────────────────────────────────────┤
+│  Domain (Entities)                                                  │
+│                                                                     │
+│  packages/common-schemas/     REQ-012  공유 Entity·VO·Enum (SSOT)  │
+│  modules/*/domain/            각 REQ   모듈 전용 도메인 로직         │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -250,7 +312,6 @@ Workflow_Automation/
 | `feature/req-XXX-*` | REQ 단위 기능 개발 | `development` 에서 분기 → `development` 으로 머지 |
 | `fix/XXX-*` | 버그 수정 | `development` 에서 분기 |
 | `release` | 프로덕션 배포 트리거 | `development` → `release` 머지 시 자동 배포 |
-| `docs` | 문서 전용 (`docs/context/` 편집) | `main` 에서 분기 |
 
 ### 5.2 흐름
 
@@ -287,42 +348,139 @@ gh pr create --base development --title "feat(auth): Google SSO + JWT 구현"
 
 ---
 
-## 6. 의존성 그래프
+## 6. 의존성 그래프 — Clean Architecture 기반
+
+### 6.1 의존성 방향
 
 ```
-packages/common-schemas  ← 모든 Python 서비스·모듈이 참조
-        │
-        ├──→ modules/auth
-        ├──→ modules/nodes-graph
-        ├──→ modules/ai-agent
-        ├──→ modules/toolset
-        ├──→ modules/doc-parser
-        ├──→ modules/storage
-        │         │
-        │         ├──→ services/api-server      (modules/* + common-schemas import)
-        │         └──→ services/execution-engine (modules/* + common-schemas import)
-        │
-        └──→ services/frontend                  (typescript 타입만 참조)
-
-database/  ← services/api-server, modules/storage가 스키마 참조
-infra/     ← 독립 (Terraform 모듈, 서비스 배포 설정)
+                    ┌──────────────────────┐
+                    │ packages/            │
+                    │   common-schemas/    │  ← 최내곽: 아무것도 import하지 않음
+                    │   (REQ-012 SSOT)     │     (Pydantic v2만 예외 허용)
+                    └──────────┬───────────┘
+                               │ import
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+    modules/auth/      modules/ai-agent/   modules/doc-parser/
+    modules/nodes-graph/  modules/toolset/
+      domain/
+      ├── ports/  ◄──── 안쪽이 인터페이스 정의
+      ├── entities/
+      └── services/
+              │ import
+              ▼
+    modules/*/application/use_cases/
+              │ import (Port 인터페이스만)
+              ▼
+    modules/*/adapters/          ← Port 구현체 제공
+    modules/storage/             ← Repository 구현체 제공
+              │ import
+              ▼
+    services/api-server/         ← DI로 조립, HTTP 라우팅
+    services/execution-engine/   ← DI로 조립, Celery 디스패치
+              │ import
+              ▼
+    database/ (SQL)
+    infra/ (Terraform)
+    External APIs
 ```
 
-### 6.1 import 규칙
+### 6.2 Port ↔ Adapter 매핑 (전체)
+
+| Port (ABC) 위치 | Port 이름 | Adapter (구현체) 위치 |
+|-----------------|----------|---------------------|
+| `auth/domain/ports/` | `SessionRepository` | `storage/repositories/` |
+| `auth/domain/ports/` | `OAuthConnectionRepository` | `storage/repositories/` |
+| `auth/domain/ports/` | `CipherPort` | `auth/adapters/cipher/` |
+| `nodes-graph/domain/ports/` | `NodeDefinitionRepository` | `storage/repositories/` |
+| `ai-agent/domain/ports/` | `AgentMemoryRepository` | `storage/repositories/` |
+| `ai-agent/domain/ports/` | `NodeRegistry` | `ai-agent/adapters/` |
+| `ai-agent/domain/ports/` | `LLMPort` | `ai-agent/adapters/llm/` |
+| `toolset/domain/ports/` | `ToolRegistry` | `toolset/adapters/` |
+| `toolset/domain/ports/` | `SecureConnectorPort` | `toolset/adapters/` |
+| `doc-parser/domain/ports/` | `ParserPort` | `doc-parser/adapters/parsers/` |
+| `execution-engine/domain/ports/` | `WorkflowRepositoryPort` | `storage/repositories/` |
+| `execution-engine/domain/ports/` | `NodeExecutorPort` | `execution-engine/adapters/` |
+| `execution-engine/domain/ports/` | `TaskQueuePort` | `execution-engine/adapters/` |
+
+### 6.3 import 규칙
 
 | 방향 | 허용 여부 | 설명 |
 |---|---|---|
 | `services/*` → `modules/*` | **허용** | 서비스가 도메인 모듈을 import |
 | `services/*` → `packages/*` | **허용** | 서비스가 공유 스키마를 import |
 | `modules/*` → `packages/*` | **허용** | 모듈이 공유 스키마를 import |
-| `modules/*` → `modules/*` | **조건부** | 명시적 인터페이스를 통해서만 |
+| `modules/*` → `modules/*` | **조건부** | Port 인터페이스를 통해서만 |
 | `modules/*` → `services/*` | **금지** | 순환 의존성 방지 |
 | `packages/*` → `modules/*` | **금지** | 공유 패키지는 독립적 |
 | `database/` → `*` | **금지** | 스키마는 순수 SQL, 코드 의존 없음 |
 
+### 6.4 금지 의존성 (위반 시 CI 실패)
+
+| 금지 방향 | 이유 |
+|-----------|------|
+| `modules/*/domain/` → SQLAlchemy, FastAPI, Celery | 도메인이 프레임워크에 의존하면 안 됨 |
+| `modules/*/domain/` → `modules/*/adapters/` | 안쪽이 바깥을 모른다 |
+| `modules/*/application/` → 구현체 직접 import | Port 인터페이스로만 참조 |
+| `packages/common-schemas/` → `modules/*` | Foundation은 독립적 |
+| `modules/*` → `services/*` | 순환 의존 방지 |
+
 ---
 
-## 7. 서비스별 기술 스택
+## 7. 모듈 내부 표준 구조
+
+모든 도메인 모듈(`modules/*`)은 아래 3계층 구조를 따른다.
+
+```
+modules/{module_name}/
+├── __init__.py
+├── domain/                         # ① 최내곽 — 순수 비즈니스 로직
+│   ├── entities/                   # 모듈 전용 도메인 엔티티
+│   ├── value_objects/              # 모듈 전용 VO (해당 시)
+│   ├── services/                   # 도메인 서비스 (순수 비즈니스 규칙)
+│   └── ports/                      # 인터페이스 정의 (ABC)
+├── application/                    # ② 유스케이스 — 도메인 조합 로직
+│   └── use_cases/                  # 각 유스케이스 = 1 클래스, execute() 메서드
+├── adapters/                       # ③ 어댑터 — 외부 시스템 연동
+│   └── ...                         # SDK 래핑, 프레임워크 통합
+└── tests/
+    ├── conftest.py
+    ├── unit/
+    │   ├── domain/                 # 도메인 순수 테스트 (mock 불필요)
+    │   └── application/            # 유스케이스 테스트 (Port mock)
+    └── integration/
+        └── adapters/               # 어댑터 통합 테스트
+```
+
+### 7.1 계층 간 의존성 규칙 (모듈 내부)
+
+```
+domain/
+  ├── entities/     ← common-schemas import만 허용
+  ├── value_objects/← common-schemas import만 허용
+  ├── services/     ← entities + value_objects + ports + common-schemas
+  └── ports/        ← entities + value_objects + common-schemas (ABC만 정의)
+
+application/
+  └── use_cases/    ← domain/* + common-schemas (ports를 통해서만 외부 접근)
+
+adapters/
+  └── ...           ← domain/ports 구현 + 외부 라이브러리 자유 사용
+```
+
+---
+
+## 8. DI (Dependency Injection) 전략
+
+DI 조립은 **애플리케이션 진입점**에서만 수행한다:
+- `services/api-server/app/dependencies/` — FastAPI `Depends()`
+- `services/execution-engine/src/dependencies/` — Celery worker 초기화
+
+**도메인과 애플리케이션 계층은 DI 프레임워크를 모른다.**
+
+---
+
+## 9. 서비스별 기술 스택
 
 | 서비스 | 언어 | 프레임워크 | 빌드 | 배포 대상 |
 |---|---|---|---|---|
@@ -336,7 +494,7 @@ infra/     ← 독립 (Terraform 모듈, 서비스 배포 설정)
 
 ---
 
-## 8. GCP 인프라 매핑
+## 10. GCP 인프라 매핑
 
 | GCP 서비스 | 용도 | 관련 디렉토리 |
 |---|---|---|
@@ -349,16 +507,16 @@ infra/     ← 독립 (Terraform 모듈, 서비스 배포 설정)
 
 ---
 
-## 9. 로컬 개발 환경
+## 11. 로컬 개발 환경
 
-### 9.1 사전 요구사항
+### 11.1 사전 요구사항
 
 - Python 3.11+
 - Node.js 20+
 - Docker & Docker Compose
 - Terraform 1.5+ (infra 작업 시)
 
-### 9.2 빠른 시작
+### 11.2 빠른 시작
 
 ```bash
 # 1. 저장소 클론
@@ -389,9 +547,9 @@ cd services/frontend && npm install && npm run dev
 
 ---
 
-## 10. CI/CD 파이프라인
+## 12. CI/CD 파이프라인
 
-### 10.1 변경 감지 기반 빌드
+### 12.1 변경 감지 기반 빌드
 
 ```yaml
 # .github/workflows/ci.yml 에서 paths 필터 활용
@@ -404,7 +562,7 @@ paths:
   - "infra/**"                  → terraform validate
 ```
 
-### 10.2 배포 흐름
+### 12.2 배포 흐름
 
 ```
 PR → development    : CI (lint + test + 보안스캔)
@@ -414,7 +572,7 @@ release → main       : 안정 병합 (수동)
 
 ---
 
-## 11. CODEOWNERS 매핑
+## 13. CODEOWNERS 매핑
 
 ```
 # 전체
@@ -433,26 +591,34 @@ release → main       : 안정 병합 (수동)
 /modules/storage/                   @dhwang0803-glitch
 /database/                          @dhwang0803-glitch
 /infra/                             @dhwang0803-glitch
+
+# 위키 보호 (조장 approve 필수)
+/docs/context/                      @dhwang0803-glitch
+/MONOREPO_STRUCTURE.md              @dhwang0803-glitch
 ```
 
 ---
 
-## 12. 주의사항
+## 14. 주의사항
 
-### 12.1 금지 사항
+### 14.1 금지 사항
+- `modules/*/domain/` → 프레임워크(SQLAlchemy, FastAPI, Celery, LangGraph) import 금지
+- `modules/*/domain/` → `modules/*/adapters/` 방향 import 금지 (안쪽 → 바깥 금지)
+- `modules/*/application/` → 구현체 직접 import 금지 (Port 인터페이스만 참조)
 - `modules/` → `services/` 방향의 import 금지 (순환 의존)
 - `packages/common-schemas`에 비즈니스 로직 금지 (순수 데이터 모델만)
 - `database/schemas/`에 Python 코드 금지 (순수 SQL만)
 - 하드코딩된 자격증명 금지 (글로벌 보안 규칙 참조)
 - `main` 브랜치 직접 push 금지
 
-### 12.2 컨벤션
+### 14.2 컨벤션
 - Python: ruff 포매터 + linter (line-length 120)
 - TypeScript: ESLint + Next.js 규칙
 - 커밋 메시지: `type(scope): description` (예: `feat(auth): Google OAuth 플로우 구현`)
 - PR 제목: 70자 이하, 한국어 허용
 - 테스트: 각 모듈/서비스의 `tests/` 디렉토리에 위치
+- 모듈 내부 구조: 반드시 `domain/` → `application/` → `adapters/` 3계층 유지
 
 ---
 
-> **본 문서는 Baseline v1.0 (2026-04-30) 기준으로 작성되었으며, 구조 변경 시 본 문서도 함께 갱신한다.**
+> **본 문서는 Baseline v1.0 (2026-04-30) 기준으로 작성되었으며, Clean Architecture 전환을 반영하여 2026-05-05에 갱신되었다. 구조 변경 시 본 문서도 함께 갱신한다.**
