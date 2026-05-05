@@ -69,7 +69,7 @@ export interface NodeConfig {
   input_schema: Record<string, unknown>;
   output_schema: Record<string, unknown>;
   parameter_schema: Record<string, unknown>;
-  risk_level: "Low" | "Medium" | "High" | "Restricted";
+  risk_level: RiskLevel;
   required_connections: Array<string>;
   description: string;
   is_mvp: boolean;
@@ -114,12 +114,12 @@ export interface AgentState {
   user_id: string;
   messages: Array<unknown>;
   turn_count: number;
-  mode: "onboarding" | "wizard" | "edit" | "general" | "security";
+  mode: AgentMode;
   draft_spec?: DraftSpec | null;
   intent_result?: IntentResult | null;
-  node_candidates?: Array<NodeConfig>;
+  node_candidates: Array<NodeConfig>;
   workflow_draft?: WorkflowSchema | null;
-  execution_status: "running" | "paused" | "completed" | "failed";
+  execution_status: ExecutionStatus;
 }
 
 export interface AnalysisResult {
@@ -232,28 +232,28 @@ export interface PlaintextCredential {
 }
 
 export interface AgentNodeFrame {
-  frame_type?: "agent_node";
+  frame_type: "agent_node";
   agent_node_name: string;
 }
 
 export interface DraftSpecDeltaFrame {
-  frame_type?: "draft_spec_delta";
+  frame_type: "draft_spec_delta";
   delta: Record<string, unknown>;
 }
 
 export interface ErrorFrame {
-  frame_type?: "error";
+  frame_type: "error";
   code: string;
   message: string;
 }
 
 export interface RationaleDeltaFrame {
-  frame_type?: "rationale_delta";
+  frame_type: "rationale_delta";
   delta: string;
 }
 
 export interface ResultFrame {
-  frame_type?: "result";
+  frame_type: "result";
   intent: string;
   payload: Record<string, unknown>;
 }
@@ -263,19 +263,19 @@ export interface SSEFrame {
 }
 
 export interface SessionFrame {
-  frame_type?: "session";
+  frame_type: "session";
   session_id: string;
   langgraph_thread_id: string;
 }
 
 export interface SlotFillQuestionFrame {
-  frame_type?: "slot_fill_question";
+  frame_type: "slot_fill_question";
   question: string;
   field_name: string;
 }
 
 export interface ValidationErrorItem {
-  code: "E_NODE_TYPE_MISMATCH" | "E_CYCLE_DETECTED" | "E_ISOLATED_NODE" | "E_DUPLICATE_ID" | "E_PERMISSION_DENIED" | "E_MISSING_CONNECTION" | "E_INVALID_TRIGGER";
+  code: ErrorCode;
   message: string;
   node_ids: Array<string>;
   edge_id?: string | null;

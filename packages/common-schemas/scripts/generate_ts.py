@@ -64,8 +64,7 @@ def _resolve_type(annotation: Any) -> str:
     from enum import Enum as StdEnum
 
     if isinstance(annotation, type) and issubclass(annotation, StdEnum):
-        values = [json.dumps(m.value) for m in annotation]
-        return " | ".join(values)
+        return annotation.__name__
 
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return annotation.__name__
@@ -83,6 +82,8 @@ def _model_to_interface(model: type[BaseModel]) -> str:
     for name, field_info in model.model_fields.items():
         annotation = field_info.annotation
         optional = not field_info.is_required()
+        if optional and field_info.default is not None:
+            optional = False
 
         origin = get_origin(annotation)
         if origin is Union:
