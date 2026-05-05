@@ -27,3 +27,4 @@
 | 0004 | [BaseCipher typing.Protocol 기반 DI 인터페이스](./adr/ADR-0004-base-cipher-protocol.md) | Accepted | 2026-05-05 |
 | 0005 | [SessionRepository / OAuthConnectionRepository H-3 시그니처 계약](./adr/ADR-0005-session-oauth-h3-contract.md) | Accepted | 2026-05-05 |
 | 0006 | [scope 값 lowercase 통일 ('private', 'team', 'public')](./adr/ADR-0006-scope-lowercase-convention.md) | Accepted | 2026-05-05 |
+| 0007 | [Python 최소 버전 3.12로 상향](./adr/ADR-0007-python-312-minimum.md) | Accepted | 2026-05-05 |
