@@ -1,0 +1,20 @@
+[project]
+name = "execution-engine"
+version = "0.1.0"
+description = "REQ-007: Celery Worker + Agent Dispatcher"
+requires-python = ">=3.11"
+dependencies = [
+    "celery[redis]>=5.4.0",
+    "pydantic>=2.7.0",
+    "redis>=5.0.0",
+    "sqlalchemy>=2.0.30",
+    "asyncpg>=0.29.0",
+    "langgraph>=0.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]

@@ -205,3 +205,38 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Node.js (Frontend)
+node_modules/
+.next/
+out/
+.vercel
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# Docker
+*.pid
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# Class diagrams (임시 취합용, 원본은 각 담당자 로컬/Drive 보관)
+class_diagram/
