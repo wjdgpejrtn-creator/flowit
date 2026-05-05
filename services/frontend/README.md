@@ -36,7 +36,7 @@ import { ExecutionViewer } from "@/components/execution";
 
 | 컴포넌트 | 설명 |
 |----------|------|
-| `WorkflowCanvas` | React Flow 기반 DAG 에디터 (드래그 앤 드롭) |
+| `WorkflowCanvas` | React Flow 기반 워크플로우 에디터 (드래그 앤 드롭) |
 | `NodePanel` | 노드 팔레트 (54종 노드 카탈로그) |
 | `EdgeEditor` | 엣지 조건 편집기 |
 

@@ -41,7 +41,7 @@ modules/{module_name}/
 | 서비스 | 주요 디렉토리 | 역할 |
 |--------|-------------|------|
 | `api-server` | `app/routers/`, `app/middleware/`, `app/dependencies/` | FastAPI Inbound Adapter + DI 조립 |
-| `execution-engine` | `src/domain/`, `src/application/`, `src/adapters/` | Celery 워커 + DAG 실행 |
+| `execution-engine` | `src/domain/`, `src/application/`, `src/adapters/` | Celery 워커 + LangGraph 실행 |
 | `frontend` | `src/components/`, `src/stores/`, `src/services/` | Next.js 14 + React Flow |
 
 ### 패키지 (packages/*)

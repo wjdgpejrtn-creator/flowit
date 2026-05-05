@@ -120,7 +120,7 @@ from storage.mappers import SessionMapper, WorkflowMapper
 ### 자동 저장 + draft_spec
 
 - Frontend dirty 추적 + 30초 주기 자동 저장 (in-place UPDATE)
-- `is_draft=true` 상태에서는 엄격한 DAG 검증 우회
+- `is_draft=true` 상태에서는 엄격한 그래프 검증 우회
 - 사용자 명시 [Save] 시 version 1 증가 + `workflow_versions` 보조 테이블 스냅샷
 
 **`draft_spec` JSONB 표준 구조**:

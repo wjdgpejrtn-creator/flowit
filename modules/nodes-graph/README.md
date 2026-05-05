@@ -1,6 +1,6 @@
 # nodes-graph
 
-> REQ-003: 54종 노드 정의 카탈로그, 그래프 DAG 검증, 직렬화
+> REQ-003: 54종 노드 정의 카탈로그, 그래프 검증 (위상 정렬), 직렬화
 
 ## 설치
 
@@ -60,7 +60,7 @@ from nodes_graph.application.use_cases import ValidateGraphUseCase, SearchNodesU
 ```
 이 모듈 → common-schemas (WorkflowSchema, NodeConfig, NodeInstance, Edge, ValidationErrorResponse)
 이 모듈 ← ai-agent (GraphValidator 호출, NodeRegistry 퍼사드로 래핑)
-이 모듈 ← execution-engine (실행 시 DAG 위상 정렬)
+이 모듈 ← execution-engine (실행 시 위상 정렬)
 이 모듈 ← storage (NodeDefinitionRepository 구현)
 ```
 
@@ -104,7 +104,7 @@ class BaseNode(Generic[TInput, TOutput], ABC):
 | 검증 유형 | 담당 |
 |----------|------|
 | DB 제약 조건 (FK, UNIQUE, NOT NULL) | 본 모듈 |
-| DAG 정적/의미적 검증 (순환, 타입 호환) | REQ-004 AI_Agent SchemaValidation |
+| 그래프 정적/의미적 검증 (순환, 타입 호환) | REQ-004 AI_Agent SchemaValidation |
 | Runtime Validation | REQ-007 / REQ-005 |
 
 ## 에러 코드

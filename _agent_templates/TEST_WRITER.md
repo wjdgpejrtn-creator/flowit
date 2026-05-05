@@ -193,7 +193,7 @@ test("renders empty canvas with add-node button", () => {
 - AuthMiddleware JWT 검증 + PermissionSource 주입
 
 ### execution-engine (REQ-007)
-- TopologicalScheduler DAG 위상 정렬 + 병렬 레벨 계산
+- TopologicalScheduler 위상 정렬 + 병렬 레벨 계산
 - ExecuteWorkflowUseCase 전체 오케스트레이션
 - 동일 execution_id 중복 실행 시 멱등성 보장
 

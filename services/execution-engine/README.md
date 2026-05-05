@@ -1,6 +1,6 @@
 # execution-engine
 
-> REQ-007: Celery 워커, 위상 정렬 DAG 실행, 에이전트 디스패처
+> REQ-007: Celery 워커, LangGraph StateGraph + TopologicalScheduler 실행, 에이전트 디스패처
 
 ## 설치
 
@@ -35,7 +35,7 @@ execute_workflow.delay(workflow_id="...", execution_context={...})
 
 | 서비스 | 메서드 | 설명 |
 |--------|--------|------|
-| `TopologicalScheduler` | `schedule(workflow: WorkflowSchema) → list[list[NodeInstance]]` | DAG 위상 정렬 → 병렬 실행 레벨 계산 |
+| `TopologicalScheduler` | `schedule(workflow: WorkflowSchema) → list[list[NodeInstance]]` | 위상 정렬(Kahn's) → 병렬 실행 레벨 계산 |
 
 ### domain/ports (인터페이스)
 
@@ -65,7 +65,7 @@ execute_workflow.delay(workflow_id="...", execution_context={...})
 ```
 src/
 ├── domain/
-│   ├── services/        ← TopologicalScheduler (DAG 정렬)
+│   ├── services/        ← TopologicalScheduler (위상 정렬)
 │   └── ports/           ← 추상 인터페이스
 ├── application/
 │   └── use_cases/       ← ExecuteWorkflow, DispatchNode
@@ -77,7 +77,7 @@ src/
 실행 흐름:
   Celery Task 수신
     → ExecuteWorkflowUseCase
-    → TopologicalScheduler.schedule() (DAG → 레벨별 정렬)
+    → TopologicalScheduler.schedule() (위상 정렬 → 레벨별 정렬)
     → Level 1 노드 병렬 실행
         → ExecuteToolUseCase (REQ-005) 또는 LangGraphDispatcher (REQ-004)
     → Level 2 노드 병렬 실행 ...

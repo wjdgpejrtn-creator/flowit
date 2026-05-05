@@ -82,7 +82,7 @@ git diff main...HEAD --name-only | grep -E "^[^/]+/[^/]+/" | \
 
 #### Execution Engine — services/execution-engine (REQ-007)
 
-- [ ] TopologicalScheduler 로직 변경 → DAG 실행 순서 영향
+- [ ] TopologicalScheduler 로직 변경 → 실행 순서 영향
 - [ ] Celery 태스크 시그니처 변경 → 큐 백로그 호환성
 - [ ] NodeExecutorPort 변경 → 모든 노드 실행 어댑터 영향
 
