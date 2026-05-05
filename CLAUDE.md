@@ -23,11 +23,19 @@
 
 | 브랜치 | 용도 |
 |--------|------|
-| `main` | 안정 브랜치 (protected) |
+| `main` | 안정 브랜치 (protected, 릴리즈 시점에만 merge) |
 | `development` | 통합 브랜치 — feature PR의 base |
 | `feature/req-XXX-*` | REQ 단위 기능 개발 |
 | `release` | 프로덕션 배포 트리거 |
 | `docs` | 문서 전용 (`docs/context/` 편집) |
+
+### 커밋 경로 구분
+
+| 변경 유형 | 방식 |
+|-----------|------|
+| REQ 기능 구현/변경 | `feature/req-xxx-*` 브랜치 → `development` PR (리뷰 후 merge) |
+| 자잘한 수정 (문서, 설정, 오타, 린트) | `development` 직접 커밋+푸시 (feature 브랜치/PR 불필요) |
+| 릴리즈 | `development` → `main` PR (조장 또는 리포 오너가 판단) |
 
 ---
 
