@@ -22,3 +22,8 @@
 | # | Title | Status | Date |
 |---|-------|--------|------|
 | 0001 | [브랜치-per-모듈에서 모노레포 구조로 전환](./adr/ADR-0001-monorepo-structure.md) | Accepted | 2026-05-03 |
+| 0002 | [pgvector HNSW 인덱스 설정 (m=16, ef_construction=64)](./adr/ADR-0002-pgvector-hnsw-index.md) | Accepted | 2026-05-05 |
+| 0003 | [node_logs RANGE 파티션 (월별) + 자동 생성 스크립트](./adr/ADR-0003-node-logs-range-partition.md) | Accepted | 2026-05-05 |
+| 0004 | [BaseCipher typing.Protocol 기반 DI 인터페이스](./adr/ADR-0004-base-cipher-protocol.md) | Accepted | 2026-05-05 |
+| 0005 | [SessionRepository / OAuthConnectionRepository H-3 시그니처 계약](./adr/ADR-0005-session-oauth-h3-contract.md) | Accepted | 2026-05-05 |
+| 0006 | [scope 값 lowercase 통일 ('private', 'team', 'public')](./adr/ADR-0006-scope-lowercase-convention.md) | Accepted | 2026-05-05 |
