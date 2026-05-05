@@ -50,6 +50,62 @@ python packages/common-schemas/scripts/generate_ts.py
 | `security` | PermissionSource, PlaintextCredential |
 | `handoff` | HandoffPayload, EvaluationResult |
 
+## 사용 예시
+
+### Python 서비스
+
+```python
+from common_schemas import WorkflowSchema, NodeInstance, Position, Edge
+from common_schemas.enums import ExecutionStatus
+from common_schemas.exceptions import ValidationError
+
+# 워크플로우 생성
+workflow = WorkflowSchema(
+    workflow_id="550e8400-e29b-41d4-a716-446655440000",
+    name="My Workflow",
+    scope="private",
+    is_draft=True,
+    nodes=[
+        NodeInstance(
+            instance_id="...",
+            node_id="...",
+            parameters={},
+            position=Position(x=100, y=200),
+        )
+    ],
+    connections=[],
+)
+
+# SSE 프레임 파싱
+from common_schemas.transport import AnySSEFrame
+
+frame = AnySSEFrame.model_validate({"frame_type": "error", "code": "E_CYCLE_DETECTED", "message": "..."})
+```
+
+### TypeScript 프론트엔드
+
+```typescript
+import type { WorkflowSchema, AgentState, AnySSEFrame } from "@workflow-automation/common-schemas";
+
+// API 응답 타입 적용
+async function fetchWorkflow(id: string): Promise<WorkflowSchema> {
+  const res = await fetch(`/api/workflows/${id}`);
+  return res.json();
+}
+
+// SSE 스트림 처리
+function handleFrame(frame: AnySSEFrame) {
+  switch (frame.frame_type) {
+    case "error":
+      console.error(frame.code, frame.message);
+      break;
+    case "rationale_delta":
+      appendToUI(frame.delta);
+      break;
+  }
+}
+```
+
 ## 설계 원칙
 
 - 모든 모델은 `frozen=True` (PlaintextCredential 제외 — `wipe()` 지원)

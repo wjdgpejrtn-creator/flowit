@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Union, get_args, get_origin
 from uuid import UUID
@@ -30,6 +31,8 @@ PYTHON_TO_TS: dict[Any, str] = {
     float: "number",
     bool: "boolean",
     UUID: "string",
+    datetime: "string",
+    date: "string",
 }
 
 
@@ -107,34 +110,82 @@ def _enum_to_ts(enum_cls: type) -> str:
     return "\n".join(lines)
 
 
+def _collect_symbols() -> tuple[list[type], list[type[BaseModel]]]:
+    """Auto-discover all Enum and BaseModel subclasses from common_schemas."""
+    import importlib
+    import pkgutil
+    from enum import Enum as StdEnum
+
+    pkg_path = Path(__file__).resolve().parent.parent / "python" / "common_schemas"
+    sys.path.insert(0, str(pkg_path.parent))
+
+    import common_schemas
+
+    enums: list[type] = []
+    models: list[type[BaseModel]] = []
+
+    for _, mod_name, _ in pkgutil.iter_modules([str(pkg_path)]):
+        module = importlib.import_module(f"common_schemas.{mod_name}")
+        for attr_name in dir(module):
+            obj = getattr(module, attr_name)
+            if not isinstance(obj, type) or attr_name.startswith("_"):
+                continue
+            if issubclass(obj, StdEnum) and obj is not StdEnum:
+                if obj not in enums:
+                    enums.append(obj)
+            elif issubclass(obj, BaseModel) and obj is not BaseModel:
+                if obj not in models:
+                    models.append(obj)
+
+    return enums, models
+
+
+def _topo_sort_models(models: list[type[BaseModel]]) -> list[type[BaseModel]]:
+    """Sort models so that dependencies appear before dependents."""
+    name_to_model = {m.__name__: m for m in models}
+    visited: set[str] = set()
+    result: list[type[BaseModel]] = []
+
+    def visit(model: type[BaseModel]) -> None:
+        name = model.__name__
+        if name in visited:
+            return
+        visited.add(name)
+        for field_info in model.model_fields.values():
+            annotation = field_info.annotation
+            deps = _extract_model_deps(annotation, name_to_model)
+            for dep in deps:
+                visit(dep)
+        result.append(model)
+
+    for m in models:
+        visit(m)
+    return result
+
+
+def _extract_model_deps(
+    annotation: Any, name_to_model: dict[str, type[BaseModel]]
+) -> list[type[BaseModel]]:
+    """Extract BaseModel references from a type annotation."""
+    deps: list[type[BaseModel]] = []
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        if annotation.__name__ in name_to_model:
+            deps.append(annotation)
+        return deps
+
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if args:
+        for arg in args:
+            deps.extend(_extract_model_deps(arg, name_to_model))
+    return deps
+
+
 def generate() -> str:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
-    from common_schemas.enums import AgentMode, ErrorCode, ExecutionStatus, RiskLevel
-    from common_schemas.agent import AgentState, DraftSpec, IntentResult, SlotFillingState, UnresolvedNode
-    from common_schemas.document import (
-        AnalysisResult, BBox, ContentBlock, DocumentBlock, FileMeta, ParserMeta, SheetMeta, SourceRef,
-    )
-    from common_schemas.handoff import EvaluationResult, HandoffPayload
-    from common_schemas.security import PermissionSource, PlaintextCredential
-    from common_schemas.transport import (
-        AgentNodeFrame, DraftSpecDeltaFrame, ErrorFrame, RationaleDeltaFrame,
-        ResultFrame, SessionFrame, SlotFillQuestionFrame, SSEFrame,
-    )
-    from common_schemas.validation import ValidationErrorItem, ValidationErrorResponse
-    from common_schemas.workflow import Edge, NodeConfig, NodeInstance, Position, WorkflowSchema
-
-    enums = [AgentMode, ExecutionStatus, RiskLevel, ErrorCode]
-    models = [
-        Position, Edge, NodeInstance, NodeConfig, WorkflowSchema,
-        BBox, SheetMeta, ParserMeta, SourceRef, FileMeta, ContentBlock, DocumentBlock, AnalysisResult,
-        UnresolvedNode, SlotFillingState, DraftSpec, IntentResult, AgentState,
-        SSEFrame, SessionFrame, AgentNodeFrame, RationaleDeltaFrame,
-        SlotFillQuestionFrame, DraftSpecDeltaFrame, ResultFrame, ErrorFrame,
-        ValidationErrorItem, ValidationErrorResponse,
-        PermissionSource, PlaintextCredential,
-        HandoffPayload, EvaluationResult,
-    ]
+    enums, models = _collect_symbols()
+    models = _topo_sort_models(models)
 
     parts = [HEADER]
     for e in enums:
@@ -145,12 +196,11 @@ def generate() -> str:
         parts.append(_model_to_interface(m))
         parts.append("")
 
-    frame_types = [
-        "SessionFrame", "AgentNodeFrame", "RationaleDeltaFrame",
-        "SlotFillQuestionFrame", "DraftSpecDeltaFrame", "ResultFrame", "ErrorFrame",
-    ]
-    parts.append(f"export type AnySSEFrame = {' | '.join(frame_types)};")
-    parts.append("")
+    from common_schemas.transport import SSEFrame
+    frame_types = [m.__name__ for m in models if issubclass(m, SSEFrame) and m is not SSEFrame]
+    if frame_types:
+        parts.append(f"export type AnySSEFrame = {' | '.join(frame_types)};")
+        parts.append("")
 
     return "\n".join(parts)
 
