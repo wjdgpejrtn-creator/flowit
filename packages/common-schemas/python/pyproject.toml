@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "common-schemas"
 version = "0.1.0"
@@ -11,7 +15,4 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "ruff>=0.4.0",
-]
-codegen = [
-    "pydantic2ts>=0.7.0",
 ]
