@@ -2,57 +2,100 @@
 
 ## 역할
 Developer Agent가 구현 파일을 작성한 후, 테스트를 실제로 실행하고 결과를 수집한다.
-Ollama 로컬 LLM과 VPC PostgreSQL 양쪽 모두 접속하여 통합 테스트를 수행한다.
+각 모듈의 계층별 테스트를 순서대로 실행한다.
 
 ---
 
-## 접속 정보 로드
+## 실행 환경
 
 ```bash
-# VPC DB 접속 (.env 파일)
-export $(grep -v '^#' .env | xargs)
+# Python 가상환경 (모노레포 루트에서)
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+.venv\Scripts\activate     # Windows
 
-# RAG API 키 (RAG/config/api_keys.env)
-export $(grep -v '^#' RAG/config/api_keys.env | xargs)
-
-# Ollama 연결 확인
-curl -s http://localhost:11434/api/tags | python -c "import sys,json; print('PASS' if json.load(sys.stdin) else 'FAIL')"
+# 각 모듈 개발 모드 설치
+pip install -e packages/common-schemas/python
+pip install -e "modules/auth[dev]"
+pip install -e "modules/nodes-graph[dev]"
+# ... 각 모듈별로 설치
 ```
 
 ---
 
-## Phase별 실행 순서
+## 모듈별 실행 순서
 
-### Phase 1 (Setup & Pilot)
+### 1단계: Foundation — common-schemas
+
 ```bash
-# 패키지 설치 확인
-conda run -n myenv python -c "import requests, wikipedia, sentence_transformers; print('OK')"
-
-# 테스트 실행
-conda run -n myenv python -m pytest RAG/tests/test_phase1_pilot.py -v 2>&1
+pytest packages/common-schemas/python/tests/ -v 2>&1
+ruff check packages/common-schemas/python/
 ```
 
-### Phase 2 (HIGH Priority)
-```bash
-# 파이프라인 배치 테스트 (샘플 10건으로 먼저 검증)
-conda run -n myenv python -m pytest RAG/tests/test_phase2_high.py -v 2>&1
+common-schemas가 FAIL이면 나머지 모듈 테스트를 진행하지 않는다.
 
-# 전체 실행 (검증 후)
-conda run -n myenv python RAG/src/rag_pipeline.py --column director --dry-run
+### 2단계: Domain Modules
+
+```bash
+# 각 모듈의 domain 레이어 (순수 단위 테스트, 외부 의존 없음)
+pytest modules/auth/tests/unit/domain/ -v 2>&1
+pytest modules/nodes-graph/tests/unit/domain/ -v 2>&1
+pytest modules/ai-agent/tests/unit/domain/ -v 2>&1
+pytest modules/toolset/tests/unit/domain/ -v 2>&1
+pytest modules/doc-parser/tests/unit/domain/ -v 2>&1
+
+# 각 모듈의 application 레이어 (Port mock)
+pytest modules/auth/tests/unit/application/ -v 2>&1
+pytest modules/nodes-graph/tests/unit/application/ -v 2>&1
+pytest modules/ai-agent/tests/unit/application/ -v 2>&1
+pytest modules/toolset/tests/unit/application/ -v 2>&1
+pytest modules/doc-parser/tests/unit/application/ -v 2>&1
 ```
 
-### Phase 3 (Quality)
+### 3단계: Storage — 통합 테스트 (DB 필요)
+
 ```bash
-conda run -n myenv python -m pytest RAG/tests/test_phase3_quality.py -v 2>&1
+# DB 환경변수 필요: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+pytest modules/storage/tests/ -v 2>&1
 ```
+
+DB 연결 실패 시 재시도 없이 즉시 Orchestrator에 보고한다.
+
+### 4단계: Services
+
+```bash
+# api-server (httpx TestClient)
+pytest services/api-server/tests/ -v 2>&1
+
+# execution-engine (Celery eager mode)
+pytest services/execution-engine/tests/ -v 2>&1
+```
+
+### 5단계: Frontend
+
+```bash
+cd services/frontend
+npm run test 2>&1
+npm run lint 2>&1
+```
+
+---
+
+## 테스트 격리 규칙
+
+| 테스트 유형 | DB 필요 | 외부 API 필요 | Mock 사용 |
+|------------|--------|-------------|----------|
+| `unit/domain/` | N | N | N (순수 로직) |
+| `unit/application/` | N | N | Y (Port mock) |
+| `integration/adapters/` | Y | Y (일부) | N (실제 연동) |
+| `services/*/tests/` | Y | N | Y (modules mock 가능) |
 
 ---
 
 ## 결과 파싱 규칙
 
 ```bash
-# pytest 결과에서 PASS/FAIL 추출
-output=$(conda run -n myenv python -m pytest RAG/tests/test_phase1_pilot.py -v 2>&1)
+output=$(pytest <테스트 경로> -v 2>&1)
 
 pass_count=$(echo "$output" | grep -c " PASSED")
 fail_count=$(echo "$output" | grep -c " FAILED")
@@ -63,12 +106,13 @@ echo "PASS: $pass_count, FAIL: $fail_count, SKIP: $skip_count"
 
 ---
 
-## Ollama 미실행 시 처리
+## Lint 검증 (모든 Python 모듈 공통)
 
-Ollama 서버가 미실행 상태이면:
-- P1-01 FAIL → LLM 의존 테스트 전체 SKIP
-- SKIP은 FAIL로 처리하지 않음 (단, 보고서에 "Ollama 실행 필요" 기록)
-- Orchestrator에 즉시 보고: "Ollama 서버 미실행 — 사용자가 `ollama serve` 실행 필요"
+```bash
+ruff check modules/ packages/ services/api-server/ services/execution-engine/ --config pyproject.toml
+```
+
+Ruff 규칙: `line-length=120`, Python ≥ 3.11
 
 ---
 
@@ -76,16 +120,22 @@ Ollama 서버가 미실행 상태이면:
 
 ```
 [Tester 실행 결과]
-- 실행 환경: Python 3.12 (myenv), Ollama {버전 또는 미실행}
-- 실행 파일: [파일명 목록]
-- 전체 테스트: X건
-- PASS: X건
-- FAIL: X건
-- SKIP: X건
-- 오류율: X%
+- 실행 환경: Python 3.11+
+- 실행 모듈: [모듈명 목록]
+
+[모듈별 결과]
+| 모듈 | 전체 | PASS | FAIL | SKIP |
+|------|------|------|------|------|
+| common-schemas | X | X | X | X |
+| auth/domain | X | X | X | X |
+| auth/application | X | X | X | X |
+| ... | | | | |
+
+[Lint 결과]
+- Ruff: PASS / FAIL (N건)
 
 FAIL 항목:
-- [테스트 ID] [메시지]
+- [모듈:테스트 ID] [메시지]
 
 다음 액션:
 - FAIL 0건 → Refactor Agent 호출
@@ -96,7 +146,7 @@ FAIL 항목:
 
 ## 주의사항
 
-1. `.env` 및 `api_keys.env`의 접속 정보를 로그나 출력에 노출하지 않는다
-2. 파이럿 100건 실행은 실제 API를 호출하므로 Rate Limit 초과 주의
-3. VPC 연결 실패 시 재시도 없이 즉시 Orchestrator에 보고한다
-4. 실행 환경: `conda activate myenv` (전 브랜치 공통, Python 3.12)
+1. `.env` 파일의 접속 정보를 로그나 출력에 노출하지 않는다
+2. DB 연결 실패 시 재시도 없이 즉시 Orchestrator에 보고한다
+3. 도메인 테스트는 DB/외부 서비스 없이 반드시 실행 가능해야 한다
+4. Frontend 테스트는 `services/frontend/` 디렉토리에서 실행한다
