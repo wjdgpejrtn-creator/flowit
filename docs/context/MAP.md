@@ -22,7 +22,8 @@ Workflow_Automation/
 ├── database/                 # REQ-001: 스키마(15개) / 마이그레이션 / seeds
 ├── infra/                    # REQ-011: Terraform + Docker
 ├── docs/                     # 프로젝트 문서
-│   └── context/              #   공용 지식 베이스 (이 위키) — docs 브랜치에서만 편집
+│   ├── context/              #   공용 지식 베이스 (이 위키) — docs 브랜치에서만 편집
+│   └── specs/                #   모듈별 구현 명세 (common-schemas import 가이드)
 ├── _agent_templates/         # Claude Agent 템플릿 (9개)
 ├── scripts/                  # 프로젝트 레벨 스크립트
 └── .github/                  # PR 템플릿, CI/CD 워크플로우
