@@ -100,6 +100,13 @@ Critical/Major 없음.
 | 항목 | 내용 | 이유 |
 |------|------|------|
 | `pyproject.toml` package-dir 명시 | `nodes-graph` 디렉토리 하이픈으로 인해 setuptools 자동 발견 불가 → `package-dir` 매핑으로 해결 | Python 패키지명 하이픈 불허 |
+| Ruff lint 수정 (18건 자동 + 4건 수동) | import 정렬(I001), `Optional[X]`→`X \| None`(UP045), 세미콜론 분리(E702), 줄 길이 초과(E501) | Ruff line-length=120 준수 |
+
+### Ruff lint 최종 결과
+
+```
+All checks passed! (N999 제외 — nodes-graph 디렉토리 하이픈은 구조상 불가피)
+```
 
 ---
 
