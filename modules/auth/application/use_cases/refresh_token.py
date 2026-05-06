@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+import os
+
+from common_schemas.exceptions import AuthorizationError
+
+from ...domain.ports.session_repository import SessionRepository
+from ...domain.value_objects.token_pair import TokenPair
+
+
+class RefreshTokenUseCase:
+    def __init__(self, session_repo: SessionRepository, jwt_adapter: object) -> None:
+        self._session_repo = session_repo
+        self._jwt_adapter = jwt_adapter
+
+    async def execute(self, refresh_token: str) -> TokenPair:
+        try:
+            payload: dict = self._jwt_adapter.decode(refresh_token)
+        except Exception as exc:
+            raise AuthorizationError("Invalid refresh token", code="E-AUTH-005") from exc
+
+        if payload.get("type") != "refresh":
+            raise AuthorizationError("Token is not a refresh token", code="E-AUTH-005")
+
+        session_hash: str = payload["session_hash"]
+        session = await self._session_repo.find_by_hash(session_hash)
+
+        if not session.is_valid():
+            raise AuthorizationError("Session is expired or revoked", code="E-AUTH-006")
+
+        expiry = int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))
+
+        new_access: str = self._jwt_adapter.encode({
+            "sub": str(session.user_id),
+            "session_hash": session_hash,
+            "type": "access",
+        })
+        new_refresh: str = self._jwt_adapter.encode({
+            "sub": str(session.user_id),
+            "session_hash": session_hash,
+            "type": "refresh",
+        }, ttl_seconds=expiry * 7)
+
+        return TokenPair(
+            access_token=new_access,
+            refresh_token=new_refresh,
+            expires_in=expiry,
+        )

@@ -1,0 +1,80 @@
+from __future__ import annotations
+
+import hashlib
+import os
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from common_schemas.exceptions import AuthorizationError, NotFoundError
+
+from ...domain.ports.cipher_port import CipherPort
+from ...domain.ports.oauth_repository import OAuthConnectionRepository
+from ...domain.ports.session_repository import SessionRepository
+from ...domain.value_objects.token_pair import TokenPair
+
+
+class AuthenticateUseCase:
+    def __init__(
+        self,
+        session_repo: SessionRepository,
+        oauth_repo: OAuthConnectionRepository,
+        cipher: CipherPort,
+        google_oauth: object,  # GoogleOAuthAdapter (avoid circular; injected at runtime)
+        jwt_adapter: object,   # JWTAdapter
+    ) -> None:
+        self._session_repo = session_repo
+        self._oauth_repo = oauth_repo
+        self._cipher = cipher
+        self._google_oauth = google_oauth
+        self._jwt_adapter = jwt_adapter
+
+    async def execute(self, code: str) -> TokenPair:
+        user_info = await self._google_oauth.exchange_code(code)
+
+        # Derive deterministic user_id from Google subject identifier
+        google_sub: str = user_info["sub"]
+        user_id = uuid.uuid5(uuid.NAMESPACE_DNS, google_sub)
+
+        # Encrypt OAuth tokens before storing
+        enc_access = self._cipher.encrypt(user_info["access_token"].encode())
+        enc_refresh = self._cipher.encrypt(user_info.get("refresh_token", "").encode())
+        scopes: list[str] = user_info.get("scopes", [])
+        token_expires_at: datetime | None = user_info.get("token_expires_at")
+
+        # Upsert OAuth connection (revoke old, create new)
+        try:
+            existing = await self._oauth_repo.get_active_for_user(user_id, "google")
+            await self._oauth_repo.update_tokens(existing.oauth_id, enc_access, enc_refresh)
+        except NotFoundError:
+            await self._oauth_repo.create(
+                user_id=user_id,
+                service="google",
+                encrypted_access_token=enc_access,
+                encrypted_refresh_token=enc_refresh,
+                scopes=scopes,
+                token_expires_at=token_expires_at,
+            )
+
+        # Create session
+        session_hash = hashlib.sha256(os.urandom(32)).hexdigest()
+        expiry = int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=expiry)
+        session = await self._session_repo.create(user_id, session_hash, expires_at)
+
+        # Issue JWT pair
+        access_token: str = self._jwt_adapter.encode({
+            "sub": str(user_id),
+            "session_hash": session_hash,
+            "type": "access",
+        })
+        refresh_token: str = self._jwt_adapter.encode({
+            "sub": str(user_id),
+            "session_hash": session_hash,
+            "type": "refresh",
+        }, ttl_seconds=expiry * 7)
+
+        return TokenPair(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=expiry,
+        )
