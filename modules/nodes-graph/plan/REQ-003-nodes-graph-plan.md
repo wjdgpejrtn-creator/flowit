@@ -151,6 +151,6 @@
 - [x] unit/domain 테스트 전체 작성
 - [x] unit/application 테스트 전체 작성
 - [x] pytest 전체 통과 (25/25 PASS)
-- [ ] Ruff lint 통과
-- [ ] report 작성 (`modules/nodes-graph/report/`)
-- [ ] PR → `development` 브랜치
+- [x] Ruff lint 통과
+- [x] report 작성 (`modules/nodes-graph/report/`)
+- [x] PR → `development` 브랜치

@@ -1,6 +1,6 @@
-import pytest
 from uuid import uuid4
 
+import pytest
 from common_schemas import Edge, NodeInstance, Position, WorkflowSchema
 from common_schemas.exceptions import ValidationError
 from nodes_graph.domain.services.graph_serializer import GraphSerializer

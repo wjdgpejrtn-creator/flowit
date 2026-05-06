@@ -1,6 +1,6 @@
-import pytest
 from uuid import uuid4
 
+import pytest
 from common_schemas import Edge, NodeInstance, Position, WorkflowSchema
 from common_schemas.enums import ErrorCode, RiskLevel
 from nodes_graph.domain.entities.node_definition import NodeDefinition
@@ -11,7 +11,9 @@ class _InMemoryRepo:
     def __init__(self):
         self._store = {}
 
-    async def upsert(self, d): self._store[str(d.node_id)] = d; return d
+    async def upsert(self, d):
+        self._store[str(d.node_id)] = d
+        return d
     async def list_all(self, mvp_only=False): return list(self._store.values())
     async def get_by_id(self, node_id): return self._store.get(str(node_id))
     async def search_by_embedding(self, q, limit=10): return list(self._store.values())[:limit]
@@ -55,7 +57,11 @@ async def test_valid_graph_passes():
 @pytest.mark.asyncio
 async def test_cycle_detected():
     n1, n2, n3 = _node(), _node(), _node()
-    edges = [_edge(n1.instance_id, n2.instance_id), _edge(n2.instance_id, n3.instance_id), _edge(n3.instance_id, n1.instance_id)]
+    edges = [
+        _edge(n1.instance_id, n2.instance_id),
+        _edge(n2.instance_id, n3.instance_id),
+        _edge(n3.instance_id, n1.instance_id),
+    ]
     result = await GraphValidator(_InMemoryRepo()).validate(_wf([n1, n2, n3], edges))
     assert result.validation_status == "failed"
     assert any(e.code == ErrorCode.E_CYCLE_DETECTED for e in result.errors)

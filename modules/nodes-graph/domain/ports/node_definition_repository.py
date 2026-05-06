@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
 from uuid import UUID
 
 from ..entities.node_definition import NodeDefinition
@@ -26,7 +25,7 @@ class NodeDefinitionRepository(ABC):
         ...
 
     @abstractmethod
-    async def get_by_id(self, node_id: UUID) -> Optional[NodeDefinition]:
+    async def get_by_id(self, node_id: UUID) -> NodeDefinition | None:
         """node_id로 단일 노드 정의 조회. REQ-002 CredentialInjectionService가 이 메서드를 사용한다."""
         ...
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from common_schemas.enums import RiskLevel
@@ -30,5 +30,5 @@ class NodeDefinition:
     is_mvp: bool
 
     # REQ-003 확장 필드
-    service_type: Optional[str] = None
-    embedding: Optional[list[float]] = None
+    service_type: str | None = None
+    embedding: list[float] | None = None

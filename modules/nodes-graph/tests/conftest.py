@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from typing import Optional
 from uuid import UUID, uuid4
 
 import pytest
-
 from common_schemas.enums import RiskLevel
 from nodes_graph.domain.entities.node_definition import NodeDefinition
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
@@ -23,7 +21,7 @@ class InMemoryNodeDefinitionRepository(NodeDefinitionRepository):
         nodes = list(self._store.values())
         return [n for n in nodes if n.is_mvp] if mvp_only else nodes
 
-    async def get_by_id(self, node_id: UUID) -> Optional[NodeDefinition]:
+    async def get_by_id(self, node_id: UUID) -> NodeDefinition | None:
         return self._store.get(str(node_id))
 
     async def search_by_embedding(self, query_embedding: list[float], limit: int = 10) -> list[NodeDefinition]:

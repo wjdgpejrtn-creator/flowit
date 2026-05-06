@@ -1,6 +1,6 @@
-import pytest
 from uuid import uuid4
 
+import pytest
 from common_schemas.enums import RiskLevel
 from nodes_graph.application.use_cases.search_nodes_use_case import SearchNodesUseCase
 from nodes_graph.domain.entities.node_definition import NodeDefinition
@@ -10,7 +10,9 @@ class _Repo:
     def __init__(self, nodes=None):
         self._nodes = {str(n.node_id): n for n in (nodes or [])}
 
-    async def upsert(self, d): self._nodes[str(d.node_id)] = d; return d
+    async def upsert(self, d):
+        self._nodes[str(d.node_id)] = d
+        return d
     async def list_all(self, mvp_only=False): return list(self._nodes.values())
     async def get_by_id(self, nid): return self._nodes.get(str(nid))
     async def search_by_embedding(self, q, limit=10): return list(self._nodes.values())[:limit]

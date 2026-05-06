@@ -1,6 +1,6 @@
-import pytest
 from uuid import uuid4
 
+import pytest
 from common_schemas import Edge, NodeInstance, Position, WorkflowSchema
 from nodes_graph.application.use_cases.validate_graph_use_case import ValidateGraphUseCase
 from nodes_graph.domain.services.graph_validator import GraphValidator
