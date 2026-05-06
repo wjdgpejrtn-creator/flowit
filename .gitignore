@@ -241,3 +241,6 @@ credentials.json
 
 # Class diagrams (임시 취합용, 원본은 각 담당자 로컬/Drive 보관)
 class_diagram/
+
+# 개인 작업 일지 (로컬 전용)
+_private/

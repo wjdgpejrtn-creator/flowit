@@ -1,0 +1,42 @@
+[project]
+name = "nodes-graph"
+version = "0.1.0"
+description = "REQ-003: 54종 노드 정의 카탈로그, 그래프 검증, 직렬화"
+requires-python = ">=3.11"
+dependencies = [
+    "common-schemas",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+    "nodes_graph",
+    "nodes_graph.domain",
+    "nodes_graph.domain.entities",
+    "nodes_graph.domain.ports",
+    "nodes_graph.domain.services",
+    "nodes_graph.application",
+    "nodes_graph.application.use_cases",
+    "nodes_graph.adapters",
+]
+
+[tool.setuptools.package-dir]
+"nodes_graph" = "."
+"nodes_graph.domain" = "domain"
+"nodes_graph.domain.entities" = "domain/entities"
+"nodes_graph.domain.ports" = "domain/ports"
+"nodes_graph.domain.services" = "domain/services"
+"nodes_graph.application" = "application"
+"nodes_graph.application.use_cases" = "application/use_cases"
+"nodes_graph.adapters" = "adapters"
