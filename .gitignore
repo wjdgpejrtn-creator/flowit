@@ -240,3 +240,6 @@ credentials.json
 
 # Class diagrams (임시 취합용, 원본은 각 담당자 로컬/Drive 보관)
 class_diagram/
+
+# 로컬 전용 참조 문서 (git 제외)
+docs/TEAM_GUIDE.md
