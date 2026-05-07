@@ -8,14 +8,32 @@ version = "0.1.0"
 description = "REQ-006: 7종 문서 파서, 청킹, 품질 게이트"
 requires-python = ">=3.11"
 dependencies = [
+    # 공통
     "pydantic>=2.0",
     "pyyaml>=6.0",
+    "common-schemas>=0.1.0",
+    # PDF
+    "pymupdf>=1.23",
+    "pdfplumber>=0.10",
+    # DOCX
+    "python-docx>=1.1",
+    # XLSX
+    "openpyxl>=3.1",
+    # PPTX
+    "python-pptx>=0.6",
+    # HWP
+    "pyhwp>=0.1",
+    # HWPX
+    "lxml>=5.0",
+    # Markdown
+    "markdown-it-py>=3.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
 ]
 
 [tool.setuptools.packages.find]
