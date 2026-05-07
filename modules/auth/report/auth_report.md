@@ -115,12 +115,16 @@ Critical/Major 없음.
 | `application/use_cases/authenticate.py` | `tokens: dict` 패턴, `if existing is not None` 분기 | docs/specs 기준 재정렬 (2026-05-07) |
 | `adapters/oauth/google_oauth_client.py` | `GoogleOAuthClient` 신규 추가 (스펙 명시 어댑터) | docs/specs 기준 재정렬 (2026-05-07) |
 | 전체 unit tests | 스펙 기준 시그니처/필드명 전면 수정 | docs/specs 기준 재정렬 (2026-05-07) |
+| Ruff lint 수정 (43건) | UP017/UP035/UP045/I001/F401/F841 전체 수정 | 팀 컨벤션 line-length=120 준수 (2026-05-07) |
+| `domain/ports/session_repository.py` | `find_by_hash` 반환 타입 `Session` → `Session \| None` | 스펙 Optional[Session] 계약 정합 (2026-05-07) |
+| `issue_token.py`, `refresh_token.py` | `session is None` 체크 추가 | find_by_hash Optional 계약 반영 (2026-05-07) |
+| `tests/conftest.py` | `find_by_hash` → None 반환으로 포트 계약 준수 | Optional[Session] 계약 정합 (2026-05-07) |
 
 ---
 
 ## 7. 다음 단계 권고사항
 
 - ~~**REQ-003 연동**: `CredentialInjectionService.inject()` `node_id` 파라미터 추가~~ → ✅ 완료 (2026-05-07, PR #19)
+- ~~**Ruff lint**: 스펙 재정렬 후 미실행~~ → ✅ 완료 (2026-05-07, 43건, `All checks passed!`)
 - **REQ-008 (storage) 연동 시**: `SessionRepository`, `OAuthConnectionRepository` ABC 구현체 주입 확인 — `**kwargs` / `tokens: dict` 패턴 계약(ADR-0005) 준수 여부 검증 필요
 - **integration 테스트**: `AESGCMCipher`, `JWTAdapter` 실제 암복호화/서명 검증은 환경변수(`ENCRYPTION_KEY`, `JWT_SECRET_KEY`) 세팅 후 별도 작성 권장
-- **Ruff lint**: 스펙 기준 재정렬 후 미실행 — `feature/req-002-auth` 브랜치에서 확인 필요

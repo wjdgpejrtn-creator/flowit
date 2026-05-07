@@ -131,6 +131,6 @@
 - [x] unit/domain 테스트 전체 작성
 - [x] unit/application 테스트 전체 작성
 - [x] pytest 전체 통과 (26/26 PASS — 스펙 기준 재정렬 후)
-- [ ] Ruff lint 통과
+- [x] Ruff lint 통과 (43건 수정, 2026-05-07, `All checks passed!`)
 - [x] `modules/auth/report/auth_report.md` 작성
 - [x] PR #19 → `development` 브랜치 (OPEN, 리뷰 대기)
