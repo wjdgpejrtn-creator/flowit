@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from typing import TYPE_CHECKING
+from uuid import NAMESPACE_DNS, uuid5
 
 from common_schemas.enums import RiskLevel
 
@@ -9,7 +9,9 @@ from ..domain.entities.node_definition import NodeDefinition
 from ..domain.entities.node_metadata import NodeMetadata
 
 if TYPE_CHECKING:
-    pass
+    from toolset.domain.entities.base_tool import BaseTool
+
+_TOOL_NAMESPACE = uuid5(NAMESPACE_DNS, "workflow-automation.tools")
 
 
 class ToolToNodeWrapper:
@@ -19,10 +21,10 @@ class ToolToNodeWrapper:
     기존 도구를 워크플로우 노드로 사용할 수 있게 한다.
     """
 
-    def __init__(self, tool: Any) -> None:
+    def __init__(self, tool: "BaseTool") -> None:
         self._tool = tool
         self.metadata = NodeMetadata(
-            node_id=UUID(str(tool.tool_id)) if not isinstance(tool.tool_id, UUID) else tool.tool_id,
+            node_id=uuid5(_TOOL_NAMESPACE, tool.tool_id),
             name=tool.name,
             category=getattr(tool, "category", "external"),
             risk_level=getattr(tool, "risk_level", RiskLevel.LOW),
