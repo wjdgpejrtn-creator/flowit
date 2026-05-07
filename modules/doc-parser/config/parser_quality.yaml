@@ -1,0 +1,37 @@
+# REQ-006 doc-parser — config/parser_quality.yaml
+#
+# Parser Quality Gate 임계값 설정
+# 코드 내 숫자 직접 기입 금지 — 모든 임계값은 여기서 관리
+#
+# 담당: 김진형 (REQ-006)
+# 참고: modules/doc-parser/README.md § Parser Quality Gate
+
+# ──────────────────────────────────────────
+# 청킹 설정
+# ──────────────────────────────────────────
+max_tokens: 512                      # 청크 최대 토큰 수
+token_chunk_overlap: 50              # 청크 간 오버랩 토큰 수
+token_estimator_mode: char_estimate  # tiktoken | char_estimate (폐쇄망: char_estimate)
+
+# ──────────────────────────────────────────
+# 텍스트 길이 검사 (failed 판정 기준)
+# ──────────────────────────────────────────
+min_text_length: 500       # 최소 텍스트 길이 (절대값)
+min_text_per_page: 150     # 페이지당 최소 텍스트 길이
+# 실제 기준: max(page_count × min_text_per_page, min_text_length)
+
+# ──────────────────────────────────────────
+# 품질 경고 임계값 (warning 판정 기준)
+# ──────────────────────────────────────────
+korean_ratio_warn: 0.30          # 한글 비율 최솟값 (미만 시 warning)
+broken_char_warn: 0.10           # 깨진 문자 비율 최댓값 (초과 시 warning)
+blocks_per_page_warn: 1.0        # 페이지당 최소 블록 수 (미만 시 warning)
+max_parser_warnings: 5           # 파서 경고 최대 허용 수 (이상 시 warning)
+min_heading_ratio: 0.05          # 최소 heading 비율 (미만 시 warning)
+min_valid_table_ratio: 0.80      # 최소 유효 표 비율 (미만 시 warning)
+min_structural_chunk_ratio: 0.30 # 최소 구조적 청크 비율 (미만 시 warning)
+
+# ──────────────────────────────────────────
+# manual_correction_required 격상 기준
+# ──────────────────────────────────────────
+warn_threshold_count: 3  # warning 누적 이 수 이상이면 manual_correction_required 로 격상
