@@ -102,6 +102,10 @@ Critical/Major 없음.
 | `pyproject.toml` package-dir 명시 | `nodes-graph` 디렉토리 하이픈으로 인해 setuptools 자동 발견 불가 → `package-dir` 매핑으로 해결 | Python 패키지명 하이픈 불허 |
 | Ruff lint 수정 (18건 자동 + 4건 수동) | import 정렬(I001), `Optional[X]`→`X \| None`(UP045), 세미콜론 분리(E702), 줄 길이 초과(E501) | Ruff line-length=120 준수 |
 | `domain/services/graph_validator.py` | `_check_type_compatibility()` 메서드 추가, `validate()` 파이프라인 편입 (stub) | docs/specs 5종 검증 항목 완성 (2026-05-07, REQ-004 연동 시 구체화) |
+| `domain/services/graph_validator.py` | `validate()` docstring 순서를 실제 코드 실행 순서와 일치 | 조장 리뷰 반영: 문서-코드 정합 (2026-05-08, PR #17) |
+| `adapters/tool_to_node_wrapper.py` | `tool: Any` → `tool: "BaseTool"` (TYPE_CHECKING 블록 활용) | 조장 리뷰 반영: spec 준수, IDE 타입 지원 확보 (2026-05-08, PR #17) |
+| `adapters/tool_to_node_wrapper.py` | uuid5 namespace를 `_TOOL_NAMESPACE` 프로젝트 전용 상수로 변경 | 조장 리뷰 반영: DNS namespace 직접 사용 제거 (2026-05-08, PR #17) |
+| `tests/unit/domain/test_graph_validator.py` | `test_type_compatibility_returns_no_errors` 추가 | 조장 리뷰 반영: 5종 검증 전부 테스트 커버 (2026-05-08, PR #17) |
 
 ### Ruff lint 최종 결과
 
