@@ -1,6 +1,6 @@
-from .drafter import DrafterService
-from .intent_analyzer import IntentAnalyzerService
-from .qa_evaluator import QAEvaluatorService
+from .drafter_service import DrafterService
+from .intent_analyzer_service import IntentAnalyzerService
+from .qa_evaluator_service import QAEvaluatorService
 from .slot_filling_service import SlotFillingService
 
 __all__ = [
