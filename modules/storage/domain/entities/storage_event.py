@@ -4,7 +4,8 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict
+from common_schemas.types import UtcDatetime
+from pydantic import BaseModel, ConfigDict
 
 
 class StorageEvent(BaseModel):
@@ -12,5 +13,5 @@ class StorageEvent(BaseModel):
 
     event_type: Literal["uploaded", "downloaded", "deleted", "expired"]
     object_id: UUID
-    timestamp: AwareDatetime
+    timestamp: UtcDatetime
     actor_id: Optional[UUID] = None

@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 from uuid import UUID, uuid4
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from common_schemas.types import UtcDatetime
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MemoryEntry(BaseModel):
@@ -16,7 +17,7 @@ class MemoryEntry(BaseModel):
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     source_session_id: Optional[UUID] = None
-    created_at: AwareDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: UtcDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def is_ephemeral(self) -> bool:
         return not self.content.strip()
