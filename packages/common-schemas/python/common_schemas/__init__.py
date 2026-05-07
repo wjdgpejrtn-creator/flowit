@@ -31,7 +31,7 @@ from .transport import (
     SSEFrame,
 )
 from .validation import ValidationErrorItem, ValidationErrorResponse
-from .workflow import Edge, NodeConfig, NodeInstance, Position, WorkflowSchema
+from .workflow import Edge, NodeConfig, NodeExecutionState, NodeInstance, Position, WorkflowSchema
 
 __all__ = [
     # enums
@@ -48,6 +48,7 @@ __all__ = [
     # workflow
     "Edge",
     "NodeConfig",
+    "NodeExecutionState",
     "NodeInstance",
     "Position",
     "WorkflowSchema",

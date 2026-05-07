@@ -561,7 +561,7 @@ modules/storage/
 │   ├── session_model.py                # ChatSessionModel (REQ-001)
 │   ├── oauth_connection_model.py
 │   ├── credential_model.py
-│   ├── node_definition_model.py        # 54종 노드 + embedding vector(1024)
+│   ├── node_definition_model.py        # 54종 노드 + embedding vector(768)
 │   ├── agent_memory_model.py           # user_id, memory_type (M-10 필드명 통일)
 │   ├── document_model.py
 │   ├── skill_model.py

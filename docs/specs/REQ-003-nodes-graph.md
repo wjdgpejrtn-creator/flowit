@@ -356,7 +356,8 @@ from abc import ABC, abstractmethod
 
 class EmbedderPort(ABC):
     """텍스트 → 벡터 임베딩 변환 인터페이스.
-    구현체: BGE-M3 모델 (768차원) — modules/ai-agent 또는 외부 서비스."""
+    구현체: BGE-M3 모델 (768차원) — modules/ai-agent 또는 외부 서비스.
+    ⚠️ 임베딩 차원 변경 시 storage ORM의 Vector 컬럼도 반드시 동기화 (REQ-008)."""
     
     @abstractmethod
     async def embed(self, text: str) -> list[float]:
