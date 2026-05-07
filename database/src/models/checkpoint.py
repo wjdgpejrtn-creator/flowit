@@ -20,7 +20,9 @@ class CheckpointModel(Base):
     parent_checkpoint_id: Mapped[str | None] = mapped_column(String(200))
     type: Mapped[str | None] = mapped_column(String(50))
     checkpoint: Mapped[dict] = mapped_column(JSONB)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, server_default="'{}'::jsonb")
+    metadata_json: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, server_default="'{}'::jsonb"
+    )
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
