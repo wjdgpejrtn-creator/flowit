@@ -7,7 +7,7 @@ from uuid import UUID
 from common_schemas.enums import RiskLevel
 
 if TYPE_CHECKING:
-    from .base_tool import BaseTool
+    from ..base_tool import BaseTool
 
 
 @dataclass(frozen=True)

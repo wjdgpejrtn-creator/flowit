@@ -1,4 +1,5 @@
-from .entities import BaseTool, ToolExecutionRecord, ToolMetadata
+from .base_tool import BaseTool
+from .entities import ToolExecutionRecord, ToolMetadata
 from .exceptions import ToolExecutionError, CredentialError, ConflictError
 from .ports import ToolRegistry, SecureConnectorPort, ToolExecutionRepository
 from .services import RuntimeValidator, ToolExecutionService, RiskAssessmentService

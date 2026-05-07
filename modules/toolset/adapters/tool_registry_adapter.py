@@ -4,7 +4,7 @@ from uuid import UUID
 
 from common_schemas.exceptions import NotFoundError
 
-from ..domain.entities.base_tool import BaseTool
+from ..domain.base_tool import BaseTool
 from ..domain.entities.tool_metadata import ToolMetadata
 from ..domain.exceptions import ConflictError
 from ..domain.ports.tool_registry import ToolRegistry

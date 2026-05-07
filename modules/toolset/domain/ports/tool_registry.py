@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ..entities.base_tool import BaseTool
+from ..base_tool import BaseTool
 from ..entities.tool_metadata import ToolMetadata
 
 

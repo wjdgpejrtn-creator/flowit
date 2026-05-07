@@ -3,7 +3,7 @@ from __future__ import annotations
 from common_schemas.exceptions import AuthorizationError
 from common_schemas.security import PermissionSource
 
-from ..entities.base_tool import BaseTool
+from ..base_tool import BaseTool
 
 _RISK_ORDER = ["Low", "Medium", "High", "Restricted"]
 
