@@ -28,3 +28,4 @@
 | 0005 | [SessionRepository / OAuthConnectionRepository H-3 시그니처 계약](./adr/ADR-0005-session-oauth-h3-contract.md) | Accepted | 2026-05-05 |
 | 0006 | [scope 값 lowercase 통일 ('private', 'team', 'public')](./adr/ADR-0006-scope-lowercase-convention.md) | Accepted | 2026-05-05 |
 | 0007 | [Python 최소 버전 3.12로 상향](./adr/ADR-0007-python-312-minimum.md) | Accepted | 2026-05-05 |
+| 0008 | [NodeExecutionState를 common-schemas 공유 타입으로 도입](./adr/ADR-0008-node-execution-state-shared-type.md) | Accepted | 2026-05-07 |
