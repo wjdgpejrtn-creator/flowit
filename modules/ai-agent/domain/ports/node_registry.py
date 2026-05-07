@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from uuid import UUID
 
 from common_schemas import NodeConfig
 
@@ -13,7 +14,7 @@ class NodeRegistry(ABC):
     """
 
     @abstractmethod
-    async def search(self, query: str, k: int = 10) -> list[NodeConfig]: ...
+    async def search(self, query: str, limit: int = 10) -> list[NodeConfig]: ...
 
     @abstractmethod
-    async def get_schema(self, node_type: str) -> dict: ...
+    async def get_schema(self, node_id: UUID) -> NodeConfig: ...
