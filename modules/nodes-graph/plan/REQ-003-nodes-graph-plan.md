@@ -14,27 +14,27 @@
 
 | 클래스 | 파일 경로 | 상태 |
 |--------|-----------|------|
-| `NodeDefinition` | `domain/entities/node_definition.py` | ⬜ |
-| `NodeMetadata` | `domain/entities/node_metadata.py` | ⬜ |
-| `BaseNode` (ABC, Generic) | `domain/entities/base_node.py` | ⬜ |
-| `GraphValidator` | `domain/services/graph_validator.py` | ⬜ |
-| `GraphSerializer` | `domain/services/graph_serializer.py` | ⬜ |
-| `NodeDefinitionRepository` (ABC) | `domain/ports/node_definition_repository.py` | ⬜ |
-| `EmbedderPort` (ABC) | `domain/ports/embedder_port.py` | ⬜ |
+| `NodeDefinition` | `domain/entities/node_definition.py` | ✅ 완료 |
+| `NodeMetadata` | `domain/entities/node_metadata.py` | ✅ 완료 |
+| `BaseNode` (ABC, Generic) | `domain/entities/base_node.py` | ✅ 완료 |
+| `GraphValidator` | `domain/services/graph_validator.py` | ✅ 완료 (`_check_type_compatibility` stub 포함) |
+| `GraphSerializer` | `domain/services/graph_serializer.py` | ✅ 완료 |
+| `NodeDefinitionRepository` (ABC) | `domain/ports/node_definition_repository.py` | ✅ 완료 |
+| `EmbedderPort` (ABC) | `domain/ports/embedder_port.py` | ✅ 완료 |
 
 ### Application Layer
 
 | 클래스 | 파일 경로 | 상태 |
 |--------|-----------|------|
-| `ValidateGraphUseCase` | `application/use_cases/validate_graph_use_case.py` | ⬜ |
-| `SearchNodesUseCase` | `application/use_cases/search_nodes_use_case.py` | ⬜ |
-| `RegisterNodesUseCase` | `application/use_cases/register_nodes_use_case.py` | ⬜ |
+| `ValidateGraphUseCase` | `application/use_cases/validate_graph_use_case.py` | ✅ 완료 |
+| `SearchNodesUseCase` | `application/use_cases/search_nodes_use_case.py` | ✅ 완료 |
+| `RegisterNodesUseCase` | `application/use_cases/register_nodes_use_case.py` | ✅ 완료 |
 
 ### Adapter Layer
 
 | 클래스 | 파일 경로 | 상태 |
 |--------|-----------|------|
-| `ToolToNodeWrapper` | `adapters/tool_to_node_wrapper.py` | ⬜ |
+| `ToolToNodeWrapper` | `adapters/tool_to_node_wrapper.py` | ✅ 완료 |
 
 ---
 
@@ -91,17 +91,17 @@
 
 | 테스트 파일 | 테스트 대상 | 상태 |
 |-------------|-------------|------|
-| `test_node_definition.py` | `NodeDefinition` 생성, 필드 검증 | ⬜ |
-| `test_graph_validator.py` | 사이클/고립/타입불일치/중복ID/필수연결 5종 검증 | ⬜ |
-| `test_graph_serializer.py` | `serialize()` / `deserialize()` 왕복 | ⬜ |
+| `test_node_definition.py` | `NodeDefinition` 생성, 필드 검증 | ✅ 완료 |
+| `test_graph_validator.py` | 사이클/고립/타입불일치/중복ID/필수연결 5종 검증 | ✅ 완료 |
+| `test_graph_serializer.py` | `serialize()` / `deserialize()` 왕복 | ✅ 완료 |
 
 ### unit/application
 
 | 테스트 파일 | 테스트 대상 | 상태 |
 |-------------|-------------|------|
-| `test_validate_graph_use_case.py` | 유효/무효 그래프 분기 | ⬜ |
-| `test_search_nodes_use_case.py` | 쿼리 → 임베딩 → 검색 결과 | ⬜ |
-| `test_register_nodes_use_case.py` | 노드 등록 + 임베딩 생성 | ⬜ |
+| `test_validate_graph_use_case.py` | 유효/무효 그래프 분기 | ✅ 완료 |
+| `test_search_nodes_use_case.py` | 쿼리 → 임베딩 → 검색 결과 | ✅ 완료 |
+| `test_register_nodes_use_case.py` | 노드 등록 + 임베딩 생성 | ✅ 완료 |
 
 ---
 

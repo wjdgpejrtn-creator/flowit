@@ -2,10 +2,10 @@
 
 **모듈**: nodes-graph  
 **REQ**: REQ-003  
-**작성일**: 2026-05-06  
+**작성일**: 2026-05-06 (최종 수정: 2026-05-07)  
 **담당자**: 박아름  
 **브랜치**: `feature/req-003-nodes-graph`  
-**상태**: ✅ PASS 완료
+**상태**: ✅ PASS 완료 (PR #17 리뷰 대기)
 
 ---
 
@@ -23,7 +23,7 @@
 
 ### 주요 구현 내용
 
-- `GraphValidator`: Kahn's algorithm 기반 사이클 감지 + 고립 노드 + 중복 ID + 필수 연결 누락 5종 검증
+- `GraphValidator`: Kahn's algorithm 기반 사이클 감지 + 고립 노드 + 타입 호환성(stub) + 중복 ID + 필수 연결 누락 5종 검증
 - `GraphSerializer`: Pydantic v2 `model_dump/model_validate` 래핑, 역직렬화 실패 시 `ValidationError` raise
 - `NodeDefinition`: H-4 합의 준수 — `risk_level`, `required_connections`, `service_type` 필드 포함 (REQ-002가 필드 접근으로 사용)
 - H-1 합의 준수 — `WorkflowSchema`, `NodeInstance`, `Edge`, `Position` 자체 정의 없음, 전부 `common_schemas` import
@@ -101,6 +101,7 @@ Critical/Major 없음.
 |------|------|------|
 | `pyproject.toml` package-dir 명시 | `nodes-graph` 디렉토리 하이픈으로 인해 setuptools 자동 발견 불가 → `package-dir` 매핑으로 해결 | Python 패키지명 하이픈 불허 |
 | Ruff lint 수정 (18건 자동 + 4건 수동) | import 정렬(I001), `Optional[X]`→`X \| None`(UP045), 세미콜론 분리(E702), 줄 길이 초과(E501) | Ruff line-length=120 준수 |
+| `domain/services/graph_validator.py` | `_check_type_compatibility()` 메서드 추가, `validate()` 파이프라인 편입 (stub) | docs/specs 5종 검증 항목 완성 (2026-05-07, REQ-004 연동 시 구체화) |
 
 ### Ruff lint 최종 결과
 
@@ -112,7 +113,8 @@ All checks passed! (N999 제외 — nodes-graph 디렉토리 하이픈은 구조
 
 ## 7. 다음 단계 권고사항
 
-- **REQ-002 (auth) 연동**: `CredentialInjectionService`에 `NodeDefinitionRepository` 주입 및 `node_id` 파라미터 추가 가능 (H-4 계약 완성)
+- ~~**REQ-002 (auth) 연동**: `CredentialInjectionService`에 `NodeDefinitionRepository` 주입 및 `node_id` 파라미터 추가~~ → ✅ 완료 (2026-05-07, auth PR #19)
 - **REQ-004 (ai-agent) 연동**: `GraphValidator`, `SearchNodesUseCase` 소비 — `NodeRegistry` 퍼사드로 래핑 예정
+- **`_check_type_compatibility` 구체화**: REQ-004 `NodeDefinition` handle 타입 메타데이터 확보 후 실제 검증 로직 구현 필요
 - **REQ-008 (storage) 연동**: `NodeDefinitionRepository` ABC 구현체 작성 필요 (pgvector `search_by_embedding` 포함)
 - **integration 테스트**: `search_by_embedding()` 실제 벡터 검색은 pgvector 환경 구성 후 작성 권장
