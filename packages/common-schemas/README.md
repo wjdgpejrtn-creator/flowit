@@ -21,14 +21,18 @@ pip install -e "packages/common-schemas/python[dev]"
 from common_schemas import (
     WorkflowSchema, NodeInstance, Edge, Position,
     NodeConfig,
-    AgentState, IntentResult,
-    DocumentBlock, ContentBlock, FileMeta,
+    AgentState, DraftSpec, IntentResult, SlotFillingState, UnresolvedNode,
+    DocumentBlock, ContentBlock, FileMeta, SourceRef, BBox, ParserMeta, SheetMeta,
+    AnalysisResult,
     PermissionSource, PlaintextCredential,
     HandoffPayload, EvaluationResult,
 )
 from common_schemas.enums import AgentMode, ExecutionStatus, RiskLevel, ErrorCode
 from common_schemas.exceptions import DomainError, ValidationError, NotFoundError
-from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
+from common_schemas.transport import (
+    SSEFrame, SessionFrame, AgentNodeFrame, RationaleDeltaFrame,
+    SlotFillQuestionFrame, DraftSpecDeltaFrame, ResultFrame, ErrorFrame, AnySSEFrame,
+)
 ```
 
 ## Public API
@@ -63,32 +67,34 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 | 클래스 | 설명 |
 |--------|------|
 | `DocumentBlock` | 파싱된 문서 최상위 컨테이너 |
-| `ContentBlock` | 개별 콘텐츠 블록 (text, table, image, heading) |
+| `ContentBlock` | 개별 콘텐츠 블록 (text, table, image, heading, code) |
 | `FileMeta` | 원본 파일 메타데이터 |
-| `SourceRef` | 원본 위치 참조 VO |
-| `BBox` | OCR/레이아웃 바운딩 박스 |
-| `ParserMeta` | 파서 이름, 버전, 설정 |
+| `SourceRef` | 원본 위치 참조 VO (page, section, bbox) |
+| `BBox` | OCR/레이아웃 바운딩 박스 (x1, y1, x2, y2) |
+| `ParserMeta` | 파서 이름, 버전, 실행시간 메타 |
+| `SheetMeta` | Excel 시트 메타 (sheet_name, row_count, col_count) |
 | `AnalysisResult` | AI 분석 결과 (요약, 핵심 포인트) |
 
 ### security.py — 보안 모델
 
 | 클래스 | 설명 |
 |--------|------|
-| `PermissionSource` | 사용자 권한 컨텍스트 (user_id, role, risk_ceiling) |
+| `PermissionSource` | 사용자 권한 컨텍스트 (user_id, role, department_id, risk_ceiling) |
 | `PlaintextCredential` | 복호화된 자격증명 (자동 wipe 지원) |
 
 ### transport.py — SSE 스트리밍 프레임
 
 | 클래스 | 설명 |
 |--------|------|
-| `SSEFrame` | 기본 SSE 프레임 |
-| `SessionFrame` | 세션 초기화 |
-| `AgentNodeFrame` | 노드 실행 이벤트 |
-| `RationaleDeltaFrame` | AI 추론 스트리밍 |
+| `SSEFrame` | 기본 SSE 프레임 (frame_type 필드) |
+| `SessionFrame` | 세션 초기화 (session_id, langgraph_thread_id) |
+| `AgentNodeFrame` | 현재 실행 에이전트 노드 |
+| `RationaleDeltaFrame` | AI 추론 실시간 스트리밍 |
 | `SlotFillQuestionFrame` | 사용자 질문 프레임 |
 | `DraftSpecDeltaFrame` | 초안 증분 업데이트 |
-| `ResultFrame` | 최종 결과 |
+| `ResultFrame` | 최종 결과 (intent: clarify/draft/refine/propose) |
 | `ErrorFrame` | 에러 알림 |
+| `AnySSEFrame` | Discriminated union — frame_type 기반 역직렬화 |
 
 ### handoff.py — 에이전트 → 실행엔진 핸드오프
 
@@ -101,9 +107,9 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 
 | Enum | 값 |
 |------|-----|
-| `AgentMode` | CLARIFY, DRAFT, REFINE, PROPOSE |
-| `ExecutionStatus` | PENDING, RUNNING, SUCCEEDED, FAILED, TIMEOUT, CANCELLED |
-| `RiskLevel` | LOW, MEDIUM, HIGH, CRITICAL |
+| `AgentMode` | ONBOARDING, WIZARD, EDIT, GENERAL, SECURITY |
+| `ExecutionStatus` | RUNNING, PAUSED, COMPLETED, FAILED |
+| `RiskLevel` | Low, Medium, High, Restricted |
 | `ErrorCode` | 도메인 에러 코드 열거 |
 
 ### exceptions.py — 도메인 예외 계층
@@ -127,8 +133,19 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 ## 의존 관계
 
 ```
-이 패키지가 의존:  pydantic>=2.7.0 (유일한 외부 의존성)
-이 패키지를 의존:  모든 modules/*, 모든 services/*
+Upstream (이 패키지가 의존):
+  └── pydantic >= 2.7.0 (유일한 외부 의존성)
+
+Downstream (이 패키지에 의존):
+  ├── modules/auth (REQ-002)
+  ├── modules/nodes-graph (REQ-003)
+  ├── modules/ai-agent (REQ-004)
+  ├── modules/toolset (REQ-005)
+  ├── modules/doc-parser (REQ-006)
+  ├── modules/storage (REQ-008)
+  ├── services/execution-engine (REQ-007)
+  ├── services/api-server (REQ-009)
+  └── services/frontend (REQ-010) — TypeScript 자동 생성 타입
 ```
 
 ## 설계 규칙
@@ -136,12 +153,12 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 - 이 패키지는 **어떤 프레임워크도 import하지 않음** (FastAPI, SQLAlchemy, LangGraph 금지)
 - 모든 Enum은 `str`을 상속하여 JSON 직렬화 호환
 - 필드 타입 불일치 시 이 패키지의 정의가 우선 (SSOT 원칙)
-- TypeScript 타입은 `pydantic2ts`로 Python에서 자동 생성
+- TypeScript 타입은 `pydantic2ts`로 Python에서 자동 생성 — 수동 편집 금지
 
 ## TypeScript 사용 (프론트엔드)
 
 ```typescript
-import type { WorkflowSchema, NodeInstance } from "@common/generated";
+import type { WorkflowSchema, NodeInstance } from "@workflow-automation/common-schemas";
 ```
 
 `tsconfig.json`의 `@common/*` 경로 별칭으로 참조합니다.
@@ -151,7 +168,7 @@ import type { WorkflowSchema, NodeInstance } from "@common/generated";
 ```bash
 pip install -e "packages/common-schemas/python[codegen]"
 cd packages/common-schemas/scripts
-# pydantic2ts로 TypeScript 타입 자동 생성
+python generate_ts.py
 ```
 
 ## 테스트
