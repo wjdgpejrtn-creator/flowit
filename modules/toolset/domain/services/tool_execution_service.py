@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from common_schemas.security import PlaintextCredential
 
-from ..entities.base_tool import BaseTool
+from ..base_tool import BaseTool
 from ..exceptions import ToolExecutionError
+from ..value_objects import ToolOutput
 from .runtime_validator import RuntimeValidator
 
 
 class ToolExecutionService:
-    """
-    파이프라인: validate_input → tool.run() → validate_output
+    """파이프라인: validate_input → tool.execute() → validate_output
 
     credential lifecycle(acquire/wipe/release)은 ExecuteToolUseCase에서 관리.
     """
@@ -22,18 +22,17 @@ class ToolExecutionService:
         tool: BaseTool,
         params: dict,
         credential: PlaintextCredential | None = None,
-    ) -> dict:
+    ) -> ToolOutput:
         self._validator.validate_input(params, tool.input_schema)
 
         try:
-            result = await tool.run(params, credential)
+            result = await tool.execute(params, credential=credential)
         except ToolExecutionError:
             raise
         except Exception as e:
             raise ToolExecutionError(
-                message=f"Tool '{tool.tool_id}' execution failed: {e}",
+                message=f"Tool '{tool.name}' execution failed: {e}",
                 code="TOOL_EXECUTION_ERROR",
             ) from e
 
-        self._validator.validate_output(result, tool.output_schema)
-        return result
+        return self._validator.validate_output(result, tool.output_schema)

@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 @dataclass
 class ToolExecutionRecord:
-    tool_id: str
+    tool_name: str
     input_data: dict
     status: Literal["success", "failed", "timeout"]
     duration_ms: int

@@ -18,7 +18,7 @@ class ToolExecutionRepository(ABC):
     @abstractmethod
     async def find_by_tool(
         self,
-        tool_id: str,
+        tool_name: str,
         limit: int = 100,
     ) -> list[ToolExecutionRecord]:
         ...
