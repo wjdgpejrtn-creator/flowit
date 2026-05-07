@@ -45,7 +45,7 @@ class HwpxParser(ParserPort):
     ZIP + lxml 구조로 직접 파싱.
 
     지원 MIME 타입:
-        application/x-hwpx
+        application/hwp+zip
 
     제한 지원:
         복잡 표·서식 완전 복원 불가 (Phase 2)
@@ -56,7 +56,7 @@ class HwpxParser(ParserPort):
         RuntimeError: 파일 손상 또는 읽기 실패 E0202
     """
 
-    MIME_TYPE = "application/x-hwpx"
+    MIME_TYPE = "application/hwp+zip"
 
     def parse(self, file_path: str, file_meta: FileMeta) -> DocumentBlock:
         xml_bytes = self._extract_xml(file_path)
