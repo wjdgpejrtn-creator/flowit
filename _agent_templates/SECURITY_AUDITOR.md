@@ -2,10 +2,10 @@
 
 ## 역할
 코드 작성 후 실행 전, 또는 git commit 직전에 호출된다.
-**개인식별 정보·자격증명·실제 인프라 정보**가 코드나 스테이징 영역에 노출되었는지 점검하고,
+**개인식별 정보/자격증명/실제 인프라 정보**가 코드나 스테이징 영역에 노출되었는지 점검하고,
 위반 항목이 있으면 즉시 차단한다.
 
-API_Server, Database, Execution_Engine, Frontend 등 **모든 브랜치에 적용**한다.
+모든 모듈(`modules/`), 서비스(`services/`), 패키지(`packages/`)에 적용한다.
 
 ---
 
@@ -29,8 +29,6 @@ git diff HEAD --name-only --diff-filter=ACM
 # 없으면 마지막 커밋 기준
 git diff HEAD~1 HEAD --name-only --diff-filter=ACM
 ```
-
-수집한 파일 목록을 기준으로 이하 체크를 실행한다.
 
 ---
 
@@ -59,10 +57,10 @@ grep -rn --include="*.py" \
   <대상 파일들>
 ```
 
-추출된 라인에서 기본값(두 번째 인자)이 아래에 해당하면 **FAIL**:
+기본값(두 번째 인자)이 아래에 해당하면 **FAIL**:
 - 실제 IP 패턴: `\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b`
-- DB명 패턴: `localhost`, `postgres` 이외의 특정 DB명 (예: `myapp_db`, `prod_db` 등 프로젝트 전용 DB명)
-- 사용자명 패턴: `postgres` 이외의 특정 사용자명 (예: `admin`, `dbadmin` 등 기본값이 아닌 사용자명)
+- 프로젝트 전용 DB명 (예: `myapp_db`, `prod_db`)
+- 기본이 아닌 사용자명 (예: `admin`, `dbadmin`)
 
 허용되는 기본값(PASS):
 - `"localhost"`, `"5432"`, `"postgres"`, `""`, `"http://localhost:11434"`, `"0.0.0.0"`
@@ -118,11 +116,7 @@ git ls-files | grep -E "\.(env|pem|key|p12|pfx)$|credentials\.json|api_keys\.env
 
 ### [S07] .gitignore 필수 항목 누락 — FAIL 시 차단
 
-```bash
-cat .gitignore
-```
-
-아래 항목이 **모두** 포함되어야 PASS:
+아래 항목이 **모두** `.gitignore`에 포함되어야 PASS:
 - `.env` 또는 `.env.*`
 - `*.pem`
 - `*.key`
@@ -133,7 +127,7 @@ cat .gitignore
 
 ---
 
-### [S08] 하드코딩 로컬 경로 — WARNING (커밋 허용, 보고 필요)
+### [S08] 하드코딩 로컬 경로 — WARNING
 
 ```bash
 grep -rn --include="*.py" \
@@ -141,29 +135,29 @@ grep -rn --include="*.py" \
   <대상 파일들>
 ```
 
-**판정 기준**:
-- 모듈 최상단 상수(`DEFAULT_*`, `MODEL_PATH` 등)이고 CLI 인자(`argparse`)로 덮어쓸 수 있으면 → **WARNING** (허용)
+- 모듈 상단 상수 + CLI 인자로 덮어쓸 수 있으면 → **WARNING**
 - 함수 내부 직접 사용 → **FAIL**
 
-판정 방법: 해당 라인이 함수 안인지 확인
+---
+
+### [S09] Clean Architecture 보안 관련 점검 — WARNING/FAIL
+
 ```bash
-# 라인 주변 컨텍스트 확인 (-B5: 위 5줄)
-grep -n "C:/Users/" <파일> | while read line; do
-  lineno=$(echo "$line" | cut -d: -f1)
-  # lineno 위 5줄에 'def ' 패턴이 있으면 함수 내부
-done
+# 자격증명을 domain/에서 직접 다루는지 확인
+grep -rn "PlaintextCredential\|encrypt\|decrypt" modules/*/domain/services/ modules/*/domain/entities/
 ```
+
+**판정 기준**:
+- `auth/domain/services/credential_injection.py`에서만 `PlaintextCredential` 사용 → PASS
+- 다른 모듈의 `domain/`에서 직접 암/복호화 로직 → **FAIL** (보안 도메인 침범)
+- `adapters/`에서 `CipherPort` 구현 → PASS (정상 위치)
 
 ---
 
 ## 전체 실행 스크립트
 
-아래 스크립트를 Bash 도구로 실행한다. `TARGET_FILES`는 Step 0에서 수집한 파일 목록으로 대체한다.
-
 ```bash
 #!/usr/bin/env bash
-# 프로젝트 루트에서 실행 (git repo 루트)
-
 echo "=== Security Audit 시작 ==="
 echo "점검 시각: $(date '+%Y-%m-%d %H:%M')"
 FAIL_COUNT=0
@@ -267,11 +261,24 @@ fi
 result=$(echo "$TARGET_PY" | xargs grep -n \
   -E "\"C:/Users/[^\"]+\"|'C:/Users/[^']+'" 2>/dev/null)
 if [ -n "$result" ]; then
-  echo "[S08 WARN] 하드코딩 로컬 경로 — 상수+CLI오버라이드 확인 필요"
+  echo "[S08 WARN] 하드코딩 로컬 경로"
   echo "$result"
   WARN_COUNT=$((WARN_COUNT + 1))
 else
   echo "[S08 PASS] 하드코딩 로컬 경로"
+fi
+
+# S09: Clean Architecture 보안 점검
+result=$(grep -rn "PlaintextCredential\|encrypt\|decrypt" \
+  modules/*/domain/services/ modules/*/domain/entities/ 2>/dev/null \
+  | grep -v "auth/domain/services/credential_injection" \
+  | grep -v "auth/domain/ports/cipher_port")
+if [ -n "$result" ]; then
+  echo "[S09 WARN] 보안 도메인 외부에서 암/복호화 로직 감지"
+  echo "$result"
+  WARN_COUNT=$((WARN_COUNT + 1))
+else
+  echo "[S09 PASS] Clean Architecture 보안 경계"
 fi
 
 echo ""
@@ -297,7 +304,7 @@ fi
 FAIL 항목:
 - [S번호 FAIL] 설명
   위반 파일: path/to/file.py:라인번호
-  위반 내용: (실제 값은 마스킹 — 예: api_key = "ab**...")
+  위반 내용: (실제 값은 마스킹)
 
 판단:
 - FAIL 0건 → 커밋/실행 허용
@@ -313,12 +320,10 @@ FAIL 항목:
 ```python
 # Before (FAIL)
 DB_HOST = "10.0.0.1"
-api_key = "abcd1234efgh"
 host = os.getenv("DB_HOST", "10.0.0.1")
 
 # After (PASS)
 DB_HOST = os.getenv("DB_HOST")
-api_key = os.getenv("TMDB_API_KEY", "")
 host = os.getenv("DB_HOST")
 ```
 
@@ -328,22 +333,10 @@ git rm --cached .env
 echo ".env" >> .gitignore
 ```
 
-### S08 WARNING — 허용 조건 확인
-```python
-# WARNING 허용 (모듈 상단 상수 + CLI 인자 존재)
-DEFAULT_TRAILERS_DIR = Path("C:/Users/daewo/DX_prod_2nd/trailers")  # ← 허용
-parser.add_argument('--trailers-dir', default=str(DEFAULT_TRAILERS_DIR))
-
-# FAIL로 격상 (함수 내부 직접 사용)
-def process():
-    path = Path("C:/Users/daewo/DX_prod_2nd/trailers")  # ← FAIL
-```
-
 ---
 
 ## 주의사항
 
 1. 점검 결과 출력에 실제 자격증명 값을 포함하지 않는다 (마스킹 처리)
-2. S08 WARN 항목은 보고서 "보안 참고사항"에 기록하되 진행을 차단하지 않는다
-3. S05/S06은 `git add` 이후 `git commit` 이전에만 유효하다
-4. `.env.example`은 민감 정보 없이 키 이름만 포함된 경우 PASS
+2. S08 WARN 항목은 보고서에 기록하되 진행을 차단하지 않는다
+3. `.env.example`은 민감 정보 없이 키 이름만 포함된 경우 PASS
