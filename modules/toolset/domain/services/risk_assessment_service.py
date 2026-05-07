@@ -15,7 +15,7 @@ class RiskAssessmentService:
     risk_ceiling은 Literal["High", "Restricted"] — str 타입.
     """
 
-    def assess(self, tool: BaseTool, context: PermissionSource) -> None:
+    def assess(self, tool: BaseTool, context: PermissionSource) -> bool:
         tool_idx = _RISK_ORDER.index(tool.risk_level.value)
         ceiling_idx = _RISK_ORDER.index(context.risk_ceiling)
 
@@ -27,3 +27,4 @@ class RiskAssessmentService:
                 ),
                 code="E_PERMISSION_DENIED",
             )
+        return True
