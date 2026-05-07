@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from typing import Any
+from uuid import NAMESPACE_DNS, uuid5
 
 from common_schemas.enums import RiskLevel
 
 from ..domain.entities.node_definition import NodeDefinition
 from ..domain.entities.node_metadata import NodeMetadata
-
-if TYPE_CHECKING:
-    pass
 
 
 class ToolToNodeWrapper:
@@ -22,7 +19,7 @@ class ToolToNodeWrapper:
     def __init__(self, tool: Any) -> None:
         self._tool = tool
         self.metadata = NodeMetadata(
-            node_id=UUID(str(tool.tool_id)) if not isinstance(tool.tool_id, UUID) else tool.tool_id,
+            node_id=uuid5(NAMESPACE_DNS, tool.tool_id),
             name=tool.name,
             category=getattr(tool, "category", "external"),
             risk_level=getattr(tool, "risk_level", RiskLevel.LOW),
