@@ -3,16 +3,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import AwareDatetime, BaseModel
 
 
 class Session(BaseModel):
     session_id: UUID
     user_id: UUID
     session_hash: str
-    expires_at: datetime
+    expires_at: AwareDatetime
     is_revoked: bool = False
-    created_at: datetime
+    created_at: AwareDatetime
     device_info: str | None = None
 
     def is_expired(self) -> bool:

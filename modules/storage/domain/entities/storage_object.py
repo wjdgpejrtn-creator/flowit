@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AwareDatetime, BaseModel, ConfigDict
 
 
 class StorageObject(BaseModel):
@@ -16,6 +16,6 @@ class StorageObject(BaseModel):
     size: int
     content_type: str
     metadata: dict[str, str]
-    uploaded_at: datetime
-    expires_at: Optional[datetime] = None
+    uploaded_at: AwareDatetime
+    expires_at: Optional[AwareDatetime] = None
     owner_id: Optional[UUID] = None

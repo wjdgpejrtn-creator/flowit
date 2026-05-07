@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AwareDatetime, BaseModel, ConfigDict
 
 
 class ScanResult(BaseModel):
@@ -11,4 +11,4 @@ class ScanResult(BaseModel):
 
     clean: bool
     threat_name: Optional[str] = None
-    scanned_at: datetime
+    scanned_at: AwareDatetime

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AwareDatetime, BaseModel, ConfigDict
 
 
 class BBox(BaseModel):
@@ -52,7 +52,7 @@ class FileMeta(BaseModel):
     file_size: int
     page_count: Optional[int] = None
     unit_type: Optional[str] = None
-    created_at: Optional[datetime] = None
+    created_at: Optional[AwareDatetime] = None
     author: Optional[str] = None
     sheet_meta: Optional[list[SheetMeta]] = None
 

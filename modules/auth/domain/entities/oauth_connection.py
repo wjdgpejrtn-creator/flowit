@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import AwareDatetime, BaseModel
 
 
 class OAuthConnection(BaseModel):
@@ -16,8 +16,8 @@ class OAuthConnection(BaseModel):
     refresh_token_encrypted: bytes | None = None
     scopes: list[str]
     is_active: bool = True
-    connected_at: datetime
-    last_refreshed_at: datetime | None = None
+    connected_at: AwareDatetime
+    last_refreshed_at: AwareDatetime | None = None
 
     def revoke(self) -> None:
         self.is_active = False
