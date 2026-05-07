@@ -8,7 +8,7 @@
 
 | 카테고리 | 클래스 | risk_level | 구현 상태 |
 |----------|--------|------------|----------|
-| API 호출 | `HttpRequestTool` | Medium | ✅ 플랜 있음 |
+| API 호출 | `HttpRequestTool` | High | ✅ 플랜 있음 |
 | API 호출 | `RestApiTool` | Medium | ⬜ stub 추가 필요 |
 | API 호출 | `GraphqlTool` | Medium | ⬜ stub 추가 필요 |
 | API 호출 | `WebhookTool` | High | ✅ 플랜 있음 |
