@@ -142,11 +142,11 @@ def mock_credential():
 @pytest.fixture
 def mock_tool_registry():
     """ToolRegistry mock."""
+    from uuid import uuid4
     registry = MagicMock(spec=ToolRegistry)
-    registry.get_tool.return_value = DummyTool()
-    registry.list_tools.return_value = [DummyTool()]
-    registry.list_metadata.return_value = [ToolMetadata.from_tool(DummyTool())]
-    registry.is_registered.return_value = True
+    registry.get.return_value = DummyTool()
+    registry.list_all.return_value = [ToolMetadata.from_tool(DummyTool(), tool_id=uuid4(), category="test")]
+    registry.list_by_category.return_value = []
     return registry
 
 
@@ -396,8 +396,9 @@ def make_use_case(
     from toolset.adapters.tool_registry_adapter import ToolRegistryAdapter
 
     if tool_registry is None:
+        from uuid import uuid4
         reg = ToolRegistryAdapter()
-        reg.register_tool(DummyTool())
+        reg.register_tool(DummyTool(), tool_id=uuid4(), category="test")
         tool_registry = reg
 
     return ExecuteToolUseCase(
@@ -459,9 +460,10 @@ class TestCredentialLifecycle:
             async def execute(self, input_data, **kwargs):
                 raise ValueError("External API down")
 
+        from uuid import uuid4
         from toolset.adapters.tool_registry_adapter import ToolRegistryAdapter
         reg = ToolRegistryAdapter()
-        reg.register_tool(FailingTool())
+        reg.register_tool(FailingTool(), tool_id=uuid4(), category="test")
 
         connector = AsyncMock()
         connector.connect.return_value = mock_credential
@@ -478,10 +480,11 @@ class TestCredentialLifecycle:
 class TestPermissionGating:
     @pytest.mark.asyncio
     async def test_restricted_tool_with_high_ceiling_raises_authorization_error(self):
+        from uuid import uuid4
         from tests.conftest import RestrictedDummyTool
         from toolset.adapters.tool_registry_adapter import ToolRegistryAdapter
         reg = ToolRegistryAdapter()
-        reg.register_tool(RestrictedDummyTool())
+        reg.register_tool(RestrictedDummyTool(), tool_id=uuid4(), category="test")
         uc = make_use_case(tool_registry=reg)
 
         with pytest.raises(AuthorizationError):
@@ -515,8 +518,9 @@ class TestNonDomainExceptionWrapping:
             async def execute(self, input_data, **kwargs):
                 raise RuntimeError("unexpected crash")
 
+        from uuid import uuid4
         reg = ToolRegistryAdapter()
-        reg.register_tool(CrashTool())
+        reg.register_tool(CrashTool(), tool_id=uuid4(), category="test")
         uc = make_use_case(tool_registry=reg)
 
         with pytest.raises(ToolExecutionError) as exc_info:
@@ -541,10 +545,11 @@ from tests.conftest import DummyTool, HighRiskDummyTool, RestrictedDummyTool
 
 @pytest.fixture
 def registry_with_tools():
+    from uuid import uuid4
     reg = ToolRegistryAdapter()
-    reg.register_tool(DummyTool())       # MEDIUM
-    reg.register_tool(HighRiskDummyTool())  # HIGH
-    reg.register_tool(RestrictedDummyTool())  # RESTRICTED
+    reg.register_tool(DummyTool(), tool_id=uuid4(), category="test")           # MEDIUM
+    reg.register_tool(HighRiskDummyTool(), tool_id=uuid4(), category="test")   # HIGH
+    reg.register_tool(RestrictedDummyTool(), tool_id=uuid4(), category="test") # RESTRICTED
     return reg
 
 
