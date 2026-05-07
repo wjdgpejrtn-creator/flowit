@@ -8,7 +8,7 @@ ParseDocumentUseCase
     파일 입력
       → ParserFactory 로 파서 선택 (mime_type 기준)
       → parse() → DocumentBlock
-      → Normalizer.normalize_document()
+      → NormalizationService.normalize_document()
       → PIIMaskingService.mask_document()
       → QualityGate.evaluate()
       → DocumentBlock + QualityGateResult 반환
@@ -18,10 +18,10 @@ from __future__ import annotations
 from common_schemas.document import DocumentBlock, FileMeta
 
 from doc_parser.domain.ports.parser_port import ParserPort
-from doc_parser.domain.services.normalizer import Normalizer
+from doc_parser.domain.services.normalizer import NormalizationService
 from doc_parser.domain.services.pii_masking_service import PIIMaskingService
 from doc_parser.domain.services.quality_gate import QualityGate
-from doc_parser.domain.value_objects.quality import QualityGateResult
+from doc_parser.domain.entities.quality import QualityGateResult
 
 
 class ParseDocumentUseCase:
@@ -36,7 +36,7 @@ class ParseDocumentUseCase:
     Args:
         parsers: ParserPort 구현체 목록 (DI로 주입)
             예) [PdfParser(), DocxParser(), XlsxParser(), ...]
-        normalizer: Normalizer 인스턴스
+        normalizer: NormalizationService 인스턴스
         pii_masking_service: PIIMaskingService 인스턴스
         quality_gate: QualityGate 인스턴스
     """
@@ -44,7 +44,7 @@ class ParseDocumentUseCase:
     def __init__(
         self,
         parsers: list[ParserPort],
-        normalizer: Normalizer,
+        normalizer: NormalizationService,
         pii_masking_service: PIIMaskingService,
         quality_gate: QualityGate,
     ) -> None:
