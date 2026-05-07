@@ -8,6 +8,7 @@ ParseDocumentUseCase
     파일 입력
       → ParserFactory 로 파서 선택 (mime_type 기준)
       → parse() → DocumentBlock
+      → Normalizer.normalize_document()
       → PIIMaskingService.mask_document()
       → QualityGate.evaluate()
       → DocumentBlock + QualityGateResult 반환
@@ -17,6 +18,7 @@ from __future__ import annotations
 from common_schemas.document import DocumentBlock, FileMeta
 
 from doc_parser.domain.ports.parser_port import ParserPort
+from doc_parser.domain.services.normalizer import Normalizer
 from doc_parser.domain.services.pii_masking_service import PIIMaskingService
 from doc_parser.domain.services.quality_gate import QualityGate
 from doc_parser.domain.value_objects.quality import QualityGateResult
@@ -25,7 +27,7 @@ from doc_parser.domain.value_objects.quality import QualityGateResult
 class ParseDocumentUseCase:
     """문서 파싱 유스케이스.
 
-    적절한 파서 선택 → 파싱 → PII 마스킹 → 품질 검증.
+    적절한 파서 선택 → 파싱 → 정규화 → PII 마스킹 → 품질 검증.
 
     Clean Architecture DIP 원칙:
         - ParserPort(ABC) 만 알고 구체 구현체(PdfParser 등)는 모름
@@ -34,6 +36,7 @@ class ParseDocumentUseCase:
     Args:
         parsers: ParserPort 구현체 목록 (DI로 주입)
             예) [PdfParser(), DocxParser(), XlsxParser(), ...]
+        normalizer: Normalizer 인스턴스
         pii_masking_service: PIIMaskingService 인스턴스
         quality_gate: QualityGate 인스턴스
     """
@@ -41,10 +44,12 @@ class ParseDocumentUseCase:
     def __init__(
         self,
         parsers: list[ParserPort],
+        normalizer: Normalizer,
         pii_masking_service: PIIMaskingService,
         quality_gate: QualityGate,
     ) -> None:
         self._parsers = parsers
+        self._normalizer = normalizer
         self._pii = pii_masking_service
         self._quality_gate = quality_gate
 
@@ -61,7 +66,7 @@ class ParseDocumentUseCase:
 
         Returns:
             tuple:
-                - DocumentBlock: PII 마스킹된 파싱 결과
+                - DocumentBlock: 정규화 + PII 마스킹된 파싱 결과
                 - QualityGateResult: 품질 판정 결과
 
         Raises:
@@ -73,10 +78,13 @@ class ParseDocumentUseCase:
         # ── 2. 파싱 ──
         document = parser.parse(file_path, file_meta)
 
-        # ── 3. PII 마스킹 (정규화 이후, 청킹 이전) ──
-        masked_document, _pii_warnings = self._pii.mask_document(document)
+        # ── 3. 정규화 (파싱 직후, PII 마스킹 이전) ──
+        normalized_document = self._normalizer.normalize_document(document)
 
-        # ── 4. 품질 검증 (청크 없이 문서 레벨만 먼저 판정) ──
+        # ── 4. PII 마스킹 (정규화 이후, 청킹 이전) ──
+        masked_document, _pii_warnings = self._pii.mask_document(normalized_document)
+
+        # ── 5. 품질 검증 (청크 없이 문서 레벨만 먼저 판정) ──
         quality_result = self._quality_gate.evaluate(masked_document, chunks=[])
 
         return masked_document, quality_result
