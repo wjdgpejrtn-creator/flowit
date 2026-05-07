@@ -18,7 +18,7 @@ from common_schemas.document import ContentBlock, DocumentBlock
 
 from doc_parser.domain.entities.chunk import Chunk
 from doc_parser.domain.entities.warning import WarningInfo
-from doc_parser.domain.value_objects.quality import QualityGateResult, QualityMetrics
+from doc_parser.domain.entities.quality import QualityGateResult, QualityMetrics
 
 
 class QualityGate:
