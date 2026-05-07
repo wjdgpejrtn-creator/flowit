@@ -5,7 +5,7 @@
 **작성일**: 2026-05-06 (최종 수정: 2026-05-07)  
 **담당자**: 박아름  
 **브랜치**: `feature/req-002-auth`  
-**상태**: ✅ PASS 완료 (PR #19 리뷰 대기)
+**상태**: ✅ PASS 완료 (PR #19 리뷰 반영 완료)
 
 ---
 
@@ -17,12 +17,12 @@
 |------|--------|----------|
 | domain/entities | 2 | `Session`, `OAuthConnection` |
 | domain/value_objects | 1 | `TokenPair` |
-| domain/ports | 3 | `CipherPort`, `SessionRepository`, `OAuthConnectionRepository` |
+| domain/ports | 4 | `CipherPort`, `OAuthClientPort`, `SessionRepository`, `OAuthConnectionRepository` |
 | domain/services | 2 | `PermissionResolver`, `CredentialInjectionService` |
 | application/use_cases | 4 | `AuthenticateUseCase`, `IssueTokenUseCase`, `RefreshTokenUseCase`, `InjectCredentialUseCase` |
-| adapters/cipher | 3 | `BaseCipher`, `AESGCMCipher`, `FernetCipher` |
-| adapters/oauth | 1 | `GoogleOAuthClient` (스펙 기준 신규) |
-| adapters | 3 | `GoogleOAuthAdapter`, `JWTAdapter`, `AuthMiddleware` |
+| adapters/cipher | 2 | `AESGCMCipher`, `FernetCipher` |
+| adapters/oauth | 1 | `GoogleOAuthClient` |
+| adapters | 2 | `JWTAdapter`, `AuthMiddleware` |
 
 ### 주요 구현 내용
 

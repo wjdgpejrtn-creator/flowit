@@ -17,6 +17,7 @@
 | `OAuthConnection` | `domain/entities/oauth_connection.py` | ✅ 완료 |
 | `TokenPair` | `domain/value_objects/token_pair.py` | ✅ 완료 |
 | `CipherPort` (ABC) | `domain/ports/cipher_port.py` | ✅ 완료 |
+| `OAuthClientPort` (ABC) | `domain/ports/oauth_client_port.py` | ✅ 완료 (리뷰 반영 신설) |
 | `SessionRepository` (ABC) | `domain/ports/session_repository.py` | ✅ 완료 |
 | `OAuthConnectionRepository` (ABC) | `domain/ports/oauth_repository.py` | ✅ 완료 |
 | `PermissionResolver` | `domain/services/permission_resolver.py` | ✅ 완료 |
@@ -35,11 +36,11 @@
 
 | 클래스 | 파일 경로 | 상태 |
 |--------|-----------|------|
-| `BaseCipher` | `adapters/cipher/base_cipher.py` | ✅ 완료 |
-| `AESGCMCipher` | `adapters/cipher/aesgcm_cipher.py` | ✅ 완료 |
-| `FernetCipher` | `adapters/cipher/fernet_cipher.py` | ✅ 완료 |
-| `GoogleOAuthAdapter` | `adapters/google_oauth.py` | ✅ 완료 (구 어댑터, 하위 호환 유지) |
-| `GoogleOAuthClient` | `adapters/oauth/google_oauth_client.py` | ✅ 완료 (스펙 기준 신규 추가) |
+| `AESGCMCipher` | `adapters/cipher/aes_gcm.py` | ✅ 완료 (`CipherPort` 직접 구현) |
+| `FernetCipher` | `adapters/cipher/fernet_cipher.py` | ✅ 완료 (`CipherPort` 직접 구현) |
+| ~~`BaseCipher`~~ | ~~`adapters/cipher/base_cipher.py`~~ | 🗑️ 삭제 (빈 중간 클래스, 리뷰 반영) |
+| `GoogleOAuthClient` | `adapters/oauth/google_oauth_client.py` | ✅ 완료 (`OAuthClientPort` 구현) |
+| ~~`GoogleOAuthAdapter`~~ | ~~`adapters/google_oauth.py`~~ | 🗑️ 삭제 (중복 어댑터, 리뷰 반영) |
 | `JWTAdapter` | `adapters/jwt_adapter.py` | ✅ 완료 |
 | `AuthMiddleware` | `adapters/middleware.py` | ✅ 완료 |
 
@@ -133,4 +134,4 @@
 - [x] pytest 전체 통과 (26/26 PASS — 스펙 기준 재정렬 후)
 - [x] Ruff lint 통과 (43건 수정, 2026-05-07, `All checks passed!`)
 - [x] `modules/auth/report/auth_report.md` 작성
-- [x] PR #19 → `development` 브랜치 (OPEN, 리뷰 대기)
+- [x] PR #19 → `development` 브랜치 (OPEN, 리뷰 반영 완료)
