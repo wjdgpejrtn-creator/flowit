@@ -2,7 +2,7 @@
 REQ-006 doc-parser — adapters/parsers/csv_parser.py
 
 CsvParser
-pandas 기반 CSV 파서
+stdlib csv 기반 CSV 파서
 
 처리 항목:
     - 인코딩 자동 감지 (UTF-8 → CP949 → EUC-KR 순 시도)
@@ -11,9 +11,9 @@ pandas 기반 CSV 파서
 """
 from __future__ import annotations
 
+import csv
+import io
 from uuid import uuid4
-
-import pandas as pd
 
 from common_schemas.document import (
     ContentBlock,
@@ -42,10 +42,6 @@ class CsvParser(ParserPort):
 
     MIME_TYPE = "text/csv"
 
-    # ──────────────────────────────────────────
-    # ParserPort 구현
-    # ──────────────────────────────────────────
-
     def parse(
         self,
         file_path: str,
@@ -63,11 +59,9 @@ class CsvParser(ParserPort):
         Raises:
             RuntimeError: 파일 손상 (E0202), 텍스트 추출 실패 (E0203)
         """
-        df = self._read_csv(file_path)
+        rows = self._read_csv(file_path)
 
         try:
-            rows = self._dataframe_to_rows(df)
-
             blocks: list[ContentBlock] = []
             if rows:
                 blocks.append(
@@ -104,10 +98,11 @@ class CsvParser(ParserPort):
     # Private
     # ──────────────────────────────────────────
 
-    def _read_csv(self, file_path: str) -> pd.DataFrame:
+    def _read_csv(self, file_path: str) -> list[list[str]]:
         """인코딩 자동 감지하여 CSV 읽기.
 
         UTF-8 → CP949 → EUC-KR → UTF-8-SIG 순으로 시도.
+        빈 행 제외.
 
         Raises:
             RuntimeError: 모든 인코딩 실패 시 E0202
@@ -116,35 +111,18 @@ class CsvParser(ParserPort):
 
         for encoding in _ENCODINGS:
             try:
-                return pd.read_csv(
-                    file_path,
-                    encoding=encoding,
-                    dtype=str,        # 모든 컬럼 문자열로
-                    keep_default_na=False,
-                )
+                with open(file_path, encoding=encoding, newline="") as f:
+                    reader = csv.reader(f)
+                    rows = [
+                        row for row in reader
+                        if any(cell.strip() for cell in row)
+                    ]
+                return rows
             except (UnicodeDecodeError, Exception) as e:
                 last_error = e
                 continue
 
         raise RuntimeError(
-            f"E0202: CSV 파일 읽기 실패 — 지원 인코딩({', '.join(_ENCODINGS)}) 모두 실패: {last_error}"
+            f"E0202: CSV 파일 읽기 실패 — "
+            f"지원 인코딩({', '.join(_ENCODINGS)}) 모두 실패: {last_error}"
         )
-
-    def _dataframe_to_rows(self, df: pd.DataFrame) -> list[list[str]]:
-        """DataFrame → 행 × 열 문자열 리스트 변환.
-
-        첫 행: 컬럼명
-        이후: 데이터 행 (빈 행 제외)
-        """
-        rows: list[list[str]] = []
-
-        # 헤더
-        rows.append(list(df.columns))
-
-        # 데이터 행
-        for _, row in df.iterrows():
-            cells = [str(v) if v is not None else "" for v in row]
-            if any(c.strip() for c in cells):
-                rows.append(cells)
-
-        return rows
