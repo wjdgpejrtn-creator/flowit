@@ -17,20 +17,18 @@ class ContinueConversationUseCase:
     async def execute(
         self,
         session_id: UUID,
-        user_id: UUID,
         message: str,
     ) -> AsyncGenerator[SSEFrame, None]:
-        return self._stream(session_id, user_id, message)
+        return self._stream(session_id, message)
 
     async def _stream(
         self,
         session_id: UUID,
-        user_id: UUID,
         message: str,
     ) -> AsyncGenerator[SSEFrame, None]:
         yield SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
 
-        memories = await self._memory_repo.find_by_user(user_id, limit=10)
+        memories = await self._memory_repo.find_by_session(session_id, limit=10)
         memory_context = "\n".join(f"- {m.content}" for m in memories)
 
         yield AgentNodeFrame(agent_node_name="context_node")

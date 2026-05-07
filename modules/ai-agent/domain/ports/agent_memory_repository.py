@@ -12,3 +12,6 @@ class AgentMemoryRepository(ABC):
 
     @abstractmethod
     async def find_by_user(self, user_id: UUID, limit: int = 20) -> list[MemoryEntry]: ...
+
+    @abstractmethod
+    async def find_by_session(self, session_id: UUID, limit: int = 20) -> list[MemoryEntry]: ...
