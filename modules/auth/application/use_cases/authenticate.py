@@ -5,7 +5,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from common_schemas.exceptions import AuthorizationError, NotFoundError
+from common_schemas.exceptions import AuthorizationError
 
 from ...domain.ports.cipher_port import CipherPort
 from ...domain.ports.oauth_repository import OAuthConnectionRepository
@@ -42,24 +42,28 @@ class AuthenticateUseCase:
         token_expires_at: datetime | None = user_info.get("token_expires_at")
 
         # Upsert OAuth connection (revoke old, create new)
-        try:
-            existing = await self._oauth_repo.get_active_for_user(user_id, "google")
-            await self._oauth_repo.update_tokens(existing.oauth_id, enc_access, enc_refresh)
-        except NotFoundError:
+        existing = await self._oauth_repo.get_active_for_user(user_id, "google")
+        if existing is not None:
+            await self._oauth_repo.update_tokens(
+                existing.oauth_id,
+                new_tokens={"access_token_encrypted": enc_access, "refresh_token_encrypted": enc_refresh},
+            )
+        else:
             await self._oauth_repo.create(
                 user_id=user_id,
                 service="google",
-                encrypted_access_token=enc_access,
-                encrypted_refresh_token=enc_refresh,
-                scopes=scopes,
-                token_expires_at=token_expires_at,
+                tokens={
+                    "access_token_encrypted": enc_access,
+                    "refresh_token_encrypted": enc_refresh,
+                    "scopes": scopes,
+                },
             )
 
         # Create session
         session_hash = hashlib.sha256(os.urandom(32)).hexdigest()
         expiry = int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=expiry)
-        session = await self._session_repo.create(user_id, session_hash, expires_at)
+        session = await self._session_repo.create(user_id, session_hash, expires_at=expires_at)
 
         # Issue JWT pair
         access_token: str = self._jwt_adapter.encode({

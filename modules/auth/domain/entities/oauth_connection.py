@@ -4,18 +4,20 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
 class OAuthConnection(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    oauth_id: UUID  # == credential_id
+    oauth_id: UUID
     user_id: UUID
     service: Literal["google", "slack"]
-    encrypted_access_token: bytes
-    encrypted_refresh_token: bytes
+    credential_id: UUID
+    access_token_encrypted: bytes
+    refresh_token_encrypted: Optional[bytes] = None
     scopes: list[str]
-    token_expires_at: Optional[datetime] = None
-    is_revoked: bool = False
-    created_at: datetime
+    is_active: bool = True
+    connected_at: datetime
+    last_refreshed_at: Optional[datetime] = None
+
+    def revoke(self) -> None:
+        self.is_active = False

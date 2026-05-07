@@ -17,7 +17,7 @@ class IssueTokenUseCase:
     async def execute(self, session_hash: str) -> TokenPair:
         session = await self._session_repo.find_by_hash(session_hash)
 
-        if not session.is_valid():
+        if session.is_revoked or session.is_expired():
             raise AuthorizationError("Session is expired or revoked", code="E-AUTH-003")
 
         expiry = int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))

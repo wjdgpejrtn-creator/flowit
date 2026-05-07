@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 from uuid import UUID
 
 from common_schemas import PermissionSource
@@ -11,6 +11,8 @@ class PermissionResolver:
         role: Literal["User", "Admin"],
         department_id: UUID,
         session_id: UUID,
+        current_workflow_id: Optional[UUID] = None,
+        current_skill_id: Optional[UUID] = None,
     ) -> PermissionSource:
         if role == "Admin":
             risk_ceiling: Literal["High", "Restricted"] = "Restricted"
@@ -24,6 +26,8 @@ class PermissionResolver:
             role=role,
             department_id=department_id,
             session_id=session_id,
+            current_workflow_id=current_workflow_id,
+            current_skill_id=current_skill_id,
             granted_scopes=granted_scopes,
             risk_ceiling=risk_ceiling,
         )

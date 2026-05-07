@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -16,12 +16,12 @@ class InMemorySessionRepository(SessionRepository):
     def __init__(self) -> None:
         self._store: dict = {}
 
-    async def create(self, user_id, session_hash, expires_at) -> Session:
+    async def create(self, user_id, session_hash, **kwargs) -> Session:
         session = Session(
             session_id=uuid4(),
             user_id=user_id,
             session_hash=session_hash,
-            expires_at=expires_at,
+            expires_at=kwargs["expires_at"],
             created_at=datetime.now(timezone.utc),
         )
         self._store[session_hash] = session
@@ -37,14 +37,13 @@ class InMemorySessionRepository(SessionRepository):
     async def revoke(self, session_id) -> None:
         for key, s in list(self._store.items()):
             if s.session_id == session_id:
-                self._store[key] = s.model_copy(update={"is_revoked": True})
+                s.revoke()
 
     async def revoke_all_for_user(self, user_id) -> int:
         count = 0
-        for key in list(self._store):
-            s = self._store[key]
+        for s in self._store.values():
             if s.user_id == user_id:
-                self._store[key] = s.model_copy(update={"is_revoked": True})
+                s.revoke()
                 count += 1
         return count
 
@@ -53,47 +52,43 @@ class InMemoryOAuthRepository(OAuthConnectionRepository):
     def __init__(self) -> None:
         self._store: dict = {}
 
-    async def create(self, user_id, service, encrypted_access_token, encrypted_refresh_token, scopes, token_expires_at=None) -> OAuthConnection:
+    async def create(self, user_id, service, tokens: dict) -> OAuthConnection:
+        oid = uuid4()
         conn = OAuthConnection(
-            oauth_id=uuid4(),
+            oauth_id=oid,
             user_id=user_id,
             service=service,
-            encrypted_access_token=encrypted_access_token,
-            encrypted_refresh_token=encrypted_refresh_token,
-            scopes=scopes,
-            token_expires_at=token_expires_at,
-            created_at=datetime.now(timezone.utc),
+            credential_id=oid,
+            access_token_encrypted=tokens["access_token_encrypted"],
+            refresh_token_encrypted=tokens.get("refresh_token_encrypted"),
+            scopes=tokens.get("scopes", []),
+            connected_at=datetime.now(timezone.utc),
         )
         self._store[str(conn.oauth_id)] = conn
         return conn
 
-    async def get_by_credential_id(self, credential_id) -> OAuthConnection:
-        conn = self._store.get(str(credential_id))
-        if conn is None:
-            from common_schemas.exceptions import NotFoundError
-            raise NotFoundError(str(credential_id))
-        return conn
+    async def get_by_credential_id(self, credential_id):
+        return self._store.get(str(credential_id))
 
-    async def get_active_for_user(self, user_id, service) -> OAuthConnection:
+    async def get_active_for_user(self, user_id, service):
         for conn in self._store.values():
-            if conn.user_id == user_id and conn.service == service and not conn.is_revoked:
+            if conn.user_id == user_id and conn.service == service and conn.is_active:
                 return conn
-        from common_schemas.exceptions import NotFoundError
-        raise NotFoundError(f"No active {service} connection for {user_id}")
+        return None
 
-    async def update_tokens(self, credential_id, encrypted_access_token, encrypted_refresh_token) -> None:
+    async def update_tokens(self, credential_id, new_tokens: dict) -> None:
         key = str(credential_id)
         if key in self._store:
             c = self._store[key]
-            self._store[key] = c.model_copy(update={
-                "encrypted_access_token": encrypted_access_token,
-                "encrypted_refresh_token": encrypted_refresh_token,
-            })
+            if "access_token_encrypted" in new_tokens:
+                c.access_token_encrypted = new_tokens["access_token_encrypted"]
+            if "refresh_token_encrypted" in new_tokens:
+                c.refresh_token_encrypted = new_tokens["refresh_token_encrypted"]
 
     async def revoke(self, credential_id) -> None:
         key = str(credential_id)
         if key in self._store:
-            self._store[key] = self._store[key].model_copy(update={"is_revoked": True})
+            self._store[key].revoke()
 
 
 class FakeCipher(CipherPort):
@@ -126,6 +121,7 @@ def user_id():
 
 @pytest.fixture
 def valid_session(user_id):
+    from datetime import timedelta
     return Session(
         session_id=uuid4(),
         user_id=user_id,

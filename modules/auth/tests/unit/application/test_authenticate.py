@@ -67,8 +67,8 @@ async def test_authenticate_stores_encrypted_token(session_repo, oauth_repo, cip
     user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "sub_encrypt_test")
     conn = await oauth_repo.get_active_for_user(user_id, "google")
 
-    assert conn.encrypted_access_token != b"goog_access_token"
-    assert cipher.decrypt(conn.encrypted_access_token) == b"goog_access_token"
+    assert conn.access_token_encrypted != b"goog_access_token"
+    assert cipher.decrypt(conn.access_token_encrypted) == b"goog_access_token"
 
 
 @pytest.mark.asyncio
@@ -88,4 +88,4 @@ async def test_authenticate_second_login_updates_tokens(session_repo, oauth_repo
 
     user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "sub_reauth")
     conn = await oauth_repo.get_active_for_user(user_id, "google")
-    assert cipher.decrypt(conn.encrypted_access_token) == b"new_access_token"
+    assert cipher.decrypt(conn.access_token_encrypted) == b"new_access_token"
