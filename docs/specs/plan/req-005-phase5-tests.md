@@ -231,10 +231,10 @@ class TestBaseToolAbstractInterface:
         assert tool.risk_level == RiskLevel.RESTRICTED
 
     @pytest.mark.asyncio
-    async def test_run_returns_dict(self):
+    async def test_execute_returns_dict(self):
         from tests.conftest import DummyTool
         tool = DummyTool()
-        result = await tool.run({"message": "hello"}, None)
+        result = await tool.execute({"message": "hello"})
         assert result == {"result": "ok: hello"}
 ```
 
@@ -512,7 +512,7 @@ class TestNonDomainExceptionWrapping:
 
         class CrashTool(DummyTool):
             tool_id = "crash"
-            async def run(self, params, credential):
+            async def execute(self, input_data, **kwargs):
                 raise RuntimeError("unexpected crash")
 
         reg = ToolRegistryAdapter()
@@ -604,7 +604,7 @@ class TestToolExecutionService:
 
         class CrashTool(Base):
             tool_id = "crash2"
-            async def run(self, params, credential):
+            async def execute(self, input_data, **kwargs):
                 raise ConnectionError("network down")
 
         with pytest.raises(ToolExecutionError) as exc_info:

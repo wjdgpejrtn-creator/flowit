@@ -44,7 +44,6 @@ class ToolRegistryAdapter(ToolRegistry):
         self,
         tool: BaseTool,
         tool_id: UUID,
-        version: str,
         category: str,
         overwrite: bool = True,
     ) -> None:
@@ -56,13 +55,13 @@ class ToolRegistryAdapter(ToolRegistry):
             )
         self._tools[tool.name] = tool
         self._metadata[tool.name] = ToolMetadata.from_tool(
-            tool, tool_id=tool_id, version=version, category=category,
+            tool, tool_id=tool_id, category=category,
         )
 
-    def register_bulk(self, tools: list[tuple[BaseTool, UUID, str, str]]) -> None:
-        """일괄 등록. (tool, tool_id, version, category) 튜플 리스트."""
-        for tool, tool_id, version, category in tools:
-            self.register_tool(tool, tool_id, version, category)
+    def register_bulk(self, tools: list[tuple[BaseTool, UUID, str]]) -> None:
+        """일괄 등록. (tool, tool_id, category) 튜플 리스트."""
+        for tool, tool_id, category in tools:
+            self.register_tool(tool, tool_id, category)
 
     def __len__(self) -> int:
         return len(self._tools)

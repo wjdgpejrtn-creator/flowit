@@ -223,18 +223,23 @@ class ListToolsUseCase:
 
     def execute(
         self,
+        category: str | None = None,
         risk_level: RiskLevel | None = None,
     ) -> list[ToolMetadata]:
         """
         등록된 도구 메타데이터 목록을 반환.
 
         Args:
+            category: 필터 — 특정 카테고리만 반환. None이면 전체 반환.
             risk_level: 필터 — 특정 위험 등급만 반환. None이면 전체 반환.
 
         Returns:
             ToolMetadata 목록 (is_enabled=True인 것만)
         """
-        metadata_list = self._registry.list_all()
+        if category is not None:
+            metadata_list = self._registry.list_by_category(category)
+        else:
+            metadata_list = self._registry.list_all()
 
         if risk_level is not None:
             metadata_list = [m for m in metadata_list if m.risk_level == risk_level]
@@ -342,8 +347,8 @@ def create_execute_tool_use_case(
     execution_repo,         # storage.repositories.ToolExecutionRepository 구현체
 ) -> ExecuteToolUseCase:
     registry = ToolRegistryAdapter()
-    registry.register_tool(GoogleDriveTool())
-    registry.register_tool(GmailTool())
+    registry.register_tool(GoogleDriveTool(), tool_id=uuid4(), category="google")
+    registry.register_tool(GmailTool(), tool_id=uuid4(), category="google")
     # ... 8개 등록
 
     return ExecuteToolUseCase(
@@ -359,10 +364,10 @@ def create_execute_tool_use_case(
 
 ## 확인 체크리스트
 
-- [ ] `execute_tool_use_case.py`: `finally` 블록에서 `wipe()` + `release()` 보장
+- [ ] `execute_tool_use_case.py`: `finally` 블록에서 `credential.wipe()` 보장
 - [ ] `execute_tool_use_case.py`: 비도메인 예외 → `ToolExecutionError` 래핑
-- [ ] `execute_tool_use_case.py`: `credential_id=None`일 때 acquire/release 호출 안 함
+- [ ] `execute_tool_use_case.py`: `credential_id=None`일 때 `connector.connect()` 호출 안 함
 - [ ] `execute_tool_use_case.py`: `repo.save()` best-effort (예외 무시)
-- [ ] `list_tools_use_case.py`: `is_enabled=False` 필터링
+- [ ] `list_tools_use_case.py`: `category` 필터 + `is_enabled=False` 필터링
 - [ ] `validate_tool_config_use_case.py`: 실제 API 호출 없이 스키마 검증만
 - [ ] 구현체 직접 import 없음 (Port만 참조)

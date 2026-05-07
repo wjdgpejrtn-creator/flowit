@@ -11,7 +11,7 @@
 | API 호출 | `HttpRequestTool` | Medium | ✅ 플랜 있음 |
 | API 호출 | `RestApiTool` | Medium | ⬜ stub 추가 필요 |
 | API 호출 | `GraphqlTool` | Medium | ⬜ stub 추가 필요 |
-| API 호출 | `WebhookTool` | Low | ✅ 플랜 있음 |
+| API 호출 | `WebhookTool` | High | ✅ 플랜 있음 |
 | 파일 처리 | `FileReadTool` | Low | ⬜ stub 추가 필요 |
 | 파일 처리 | `FileWriteTool` | Medium | ⬜ stub 추가 필요 |
 | 파일 처리 | `FileTransformTool` | Low | ⬜ stub 추가 필요 |
@@ -112,7 +112,7 @@ class WebhookTool(BaseTool):
     tool_id = "webhook"
     name = "Webhook"
     description = "지정된 URL로 HTTP 요청을 전송합니다. POST/GET/PUT/PATCH/DELETE 지원."
-    risk_level = RiskLevel.MEDIUM
+    risk_level = RiskLevel.HIGH
 
     input_schema = {
         "type": "object",
@@ -141,16 +141,13 @@ class WebhookTool(BaseTool):
         "required": ["status_code"],
     }
 
-    async def run(
-        self,
-        params: dict,
-        credential: PlaintextCredential | None,  # webhook은 credential 불필요
-    ) -> dict:
-        url = params["url"]
-        method = params.get("method", "POST").upper()
-        headers = params.get("headers", {})
-        body = params.get("body")
-        timeout = params.get("timeout", _DEFAULT_TIMEOUT)
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        credential: PlaintextCredential | None = kwargs.get("credential")
+        url = input_data["url"]
+        method = input_data.get("method", "POST").upper()
+        headers = input_data.get("headers", {})
+        body = input_data.get("body")
+        timeout = input_data.get("timeout", _DEFAULT_TIMEOUT)
 
         last_exc: Exception | None = None
 
@@ -248,36 +245,37 @@ class HttpRequestTool(BaseTool):
         "required": ["status_code"],
     }
 
-    async def run(self, params: dict, credential: PlaintextCredential | None) -> dict:
-        headers = dict(params.get("headers", {}))
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        credential: PlaintextCredential | None = kwargs.get("credential")
+        headers = dict(input_data.get("headers", {}))
 
         # credential 있으면 Bearer 토큰 주입
         # ⚠️ credential.value 사용 (credential.token 아님)
-        if credential and params.get("auth_type") == "bearer":
+        if credential and input_data.get("auth_type") == "bearer":
             headers["Authorization"] = f"Bearer {credential.value}"
 
-        body_type = params.get("body_type", "json")
-        body = params.get("body")
+        body_type = input_data.get("body_type", "json")
+        body = input_data.get("body")
 
         async with httpx.AsyncClient(
-            timeout=params.get("timeout", 30),
-            verify=params.get("verify_ssl", True),
+            timeout=input_data.get("timeout", 30),
+            verify=input_data.get("verify_ssl", True),
         ) as client:
             try:
-                kwargs: dict = {
-                    "method": params["method"],
-                    "url": params["url"],
+                request_kwargs: dict = {
+                    "method": input_data["method"],
+                    "url": input_data["url"],
                     "headers": headers,
-                    "params": params.get("query_params"),
+                    "params": input_data.get("query_params"),
                 }
                 if body_type == "json":
-                    kwargs["json"] = body
+                    request_kwargs["json"] = body
                 elif body_type == "form":
-                    kwargs["data"] = body
+                    request_kwargs["data"] = body
                 elif body_type == "text":
-                    kwargs["content"] = str(body)
+                    request_kwargs["content"] = str(body)
 
-                response = await client.request(**kwargs)
+                response = await client.request(**request_kwargs)
                 return {
                     "status_code": response.status_code,
                     "response_body": self._parse_response(response),
@@ -353,7 +351,8 @@ class LLMTool(BaseTool):
         "required": ["text"],
     }
 
-    async def run(self, params: dict, credential: PlaintextCredential | None) -> dict:
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        credential: PlaintextCredential | None = kwargs.get("credential")
         if not _MODAL_ENDPOINT:
             raise ToolExecutionError(
                 message="MODAL_LLM_ENDPOINT environment variable is not set.",
@@ -361,11 +360,11 @@ class LLMTool(BaseTool):
             )
 
         payload = {
-            "prompt": params["prompt"],
-            "max_tokens": params.get("max_tokens", 512),
-            "temperature": params.get("temperature", 0.7),
+            "prompt": input_data["prompt"],
+            "max_tokens": input_data.get("max_tokens", 512),
+            "temperature": input_data.get("temperature", 0.7),
         }
-        if system_prompt := params.get("system_prompt"):
+        if system_prompt := input_data.get("system_prompt"):
             payload["system_prompt"] = system_prompt
 
         async with httpx.AsyncClient(timeout=120) as client:
@@ -461,9 +460,10 @@ class GoogleDriveTool(BaseTool):
         },
     }
 
-    async def run(self, params: dict, credential: PlaintextCredential | None) -> dict:
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        credential: PlaintextCredential | None = kwargs.get("credential")
         service = self._build_service(credential)
-        action = params["action"]
+        action = input_data["action"]
 
         dispatch = {
             "upload": self._upload,
@@ -480,7 +480,7 @@ class GoogleDriveTool(BaseTool):
                 message=f"Unsupported action: {action}",
                 code="TOOL_EXECUTION_ERROR",
             )
-        return await handler(service, params)
+        return await handler(service, input_data)
 
     def _build_service(self, credential: PlaintextCredential | None):
         if not credential:
@@ -584,16 +584,17 @@ class GmailTool(BaseTool):
         },
     }
 
-    async def run(self, params: dict, credential: PlaintextCredential | None) -> dict:
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        credential: PlaintextCredential | None = kwargs.get("credential")
         service = self._build_service(credential)
-        action = params["action"]
+        action = input_data["action"]
         dispatch = {
             "send": self._send,
             "read": self._read,
             "search": self._search,
             "archive": self._archive,
         }
-        return await dispatch[action](service, params)
+        return await dispatch[action](service, input_data)
 
     def _build_service(self, credential: PlaintextCredential | None):
         if not credential:
@@ -696,7 +697,8 @@ class GoogleCalendarTool(BaseTool):
         },
     }
 
-    async def run(self, params: dict, credential: PlaintextCredential | None) -> dict:
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        credential: PlaintextCredential | None = kwargs.get("credential")
         if not credential:
             raise ToolExecutionError(
                 message="Google Calendar requires OAuth credential.",
@@ -705,7 +707,7 @@ class GoogleCalendarTool(BaseTool):
         # ⚠️ credential.value 사용
         creds = Credentials(token=credential.value)
         service = build("calendar", "v3", credentials=creds)
-        action = params["action"]
+        action = input_data["action"]
 
         dispatch = {
             "create_event": self._create_event,
@@ -713,7 +715,7 @@ class GoogleCalendarTool(BaseTool):
             "update_event": self._update_event,
             "delete_event": self._delete_event,
         }
-        return await dispatch[action](service, params)
+        return await dispatch[action](service, input_data)
 
     async def _create_event(self, service, params: dict) -> dict:
         body = {
@@ -811,7 +813,8 @@ class GoogleSheetsTool(BaseTool):
         },
     }
 
-    async def run(self, params: dict, credential: PlaintextCredential | None) -> dict:
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        credential: PlaintextCredential | None = kwargs.get("credential")
         if not credential:
             raise ToolExecutionError(
                 message="Google Sheets requires OAuth credential.",
@@ -828,7 +831,7 @@ class GoogleSheetsTool(BaseTool):
             "append": self._append,
             "create": self._create,
         }
-        return await dispatch[params["action"]](sheets, params)
+        return await dispatch[input_data["action"]](sheets, input_data)
 
     async def _read(self, sheets, params: dict) -> dict:
         result = sheets.values().get(
@@ -927,7 +930,8 @@ class SlackTool(BaseTool):
         "required": ["ok"],
     }
 
-    async def run(self, params: dict, credential: PlaintextCredential | None) -> dict:
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        credential: PlaintextCredential | None = kwargs.get("credential")
         # ⚠️ credential.value 사용. 없으면 환경변수 fallback
         token = credential.value if credential else _SLACK_BOT_TOKEN
         if not token:
@@ -937,26 +941,26 @@ class SlackTool(BaseTool):
             )
 
         client = AsyncWebClient(token=token)
-        action = params["action"]
+        action = input_data["action"]
 
         try:
             if action == "send_message":
                 resp = await client.chat_postMessage(
-                    channel=params["channel"],
-                    text=params.get("text", ""),
-                    blocks=params.get("blocks"),
+                    channel=input_data["channel"],
+                    text=input_data.get("text", ""),
+                    blocks=input_data.get("blocks"),
                 )
             elif action == "post_thread":
                 resp = await client.chat_postMessage(
-                    channel=params["channel"],
-                    text=params.get("text", ""),
-                    thread_ts=params["thread_ts"],
+                    channel=input_data["channel"],
+                    text=input_data.get("text", ""),
+                    thread_ts=input_data["thread_ts"],
                 )
             elif action == "upload_file":
                 resp = await client.files_upload(
-                    channels=params["channel"],
-                    content=params.get("file_content", ""),
-                    filename=params.get("file_name", "file.txt"),
+                    channels=input_data["channel"],
+                    content=input_data.get("file_content", ""),
+                    filename=input_data.get("file_name", "file.txt"),
                 )
             else:
                 raise ToolExecutionError(
