@@ -14,11 +14,11 @@ REQ-006 doc-parser — domain/services/chunking_service.py
 """
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from common_schemas.document import ContentBlock, DocumentBlock, SourceRef
+from common_schemas.document import ContentBlock, DocumentBlock
 
-from doc_parser.domain.entities.chunk import Chunk, ChunkOverlapMeta
+from doc_parser.domain.entities.chunk import Chunk
 
 
 class ChunkingService:
@@ -58,20 +58,22 @@ class ChunkingService:
         Args:
             document: 파싱된 DocumentBlock
             strategy: 강제 지정할 청킹 전략 (선택)
-                "structural" | "page" | "token" | "table"
 
         Returns:
             list[Chunk]: 청킹 결과
         """
         blocks = list(document.blocks)
         chunks: list[Chunk] = []
+        chunk_index = 0
 
         # 표 블록은 항상 독립 청크로 먼저 분리
         table_blocks = [b for b in blocks if b.block_type == "table"]
         other_blocks = [b for b in blocks if b.block_type != "table"]
 
         for block in table_blocks:
-            chunks.extend(self._chunk_table(block))
+            table_chunks = self._chunk_table(block, document.document_id, chunk_index)
+            chunks.extend(table_chunks)
+            chunk_index += len(table_chunks)
 
         if not other_blocks:
             return chunks
@@ -80,20 +82,16 @@ class ChunkingService:
         selected = strategy or self._select_strategy(other_blocks)
 
         if selected == "structural":
-            chunks.extend(self._chunk_by_section(other_blocks))
+            new_chunks = self._chunk_by_section(other_blocks, document.document_id, chunk_index)
         elif selected == "page":
-            chunks.extend(self._chunk_by_page(other_blocks))
+            new_chunks = self._chunk_by_page(other_blocks, document.document_id, chunk_index)
         elif selected == "token":
-            chunks.extend(self._chunk_by_token(other_blocks))
+            new_chunks = self._chunk_by_token(other_blocks, document.document_id, chunk_index)
         else:
-            chunks.extend(self._chunk_by_page(other_blocks))
+            new_chunks = self._chunk_by_page(other_blocks, document.document_id, chunk_index)
 
-        # 오버랩 적용 (table 제외)
-        non_table = [c for c in chunks if c.chunk_type != "table"]
-        table_chunks = [c for c in chunks if c.chunk_type == "table"]
-        overlapped = self._apply_overlap(non_table)
-
-        return overlapped + table_chunks
+        chunks.extend(new_chunks)
+        return chunks
 
     # ──────────────────────────────────────────
     # Private — 전략 선택
@@ -108,148 +106,126 @@ class ChunkingService:
     # Private — 청킹 전략 구현
     # ──────────────────────────────────────────
 
-    def _chunk_by_section(self, blocks: list[ContentBlock]) -> list[Chunk]:
-        """1순위: heading 기준 섹션 분리.
-
-        heading 블록을 기준으로 섹션을 나누고,
-        섹션이 max_tokens 초과 시 token 분할로 재귀 처리.
-        """
+    def _chunk_by_section(
+        self,
+        blocks: list[ContentBlock],
+        document_id: UUID,
+        start_index: int,
+    ) -> list[Chunk]:
+        """1순위: heading 기준 섹션 분리."""
         chunks: list[Chunk] = []
         current_section: list[ContentBlock] = []
+        idx = start_index
 
         for block in blocks:
             if block.block_type == "heading" and current_section:
-                chunks.extend(self._finalize_section(current_section, "structural"))
+                new = self._finalize_section(current_section, document_id, idx)
+                chunks.extend(new)
+                idx += len(new)
                 current_section = []
             current_section.append(block)
 
         if current_section:
-            chunks.extend(self._finalize_section(current_section, "structural"))
+            chunks.extend(self._finalize_section(current_section, document_id, idx))
 
         return chunks
 
-    def _chunk_by_page(self, blocks: list[ContentBlock]) -> list[Chunk]:
-        """2순위: 페이지 단위 분리.
-
-        같은 page 번호의 블록을 묶어 하나의 청크로.
-        페이지가 max_tokens 초과 시 token 분할로 재귀 처리.
-        """
+    def _chunk_by_page(
+        self,
+        blocks: list[ContentBlock],
+        document_id: UUID,
+        start_index: int,
+    ) -> list[Chunk]:
+        """2순위: 페이지 단위 분리."""
         from itertools import groupby
 
         chunks: list[Chunk] = []
+        idx = start_index
         keyfunc = lambda b: b.page or 0  # noqa: E731
         sorted_blocks = sorted(blocks, key=keyfunc)
 
         for _, group in groupby(sorted_blocks, key=keyfunc):
             page_blocks = list(group)
-            chunks.extend(self._finalize_section(page_blocks, "page"))
+            new = self._finalize_section(page_blocks, document_id, idx)
+            chunks.extend(new)
+            idx += len(new)
 
         return chunks
 
-    def _chunk_by_token(self, blocks: list[ContentBlock]) -> list[Chunk]:
-        """3순위: 토큰 최적화 재귀 분할.
-
-        paragraph / list 블록만 대상.
-        max_tokens 초과 시 재귀적으로 분할.
-        """
+    def _chunk_by_token(
+        self,
+        blocks: list[ContentBlock],
+        document_id: UUID,
+        start_index: int,
+    ) -> list[Chunk]:
+        """3순위: 토큰 최적화 재귀 분할."""
         chunks: list[Chunk] = []
-        buffer = ""
         buffer_blocks: list[ContentBlock] = []
+        idx = start_index
 
         for block in blocks:
             text = block.content or ""
-            if self._calc_token_count(buffer + text) > self._max_tokens and buffer:
-                chunks.append(self._make_chunk(buffer, buffer_blocks, "token"))
-                buffer = ""
+            buffer_text = "\n".join(b.content or "" for b in buffer_blocks)
+            if self._calc_token_count(buffer_text + text) > self._max_tokens and buffer_blocks:
+                chunks.append(self._make_chunk(buffer_blocks, document_id, idx))
+                idx += 1
                 buffer_blocks = []
-            buffer += text + "\n"
             buffer_blocks.append(block)
 
-        if buffer:
-            chunks.append(self._make_chunk(buffer.strip(), buffer_blocks, "token"))
+        if buffer_blocks:
+            chunks.append(self._make_chunk(buffer_blocks, document_id, idx))
 
         return chunks
 
-    def _chunk_table(self, block: ContentBlock) -> list[Chunk]:
+    def _chunk_table(
+        self,
+        block: ContentBlock,
+        document_id: UUID,
+        start_index: int,
+    ) -> list[Chunk]:
         """4순위: 표 독립 청크 처리.
 
-        표는 항상 독립 청크.
-        오버랩 없음.
         20행 초과 시 header 유지 후 row group 단위로 분할.
         """
         if not block.table:
             return []
 
         rows = block.table
-        header = rows[0] if rows else []
         data_rows = rows[1:]
         row_group_size = 20
 
         if len(data_rows) <= row_group_size:
-            content = self._table_to_text(rows)
-            return [self._make_chunk(content, [block], "table")]
+            return [Chunk(
+                chunk_id=uuid4(),
+                block=block,
+                chunk_index=start_index,
+                parent_document_id=document_id,
+            )]
 
-        # 20행 초과 → header 유지 후 분할
+        # 20행 초과 → 블록을 분할해서 각각 청크로
         chunks: list[Chunk] = []
-        for i in range(0, len(data_rows), row_group_size):
-            group = [header] + data_rows[i: i + row_group_size]
-            content = self._table_to_text(group)
-            chunks.append(self._make_chunk(content, [block], "table"))
+        header = rows[0] if rows else []
+        for i, offset in enumerate(range(0, len(data_rows), row_group_size)):
+            group_rows = [header] + data_rows[offset: offset + row_group_size]
+            # 분할된 표를 새 ContentBlock으로 만들어 Chunk에 담음
+            sub_block = block.model_copy(update={"table": group_rows})
+            chunks.append(Chunk(
+                chunk_id=uuid4(),
+                block=sub_block,
+                chunk_index=start_index + i,
+                parent_document_id=document_id,
+            ))
 
         return chunks
-
-    def _apply_overlap(self, chunks: list[Chunk]) -> list[Chunk]:
-        """인접 청크 간 오버랩 적용 (table 제외).
-
-        overlap_tokens 만큼 이전 청크 끝 텍스트를 다음 청크 앞에 추가.
-        """
-        if len(chunks) <= 1:
-            return chunks
-
-        result: list[Chunk] = [chunks[0]]
-
-        for i in range(1, len(chunks)):
-            prev = chunks[i - 1]
-            curr = chunks[i]
-
-            overlap_text = self._get_overlap_text(prev.content)
-            if not overlap_text:
-                result.append(curr)
-                continue
-
-            new_content = overlap_text + "\n" + curr.content
-            new_token_count = self._calc_token_count(new_content)
-            overlap_meta = ChunkOverlapMeta(
-                has_overlap=True,
-                overlap_tokens=self._calc_token_count(overlap_text),
-            )
-            result.append(
-                curr.model_copy(
-                    update={
-                        "content": new_content,
-                        "token_count": new_token_count,
-                        "overlap_meta": overlap_meta,
-                    }
-                )
-            )
-
-        return result
 
     # ──────────────────────────────────────────
     # Private — 유틸
     # ──────────────────────────────────────────
 
     def _calc_token_count(self, text: str) -> int:
-        """토큰 수 계산.
-
-        token_estimator_mode:
-            char_estimate — char × 0.7 (폐쇄망 기본값)
-            tiktoken      — tiktoken 라이브러리 사용 (외부망)
-        """
+        """토큰 수 계산."""
         if self._estimator_mode == "char_estimate":
             return int(len(text) * 0.7)
-
-        # tiktoken 모드 (Phase 2 — 폐쇄망 미지원)
         try:
             import tiktoken  # noqa: PLC0415
             enc = tiktoken.get_encoding("cl100k_base")
@@ -260,47 +236,40 @@ class ChunkingService:
     def _finalize_section(
         self,
         blocks: list[ContentBlock],
-        chunk_type: str,
+        document_id: UUID,
+        start_index: int,
     ) -> list[Chunk]:
         """섹션/페이지 블록을 청크로 변환.
 
         max_tokens 초과 시 token 분할로 재귀 처리.
         """
+        if not blocks:
+            return []
+
         text = "\n".join(b.content or "" for b in blocks).strip()
         if not text:
             return []
 
         if self._calc_token_count(text) <= self._max_tokens:
-            return [self._make_chunk(text, blocks, chunk_type)]
+            return [self._make_chunk(blocks, document_id, start_index)]
 
         # 초과 시 token 분할
-        return self._chunk_by_token(blocks)
+        return self._chunk_by_token(blocks, document_id, start_index)
 
     def _make_chunk(
         self,
-        content: str,
         blocks: list[ContentBlock],
-        chunk_type: str,
+        document_id: UUID,
+        chunk_index: int,
     ) -> Chunk:
-        """Chunk 객체 생성 헬퍼."""
-        source_ref = blocks[0].source_ref if blocks and blocks[0].source_ref else SourceRef()
+        """Chunk 객체 생성 헬퍼.
+
+        여러 블록을 하나의 청크로 묶을 때
+        첫 번째 블록을 대표 block 으로 사용.
+        """
         return Chunk(
             chunk_id=uuid4(),
-            chunk_type=chunk_type,  # type: ignore[arg-type]
-            content=content.strip(),
-            token_count=self._calc_token_count(content),
-            source_ref=source_ref,
-            block_ids=[b.block_id for b in blocks],
+            block=blocks[0],
+            chunk_index=chunk_index,
+            parent_document_id=document_id,
         )
-
-    def _get_overlap_text(self, text: str) -> str:
-        """이전 청크에서 오버랩할 텍스트 추출 (끝부분)."""
-        words = text.split()
-        overlap_word_count = max(1, self._overlap_tokens // 2)
-        if len(words) <= overlap_word_count:
-            return ""
-        return " ".join(words[-overlap_word_count:])
-
-    def _table_to_text(self, rows: list[list]) -> str:
-        """표 데이터를 텍스트로 변환."""
-        return "\n".join("\t".join(str(cell) for cell in row) for row in rows)
