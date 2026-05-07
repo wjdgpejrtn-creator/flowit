@@ -14,7 +14,7 @@ import json
 import sys
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Union, get_args, get_origin
+from typing import Annotated, Any, Union, get_args, get_origin
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -44,6 +44,11 @@ def _resolve_type(annotation: Any) -> str:
 
     if annotation in PYTHON_TO_TS:
         return PYTHON_TO_TS[annotation]
+
+    if origin is Annotated:
+        args = get_args(annotation)
+        if args:
+            return _resolve_type(args[0])
 
     if origin is list:
         inner = get_args(annotation)[0] if get_args(annotation) else Any
