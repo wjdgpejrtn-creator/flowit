@@ -6,6 +6,8 @@ from urllib.parse import urlencode
 
 import httpx
 
+from ...domain.ports.oauth_client_port import OAuthClientPort
+
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
@@ -20,7 +22,7 @@ _DEFAULT_SCOPES = [
 ]
 
 
-class GoogleOAuthClient:
+class GoogleOAuthClient(OAuthClientPort):
     def __init__(
         self,
         client_id: str | None = None,

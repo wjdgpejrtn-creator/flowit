@@ -5,12 +5,12 @@ import os
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from .base_cipher import BaseCipher
+from ...domain.ports.cipher_port import CipherPort
 
 _NONCE_SIZE = 12
 
 
-class AESGCMCipher(BaseCipher):
+class AESGCMCipher(CipherPort):
     def __init__(self, key: bytes | None = None) -> None:
         if key is None:
             raw = os.getenv("ENCRYPTION_KEY", "")
