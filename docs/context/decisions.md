@@ -29,3 +29,5 @@
 | 0006 | [scope 값 lowercase 통일 ('private', 'team', 'public')](./adr/ADR-0006-scope-lowercase-convention.md) | Accepted | 2026-05-05 |
 | 0007 | [Python 최소 버전 3.12로 상향](./adr/ADR-0007-python-312-minimum.md) | Accepted | 2026-05-05 |
 | 0008 | [NodeExecutionState를 common-schemas 공유 타입으로 도입](./adr/ADR-0008-node-execution-state-shared-type.md) | Accepted | 2026-05-07 |
+| 0009 | [UtcDatetime 공용 타입 도입 — naive datetime 자동 UTC 변환](./adr/ADR-0009-utc-datetime-type.md) | Accepted | 2026-05-08 |
+| 0010 | [Storage 모듈 아키텍처 — Mapper 패턴 + 타 모듈 Port ABC 구현](./adr/ADR-0010-storage-module-architecture.md) | Accepted | 2026-05-07 |

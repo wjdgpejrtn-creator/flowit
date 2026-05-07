@@ -131,6 +131,7 @@ packages/common-schemas/
 │   │   │                           # RationaleDeltaFrame, SlotFillQuestionFrame,
 │   │   │                           # DraftSpecDeltaFrame, ResultFrame, ErrorFrame
 │   │   ├── handoff.py              # HandoffPayload, EvaluationResult
+│   │   ├── types.py                # UtcDatetime (naive→UTC 자동 변환 타입, ADR-0009)
 │   │   ├── enums.py                # AgentMode, ExecutionStatus, RiskLevel, ErrorCode
 │   │   └── exceptions.py           # 공유 도메인 예외 (DomainError 베이스 클래스)
 │   └── pyproject.toml
@@ -545,45 +546,72 @@ REQ-007 Celery Worker
 
 ## 6. Persistence Adapter — modules/storage/ (REQ-008)
 
-Clean Architecture에서 **Outbound Adapter** 역할. 다른 모듈이 정의한 Repository ABC를 구현한다.
+Clean Architecture에서 **Outbound Adapter** 역할. 다른 모듈이 정의한 Repository ABC를 구현하며, 동시에 파일 스토리지 자체 도메인을 소유한다. (ADR-0010)
 
 ### 6.1 디렉토리 구조
 
 ```
 modules/storage/
 ├── __init__.py
-├── orm/                                # SQLAlchemy ORM 모델 (DB 테이블 1:1)
+├── orm/                                # SQLAlchemy ORM 모델 (DB 전용, 도메인 경계 밖)
 │   ├── __init__.py
-│   ├── user_model.py
+│   ├── base.py                         # DeclarativeBase + 공통 설정
+│   ├── session_factory.py              # AsyncSession 팩토리
 │   ├── workflow_model.py
-│   ├── node_instance_model.py
 │   ├── execution_model.py
 │   ├── session_model.py                # ChatSessionModel (REQ-001)
 │   ├── oauth_connection_model.py
-│   ├── credential_model.py
 │   ├── node_definition_model.py        # 54종 노드 + embedding vector(768)
 │   ├── agent_memory_model.py           # user_id, memory_type (M-10 필드명 통일)
 │   ├── document_model.py
 │   ├── skill_model.py
-│   ├── approval_model.py
-│   ├── notification_model.py
-│   └── audit_log_model.py
-├── repositories/                       # Repository ABC 구현체
+│   ├── storage_object_model.py         # 파일 스토리지 자체 ORM
+│   └── tool_execution_model.py
+├── repositories/                       # Repository ABC 구현체 (pg_* 네이밍)
 │   ├── __init__.py
-│   ├── session_repository.py           # → auth/domain/ports/SessionRepository
-│   ├── oauth_repository.py             # → auth/domain/ports/OAuthConnectionRepository
-│   ├── workflow_repository.py          # → 자체 + execution-engine Port
-│   ├── skill_repository.py             # → 자체 (마켓플레이스)
-│   ├── node_definition_repository.py   # → nodes-graph/domain/ports/NodeDefinitionRepository
-│   ├── agent_memory_repository.py      # → ai-agent/domain/ports/AgentMemoryRepository
-│   ├── document_repository.py          # → 자체
-│   └── execution_repository.py         # → 자체
-├── mappers/                            # ORM ↔ 도메인 엔티티 변환
+│   ├── pg_session_repository.py        # → auth/domain/ports/SessionRepository
+│   ├── pg_oauth_repository.py          # → auth/domain/ports/OAuthConnectionRepository
+│   ├── pg_workflow_repository.py       # → ai-agent/domain/ports/WorkflowRepository
+│   ├── pg_skill_repository.py          # → 자체 (마켓플레이스)
+│   ├── pg_node_definition_repository.py # → nodes-graph/domain/ports/NodeDefinitionRepository
+│   ├── pg_agent_memory_repository.py   # → ai-agent/domain/ports/AgentMemoryRepository
+│   ├── pg_tool_execution_repository.py # → toolset/domain/ports/ToolExecutionRepository
+│   ├── pg_document_repository.py       # → doc-parser (향후)
+│   └── pg_execution_repository.py      # → 자체
+├── mappers/                            # ORM ↔ 도메인 엔티티 변환 (10개 매퍼)
 │   ├── __init__.py
 │   ├── session_mapper.py               # ChatSessionModel ↔ Session
+│   ├── oauth_connection_mapper.py      # OAuthConnectionModel ↔ OAuthConnection
 │   ├── workflow_mapper.py              # WorkflowORM ↔ WorkflowSchema
-│   └── ...                             # 각 엔티티별 매퍼
-├── marketplace/                        # 마켓플레이스 도메인 (REQ-008 고유)
+│   ├── node_definition_mapper.py       # NodeDefinitionModel ↔ NodeDefinition
+│   ├── agent_memory_mapper.py          # AgentMemoryModel ↔ MemoryEntry
+│   ├── tool_execution_mapper.py        # ToolExecutionModel ↔ ToolExecutionRecord
+│   ├── execution_mapper.py             # ExecutionModel ↔ Execution
+│   ├── document_mapper.py              # DocumentModel ↔ DocumentBlock
+│   ├── skill_mapper.py                 # SkillModel ↔ Skill
+│   └── storage_object_mapper.py        # StorageObjectModel ↔ StorageObject
+├── domain/                             # Storage 자체 도메인 (파일 스토리지)
+│   ├── entities/
+│   │   ├── storage_object.py           # StorageObject (파일 메타데이터)
+│   │   ├── upload_policy.py            # UploadPolicy (파일 크기/타입 제한)
+│   │   ├── retention_policy.py         # RetentionPolicy (보관 기간)
+│   │   ├── scan_result.py              # ScanResult (바이러스 검사 결과)
+│   │   └── storage_event.py            # StorageEvent (감사 이벤트)
+│   └── ports/
+│       ├── object_storage_port.py      # ObjectStoragePort (ABC) — GCS/Local 추상화
+│       ├── virus_scan_port.py          # VirusScanPort (ABC) — ClamAV 추상화
+│       └── storage_event_port.py       # StorageEventPort (ABC) — 이벤트 발행
+├── application/                        # Storage 자체 유스케이스
+│   └── use_cases/
+│       ├── upload_file.py              # UploadFileUseCase
+│       ├── download_file.py            # DownloadFileUseCase
+│       ├── delete_file.py              # DeleteFileUseCase
+│       └── cleanup_expired.py          # CleanupExpiredUseCase
+├── adapters/                           # 외부 스토리지 어댑터
+│   ├── gcs_adapter.py                  # GCS ObjectStoragePort 구현
+│   ├── local_storage_adapter.py        # 로컬 파일시스템 (개발용)
+│   └── clamav_adapter.py               # ClamAV VirusScanPort 구현
+├── marketplace/                        # 마켓플레이스 하위 도메인 (REQ-008 고유)
 │   ├── domain/
 │   │   ├── skill_lifecycle.py          # 5-state machine (draft→review→approved→published→archived)
 │   │   └── approval_workflow.py        # 승인 워크플로우
@@ -627,6 +655,27 @@ class SessionMapper:
 - ORM 모델은 `modules/storage/orm/` 밖으로 절대 노출하지 않는다
 - Repository 구현체는 항상 도메인 엔티티를 반환한다
 - 매퍼는 양방향(to_domain / to_orm) 정적 메서드를 제공한다
+
+### 6.3 타 모듈 Port ABC 구현 매핑 (ADR-0010)
+
+| Port (ABC) 정의 위치 | 구현체 (storage/repositories/) |
+|---------------------|-------------------------------|
+| `auth/domain/ports/SessionRepository` | `pg_session_repository.py` |
+| `auth/domain/ports/OAuthConnectionRepository` | `pg_oauth_repository.py` |
+| `nodes-graph/domain/ports/NodeDefinitionRepository` | `pg_node_definition_repository.py` |
+| `ai-agent/domain/ports/AgentMemoryRepository` | `pg_agent_memory_repository.py` |
+| `ai-agent/domain/ports/WorkflowRepository` | `pg_workflow_repository.py` |
+| `toolset/domain/ports/ToolExecutionRepository` | `pg_tool_execution_repository.py` |
+| `doc-parser` (향후) | `pg_document_repository.py` |
+
+### 6.4 Storage 자체 도메인
+
+Storage는 단순 Repository 구현체 모음이 아니라, 파일 스토리지 자체 도메인을 가진다:
+
+- **엔티티**: `StorageObject`, `UploadPolicy`, `RetentionPolicy`, `ScanResult`, `StorageEvent`
+- **포트**: `ObjectStoragePort` (GCS/Local 추상화), `VirusScanPort` (ClamAV), `StorageEventPort` (감사 이벤트)
+- **유스케이스**: `UploadFileUseCase`, `DownloadFileUseCase`, `DeleteFileUseCase`, `CleanupExpiredUseCase`
+- **어댑터**: `GCSAdapter` (프로덕션), `LocalStorageAdapter` (개발), `ClamAVAdapter`
 
 ---
 
