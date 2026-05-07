@@ -1,14 +1,14 @@
 """
 REQ-006 doc-parser — domain/entities/chunk.py
 
-청킹 결과 단위 엔티티
+청킹 결과 단위 엔티티 및 청킹 전략 설정 VO
 """
 from __future__ import annotations
 
 from typing import Literal, Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from common_schemas.document import SourceRef
 
@@ -53,3 +53,24 @@ class Chunk(BaseModel):
     overlap_meta: Optional[ChunkOverlapMeta] = None
     block_ids: list[UUID] = Field(default_factory=list)
     importance_score: Optional[float] = None  # REQ-004 AI_Agent 담당
+
+
+class ChunkingStrategy(BaseModel):
+    """청킹 전략 설정 VO.
+
+    config/parser_quality.yaml 에서 로드.
+    frozen=True → 생성 후 불변.
+
+    Attributes:
+        max_tokens: 청크 최대 토큰 수
+        overlap_tokens: 청크 간 오버랩 토큰 수
+        token_estimator_mode: 토큰 계산 방식
+            tiktoken      — 외부망 환경
+            char_estimate — 폐쇄망 기본값 (char × 0.7)
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    max_tokens: int
+    overlap_tokens: int
+    token_estimator_mode: Literal["tiktoken", "char_estimate"]
