@@ -19,13 +19,13 @@ async def test_create_user(db_session):
     user = UserModel(
         email="test@example.com",
         name="Test User",
-        role="user",
+        role="User",
     )
     db_session.add(user)
     await db_session.flush()
     await db_session.refresh(user)
 
-    assert user.id is not None
+    assert user.user_id is not None
     assert user.email == "test@example.com"
     assert user.is_active is True
 
@@ -37,7 +37,7 @@ async def test_create_workflow(db_session):
     await db_session.flush()
 
     workflow = WorkflowModel(
-        user_id=user.id,
+        user_id=user.user_id,
         name="Test Workflow",
         scope="private",
         nodes=[{"id": "n1", "type": "trigger_manual"}],
@@ -47,6 +47,6 @@ async def test_create_workflow(db_session):
     await db_session.flush()
     await db_session.refresh(workflow)
 
-    assert workflow.id is not None
+    assert workflow.workflow_id is not None
     assert workflow.version == 1
     assert workflow.is_draft is True

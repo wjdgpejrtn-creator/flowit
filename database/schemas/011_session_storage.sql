@@ -1,35 +1,31 @@
 -- 011_session_storage.sql
--- Chat sessions and messages (REQ-002 session store + chat history)
+-- Sessions (Spec: Session entity) + chat messages
+-- Aligned: table name "sessions" (not "chat_sessions"), PK "session_id",
+--          added device_info, removed kind/last_activity_at
 
--- ============================================================
--- chat_sessions
--- ============================================================
-CREATE TABLE chat_sessions (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id),
-    session_hash    VARCHAR(128) NOT NULL,
-    kind            VARCHAR(30) NOT NULL DEFAULT 'chat'
-                    CHECK (kind IN ('chat', 'workflow_builder', 'skill_wizard')),
-    is_revoked      BOOLEAN NOT NULL DEFAULT FALSE,
-    last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+CREATE TABLE sessions (
+    session_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES users(user_id),
+    session_hash    VARCHAR(64) NOT NULL UNIQUE,
     expires_at      TIMESTAMPTZ NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    is_revoked      BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    device_info     VARCHAR(200)
 );
 
-CREATE INDEX idx_chat_sessions_user_id ON chat_sessions(user_id);
-CREATE UNIQUE INDEX idx_chat_sessions_hash ON chat_sessions(session_hash)
-    WHERE is_revoked = FALSE;
-CREATE INDEX idx_chat_sessions_expires_at ON chat_sessions(expires_at)
+CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX idx_sessions_session_hash ON sessions(session_hash);
+CREATE INDEX idx_sessions_expires_at ON sessions(expires_at)
     WHERE is_revoked = FALSE;
 
 -- ============================================================
--- chat_messages
+-- chat_messages (Spec: ConversationMessage entity)
 -- ============================================================
 CREATE TABLE chat_messages (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id      UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    message_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id      UUID NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     role            VARCHAR(20) NOT NULL
-                    CHECK (role IN ('user', 'assistant', 'system', 'tool')),
+                    CHECK (role IN ('user', 'assistant', 'system')),
     content         TEXT NOT NULL,
     metadata        JSONB DEFAULT '{}'::JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()

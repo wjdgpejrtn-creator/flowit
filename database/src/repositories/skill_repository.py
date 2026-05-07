@@ -13,8 +13,8 @@ class SkillRepository(BaseRepository[SkillModel]):
     async def approve(self, skill_id: uuid.UUID) -> None:
         stmt = (
             update(self.model)
-            .where(self.model.id == skill_id)
-            .values(status="approved")
+            .where(self.model.skill_id == skill_id)
+            .values(lifecycle_state="approved")
         )
         await self.session.execute(stmt)
         await self.session.flush()

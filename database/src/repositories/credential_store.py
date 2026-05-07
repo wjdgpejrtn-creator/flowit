@@ -31,7 +31,7 @@ class CredentialStore(BaseRepository[CredentialModel]):
             credential_kind=credential_kind,
             encrypted_data=encrypted,
         )
-        return instance.id
+        return instance.credential_id
 
     async def retrieve(self, credential_id: uuid.UUID) -> bytes:
         instance = await self.get_or_raise(credential_id)

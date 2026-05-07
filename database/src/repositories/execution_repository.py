@@ -13,7 +13,7 @@ class ExecutionRepository(BaseRepository[ExecutionModel]):
     async def update_status(self, execution_id: uuid.UUID, status: str) -> None:
         stmt = (
             update(self.model)
-            .where(self.model.id == execution_id)
+            .where(self.model.execution_id == execution_id)
             .values(status=status)
         )
         await self.session.execute(stmt)

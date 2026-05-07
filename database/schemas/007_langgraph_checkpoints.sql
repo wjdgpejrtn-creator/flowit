@@ -1,24 +1,19 @@
 -- 007_langgraph_checkpoints.sql
 -- LangGraph PostgresSaver compatible checkpoint tables (REQ-004/007)
+-- These tables follow LangGraph's internal schema — do not modify column names
 
--- ============================================================
--- checkpoints (LangGraph state snapshots)
--- ============================================================
 CREATE TABLE checkpoints (
-    thread_id       VARCHAR(200) NOT NULL,
-    checkpoint_ns   VARCHAR(200) NOT NULL DEFAULT '',
-    checkpoint_id   VARCHAR(200) NOT NULL,
-    parent_checkpoint_id VARCHAR(200),
-    type            VARCHAR(50),
-    checkpoint      JSONB NOT NULL,
-    metadata        JSONB DEFAULT '{}'::JSONB,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    thread_id               VARCHAR(200) NOT NULL,
+    checkpoint_ns           VARCHAR(200) NOT NULL DEFAULT '',
+    checkpoint_id           VARCHAR(200) NOT NULL,
+    parent_checkpoint_id    VARCHAR(200),
+    type                    VARCHAR(50),
+    checkpoint              JSONB NOT NULL,
+    metadata                JSONB DEFAULT '{}'::JSONB,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
 );
 
--- ============================================================
--- checkpoint_writes (pending writes per checkpoint)
--- ============================================================
 CREATE TABLE checkpoint_writes (
     thread_id       VARCHAR(200) NOT NULL,
     checkpoint_ns   VARCHAR(200) NOT NULL DEFAULT '',

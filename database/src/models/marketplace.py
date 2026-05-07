@@ -7,30 +7,32 @@ from sqlalchemy import ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.models.base import Base, TimestampMixin, UUIDMixin
+from src.models.base import Base, TimestampMixin, uuid_pk
 
 
-class SkillReviewModel(UUIDMixin, TimestampMixin, Base):
+class SkillReviewModel(TimestampMixin, Base):
     __tablename__ = "skill_reviews"
 
+    review_id: Mapped[uuid.UUID] = uuid_pk("review_id")
     skill_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("skills.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey("skills.skill_id", ondelete="CASCADE")
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id")
+        UUID(as_uuid=True), ForeignKey("users.user_id")
     )
     rating: Mapped[int] = mapped_column(Integer)
     comment: Mapped[str | None] = mapped_column(Text)
 
 
-class MarketplaceRecommendationModel(UUIDMixin, Base):
+class MarketplaceRecommendationModel(Base):
     __tablename__ = "marketplace_recommendations"
 
+    recommendation_id: Mapped[uuid.UUID] = uuid_pk("recommendation_id")
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id")
+        UUID(as_uuid=True), ForeignKey("users.user_id")
     )
     skill_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("skills.id", ondelete="CASCADE")
+        UUID(as_uuid=True), ForeignKey("skills.skill_id", ondelete="CASCADE")
     )
     score: Mapped[float] = mapped_column(Numeric(5, 4))
     reason: Mapped[str | None] = mapped_column(String(200))
@@ -43,11 +45,11 @@ class SkillDependencyModel(Base):
 
     skill_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("skills.id", ondelete="CASCADE"),
+        ForeignKey("skills.skill_id", ondelete="CASCADE"),
         primary_key=True,
     )
     depends_on_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("skills.id", ondelete="CASCADE"),
+        ForeignKey("skills.skill_id", ondelete="CASCADE"),
         primary_key=True,
     )

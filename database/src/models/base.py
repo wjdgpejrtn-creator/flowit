@@ -28,8 +28,9 @@ class Base(DeclarativeBase):
         return "".join(result) + "s"
 
 
-class UUIDMixin:
-    id: Mapped[uuid.UUID] = mapped_column(
+def uuid_pk(column_name: str = "id") -> Mapped[uuid.UUID]:
+    return mapped_column(
+        column_name,
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,

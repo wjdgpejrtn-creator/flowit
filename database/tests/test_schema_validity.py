@@ -1,4 +1,4 @@
-"""Test that all 15 SQL schema files execute without errors."""
+"""Test that all 16 SQL schema files execute without errors."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ async def test_all_schemas_execute(db_engine):
 
     runner = MigrationRunner(db_engine)
     applied = await runner.run_schemas()
-    assert len(applied) == 15, f"Expected 15 schemas, got {len(applied)}"
+    assert len(applied) == 16, f"Expected 16 schemas, got {len(applied)}"
 
 
 @pytest.mark.asyncio
@@ -30,14 +30,16 @@ async def test_tables_created(db_engine):
         "credentials", "agents", "webhook_registry",
         "node_logs", "approvals", "notifications",
         "skills", "skill_stats", "skill_promotion_logs",
-        "documents", "document_blocks",
+        "documents", "document_chunks",
         "checkpoints", "checkpoint_writes",
         "oauth_connections", "security_logs",
         "node_definitions", "intent_logs", "workflow_feedback",
-        "chat_sessions", "chat_messages",
+        "sessions", "chat_messages",
         "agent_memories", "skill_reviews",
         "marketplace_recommendations", "skill_dependencies",
         "audit_logs",
+        "node_results", "tool_executions",
+        "storage_objects", "quality_gate_logs",
     }
 
     async with db_engine.begin() as conn:
