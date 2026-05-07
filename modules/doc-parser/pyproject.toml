@@ -22,7 +22,7 @@ dependencies = [
     # PPTX
     "python-pptx>=0.6",
     # HWP
-    "pyhwp>=0.1",
+    "pyhwp",
     # HWPX
     "lxml>=5.0",
     # Markdown
