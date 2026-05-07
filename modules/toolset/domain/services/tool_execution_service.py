@@ -8,8 +8,7 @@ from .runtime_validator import RuntimeValidator
 
 
 class ToolExecutionService:
-    """
-    파이프라인: validate_input → tool.run() → validate_output
+    """파이프라인: validate_input → tool.execute() → validate_output
 
     credential lifecycle(acquire/wipe/release)은 ExecuteToolUseCase에서 관리.
     """
@@ -26,12 +25,12 @@ class ToolExecutionService:
         self._validator.validate_input(params, tool.input_schema)
 
         try:
-            result = await tool.run(params, credential)
+            result = await tool.execute(params, credential=credential)
         except ToolExecutionError:
             raise
         except Exception as e:
             raise ToolExecutionError(
-                message=f"Tool '{tool.tool_id}' execution failed: {e}",
+                message=f"Tool '{tool.name}' execution failed: {e}",
                 code="TOOL_EXECUTION_ERROR",
             ) from e
 
