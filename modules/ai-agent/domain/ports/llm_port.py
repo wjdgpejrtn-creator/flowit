@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, TypeVar
+
+T = TypeVar("T")
 
 
 class LLMPort(ABC):
     @abstractmethod
-    async def generate(self, messages: list[dict[str, Any]], tools: list[dict] | None = None) -> dict[str, Any]: ...
+    async def generate(self, prompt: str, **kwargs: Any) -> str: ...
 
     @abstractmethod
-    async def embed(self, text: str) -> list[float]: ...
+    async def generate_structured(self, prompt: str, schema: type[T]) -> T: ...

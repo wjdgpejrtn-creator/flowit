@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,9 +14,9 @@ class MemoryEntry(BaseModel):
     user_id: UUID
     memory_type: Literal["preference", "correction", "workflow_pattern", "summary"]
     content: str
-    source_session_id: UUID
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    source_session_id: Optional[UUID] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def is_ephemeral(self) -> bool:
-        """일회성 잡담은 저장하지 않는다. content가 비어있으면 저장 대상 아님."""
         return not self.content.strip()

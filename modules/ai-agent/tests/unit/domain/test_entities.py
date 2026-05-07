@@ -2,73 +2,56 @@ from uuid import uuid4
 
 import pytest
 
-from ai_agent.domain.entities import CorrectionPattern, MemoryEntry
+from ai_agent.domain.entities import ConversationMessage, MemoryEntry
 
 
 class TestMemoryEntry:
-    def test_create(self):
+    def test_create_without_session(self):
         entry = MemoryEntry(
             user_id=uuid4(),
             memory_type="preference",
             content="슬랙 알림을 항상 포함",
-            source_session_id=uuid4(),
         )
-        assert entry.entry_id is not None
-        assert entry.created_at is not None
+        assert entry.source_session_id is None
+        assert entry.metadata == {}
 
-    def test_is_ephemeral_empty(self):
+    def test_create_with_session(self):
+        sid = uuid4()
         entry = MemoryEntry(
             user_id=uuid4(),
-            memory_type="summary",
-            content="   ",
-            source_session_id=uuid4(),
+            memory_type="workflow_pattern",
+            content="주간 보고서 자동화",
+            source_session_id=sid,
         )
+        assert entry.source_session_id == sid
+
+    def test_is_ephemeral_empty(self):
+        entry = MemoryEntry(user_id=uuid4(), memory_type="summary", content="   ")
         assert entry.is_ephemeral() is True
 
     def test_is_ephemeral_has_content(self):
-        entry = MemoryEntry(
-            user_id=uuid4(),
-            memory_type="preference",
-            content="구글 드라이브를 기본 저장소로",
-            source_session_id=uuid4(),
-        )
+        entry = MemoryEntry(user_id=uuid4(), memory_type="preference", content="구글 드라이브 기본")
         assert entry.is_ephemeral() is False
 
     def test_immutable(self):
-        entry = MemoryEntry(
-            user_id=uuid4(),
-            memory_type="preference",
-            content="테스트",
-            source_session_id=uuid4(),
-        )
+        entry = MemoryEntry(user_id=uuid4(), memory_type="preference", content="테스트")
         with pytest.raises(Exception):
             entry.content = "변경 시도"
 
 
-class TestCorrectionPattern:
-    def test_create_defaults(self):
-        pattern = CorrectionPattern(
-            user_id=uuid4(),
-            original="슬렉",
-            corrected="슬랙",
-        )
-        assert pattern.frequency == 1
-        assert pattern.is_recurring() is False
+class TestConversationMessage:
+    def test_create(self):
+        msg = ConversationMessage(role="user", content="안녕하세요")
+        assert msg.role == "user"
+        assert msg.timestamp is not None
+        assert msg.metadata is None
 
-    def test_is_recurring_true(self):
-        pattern = CorrectionPattern(
-            user_id=uuid4(),
-            original="슬렉",
-            corrected="슬랙",
-            frequency=3,
-        )
-        assert pattern.is_recurring() is True
+    def test_all_roles(self):
+        for role in ("user", "assistant", "system"):
+            msg = ConversationMessage(role=role, content="test")
+            assert msg.role == role
 
     def test_immutable(self):
-        pattern = CorrectionPattern(
-            user_id=uuid4(),
-            original="a",
-            corrected="b",
-        )
+        msg = ConversationMessage(role="user", content="test")
         with pytest.raises(Exception):
-            pattern.frequency = 99
+            msg.content = "변경"

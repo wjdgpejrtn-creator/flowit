@@ -1,23 +1,21 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 from uuid import uuid4
 
-from common_schemas import IntentResult, NodeConfig, NodeInstance, Position, WorkflowSchema
+from common_schemas import DraftSpec, NodeConfig, NodeInstance, Position, WorkflowSchema
 from common_schemas.exceptions import ExecutionError
 
 from ..ports.llm_port import LLMPort
 
-_SYSTEM_PROMPT = """You are a workflow drafter. Given the user intent and candidate nodes,
+_SYSTEM_PROMPT = """You are a workflow drafter. Given a DraftSpec and candidate nodes,
 output a JSON object matching WorkflowSchema:
 {
-  "workflow_id": "<uuid>",
   "name": "<string>",
   "scope": "private",
   "is_draft": true,
-  "nodes": [...],
-  "connections": [...]
+  "nodes": [{"node_type": "<type>", "parameters": {}, "x": 0, "y": 0}],
+  "connections": []
 }
 Only use nodes from the provided candidate list.
 """
@@ -27,39 +25,23 @@ class DrafterService:
     def __init__(self, llm: LLMPort) -> None:
         self._llm = llm
 
-    async def draft_workflow(
-        self,
-        intent: IntentResult,
-        node_candidates: list[NodeConfig],
-        messages: list[dict[str, Any]],
-    ) -> WorkflowSchema:
+    async def draft(self, spec: DraftSpec, candidates: list[NodeConfig]) -> WorkflowSchema:
         catalog = [
             {"node_type": n.node_type, "name": n.name, "description": n.description}
-            for n in node_candidates
+            for n in candidates
         ]
-        prompt_messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "intent": intent.intent,
-                        "entities": intent.analyzed_entities,
-                        "available_nodes": catalog,
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-            *messages,
-        ]
-        response = await self._llm.generate(prompt_messages)
-        return self._parse(response, node_candidates)
+        prompt = (
+            _SYSTEM_PROMPT
+            + f"\nDraftSpec: {json.dumps({'intent': spec.natural_language_intent, 'entities': spec.discovered_entities}, ensure_ascii=False)}"
+            + f"\nAvailable nodes: {json.dumps(catalog, ensure_ascii=False)}"
+        )
+        response = await self._llm.generate(prompt)
+        return self._parse(response, candidates)
 
-    def _parse(self, response: dict[str, Any], candidates: list[NodeConfig]) -> WorkflowSchema:
+    def _parse(self, response: str, candidates: list[NodeConfig]) -> WorkflowSchema:
         try:
-            data = json.loads(response["content"])
+            data = json.loads(response)
             node_map = {n.node_type: n for n in candidates}
-
             nodes = []
             for raw in data.get("nodes", []):
                 nc = node_map.get(raw.get("node_type"))
@@ -76,7 +58,6 @@ class DrafterService:
                         position=Position(x=raw.get("x", 0.0), y=raw.get("y", 0.0)),
                     )
                 )
-
             return WorkflowSchema(
                 workflow_id=uuid4(),
                 name=data.get("name", "Untitled Workflow"),

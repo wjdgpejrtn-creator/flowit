@@ -1,4 +1,5 @@
 from .compose_workflow import ComposeWorkflowUseCase
-from .onboarding import OnboardingUseCase
+from .continue_conversation import ContinueConversationUseCase
+from .save_memory import SaveMemoryUseCase
 
-__all__ = ["ComposeWorkflowUseCase", "OnboardingUseCase"]
+__all__ = ["ComposeWorkflowUseCase", "ContinueConversationUseCase", "SaveMemoryUseCase"]

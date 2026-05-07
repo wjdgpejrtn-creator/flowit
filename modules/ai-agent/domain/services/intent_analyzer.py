@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from common_schemas import IntentResult
@@ -14,6 +15,8 @@ Classify the user's latest message into one of four intents:
 - refine: user wants to modify an existing workflow
 - propose: user is ready to accept the current proposal
 
+Context will be provided as additional JSON. Use it to inform classification.
+
 Respond ONLY with JSON: {"intent": "<intent>", "confidence": <0.0-1.0>, "analyzed_entities": {}}
 """
 
@@ -22,19 +25,18 @@ class IntentAnalyzerService:
     def __init__(self, llm: LLMPort) -> None:
         self._llm = llm
 
-    async def analyze_intent(self, messages: list[dict[str, Any]]) -> IntentResult:
-        prompt_messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            *messages,
-        ]
-        response = await self._llm.generate(prompt_messages)
+    async def analyze(self, messages: list[dict[str, Any]], context: dict[str, Any]) -> IntentResult:
+        system_with_context = _SYSTEM_PROMPT
+        if context:
+            system_with_context += f"\nContext: {json.dumps(context, ensure_ascii=False)}"
+
+        prompt = system_with_context + "\n\nMessages:\n" + json.dumps(messages, ensure_ascii=False)
+        response = await self._llm.generate(prompt)
         return self._parse(response)
 
-    def _parse(self, response: dict[str, Any]) -> IntentResult:
+    def _parse(self, response: str) -> IntentResult:
         try:
-            content = response["content"]
-            import json
-            data = json.loads(content)
+            data = json.loads(response)
             return IntentResult(
                 intent=data["intent"],
                 confidence=float(data["confidence"]),

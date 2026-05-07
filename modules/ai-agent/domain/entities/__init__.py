@@ -1,4 +1,4 @@
-from .correction_pattern import CorrectionPattern
+from .conversation_message import ConversationMessage
 from .memory_entry import MemoryEntry
 
-__all__ = ["MemoryEntry", "CorrectionPattern"]
+__all__ = ["MemoryEntry", "ConversationMessage"]
