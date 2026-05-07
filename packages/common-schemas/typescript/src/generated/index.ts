@@ -288,4 +288,11 @@ export interface ValidationErrorResponse {
   errors: Array<ValidationErrorItem>;
 }
 
+export interface NodeExecutionState {
+  node_instance_id: string;
+  status: "pending" | "running" | "succeeded" | "failed" | "retrying" | "cancelled";
+  attempt: number;
+  last_error?: string | null;
+}
+
 export type AnySSEFrame = AgentNodeFrame | DraftSpecDeltaFrame | ErrorFrame | RationaleDeltaFrame | ResultFrame | SessionFrame | SlotFillQuestionFrame;
