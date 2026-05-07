@@ -19,10 +19,10 @@ class GraphValidator:
     """워크플로우 그래프 무결성 검증 서비스.
 
     검증 항목:
-    1. 사이클 감지 (Kahn's algorithm)
-    2. 고립 노드 검출
+    1. 중복 instance_id
+    2. 사이클 감지 (Kahn's algorithm)
     3. 노드 타입 불일치 (from_handle ↔ to_handle)
-    4. 중복 instance_id
+    4. 고립 노드 검출
     5. 필수 연결 누락 (required_connections)
     """
 

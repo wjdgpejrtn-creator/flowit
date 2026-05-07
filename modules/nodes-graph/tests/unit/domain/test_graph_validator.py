@@ -111,3 +111,13 @@ async def test_single_node_no_isolated_error():
     n1 = _node()
     result = await GraphValidator(_InMemoryRepo()).validate(_wf([n1], []))
     assert not any(e.code == ErrorCode.E_ISOLATED_NODE for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_type_compatibility_returns_no_errors():
+    # _check_type_compatibility는 현재 stub — 항상 빈 리스트 반환
+    n1, n2 = _node(), _node()
+    edge = _edge(n1.instance_id, n2.instance_id)
+    result = await GraphValidator(_InMemoryRepo()).validate(_wf([n1, n2], [edge]))
+    assert not any(e.code for e in result.errors if e.validator == "TypeCompatibility")
+    assert result.validation_status == "passed"
