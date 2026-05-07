@@ -119,6 +119,11 @@ Critical/Major 없음.
 | `domain/ports/session_repository.py` | `find_by_hash` 반환 타입 `Session` → `Session \| None` | 스펙 Optional[Session] 계약 정합 (2026-05-07) |
 | `issue_token.py`, `refresh_token.py` | `session is None` 체크 추가 | find_by_hash Optional 계약 반영 (2026-05-07) |
 | `tests/conftest.py` | `find_by_hash` → None 반환으로 포트 계약 준수 | Optional[Session] 계약 정합 (2026-05-07) |
+| `domain/ports/oauth_client_port.py` | `OAuthClientPort` ABC 신설 (`exchange_code`, `refresh_access_token`, `get_user_info`) | 조장 리뷰 반영: application이 Port에만 의존하도록 아키텍처 정합 (2026-05-08, PR #19) |
+| `application/use_cases/authenticate_use_case.py` | `google_oauth: object` → `google_oauth: OAuthClientPort` | 타입힌트 명시 — IDE/타입체커 지원 확보 (2026-05-08, PR #19) |
+| `adapters/oauth/google_oauth_client.py` | `GoogleOAuthClient(OAuthClientPort)` 명시 구현 | Port-Adapter 계약 명시화 (2026-05-08, PR #19) |
+| `adapters/google_oauth.py` | `GoogleOAuthAdapter` 삭제 | 중복 어댑터 제거 — `GoogleOAuthClient`가 정식 구현체 (2026-05-08, PR #19) |
+| `adapters/cipher/base_cipher.py` | `BaseCipher` 삭제, `AESGCMCipher`·`FernetCipher` → `CipherPort` 직접 상속 | 빈 중간 클래스 제거, spec 외 클래스 정리 (2026-05-08, PR #19) |
 
 ---
 
