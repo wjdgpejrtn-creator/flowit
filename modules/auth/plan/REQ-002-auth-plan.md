@@ -38,7 +38,8 @@
 | `BaseCipher` | `adapters/cipher/base_cipher.py` | ✅ 완료 |
 | `AESGCMCipher` | `adapters/cipher/aesgcm_cipher.py` | ✅ 완료 |
 | `FernetCipher` | `adapters/cipher/fernet_cipher.py` | ✅ 완료 |
-| `GoogleOAuthAdapter` | `adapters/google_oauth.py` | ✅ 완료 |
+| `GoogleOAuthAdapter` | `adapters/google_oauth.py` | ✅ 완료 (구 어댑터, 하위 호환 유지) |
+| `GoogleOAuthClient` | `adapters/oauth/google_oauth_client.py` | ✅ 완료 (스펙 기준 신규 추가) |
 | `JWTAdapter` | `adapters/jwt_adapter.py` | ✅ 완료 |
 | `AuthMiddleware` | `adapters/middleware.py` | ✅ 완료 |
 
@@ -64,7 +65,7 @@
 
 | 테스트 파일 | 테스트 대상 | 상태 |
 |-------------|-------------|------|
-| `test_session.py` | `Session.is_valid()`, 불변성 | ✅ 완료 |
+| `test_session.py` | `Session.is_expired()`, `revoke()`, `device_info` (스펙 기준 재정렬) | ✅ 완료 |
 | `test_permission_resolver.py` | `PermissionResolver.resolve()` Admin/User 분기 | ✅ 완료 |
 | `test_credential_injection.py` | `CredentialInjectionService.inject()` 복호화/폐기 처리 | ✅ 완료 |
 
@@ -104,7 +105,7 @@
 
 | 항목 | 이유 | 해결 조건 |
 |------|------|-----------|
-| `CredentialInjectionService`에 `node_id` 파라미터 추가 | REQ-003 `NodeDefinitionRepository` ABC 미완성 | REQ-003 구현 완료 후 |
+| ~~`CredentialInjectionService`에 `node_id` 파라미터 추가~~ | ~~REQ-003 `NodeDefinitionRepository` ABC 미완성~~ | ✅ 완료 (2026-05-07, 스펙 기준 재정렬 PR #19) |
 | integration 테스트 작성 | 실제 암복호화/JWT 검증은 환경변수 필요 | CI 환경 구성 후 |
 
 ---
@@ -129,7 +130,7 @@
 - [x] adapter 계층 전체 구현
 - [x] unit/domain 테스트 전체 작성
 - [x] unit/application 테스트 전체 작성
-- [x] pytest 전체 통과 (24/24 PASS)
+- [x] pytest 전체 통과 (26/26 PASS — 스펙 기준 재정렬 후)
 - [ ] Ruff lint 통과
-- [x] `docs/reports/auth_report.md` 작성
-- [ ] PR → `development` 브랜치
+- [x] `modules/auth/report/auth_report.md` 작성
+- [x] PR #19 → `development` 브랜치 (OPEN, 리뷰 대기)
