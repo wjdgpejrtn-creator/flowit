@@ -20,7 +20,7 @@ class SessionModel(Base):
     session_hash: Mapped[str] = mapped_column(String(64), unique=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     is_revoked: Mapped[bool] = mapped_column(server_default="false")
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     device_info: Mapped[str | None] = mapped_column(String(200))
 
     messages: Mapped[list[ChatMessageModel]] = relationship(
@@ -40,6 +40,6 @@ class ChatMessageModel(Base):
     metadata_json: Mapped[dict | None] = mapped_column(
         "metadata", JSONB, server_default="'{}'::jsonb"
     )
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     session: Mapped[SessionModel] = relationship(back_populates="messages")

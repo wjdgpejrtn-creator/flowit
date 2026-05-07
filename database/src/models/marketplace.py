@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,7 +37,7 @@ class MarketplaceRecommendationModel(Base):
     score: Mapped[float] = mapped_column(Numeric(5, 4))
     reason: Mapped[str | None] = mapped_column(String(200))
     is_dismissed: Mapped[bool] = mapped_column(server_default="false")
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SkillDependencyModel(Base):

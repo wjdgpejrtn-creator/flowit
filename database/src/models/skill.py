@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ForeignKey, Integer, Numeric, String, Text, func, text
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,9 +43,9 @@ class SkillStatsModel(Base):
     use_count: Mapped[int] = mapped_column(Integer, server_default="0")
     avg_rating: Mapped[float | None] = mapped_column(Numeric(3, 2), server_default="0")
     review_count: Mapped[int] = mapped_column(Integer, server_default="0")
-    last_used_at: Mapped[datetime | None] = mapped_column()
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -62,4 +62,4 @@ class SkillPromotionLogModel(Base):
         UUID(as_uuid=True), ForeignKey("users.user_id")
     )
     reason: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, LargeBinary, String, func
+from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, func
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,5 +25,5 @@ class OAuthConnectionModel(Base):
     refresh_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     scopes: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
     is_active: Mapped[bool] = mapped_column(server_default="true")
-    connected_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    last_refreshed_at: Mapped[datetime | None] = mapped_column()
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

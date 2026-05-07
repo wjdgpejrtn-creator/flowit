@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Integer, Numeric, String, Text, func, text
+from sqlalchemy import DateTime, Integer, Numeric, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,7 +33,7 @@ class NodeLogModel(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     worker_id: Mapped[str | None] = mapped_column(String(100))
     started_at: Mapped[datetime] = mapped_column(
-        primary_key=True, server_default=func.now()
+        DateTime(timezone=True), primary_key=True, server_default=func.now()
     )
     retry_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
     tool_name: Mapped[str | None] = mapped_column(String(100))

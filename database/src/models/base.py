@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, text
+from sqlalchemy import DateTime, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -40,9 +40,8 @@ def uuid_pk(column_name: str = "id") -> Mapped[uuid.UUID]:
 
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(),
+        DateTime(timezone=True), server_default=func.now(),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(),
-        onupdate=func.now(),
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
     )
