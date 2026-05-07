@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Awaitable, Callable
+import uuid
+from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -8,8 +9,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..domain.services.permission_resolver import PermissionResolver
 from .jwt_adapter import JWTAdapter
-
-import uuid
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

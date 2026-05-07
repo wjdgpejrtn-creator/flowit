@@ -25,7 +25,7 @@ class RefreshTokenUseCase:
         session_hash: str = payload["session_hash"]
         session = await self._session_repo.find_by_hash(session_hash)
 
-        if not session.is_valid():
+        if session is None or session.is_revoked or session.is_expired():
             raise AuthorizationError("Session is expired or revoked", code="E-AUTH-006")
 
         expiry = int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))

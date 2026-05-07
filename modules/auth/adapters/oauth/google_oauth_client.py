@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
 import httpx
+
+from ...domain.ports.oauth_client_port import OAuthClientPort
 
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -21,7 +22,7 @@ _DEFAULT_SCOPES = [
 ]
 
 
-class GoogleOAuthAdapter:
+class GoogleOAuthClient(OAuthClientPort):
     def __init__(
         self,
         client_id: str | None = None,
@@ -44,7 +45,8 @@ class GoogleOAuthAdapter:
         }
         return f"{_AUTH_URL}?{urlencode(params)}"
 
-    async def exchange_code(self, code: str) -> dict[str, Any]:
+    async def exchange_code(self, code: str, redirect_uri: str | None = None) -> dict[str, Any]:
+        uri = redirect_uri or self._redirect_uri
         async with httpx.AsyncClient() as client:
             token_resp = await client.post(
                 _TOKEN_URL,
@@ -52,30 +54,20 @@ class GoogleOAuthAdapter:
                     "code": code,
                     "client_id": self._client_id,
                     "client_secret": self._client_secret,
-                    "redirect_uri": self._redirect_uri,
+                    "redirect_uri": uri,
                     "grant_type": "authorization_code",
                 },
             )
             token_resp.raise_for_status()
             tokens: dict = token_resp.json()
 
-            userinfo_resp = await client.get(
-                _USERINFO_URL,
-                headers={"Authorization": f"Bearer {tokens['access_token']}"},
-            )
-            userinfo_resp.raise_for_status()
-            userinfo: dict = userinfo_resp.json()
-
-        expires_in = tokens.get("expires_in", 3600)
-        token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-
+        userinfo = await self.get_user_info(tokens["access_token"])
         return {
             "sub": userinfo["sub"],
             "email": userinfo.get("email", ""),
             "access_token": tokens["access_token"],
             "refresh_token": tokens.get("refresh_token", ""),
             "scopes": tokens.get("scope", "").split(),
-            "token_expires_at": token_expires_at,
         }
 
     async def refresh_access_token(self, refresh_token: str) -> dict[str, Any]:
@@ -88,6 +80,15 @@ class GoogleOAuthAdapter:
                     "client_secret": self._client_secret,
                     "grant_type": "refresh_token",
                 },
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_user_info(self, access_token: str) -> dict[str, Any]:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                _USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
             )
             resp.raise_for_status()
             return resp.json()
