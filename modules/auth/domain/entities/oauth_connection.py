@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -13,11 +13,11 @@ class OAuthConnection(BaseModel):
     service: Literal["google", "slack"]
     credential_id: UUID
     access_token_encrypted: bytes
-    refresh_token_encrypted: Optional[bytes] = None
+    refresh_token_encrypted: bytes | None = None
     scopes: list[str]
     is_active: bool = True
     connected_at: datetime
-    last_refreshed_at: Optional[datetime] = None
+    last_refreshed_at: datetime | None = None
 
     def revoke(self) -> None:
         self.is_active = False

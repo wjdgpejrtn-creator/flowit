@@ -3,9 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
-
-from common_schemas.exceptions import AuthorizationError
+from datetime import UTC, datetime, timedelta
 
 from ...domain.ports.cipher_port import CipherPort
 from ...domain.ports.oauth_repository import OAuthConnectionRepository
@@ -39,7 +37,6 @@ class AuthenticateUseCase:
         enc_access = self._cipher.encrypt(user_info["access_token"].encode())
         enc_refresh = self._cipher.encrypt(user_info.get("refresh_token", "").encode())
         scopes: list[str] = user_info.get("scopes", [])
-        token_expires_at: datetime | None = user_info.get("token_expires_at")
 
         # Upsert OAuth connection (revoke old, create new)
         existing = await self._oauth_repo.get_active_for_user(user_id, "google")
@@ -62,8 +59,8 @@ class AuthenticateUseCase:
         # Create session
         session_hash = hashlib.sha256(os.urandom(32)).hexdigest()
         expiry = int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=expiry)
-        session = await self._session_repo.create(user_id, session_hash, expires_at=expires_at)
+        expires_at = datetime.now(UTC) + timedelta(seconds=expiry)
+        await self._session_repo.create(user_id, session_hash, expires_at=expires_at)
 
         # Issue JWT pair
         access_token: str = self._jwt_adapter.encode({

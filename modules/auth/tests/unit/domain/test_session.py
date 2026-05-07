@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from auth.domain.entities.session import Session
@@ -9,8 +9,8 @@ def _make_session(**kwargs) -> Session:
         session_id=uuid4(),
         user_id=uuid4(),
         session_hash="abc123",
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        created_at=datetime.now(UTC),
     )
     return Session(**{**defaults, **kwargs})
 
@@ -21,7 +21,7 @@ def test_valid_session_is_not_expired():
 
 
 def test_expired_session_is_expired():
-    session = _make_session(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+    session = _make_session(expires_at=datetime.now(UTC) - timedelta(seconds=1))
     assert session.is_expired() is True
 
 

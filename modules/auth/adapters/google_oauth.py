@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -67,7 +67,7 @@ class GoogleOAuthAdapter:
             userinfo: dict = userinfo_resp.json()
 
         expires_in = tokens.get("expires_in", 3600)
-        token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
         return {
             "sub": userinfo["sub"],

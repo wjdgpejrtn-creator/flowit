@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-
 from auth.domain.entities.oauth_connection import OAuthConnection
 from auth.domain.entities.session import Session
 from auth.domain.ports.cipher_port import CipherPort
@@ -22,7 +21,7 @@ class InMemorySessionRepository(SessionRepository):
             user_id=user_id,
             session_hash=session_hash,
             expires_at=kwargs["expires_at"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         self._store[session_hash] = session
         return session
@@ -62,7 +61,7 @@ class InMemoryOAuthRepository(OAuthConnectionRepository):
             access_token_encrypted=tokens["access_token_encrypted"],
             refresh_token_encrypted=tokens.get("refresh_token_encrypted"),
             scopes=tokens.get("scopes", []),
-            connected_at=datetime.now(timezone.utc),
+            connected_at=datetime.now(UTC),
         )
         self._store[str(conn.oauth_id)] = conn
         return conn
@@ -126,6 +125,6 @@ def valid_session(user_id):
         session_id=uuid4(),
         user_id=user_id,
         session_hash="test_hash_abc",
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-        created_at=datetime.now(timezone.utc),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        created_at=datetime.now(UTC),
     )

@@ -1,7 +1,7 @@
-import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
 from auth.application.use_cases.refresh_token import RefreshTokenUseCase
 from common_schemas.exceptions import AuthorizationError
 
@@ -30,7 +30,7 @@ class BadJWT:
 
 @pytest.mark.asyncio
 async def test_refresh_issues_new_pair(session_repo):
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
     user_id = uuid4()
     await session_repo.create(user_id, "sess_hash_1", expires_at=expires_at)
 
@@ -47,7 +47,7 @@ async def test_refresh_issues_new_pair(session_repo):
 
 @pytest.mark.asyncio
 async def test_refresh_with_access_token_raises(session_repo):
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
     user_id = uuid4()
     await session_repo.create(user_id, "sess_hash_2", expires_at=expires_at)
 
@@ -70,7 +70,7 @@ async def test_refresh_with_invalid_token_raises(session_repo):
 
 @pytest.mark.asyncio
 async def test_refresh_revoked_session_raises(session_repo):
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
     user_id = uuid4()
     session = await session_repo.create(user_id, "sess_hash_3", expires_at=expires_at)
     await session_repo.revoke(session.session_id)

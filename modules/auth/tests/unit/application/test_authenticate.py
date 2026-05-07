@@ -1,7 +1,6 @@
-import pytest
 import uuid
-from datetime import datetime, timezone
 
+import pytest
 from auth.application.use_cases.authenticate import AuthenticateUseCase
 
 

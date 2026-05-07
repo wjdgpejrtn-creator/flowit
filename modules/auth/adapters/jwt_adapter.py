@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt as pyjwt
@@ -20,8 +20,8 @@ class JWTAdapter:
         expiry = ttl_seconds or int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))
         data = {
             **payload,
-            "iat": datetime.now(timezone.utc),
-            "exp": datetime.now(timezone.utc) + timedelta(seconds=expiry),
+            "iat": datetime.now(UTC),
+            "exp": datetime.now(UTC) + timedelta(seconds=expiry),
         }
         return pyjwt.encode(data, self._secret, algorithm=self._algorithm)
 

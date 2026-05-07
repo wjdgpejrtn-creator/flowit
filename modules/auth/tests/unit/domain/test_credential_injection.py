@@ -1,6 +1,6 @@
-import pytest
 from uuid import uuid4
 
+import pytest
 from auth.domain.services.credential_injection import CredentialInjectionService
 from common_schemas.enums import RiskLevel
 from common_schemas.exceptions import AuthorizationError, NotFoundError
