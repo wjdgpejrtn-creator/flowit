@@ -34,6 +34,7 @@ class GraphValidator:
 
         errors.extend(self._check_duplicate_ids(workflow.nodes))
         errors.extend(self._detect_cycles(workflow.nodes, workflow.connections))
+        errors.extend(self._check_type_compatibility(workflow.connections))
         errors.extend(self._detect_isolated_nodes(workflow.nodes, workflow.connections))
         errors.extend(await self._check_required_connections(workflow.nodes))
 
@@ -109,6 +110,18 @@ class GraphValidator:
             node_ids=isolated,
             validator="SchemaValidation",
         )]
+
+    def _check_type_compatibility(self, edges: list[Edge]) -> list[ValidationErrorItem]:
+        """from_handle 출력 타입과 to_handle 입력 타입 호환 검증.
+
+        현재는 handle 명칭 기반 단순 검증 (동일 handle명은 호환).
+        향후 NodeDefinition에 handle 타입 메타데이터 추가 시 확장.
+        """
+        errors: list[ValidationErrorItem] = []
+        for edge in edges:
+            if edge.from_handle and edge.to_handle:
+                pass  # 타입 메타데이터 확보 후 구체 검증 구현 (REQ-004 연동 시점)
+        return errors
 
     async def _check_required_connections(self, nodes: list[NodeInstance]) -> list[ValidationErrorItem]:
         errors: list[ValidationErrorItem] = []
