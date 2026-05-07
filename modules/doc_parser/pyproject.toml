@@ -37,8 +37,11 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["doc_parser*"]
+where = [".."]
+include = ["doc-parser*", "domain*", "adapters*", "application*"]
+
+[tool.setuptools.package-dir]
+"doc_parser" = "."
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
