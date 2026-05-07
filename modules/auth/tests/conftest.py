@@ -26,12 +26,8 @@ class InMemorySessionRepository(SessionRepository):
         self._store[session_hash] = session
         return session
 
-    async def find_by_hash(self, session_hash: str) -> Session:
-        session = self._store.get(session_hash)
-        if session is None:
-            from common_schemas.exceptions import NotFoundError
-            raise NotFoundError(f"Session not found: {session_hash}")
-        return session
+    async def find_by_hash(self, session_hash: str) -> Session | None:
+        return self._store.get(session_hash)
 
     async def revoke(self, session_id) -> None:
         for key, s in list(self._store.items()):
