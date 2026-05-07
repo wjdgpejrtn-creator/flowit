@@ -47,11 +47,11 @@ class ExecuteToolUseCase:
     1. ToolRegistry에서 도구 조회
     2. RiskAssessmentService.assess() — 권한/위험도 검사
     3. RuntimeValidator.validate_input() — 입력 스키마 검증
-    4. SecureConnectorPort.acquire_credential() — 자격증명 획득 (credential_id 있을 때만)
-    5. BaseTool.run() — 도구 실행
+    4. SecureConnectorPort.connect() — 자격증명 주입 HTTP 요청 (credential_id 있을 때만)
+    5. BaseTool.execute() — 도구 실행
     6. RuntimeValidator.validate_output() — 출력 스키마 검증
     7. ToolExecutionRepository.save() — 실행 이력 저장
-    8. [finally] credential.wipe() + release_credential() — 자격증명 즉시 폐기
+    8. [finally] credential.wipe() — 자격증명 즉시 폐기
 
     DI 조립 위치: services/api-server/app/dependencies/tools.py
     호출 주체: services/execution-engine (REQ-007)
@@ -106,13 +106,18 @@ class ExecuteToolUseCase:
         # 3. 입력 스키마 검증
         self._validator.validate_input(input_data, tool.input_schema)
 
-        # 4. Credential 획득
+        # 4. Credential 획득 (credential_id 있을 때만)
+        # SecureConnectorPort.connect()는 tool.execute() 내부에서 직접 호출됨.
+        # use case는 PlaintextCredential을 CredentialInjectionService(auth)로 조회해 tool에 전달.
         credential: PlaintextCredential | None = None
         if credential_id is not None:
-            credential = await self._connector.acquire_credential(
-                credential_id=credential_id,
-                service=tool.name,
+            credential = await self._connector.connect(
+                endpoint="",  # credential 조회 전용 호출 시 빈 endpoint
+                credentials=PlaintextCredential(value=credential_id, credential_kind="lookup"),
             )
+            # ⚠️ Phase 2 구현 시 확정 필요:
+            # auth.CredentialInjectionService.inject(credential_id, node_id) → PlaintextCredential
+            # 로 대체 예정 (SecureConnectorPort는 실제 HTTP 요청용)
 
         start_ms = time.monotonic()
         status = "failed"
@@ -120,8 +125,8 @@ class ExecuteToolUseCase:
         result: dict = {}
 
         try:
-            # 5. 도구 실행
-            result = await tool.execute(input_data, credential=credential)
+            # 5. 도구 실행 (connector를 kwargs로 전달 — tool이 필요 시 connect() 호출)
+            result = await tool.execute(input_data, credential=credential, connector=self._connector)
 
             # 6. 출력 스키마 검증
             self._validator.validate_output(result, tool.output_schema)
@@ -159,8 +164,6 @@ class ExecuteToolUseCase:
             # 8. Credential 즉시 폐기 (성공/실패 무관)
             if credential is not None:
                 credential.wipe()
-            if credential_id is not None:
-                await self._connector.release_credential(credential_id)
 ```
 
 ### 실행 흐름 다이어그램
@@ -168,28 +171,28 @@ class ExecuteToolUseCase:
 ```
 execute(tool_name, input_data, context, credential_id)
 │
-├─ registry.get(tool_name)                    → NotFoundError 가능
-├─ risk_service.assess(tool, context)         → AuthorizationError 가능
-├─ validator.validate_input(input_data, schema) → ValidationError 가능
-├─ connector.acquire_credential(...)          → CredentialError 가능 (credential_id != None)
+├─ registry.get(tool_name)                              → NotFoundError 가능
+├─ risk_service.assess(tool, context)                   → AuthorizationError 가능
+├─ validator.validate_input(input_data, schema)         → ValidationError 가능
+├─ [credential_id != None] credential 조회              → CredentialError 가능
 │
-├─ tool.execute(input_data, credential=...)   → ToolExecutionError 가능 (래핑)
-├─ validator.validate_output(result, schema)  → ValidationError 가능
+├─ tool.execute(input_data, credential=..., connector=..) → ToolExecutionError 가능 (래핑)
+│   └─ tool 내부에서 connector.connect(endpoint, credential) 호출 → ConnectorResponse
+├─ validator.validate_output(result, schema)            → ValidationError 가능
 │
 └─ [finally]
-    ├─ repo.save(record)                      ← best-effort (예외 무시)
-    ├─ credential.wipe()                      ← 항상 실행
-    └─ connector.release_credential(...)      ← 항상 실행
+    ├─ repo.save(record)                                ← best-effort (예외 무시)
+    └─ credential.wipe()                                ← 항상 실행
 ```
 
 ### 엣지 케이스
 
 | 케이스 | 처리 방식 |
 |--------|----------|
-| `credential_id=None` (webhook, http_request, llm) | acquire/release 건너뜀, credential=None으로 run() 호출 |
-| `tool.run()`에서 비도메인 예외 | `ToolExecutionError`로 래핑 후 재발생 |
-| `release_credential()` 실패 | best-effort — SecureConnector에서 로그만 남김 |
-| `validate_output()` 실패 | ValidationError 발생. credential은 이미 finally에서 wipe |
+| `credential_id=None` (webhook, delay 등) | credential 조회 건너뜀, `credential=None`으로 `execute()` 호출 |
+| `tool.execute()`에서 비도메인 예외 | `ToolExecutionError`로 래핑 후 재발생 |
+| `connector.connect()` 실패 | `ToolExecutionError` 발생 — tool 내부에서 처리 |
+| `validate_output()` 실패 | `ValidationError` 발생. credential은 이미 finally에서 wipe |
 | `repo.save()` 실패 | best-effort — 이력 저장 실패해도 결과는 그대로 반환 |
 
 ---
