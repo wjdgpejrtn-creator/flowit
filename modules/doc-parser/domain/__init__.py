@@ -22,9 +22,9 @@ from doc_parser.domain.ports.config_port import ConfigLoaderPort
 from doc_parser.domain.ports.parser_port import ParserPort
 from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
 from doc_parser.domain.services.chunking_service import ChunkingService
-from doc_parser.domain.services.normalizer import NormalizationService
+from doc_parser.domain.services.normalization import NormalizationService
 from doc_parser.domain.services.parser_factory import ParserFactory
-from doc_parser.domain.services.pii_masking_service import PIIMaskingService
+from doc_parser.domain.services.pii_masking import PIIMaskingService
 from doc_parser.domain.services.quality_gate import QualityGate
 
 __all__ = [
@@ -46,9 +46,9 @@ __all__ = [
     "DocumentRepositoryPort",
     # ports/config_port.py
     "ConfigLoaderPort",
-    # services/normalizer.py
+    # services/normalization.py
     "NormalizationService",
-    # services/pii_masking_service.py
+    # services/pii_masking.py
     "PIIMaskingService",
     # services/chunking_service.py
     "ChunkingService",

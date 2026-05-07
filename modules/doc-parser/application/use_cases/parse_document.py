@@ -18,8 +18,8 @@ from __future__ import annotations
 from common_schemas.document import DocumentBlock, FileMeta
 
 from doc_parser.domain.ports.parser_port import ParserPort
-from doc_parser.domain.services.normalizer import NormalizationService
-from doc_parser.domain.services.pii_masking_service import PIIMaskingService
+from doc_parser.domain.services.normalization import NormalizationService
+from doc_parser.domain.services.pii_masking import PIIMaskingService
 from doc_parser.domain.services.quality_gate import QualityGate
 from doc_parser.domain.entities.quality import QualityGateResult
 
