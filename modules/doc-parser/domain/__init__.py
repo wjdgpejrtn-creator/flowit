@@ -19,6 +19,7 @@ from doc_parser.domain.services.chunking_service import ChunkingService
 from doc_parser.domain.services.pii_masking_service import PIIMaskingService
 from doc_parser.domain.services.quality_gate import QualityGate
 from doc_parser.domain.value_objects.quality import QualityGateResult, QualityMetrics
+from doc_parser.domain.services.normalizer import Normalizer
 
 __all__ = [
     # entities/warning.py
