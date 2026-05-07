@@ -2,12 +2,12 @@
 REQ-006 doc-parser — adapters/parsers/hwpx_parser.py
 
 HwpxParser
-ZIP + XML 기반 HWPX 2.0 파서
+ZIP + lxml 기반 HWPX 2.0 파서
 
 처리 흐름:
     .hwpx 파일 = ZIP 압축
-      → word/document.xml 추출
-      → XML 파싱 → 단락/표 블록 변환
+      → Contents/section0.xml 추출
+      → lxml 파싱 → 단락/표 블록 변환
 
 제한 사항 (MVP):
     - 복잡 표·서식 완전 복원 불가
@@ -19,7 +19,8 @@ from __future__ import annotations
 import re
 import zipfile
 from uuid import uuid4
-from xml.etree import ElementTree as ET
+
+from lxml import etree
 
 from common_schemas.document import (
     ContentBlock,
@@ -31,22 +32,17 @@ from common_schemas.document import (
 
 from doc_parser.domain.ports.parser_port import ParserPort
 
-# HWPX XML 네임스페이스
-_NS = {
-    "hp": "http://www.hancom.co.kr/hwpml/2012/paragraph",
-    "hc": "http://www.hancom.co.kr/hwpml/2012/core",
-    "ht": "http://www.hancom.co.kr/hwpml/2012/table",
-}
-
-# HWPX 문서 본문 경로
-_CONTENT_PATH = "Contents/section0.xml"
-_CONTENT_PATH_ALT = "word/document.xml"
+# HWPX 문서 본문 경로 후보
+_CONTENT_CANDIDATES = [
+    "Contents/section0.xml",
+    "word/document.xml",
+]
 
 
 class HwpxParser(ParserPort):
     """HWPX 2.0 파서 구현체.
 
-    ZIP + XML 구조로 직접 파싱.
+    ZIP + lxml 구조로 직접 파싱.
 
     지원 MIME 타입:
         application/x-hwpx
@@ -63,13 +59,16 @@ class HwpxParser(ParserPort):
     MIME_TYPE = "application/x-hwpx"
 
     def parse(self, file_path: str, file_meta: FileMeta) -> DocumentBlock:
-        xml_text = self._extract_xml(file_path)
+        xml_bytes = self._extract_xml(file_path)
         try:
-            blocks = self._parse_xml(xml_text)
+            blocks = self._parse_xml(xml_bytes)
             return DocumentBlock(
                 document_id=uuid4(),
                 file_meta=file_meta,
-                parser=ParserMeta(parser_name="HwpxParser", parser_version="1.0.0"),
+                parser=ParserMeta(
+                    parser_name="HwpxParser",
+                    parser_version="1.0.0",
+                ),
                 blocks=blocks,
             )
         except Exception as e:
@@ -82,10 +81,8 @@ class HwpxParser(ParserPort):
     # Private
     # ──────────────────────────────────────────
 
-    def _extract_xml(self, file_path: str) -> str:
+    def _extract_xml(self, file_path: str) -> bytes:
         """ZIP에서 본문 XML 추출.
-
-        Contents/section0.xml → word/document.xml 순으로 시도.
 
         Raises:
             RuntimeError: ZIP 읽기 실패 (E0202) 또는 본문 없음 (E0208)
@@ -94,9 +91,8 @@ class HwpxParser(ParserPort):
             with zipfile.ZipFile(file_path, "r") as zf:
                 names = zf.namelist()
 
-                # 경로 탐색
                 content_path = None
-                for candidate in [_CONTENT_PATH, _CONTENT_PATH_ALT]:
+                for candidate in _CONTENT_CANDIDATES:
                     if candidate in names:
                         content_path = candidate
                         break
@@ -114,15 +110,17 @@ class HwpxParser(ParserPort):
                         f"포함된 파일: {names}"
                     )
 
-                return zf.read(content_path).decode("utf-8")
+                return zf.read(content_path)
 
-        except (zipfile.BadZipFile, Exception) as e:
-            if "E0208" in str(e):
-                raise
+        except zipfile.BadZipFile as e:
+            raise RuntimeError(f"E0202: HWPX 파일 읽기 실패 — {e}") from e
+        except RuntimeError:
+            raise
+        except Exception as e:
             raise RuntimeError(f"E0202: HWPX 파일 읽기 실패 — {e}") from e
 
-    def _parse_xml(self, xml_text: str) -> list[ContentBlock]:
-        """XML → ContentBlock 목록 변환.
+    def _parse_xml(self, xml_bytes: bytes) -> list[ContentBlock]:
+        """lxml → ContentBlock 목록 변환.
 
         단락(p) → text/heading 블록
         표(tbl)  → table 블록
@@ -132,13 +130,12 @@ class HwpxParser(ParserPort):
         page_num = 1
 
         try:
-            root = ET.fromstring(xml_text)
-        except ET.ParseError as e:
+            root = etree.fromstring(xml_bytes)
+        except etree.XMLSyntaxError as e:
             raise RuntimeError(f"E0208: HWPX XML 파싱 실패 — XML 형식 오류: {e}") from e
 
-        # 네임스페이스 무관하게 전체 탐색
         for elem in root.iter():
-            tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+            tag = etree.QName(elem.tag).localname if elem.tag else ""
 
             # 단락
             if tag == "p":
@@ -171,24 +168,24 @@ class HwpxParser(ParserPort):
 
         return blocks
 
-    def _extract_para_text(self, para_elem: ET.Element) -> str:
-        """단락 요소에서 텍스트 추출."""
+    def _extract_para_text(self, para_elem) -> str:
+        """단락 요소에서 텍스트 추출 (lxml)."""
         texts = []
         for elem in para_elem.iter():
-            tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+            tag = etree.QName(elem.tag).localname if elem.tag else ""
             if tag in ("t", "run", "r") and elem.text:
                 texts.append(elem.text)
         return " ".join(texts).strip()
 
-    def _extract_table(self, tbl_elem: ET.Element) -> list[list[str]]:
-        """표 요소에서 행×열 데이터 추출."""
+    def _extract_table(self, tbl_elem) -> list[list[str]]:
+        """표 요소에서 행×열 데이터 추출 (lxml)."""
         rows = []
         for elem in tbl_elem.iter():
-            tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+            tag = etree.QName(elem.tag).localname if elem.tag else ""
             if tag in ("tr", "row"):
                 cells = []
                 for cell_elem in elem.iter():
-                    cell_tag = cell_elem.tag.split("}")[-1] if "}" in cell_elem.tag else cell_elem.tag
+                    cell_tag = etree.QName(cell_elem.tag).localname if cell_elem.tag else ""
                     if cell_tag in ("tc", "cell") and cell_elem.text:
                         cells.append(cell_elem.text.strip())
                 if cells:
@@ -200,7 +197,9 @@ class HwpxParser(ParserPort):
         text = text.strip()
         is_short = len(text) <= 50
         no_newline = "\n" not in text
-        numbered = bool(re.match(r"^(\d+[\.\)]|제\s*\d+\s*[조항절장]|[가-힣]\.|[IVX]+\.)\s", text))
+        numbered = bool(re.match(
+            r"^(\d+[\.\)]|제\s*\d+\s*[조항절장]|[가-힣]\.|[IVX]+\.)\s", text
+        ))
         if is_short and no_newline and numbered:
             return "heading"
         if is_short and no_newline and text.endswith(("장", "절", "항", "조")):
