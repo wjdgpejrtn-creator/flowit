@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from common_schemas.exceptions import NotFoundError
 
-from ..domain.entities.base_tool import BaseTool
+from ..domain.base_tool import BaseTool
 from ..domain.entities.tool_metadata import ToolMetadata
 from ..domain.exceptions import ConflictError
 from ..domain.ports.tool_registry import ToolRegistry
@@ -38,7 +38,7 @@ class ToolRegistryAdapter(ToolRegistry):
             raise NotFoundError(
                 message=f"Tool '{tool_name}' is not registered. "
                         f"Available: {list(self._tools.keys())}",
-                code="E_NODE_TYPE_MISMATCH",
+                code="TOOL_NOT_FOUND",
             )
         return self._tools[tool_name]
 
@@ -88,7 +88,7 @@ class ToolRegistryAdapter(ToolRegistry):
 
 ## 3-2. `adapters/secure_connector.py`
 
-**역할**: `SecureConnectorPort` 구현체. `auth.domain.services.CredentialInjectionService`를 DI로 주입받아 복호화 처리.
+**역할**: `SecureConnectorPort` 구현체. `auth.domain.services.CredentialInjectionService`로 credential 복호화 후 httpx로 HTTP 요청. `ConnectorResponse` 반환.
 
 ```python
 from __future__ import annotations
@@ -100,6 +100,7 @@ from common_schemas.security import PlaintextCredential
 
 from ..domain.exceptions import CredentialError
 from ..domain.ports.secure_connector_port import SecureConnectorPort
+from ..domain.value_objects.connector_response import ConnectorResponse
 
 logger = logging.getLogger(__name__)
 
@@ -108,17 +109,16 @@ class SecureConnector(SecureConnectorPort):
     """
     SecureConnectorPort 구현체.
 
-    auth.domain.services.CredentialInjectionService를 통해
-    credential_id를 복호화하여 PlaintextCredential을 반환한다.
+    auth.domain.services.CredentialInjectionService로 credential을 복호화한 뒤
+    httpx로 외부 HTTP 요청을 수행하고 ConnectorResponse를 반환한다.
 
     CLAUDE.md 허용 import:
         from auth.domain.services import CredentialInjectionService
         → inject(credential_id: UUID, node_id: UUID) → PlaintextCredential
 
     보안 원칙:
-    - 활성 credential은 _active dict에 최단 시간만 보관
-    - release_credential() 호출 시 _active에서 즉시 제거
-    - release 실패 시 로그만 남기고 예외 미발생 (best-effort)
+    - PlaintextCredential은 connect() 스코프 내에서만 보유, 반환 후 즉시 wipe
+    - domain 레이어는 httpx에 의존하지 않음 — ConnectorResponse로 변환 후 반환
 
     ⚠️ 협의 필요 (REQ-002 박아름):
     - inject()의 node_id 파라미터 처리 방식 확인 필요
@@ -133,51 +133,47 @@ class SecureConnector(SecureConnectorPort):
         """
         Args:
             inject_credential_service: auth.domain.services.CredentialInjectionService
-                타입 힌트를 object로 두는 이유:
-                toolset → auth 직접 import는 adapters 레이어에서만 허용이나,
-                런타임 DI 주입 시 타입 검사를 피하기 위해 duck-typing.
             node_id: 실행 중인 노드 ID. 없으면 UUID(0) 사용.
         """
         self._inject = inject_credential_service
         self._node_id = node_id or UUID(int=0)
-        # credential_id(str) → PlaintextCredential 매핑 (활성 상태만 보관)
-        self._active: dict[str, PlaintextCredential] = {}
 
-    async def acquire_credential(
+    async def connect(
         self,
-        credential_id: str,
-        service: str,
-    ) -> PlaintextCredential:
+        endpoint: str,
+        credentials: PlaintextCredential,
+        **kwargs,
+    ) -> ConnectorResponse:
         """
-        CredentialInjectionService.inject()를 통해 복호화된 credential 획득.
+        자격증명을 주입해 외부 HTTP 요청 수행 후 ConnectorResponse 반환.
+
+        httpx.Response → ConnectorResponse 변환은 이 adapter에서 담당.
 
         Raises:
-            CredentialError: 복호화 실패 또는 credential 미존재
+            CredentialError: HTTP 요청 실패
         """
+        import httpx
         try:
-            # inject(credential_id: UUID, node_id: UUID) → PlaintextCredential
-            credential: PlaintextCredential = await self._inject.inject(
-                UUID(credential_id),
-                self._node_id,
+            async with httpx.AsyncClient() as client:
+                response = await client.request(
+                    method=kwargs.get("method", "GET"),
+                    url=endpoint,
+                    headers={
+                        "Authorization": f"Bearer {credentials.value}",
+                        **kwargs.get("headers", {}),
+                    },
+                    **{k: v for k, v in kwargs.items() if k not in ("method", "headers")},
+                )
+            return ConnectorResponse(
+                status_code=response.status_code,
+                body=response.content,
+                headers=dict(response.headers),
             )
         except Exception as e:
             raise CredentialError(
-                message=f"Failed to acquire credential '{credential_id}': {e}",
+                message=f"HTTP request to '{endpoint}' failed: {e}",
                 code="CREDENTIAL_ERROR",
             ) from e
-
-        self._active[credential_id] = credential
-        return credential
-
-    async def release_credential(self, credential_id: str) -> None:
-        """_active에서 credential 제거. 실패 시 로그만 남김 (best-effort)."""
-        try:
-            self._active.pop(credential_id, None)
-        except Exception:
-            logger.warning(
-                "Failed to release credential '%s' from active store.",
-                credential_id,
-            )
 ```
 
 **협의 포인트 (REQ-002 박아름):**
@@ -371,7 +367,7 @@ __all__ = ["ToolRegistryAdapter", "SecureConnector", "StateManager"]
 - [ ] `tool_registry_adapter.py`: `get_tool()` — 미등록 시 Available 목록 포함 에러 메시지
 - [ ] `tool_registry_adapter.py`: `list_metadata()` 구현 (ListToolsUseCase에서 사용)
 - [ ] `tool_registry_adapter.py`: `register_bulk()` 8개 도구 일괄 등록
-- [ ] `secure_connector.py`: `release_credential()` best-effort, 예외 미발생
+- [ ] `secure_connector.py`: `connect()` → `ConnectorResponse` 반환, httpx 의존은 adapter 내부만
 - [ ] `secure_connector.py`: `CredentialInjectionService.inject(UUID(credential_id), node_id)` 호출 확인
 - [ ] `secure_connector.py`: REQ-002 박아름 — `node_id` 처리 방식 사전 확인 필요
 - [ ] `state_manager.py`: Redis → PostgreSQL fallback 전환 로직

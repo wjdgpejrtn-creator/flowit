@@ -39,7 +39,7 @@ from uuid import uuid4
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PermissionSource, PlaintextCredential
 
-from toolset.domain.entities.base_tool import BaseTool
+from toolset.domain.base_tool import BaseTool
 from toolset.domain.entities.tool_metadata import ToolMetadata
 from toolset.domain.ports.tool_registry import ToolRegistry
 from toolset.domain.ports.secure_connector_port import SecureConnectorPort
@@ -52,9 +52,9 @@ from toolset.domain.services.risk_assessment_service import RiskAssessmentServic
 
 class DummyTool(BaseTool):
     """MEDIUM 위험도 테스트용 Tool."""
-    tool_id = "dummy"
-    name = "Dummy Tool"
+    name = "dummy"
     description = "테스트용 도구"
+    version = "1.0.0"
     risk_level = RiskLevel.MEDIUM
     input_schema = {
         "type": "object",
@@ -67,33 +67,33 @@ class DummyTool(BaseTool):
         "required": ["result"],
     }
 
-    async def run(self, params: dict, credential: PlaintextCredential | None) -> dict:
-        return {"result": f"ok: {params['message']}"}
+    async def execute(self, input_data: dict, **kwargs) -> dict:
+        return {"result": f"ok: {input_data['message']}"}
 
 
 class HighRiskDummyTool(BaseTool):
     """HIGH 위험도 테스트용 Tool."""
-    tool_id = "high_risk_dummy"
-    name = "High Risk Dummy"
+    name = "high_risk_dummy"
     description = "HIGH 위험도 테스트용"
+    version = "1.0.0"
     risk_level = RiskLevel.HIGH
     input_schema = {"type": "object", "properties": {}}
     output_schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
 
-    async def run(self, params: dict, credential: PlaintextCredential | None) -> dict:
+    async def execute(self, input_data: dict, **kwargs) -> dict:
         return {"ok": True}
 
 
 class RestrictedDummyTool(BaseTool):
     """RESTRICTED 위험도 테스트용 Tool."""
-    tool_id = "restricted_dummy"
-    name = "Restricted Dummy"
+    name = "restricted_dummy"
     description = "RESTRICTED 위험도 테스트용"
+    version = "1.0.0"
     risk_level = RiskLevel.RESTRICTED
     input_schema = {"type": "object", "properties": {}}
     output_schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
 
-    async def run(self, params: dict, credential: PlaintextCredential | None) -> dict:
+    async def execute(self, input_data: dict, **kwargs) -> dict:
         return {"ok": True}
 
 
@@ -187,54 +187,48 @@ import pytest
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PlaintextCredential
 
-from toolset.domain.entities.base_tool import BaseTool
+from toolset.domain.base_tool import BaseTool
 
 
-class TestBaseToolSubclassValidation:
-    """__init_subclass__ 검증 로직 테스트."""
+class TestBaseToolAbstractInterface:
+    """BaseTool ABC @property @abstractmethod 인터페이스 테스트."""
 
-    def test_missing_all_required_vars_raises_type_error(self):
-        with pytest.raises(TypeError, match="must define class variables"):
+    def test_abstract_property_missing_raises_type_error(self):
+        """abstract property 미구현 시 인스턴스 생성 불가."""
+        with pytest.raises(TypeError):
             class BrokenTool(BaseTool):
-                async def run(self, params, credential):
+                async def execute(self, input_data, **kwargs):
                     return {}
-
-    def test_missing_single_var_raises_type_error(self):
-        with pytest.raises(TypeError, match="tool_id"):
-            class NoToolIdTool(BaseTool):
-                # tool_id 누락
-                name = "Test"
-                description = "desc"
-                risk_level = RiskLevel.LOW
-                input_schema = {"type": "object"}
-                output_schema = {"type": "object"}
-                async def run(self, params, credential):
-                    return {}
+            BrokenTool()  # instantiation 시점에 TypeError
 
     def test_complete_subclass_no_error(self):
+        """모든 abstract property + execute 구현 시 정상 생성."""
         class OkTool(BaseTool):
-            tool_id = "ok"
-            name = "Ok"
+            name = "ok"
             description = "ok tool"
+            version = "1.0.0"
             risk_level = RiskLevel.LOW
             input_schema = {"type": "object"}
             output_schema = {"type": "object"}
-            async def run(self, params, credential):
+            async def execute(self, input_data, **kwargs):
                 return {}
-        assert OkTool.tool_id == "ok"
+        tool = OkTool()
+        assert tool.name == "ok"
+        assert tool.version == "1.0.0"
 
     def test_risk_level_restricted_allowed(self):
         """RESTRICTED는 유효한 RiskLevel."""
         class RestrictedTool(BaseTool):
-            tool_id = "r"
-            name = "R"
+            name = "r"
             description = "d"
+            version = "1.0.0"
             risk_level = RiskLevel.RESTRICTED
             input_schema = {"type": "object"}
             output_schema = {"type": "object"}
-            async def run(self, params, credential):
+            async def execute(self, input_data, **kwargs):
                 return {}
-        assert RestrictedTool.risk_level == RiskLevel.RESTRICTED
+        tool = RestrictedTool()
+        assert tool.risk_level == RiskLevel.RESTRICTED
 
     @pytest.mark.asyncio
     async def test_run_returns_dict(self):
@@ -420,8 +414,8 @@ class TestExecuteToolSuccess:
     async def test_execute_without_credential(self):
         uc = make_use_case()
         result = await uc.execute(
-            tool_id="dummy",
-            params={"message": "hello"},
+            tool_name="dummy",
+            input_data={"message": "hello"},
             context=make_permission("High"),
             credential_id=None,
         )
@@ -430,25 +424,24 @@ class TestExecuteToolSuccess:
     @pytest.mark.asyncio
     async def test_execute_with_credential(self, mock_credential):
         connector = AsyncMock()
-        connector.acquire_credential.return_value = mock_credential
+        connector.connect.return_value = mock_credential
         uc = make_use_case(secure_connector=connector)
 
         result = await uc.execute(
-            tool_id="dummy",
-            params={"message": "world"},
+            tool_name="dummy",
+            input_data={"message": "world"},
             context=make_permission("High"),
             credential_id="cred-001",
         )
         assert result["result"] == "ok: world"
-        connector.acquire_credential.assert_called_once()
-        connector.release_credential.assert_called_once()
+        connector.connect.assert_called_once()
 
 
 class TestCredentialLifecycle:
     @pytest.mark.asyncio
     async def test_credential_wiped_on_success(self, mock_credential):
         connector = AsyncMock()
-        connector.acquire_credential.return_value = mock_credential
+        connector.connect.return_value = mock_credential
         uc = make_use_case(secure_connector=connector)
 
         await uc.execute("dummy", {"message": "x"}, make_permission("High"), "cred-001")
@@ -462,8 +455,8 @@ class TestCredentialLifecycle:
         from tests.conftest import DummyTool
 
         class FailingTool(DummyTool):
-            tool_id = "failing"
-            async def run(self, params, credential):
+            name = "failing"
+            async def execute(self, input_data, **kwargs):
                 raise ValueError("External API down")
 
         from toolset.adapters.tool_registry_adapter import ToolRegistryAdapter
@@ -471,7 +464,7 @@ class TestCredentialLifecycle:
         reg.register_tool(FailingTool())
 
         connector = AsyncMock()
-        connector.acquire_credential.return_value = mock_credential
+        connector.connect.return_value = mock_credential
         uc = make_use_case(tool_registry=reg, secure_connector=connector)
 
         with pytest.raises(ToolExecutionError):
@@ -479,7 +472,7 @@ class TestCredentialLifecycle:
 
         # 실패해도 wipe 보장
         assert mock_credential.value == ""
-        connector.release_credential.assert_called_once()
+        # release_credential() 제거됨 — connect()가 단일 호출로 처리
 
 
 class TestPermissionGating:
