@@ -1,4 +1,4 @@
-﻿from .aesgcm_cipher import AESGCMCipher
+﻿from .aes_gcm import AESGCMCipher
 from .base_cipher import BaseCipher
 from .fernet_cipher import FernetCipher
 

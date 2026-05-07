@@ -4,7 +4,7 @@ from uuid import UUID
 
 from common_schemas import PlaintextCredential
 
-from ...domain.services.credential_injection import CredentialInjectionService
+from ...domain.services.credential_injection_service import CredentialInjectionService
 
 
 class InjectCredentialUseCase:

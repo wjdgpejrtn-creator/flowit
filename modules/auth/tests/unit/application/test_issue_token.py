@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from auth.application.use_cases.issue_token import IssueTokenUseCase
+from auth.application.use_cases.issue_token_use_case import IssueTokenUseCase
 from common_schemas.exceptions import AuthorizationError
 
 

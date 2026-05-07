@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from auth.application.use_cases.authenticate import AuthenticateUseCase
+from auth.application.use_cases.authenticate_use_case import AuthenticateUseCase
 
 
 class FakeGoogleOAuth:

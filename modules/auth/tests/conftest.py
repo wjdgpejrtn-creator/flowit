@@ -7,7 +7,7 @@ import pytest
 from auth.domain.entities.oauth_connection import OAuthConnection
 from auth.domain.entities.session import Session
 from auth.domain.ports.cipher_port import CipherPort
-from auth.domain.ports.oauth_repository import OAuthConnectionRepository
+from auth.domain.ports.oauth_connection_repository import OAuthConnectionRepository
 from auth.domain.ports.session_repository import SessionRepository
 
 

@@ -6,7 +6,7 @@ from common_schemas.exceptions import AuthorizationError, NotFoundError
 from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRepository
 
 from ..ports.cipher_port import CipherPort
-from ..ports.oauth_repository import OAuthConnectionRepository
+from ..ports.oauth_connection_repository import OAuthConnectionRepository
 
 
 class CredentialInjectionService:

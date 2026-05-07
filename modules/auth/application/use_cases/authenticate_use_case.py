@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from ...domain.ports.cipher_port import CipherPort
-from ...domain.ports.oauth_repository import OAuthConnectionRepository
+from ...domain.ports.oauth_connection_repository import OAuthConnectionRepository
 from ...domain.ports.session_repository import SessionRepository
 from ...domain.value_objects.token_pair import TokenPair
 
