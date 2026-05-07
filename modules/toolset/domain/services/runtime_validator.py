@@ -29,5 +29,5 @@ class RuntimeValidator:
             path = ".".join(str(p) for p in first.absolute_path) or "root"
             raise ValidationError(
                 message=f"[{prefix}.{path}] {first.message}",
-                code="E_NODE_TYPE_MISMATCH",
+                code="E_TOOL_SCHEMA_MISMATCH",
             )

@@ -22,7 +22,7 @@
 | 조건/제어 | `LoopTool` | Medium | ⬜ stub 추가 필요 |
 | 조건/제어 | `DelayTool` | Low | ⬜ stub 추가 필요 |
 | 알림 | `EmailSendTool` | High | ⬜ stub 추가 필요 |
-| 알림 | `SlackNotifyTool` | Medium | ⬜ stub 추가 필요 |
+| 알림 | `SlackNotifyTool` | High | ⬜ stub 추가 필요 |
 
 ---
 
@@ -1232,7 +1232,7 @@ class SlackNotifyTool(BaseTool):
     @property
     def version(self) -> str: return "1.0.0"
     @property
-    def risk_level(self) -> RiskLevel: return RiskLevel.MEDIUM
+    def risk_level(self) -> RiskLevel: return RiskLevel.HIGH
     @property
     def input_schema(self) -> dict[str, Any]: return {}
     @property

@@ -131,16 +131,25 @@ class BaseTool(ABC):
         ...
 ```
 
+#### risk_level 판정 기준
+
+| 등급 | 기준 |
+|------|------|
+| Low | 순수 연산, 외부 부작용 없음 |
+| Medium | 로컬 쓰기 또는 설정된 엔드포인트 호출 (범위 제한, 통제 가능) |
+| High | 사람에게 직접 메시지 전송, 또는 임의 외부 시스템에 비가역적 변경 |
+| Restricted | 관리자 전용 시스템 조작 (현재 해당 없음) |
+
 #### 구체 Tool 구현체 (~15개 클래스)
 
 아래는 구현해야 할 구체 도구 목록이다. 모두 `BaseTool`을 상속한다.
 
 | 카테고리 | 클래스명 | risk_level | 설명 |
 |----------|----------|------------|------|
-| **API 호출** | `HttpRequestTool` | Medium | 범용 HTTP 요청 (GET/POST/PUT/DELETE) |
+| **API 호출** | `HttpRequestTool` | High | 범용 HTTP 요청 (임의 URL, DELETE 포함, 비가역적) |
 | **API 호출** | `RestApiTool` | Medium | REST API 호출 + 응답 파싱 |
 | **API 호출** | `GraphqlTool` | Medium | GraphQL 쿼리/뮤테이션 실행 |
-| **API 호출** | `WebhookTool` | Low | 웹훅 발송 (fire-and-forget) |
+| **API 호출** | `WebhookTool` | High | 웹훅 발송 (fire-and-forget, 외부 엔드포인트 비가역적) |
 | **파일 처리** | `FileReadTool` | Low | 파일 읽기 (텍스트/바이너리) |
 | **파일 처리** | `FileWriteTool` | Medium | 파일 쓰기/생성 |
 | **파일 처리** | `FileTransformTool` | Low | 파일 포맷 변환 (CSV↔JSON, Excel→CSV 등) |
@@ -151,7 +160,7 @@ class BaseTool(ABC):
 | **조건/제어** | `LoopTool` | Medium | 반복 실행 (배열 순회) |
 | **조건/제어** | `DelayTool` | Low | 대기/지연 (sleep) |
 | **알림** | `EmailSendTool` | High | 이메일 발송 |
-| **알림** | `SlackNotifyTool` | Medium | Slack 메시지 전송 |
+| **알림** | `SlackNotifyTool` | High | Slack 메시지 전송 (사람에게 직접, 비가역적) |
 
 > **구현 위치**: `adapters/tools/` 디렉토리에 카테고리별 서브폴더로 배치한다.
 
