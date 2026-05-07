@@ -5,7 +5,7 @@ domain 레이어 전체 public export
 
 사용 예시:
     from doc_parser.domain import (
-        Chunk, ChunkOverlapMeta, ChunkingStrategy,
+        Chunk, ChunkingStrategy,
         WarningInfo, ElapsedDetail,
         QualityMetrics, QualityGateResult, QualityConfig,
         PIIMaskRule,
@@ -14,7 +14,7 @@ domain 레이어 전체 public export
         PIIMaskingService, ParserFactory,
     )
 """
-from doc_parser.domain.entities.chunk import Chunk, ChunkingStrategy, ChunkOverlapMeta
+from doc_parser.domain.entities.chunk import Chunk, ChunkingStrategy
 from doc_parser.domain.entities.pii import PIIMaskRule
 from doc_parser.domain.entities.quality import QualityConfig, QualityGateResult, QualityMetrics
 from doc_parser.domain.entities.warning import ElapsedDetail, WarningInfo
@@ -32,7 +32,6 @@ __all__ = [
     "WarningInfo",
     "ElapsedDetail",
     # entities/chunk.py
-    "ChunkOverlapMeta",
     "Chunk",
     "ChunkingStrategy",
     # entities/quality.py
