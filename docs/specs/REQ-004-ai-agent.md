@@ -63,7 +63,7 @@
 | 포트(ABC) | 설명 | 주요 메서드 | Adapter 구현 위치 |
 |-----------|------|-------------|-------------------|
 | `LLMPort` | LLM 호출 추상 인터페이스 | `generate(prompt: str, **kwargs) -> str`, `generate_structured(prompt: str, schema: type[T]) -> T` | `adapters/llm/` (Modal GPU) |
-| `AgentMemoryRepository` | 메모리 저장소 | `save(entry: MemoryEntry) -> None`, `find_by_user(user_id: UUID, limit: int) -> list[MemoryEntry]` | `modules/storage/repositories/` |
+| `AgentMemoryRepository` | 메모리 저장소 | `save(entry: MemoryEntry) -> None`, `find_by_user(user_id: UUID, limit: int) -> list[MemoryEntry]`, `find_by_session(session_id: UUID, limit: int) -> list[MemoryEntry]` | `modules/storage/repositories/` |
 | `WorkflowRepository` | 워크플로우 저장소 | `save(workflow: WorkflowSchema) -> UUID`, `find_by_id(workflow_id: UUID) -> Optional[WorkflowSchema]` | `modules/storage/repositories/` |
 | `NodeRegistry` | 노드 카탈로그 검색 퍼사드 | `search(query: str, limit: int) -> list[NodeConfig]`, `get_schema(node_id: UUID) -> NodeConfig` | `adapters/node_registry.py` |
 

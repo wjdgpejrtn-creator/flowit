@@ -76,6 +76,7 @@ from ai_agent.application.use_cases import (
 | | `generate_structured(prompt: str, schema: type[T]) → T` | |
 | `AgentMemoryRepository` | `save(entry: MemoryEntry) → None` | `storage/repositories/` |
 | | `find_by_user(user_id: UUID, limit: int) → list[MemoryEntry]` | |
+| | `find_by_session(session_id: UUID, limit: int) → list[MemoryEntry]` | |
 | `WorkflowRepository` | `save(workflow: WorkflowSchema) → UUID` | `storage/repositories/` |
 | | `find_by_id(workflow_id: UUID) → Optional[WorkflowSchema]` | |
 | `NodeRegistry` | `search(query: str, limit: int) → list[NodeConfig]` | `ai-agent/adapters/node_registry.py` (Facade) |
