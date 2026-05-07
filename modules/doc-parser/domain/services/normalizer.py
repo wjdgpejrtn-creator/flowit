@@ -15,7 +15,7 @@ import unicodedata
 from common_schemas.document import ContentBlock, DocumentBlock
 
 
-class Normalizer:
+class NormalizationService:
     """기본 정규화 서비스.
 
     파싱 직후, PII 마스킹 이전에 수행.
