@@ -11,7 +11,7 @@ dependencies = [
     # 공통
     "pydantic>=2.0",
     "pyyaml>=6.0",
-    "common-schemas>=0.1.0",
+    # common-schemas 는 로컬 패키지 → pip install -e packages/common-schemas/python
     # PDF
     "pymupdf>=1.23",
     "pdfplumber>=0.10",
