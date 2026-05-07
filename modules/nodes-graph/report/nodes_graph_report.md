@@ -5,7 +5,7 @@
 **작성일**: 2026-05-06 (최종 수정: 2026-05-07)  
 **담당자**: 박아름  
 **브랜치**: `feature/req-003-nodes-graph`  
-**상태**: ✅ PASS 완료 (PR #17 리뷰 대기)
+**상태**: ✅ PASS 완료 (PR #17 리뷰 반영 완료)
 
 ---
 
@@ -37,8 +37,8 @@
 
 | 구분 | 건수 |
 |------|------|
-| 전체 테스트 | 25건 |
-| PASS | 25건 |
+| 전체 테스트 | 26건 |
+| PASS | 26건 |
 | FAIL | 0건 |
 | SKIP | 0건 |
 
@@ -46,7 +46,7 @@
 
 | 계층 | 전체 | PASS | FAIL |
 |------|------|------|------|
-| unit/domain | 15 | 15 | 0 |
+| unit/domain | 16 | 16 | 0 |
 | unit/application | 10 | 10 | 0 |
 | integration | 0 | - | - |
 
@@ -55,7 +55,7 @@
 | 파일 | 테스트 케이스 |
 |------|-------------|
 | `unit/domain/test_node_definition.py` | 생성, 필드 검증, 불변성 |
-| `unit/domain/test_graph_validator.py` | 유효/사이클/고립/중복ID/필수연결 7건 |
+| `unit/domain/test_graph_validator.py` | 유효/사이클/고립/중복ID/필수연결/타입호환성(stub) 8건 |
 | `unit/domain/test_graph_serializer.py` | 직렬화, 역직렬화 왕복, 오류 처리 |
 | `unit/application/test_validate_graph_use_case.py` | 유효/댕글링엣지/사이클 |
 | `unit/application/test_search_nodes_use_case.py` | 검색, limit, 빈 결과 |
