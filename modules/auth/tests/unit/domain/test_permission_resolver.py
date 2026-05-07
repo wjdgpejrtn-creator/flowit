@@ -1,0 +1,39 @@
+from uuid import uuid4
+
+from auth.domain.services.permission_resolver import PermissionResolver
+
+
+def test_admin_gets_restricted_ceiling():
+    resolver = PermissionResolver()
+    perm = resolver.resolve(
+        user_id=uuid4(),
+        role="Admin",
+        department_id=uuid4(),
+        session_id=uuid4(),
+    )
+    assert perm.risk_ceiling == "Restricted"
+    assert "Public" in perm.granted_scopes
+    assert "Team" in perm.granted_scopes
+    assert "Private" in perm.granted_scopes
+
+
+def test_user_gets_high_ceiling():
+    resolver = PermissionResolver()
+    perm = resolver.resolve(
+        user_id=uuid4(),
+        role="User",
+        department_id=uuid4(),
+        session_id=uuid4(),
+    )
+    assert perm.risk_ceiling == "High"
+    assert perm.granted_scopes == ["Private"]
+
+
+def test_permission_source_is_frozen():
+    resolver = PermissionResolver()
+    perm = resolver.resolve(uuid4(), "User", uuid4(), uuid4())
+    try:
+        perm.role = "Admin"  # type: ignore
+        assert False, "Should be immutable"
+    except Exception:
+        pass

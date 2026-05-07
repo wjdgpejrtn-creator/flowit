@@ -1,6 +1,20 @@
-# common-schemas
+# common-schemas (REQ-012)
 
-> REQ-012: Pydantic v2 공유 스키마 — 전체 시스템의 Single Source of Truth (SSOT)
+Pydantic v2 기반 공유 스키마 패키지. Python SSOT에서 TypeScript 인터페이스를 자동 생성한다.
+
+## 구조
+
+```
+packages/common-schemas/
+├── python/
+│   ├── common_schemas/   # Pydantic v2 모델 (42 symbols)
+│   ├── tests/            # pytest 단위테스트
+│   └── pyproject.toml
+├── typescript/
+│   └── src/generated/    # codegen 산출물 (index.ts)
+└── scripts/
+    └── generate_ts.py    # Python → TypeScript codegen
+```
 
 ## 설치
 
@@ -10,9 +24,6 @@ pip install -e packages/common-schemas/python
 
 # 개발 의존성 포함
 pip install -e "packages/common-schemas/python[dev]"
-
-# TypeScript (프론트엔드에서 사용)
-# packages/common-schemas/typescript/src/generated/ 에서 자동 생성된 타입 import
 ```
 
 ## Quick Start
@@ -34,6 +45,20 @@ from common_schemas.transport import (
     SlotFillQuestionFrame, DraftSpecDeltaFrame, ResultFrame, ErrorFrame, AnySSEFrame,
 )
 ```
+
+## 모듈 구성
+
+| 모듈 | 내용 |
+|------|------|
+| `workflow` | Position, Edge, NodeInstance, NodeConfig, WorkflowSchema |
+| `agent` | AgentState, DraftSpec, IntentResult, SlotFillingState, UnresolvedNode |
+| `document` | BBox, FileMeta, SourceRef, ParserMeta, SheetMeta, ContentBlock, DocumentBlock, AnalysisResult |
+| `security` | PermissionSource, PlaintextCredential |
+| `transport` | SSE frame 타입 (Session, AgentNode, RationaleDelta 등) + AnySSEFrame discriminated union |
+| `handoff` | HandoffPayload, EvaluationResult |
+| `enums` | AgentMode, ExecutionStatus, RiskLevel, ErrorCode |
+| `exceptions` | DomainError 계층 (Validation, Authorization, NotFound, Conflict, Integrity) |
+| `validation` | ValidationErrorItem, ValidationErrorResponse |
 
 ## Public API
 
@@ -130,6 +155,58 @@ from common_schemas.transport import (
 | `ValidationErrorResponse` | 배치 에러 응답 (errors, is_valid) |
 | `ValidationErrorItem` | 개별 검증 에러 (field, error_code, severity) |
 
+## 사용 예시
+
+### Python 서비스
+
+```python
+from common_schemas import WorkflowSchema, NodeInstance, Position, Edge
+from common_schemas.enums import ExecutionStatus
+from common_schemas.exceptions import ValidationError
+
+workflow = WorkflowSchema(
+    workflow_id="550e8400-e29b-41d4-a716-446655440000",
+    name="My Workflow",
+    scope="private",
+    is_draft=True,
+    nodes=[
+        NodeInstance(
+            instance_id="...",
+            node_id="...",
+            parameters={},
+            position=Position(x=100, y=200),
+        )
+    ],
+    connections=[],
+)
+
+from common_schemas.transport import AnySSEFrame
+
+frame = AnySSEFrame.model_validate({"frame_type": "error", "code": "E_CYCLE_DETECTED", "message": "..."})
+```
+
+### TypeScript 프론트엔드
+
+```typescript
+import type { WorkflowSchema, AgentState, AnySSEFrame } from "@workflow-automation/common-schemas";
+
+async function fetchWorkflow(id: string): Promise<WorkflowSchema> {
+  const res = await fetch(`/api/workflows/${id}`);
+  return res.json();
+}
+
+function handleFrame(frame: AnySSEFrame) {
+  switch (frame.frame_type) {
+    case "error":
+      console.error(frame.code, frame.message);
+      break;
+    case "rationale_delta":
+      appendToUI(frame.delta);
+      break;
+  }
+}
+```
+
 ## 의존 관계
 
 ```
@@ -151,29 +228,23 @@ Downstream (이 패키지에 의존):
 ## 설계 규칙
 
 - 이 패키지는 **어떤 프레임워크도 import하지 않음** (FastAPI, SQLAlchemy, LangGraph 금지)
+- 모든 모델은 `frozen=True` (PlaintextCredential 제외 — `wipe()` 지원)
 - 모든 Enum은 `str`을 상속하여 JSON 직렬화 호환
+- ID 필드는 `uuid.UUID` 타입
+- Optional 필드는 명시적 `Optional[T] = None`
 - 필드 타입 불일치 시 이 패키지의 정의가 우선 (SSOT 원칙)
-- TypeScript 타입은 `pydantic2ts`로 Python에서 자동 생성 — 수동 편집 금지
+- TypeScript 타입은 Python에서 단방향 생성 — 수동 편집 금지
 
-## TypeScript 사용 (프론트엔드)
-
-```typescript
-import type { WorkflowSchema, NodeInstance } from "@workflow-automation/common-schemas";
-```
-
-`tsconfig.json`의 `@common/*` 경로 별칭으로 참조합니다.
-
-## 코드 생성
+## TypeScript Codegen
 
 ```bash
-pip install -e "packages/common-schemas/python[codegen]"
-cd packages/common-schemas/scripts
-python generate_ts.py
+python packages/common-schemas/scripts/generate_ts.py
 ```
+
+`typescript/src/generated/index.ts`가 재생성된다. 이 파일은 직접 편집하지 말 것.
 
 ## 테스트
 
 ```bash
-pytest packages/common-schemas/python/tests/
-ruff check packages/common-schemas/python/
+pytest packages/common-schemas/python/tests -v
 ```
