@@ -6,6 +6,7 @@ domain/services 레이어 public export
 from doc_parser.domain.services.chunking_service import ChunkingService
 from doc_parser.domain.services.pii_masking_service import PIIMaskingService
 from doc_parser.domain.services.quality_gate import QualityGate
+from doc_parser.domain.services.normalizer import Normalizer
 
 __all__ = [
     # pii_masking_service.py
