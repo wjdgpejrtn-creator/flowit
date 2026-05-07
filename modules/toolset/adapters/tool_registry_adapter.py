@@ -28,7 +28,7 @@ class ToolRegistryAdapter(ToolRegistry):
             raise NotFoundError(
                 message=f"Tool '{tool_name}' is not registered. "
                         f"Available: {list(self._tools.keys())}",
-                code="E_NODE_TYPE_MISMATCH",
+                code="TOOL_NOT_FOUND",
             )
         return self._tools[tool_name]
 

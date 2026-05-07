@@ -3,7 +3,7 @@ from .entities import ToolExecutionRecord, ToolMetadata
 from .exceptions import ToolExecutionError, CredentialError, ConflictError
 from .ports import ToolRegistry, SecureConnectorPort, ToolExecutionRepository
 from .services import RuntimeValidator, ToolExecutionService, RiskAssessmentService
-from .value_objects import ToolInput, ToolOutput, ExecutionTimeout
+from .value_objects import ConnectorResponse, ToolInput, ToolOutput, ExecutionTimeout
 
 __all__ = [
     "BaseTool",
@@ -18,6 +18,7 @@ __all__ = [
     "RuntimeValidator",
     "ToolExecutionService",
     "RiskAssessmentService",
+    "ConnectorResponse",
     "ToolInput",
     "ToolOutput",
     "ExecutionTimeout",

@@ -14,6 +14,10 @@ class BaseTool(ABC):
 
     @property
     @abstractmethod
+    def description(self) -> str: ...
+
+    @property
+    @abstractmethod
     def version(self) -> str: ...
 
     @property

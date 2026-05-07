@@ -1,8 +1,28 @@
-# Phase 4 — 8개 Tool 구현
+# Phase 4 — Tool 구현 (spec 15종 + 추가 도구)
 
 > **대상 경로**: `modules/toolset/adapters/tools/`
-> **구현 순서**: webhook → http_request → llm → google_drive → gmail → google_calendar → google_sheets → slack
-> **공통 패턴**: `BaseTool` 상속 + 클래스 변수 메타데이터 + `async run()` 구현
+> **구현 순서**: webhook → http_request → (spec 나머지) → llm → google_drive → gmail → google_calendar → google_sheets → slack
+> **공통 패턴**: `BaseTool` 상속 + `@property` 메타데이터 + `async execute()` 구현
+
+### spec 15종 구현 현황
+
+| 카테고리 | 클래스 | risk_level | 구현 상태 |
+|----------|--------|------------|----------|
+| API 호출 | `HttpRequestTool` | Medium | ✅ 플랜 있음 |
+| API 호출 | `RestApiTool` | Medium | ⬜ stub 추가 필요 |
+| API 호출 | `GraphqlTool` | Medium | ⬜ stub 추가 필요 |
+| API 호출 | `WebhookTool` | Low | ✅ 플랜 있음 |
+| 파일 처리 | `FileReadTool` | Low | ⬜ stub 추가 필요 |
+| 파일 처리 | `FileWriteTool` | Medium | ⬜ stub 추가 필요 |
+| 파일 처리 | `FileTransformTool` | Low | ⬜ stub 추가 필요 |
+| 데이터 변환 | `JsonTransformTool` | Low | ⬜ stub 추가 필요 |
+| 데이터 변환 | `TextTemplateTool` | Low | ⬜ stub 추가 필요 |
+| 데이터 변환 | `DataMappingTool` | Low | ⬜ stub 추가 필요 |
+| 조건/제어 | `ConditionalTool` | Low | ⬜ stub 추가 필요 |
+| 조건/제어 | `LoopTool` | Medium | ⬜ stub 추가 필요 |
+| 조건/제어 | `DelayTool` | Low | ⬜ stub 추가 필요 |
+| 알림 | `EmailSendTool` | High | ⬜ stub 추가 필요 |
+| 알림 | `SlackNotifyTool` | Medium | ⬜ stub 추가 필요 |
 
 ---
 
@@ -28,7 +48,7 @@ from typing import Any
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PlaintextCredential
 
-from ...domain.entities.base_tool import BaseTool
+from ...domain.base_tool import BaseTool
 from ...domain.exceptions import ToolExecutionError   # ← common_schemas 아님
 
 
@@ -37,6 +57,10 @@ class XxxTool(BaseTool):
     @property
     def name(self) -> str:
         return "xxx"                    # 고유 이름 (tool_name 기준)
+
+    @property
+    def description(self) -> str:
+        return "..."                    # 도구 설명 (ToolMetadata.from_tool() 에서 사용)
 
     @property
     def version(self) -> str:
@@ -77,7 +101,7 @@ import httpx
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PlaintextCredential
 
-from ...domain.entities.base_tool import BaseTool
+from ...domain.base_tool import BaseTool
 from ...domain.exceptions import ToolExecutionError
 
 _DEFAULT_TIMEOUT = int(os.getenv("TOOL_EXECUTION_TIMEOUT", "30"))
@@ -179,7 +203,7 @@ import httpx
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PlaintextCredential
 
-from ...domain.entities.base_tool import BaseTool
+from ...domain.base_tool import BaseTool
 from ...domain.exceptions import ToolExecutionError
 
 
@@ -289,7 +313,7 @@ import httpx
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PlaintextCredential
 
-from ...domain.entities.base_tool import BaseTool
+from ...domain.base_tool import BaseTool
 from ...domain.exceptions import ToolExecutionError
 
 _MODAL_ENDPOINT = os.getenv("MODAL_LLM_ENDPOINT")   # 환경변수로 주입
@@ -380,7 +404,7 @@ from googleapiclient.http import MediaInMemoryUpload
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PlaintextCredential
 
-from ...domain.entities.base_tool import BaseTool
+from ...domain.base_tool import BaseTool
 from ...domain.exceptions import ToolExecutionError
 
 
@@ -524,7 +548,7 @@ from googleapiclient.discovery import build
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PlaintextCredential
 
-from ...domain.entities.base_tool import BaseTool
+from ...domain.base_tool import BaseTool
 from ...domain.exceptions import ToolExecutionError
 
 
@@ -630,7 +654,7 @@ from googleapiclient.discovery import build
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PlaintextCredential
 
-from ...domain.entities.base_tool import BaseTool
+from ...domain.base_tool import BaseTool
 from ...domain.exceptions import ToolExecutionError
 
 
@@ -750,7 +774,7 @@ from googleapiclient.discovery import build
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PlaintextCredential
 
-from ...domain.entities.base_tool import BaseTool
+from ...domain.base_tool import BaseTool
 from ...domain.exceptions import ToolExecutionError
 
 
@@ -863,7 +887,7 @@ from slack_sdk.errors import SlackApiError
 from common_schemas.enums import RiskLevel
 from common_schemas.security import PlaintextCredential
 
-from ...domain.entities.base_tool import BaseTool
+from ...domain.base_tool import BaseTool
 from ...domain.exceptions import ToolExecutionError
 
 _SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")   # credential 없을 때 fallback
@@ -956,11 +980,285 @@ class SlackTool(BaseTool):
 
 ---
 
-## 4-9. `adapters/tools/__init__.py`
+---
+
+## 4-9. spec 15종 — 누락 도구 Stubs
+
+> 아래 13개는 spec 기준 필수 구현 도구. 현재 skeleton만 제공. Phase 4 구현 시 완성 필요.
 
 ```python
+# adapters/tools/rest_api_tool.py
+from ...domain.base_tool import BaseTool
+from common_schemas.enums import RiskLevel
+from typing import Any
+
+class RestApiTool(BaseTool):
+    @property
+    def name(self) -> str: return "rest_api"
+    @property
+    def description(self) -> str: return "REST API 호출 + 응답 파싱"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.MEDIUM
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/graphql_tool.py
+class GraphqlTool(BaseTool):
+    @property
+    def name(self) -> str: return "graphql"
+    @property
+    def description(self) -> str: return "GraphQL 쿼리/뮤테이션"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.MEDIUM
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/file_read_tool.py
+class FileReadTool(BaseTool):
+    @property
+    def name(self) -> str: return "file_read"
+    @property
+    def description(self) -> str: return "파일 읽기"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.LOW
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/file_write_tool.py
+class FileWriteTool(BaseTool):
+    @property
+    def name(self) -> str: return "file_write"
+    @property
+    def description(self) -> str: return "파일 쓰기/생성"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.MEDIUM
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/file_transform_tool.py
+class FileTransformTool(BaseTool):
+    @property
+    def name(self) -> str: return "file_transform"
+    @property
+    def description(self) -> str: return "포맷 변환 (CSV↔JSON 등)"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.LOW
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/json_transform_tool.py
+class JsonTransformTool(BaseTool):
+    @property
+    def name(self) -> str: return "json_transform"
+    @property
+    def description(self) -> str: return "JMESPath/JSONPath 변환"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.LOW
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/text_template_tool.py
+class TextTemplateTool(BaseTool):
+    @property
+    def name(self) -> str: return "text_template"
+    @property
+    def description(self) -> str: return "Jinja2 템플릿 렌더링"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.LOW
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/data_mapping_tool.py
+class DataMappingTool(BaseTool):
+    @property
+    def name(self) -> str: return "data_mapping"
+    @property
+    def description(self) -> str: return "필드 매핑/리네이밍"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.LOW
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/conditional_tool.py
+class ConditionalTool(BaseTool):
+    @property
+    def name(self) -> str: return "conditional"
+    @property
+    def description(self) -> str: return "조건 분기 (if/else)"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.LOW
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/loop_tool.py
+class LoopTool(BaseTool):
+    @property
+    def name(self) -> str: return "loop"
+    @property
+    def description(self) -> str: return "반복 실행 (배열 순회)"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.MEDIUM
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/delay_tool.py
+class DelayTool(BaseTool):
+    @property
+    def name(self) -> str: return "delay"
+    @property
+    def description(self) -> str: return "대기/지연"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.LOW
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/email_send_tool.py
+class EmailSendTool(BaseTool):
+    @property
+    def name(self) -> str: return "email_send"
+    @property
+    def description(self) -> str: return "이메일 발송"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.HIGH
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+```python
+# adapters/tools/slack_notify_tool.py
+class SlackNotifyTool(BaseTool):
+    @property
+    def name(self) -> str: return "slack_notify"
+    @property
+    def description(self) -> str: return "Slack 메시지 전송"
+    @property
+    def version(self) -> str: return "1.0.0"
+    @property
+    def risk_level(self) -> RiskLevel: return RiskLevel.MEDIUM
+    @property
+    def input_schema(self) -> dict[str, Any]: return {}
+    @property
+    def output_schema(self) -> dict[str, Any]: return {}
+    async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+        raise NotImplementedError
+```
+
+---
+
+## 4-10. `adapters/tools/__init__.py`
+
+```python
+# spec 15종
 from .webhook_tool import WebhookTool
 from .http_request_tool import HttpRequestTool
+from .rest_api_tool import RestApiTool
+from .graphql_tool import GraphqlTool
+from .file_read_tool import FileReadTool
+from .file_write_tool import FileWriteTool
+from .file_transform_tool import FileTransformTool
+from .json_transform_tool import JsonTransformTool
+from .text_template_tool import TextTemplateTool
+from .data_mapping_tool import DataMappingTool
+from .conditional_tool import ConditionalTool
+from .loop_tool import LoopTool
+from .delay_tool import DelayTool
+from .email_send_tool import EmailSendTool
+from .slack_notify_tool import SlackNotifyTool
+# 추가 도구 (spec 외)
 from .llm_tool import LLMTool
 from .google_drive_tool import GoogleDriveTool
 from .gmail_tool import GmailTool
@@ -969,26 +1267,15 @@ from .google_sheets_tool import GoogleSheetsTool
 from .slack_tool import SlackTool
 
 ALL_TOOLS = [
-    WebhookTool(),
-    HttpRequestTool(),
-    LLMTool(),
-    GoogleDriveTool(),
-    GmailTool(),
-    GoogleCalendarTool(),
-    GoogleSheetsTool(),
-    SlackTool(),
-]
-
-__all__ = [
-    "WebhookTool",
-    "HttpRequestTool",
-    "LLMTool",
-    "GoogleDriveTool",
-    "GmailTool",
-    "GoogleCalendarTool",
-    "GoogleSheetsTool",
-    "SlackTool",
-    "ALL_TOOLS",
+    # spec 15종
+    WebhookTool(), HttpRequestTool(), RestApiTool(), GraphqlTool(),
+    FileReadTool(), FileWriteTool(), FileTransformTool(),
+    JsonTransformTool(), TextTemplateTool(), DataMappingTool(),
+    ConditionalTool(), LoopTool(), DelayTool(),
+    EmailSendTool(), SlackNotifyTool(),
+    # 추가 도구
+    LLMTool(), GoogleDriveTool(), GmailTool(),
+    GoogleCalendarTool(), GoogleSheetsTool(), SlackTool(),
 ]
 ```
 
