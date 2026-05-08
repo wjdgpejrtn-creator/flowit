@@ -1,6 +1,6 @@
 # REQ-008 Storage — 구현 명세
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|
@@ -45,10 +45,40 @@
 | `ClamAVAdapter` | 바이러스 스캔 (ClamAV daemon) |
 | `LocalStorageAdapter` | 로컬 개발용 파일시스템 저장소 |
 
+### Repository 구현체 (다른 모듈의 Port ABC 구현)
+
+| Repository | 구현하는 Port | 주요 메서드 |
+|-----------|-------------|------------|
+| `PgSessionRepository` | `auth/domain/ports/SessionRepository` | `create(user_id, session_hash, expires_at: datetime) → Session`, `find_by_hash(hash) → Session`, `revoke(session_id)`, `revoke_all_for_user(user_id) → int` |
+| `PgOAuthRepository` | `auth/domain/ports/OAuthConnectionRepository` | `create(user_id, service, tokens) → OAuthConnection`, `get_by_credential_id(id)`, `get_active_for_user(user_id, service)`, `update_tokens(credential_id, tokens)`, `revoke(credential_id)` |
+| `PgNodeDefinitionRepository` | `nodes_graph/domain/ports/NodeDefinitionRepository` | `get_by_id(node_id) → Optional[NodeDefinition]`, `list_all(mvp_only) → list[NodeDefinition]`, `search_by_embedding(query, limit) → list[NodeDefinition]`, `upsert(definition) → NodeDefinition` |
+| `PgAgentMemoryRepository` | `ai_agent/domain/ports/AgentMemoryRepository` | `save(entry: MemoryEntry) → None`, `find_by_user(user_id, limit) → list[MemoryEntry]`, `find_by_session(session_id: UUID, limit: int) → list[MemoryEntry]` |
+| `PgWorkflowRepository` | `execution_engine/domain/ports/` | `get(workflow_id: UUID) → WorkflowSchema`, `save(schema: WorkflowSchema) → UUID`, `get_node_config(node_id: UUID) → NodeConfig` |
+| `PgExecutionRepository` | `execution_engine/domain/ports/` | `save(result: ExecutionResult) → None`, `get(execution_id: UUID) → ExecutionResult`, `update_node_state(execution_id, state: NodeExecutionState) → None` |
+| `PgDocumentRepository` | `doc_parser/domain/ports/` | `save(document: DocumentBlock) → UUID`, `save_chunks(chunks: list[Chunk]) → None`, `save_quality_log(result, document_id) → None` |
+| `PgToolExecutionRepository` | `toolset/domain/ports/ToolExecutionRepository` | `save(record: ToolExecutionRecord) → None`, `find_by_tool(tool_name, limit) → list[ToolExecutionRecord]` |
+| `PgSkillRepository` | 자체 정의 | `upsert(skill) → Skill`, `get_by_id(skill_id) → Skill`, `list(offset, limit) → list[Skill]`, `search(query, embedding, limit) → list[Skill]` (하이브리드: 0.4×FTS + 0.6×vector) |
+
+### Marketplace 하위 도메인
+
+| 레이어 | 클래스 | 설명 |
+|--------|--------|------|
+| domain | `SkillLifecycle` | 상태 머신 (draft→review→approved→published→archived) |
+| domain | `ApprovalWorkflow` | 승인 워크플로우 |
+| application | `PublishSkillUseCase` | 스킬 발행 |
+| application | `SearchSkillsUseCase` | 하이브리드 검색 (0.4×FTS + 0.6×vector) |
+| application | `ApproveSkillUseCase` | 스킬 승인 처리 |
+
 ## 의존성 관계
 
 ```
-upstream:  REQ-002 (PermissionSource 권한 검증), REQ-006 (파싱 대상 원본 파일)
-downstream: REQ-006 (원본 파일 읽기), REQ-010 (파일 다운로드/미리보기)
-infra: GCP Cloud Storage, ClamAV
+upstream:  REQ-002 (PermissionSource 권한 검증, SessionRepository/OAuthConnectionRepository ABC),
+           REQ-003 (NodeDefinitionRepository ABC),
+           REQ-004 (AgentMemoryRepository ABC),
+           REQ-005 (ToolExecutionRepository ABC),
+           REQ-006 (파싱 대상 원본 파일, DocumentRepositoryPort ABC),
+           REQ-012 (common_schemas 도메인 엔티티)
+downstream: REQ-006 (원본 파일 읽기), REQ-007 (ExecutionRepository, WorkflowRepository),
+            REQ-009 (DI 컨테이너 Repository 주입), REQ-010 (파일 다운로드/미리보기)
+infra: GCP Cloud Storage, ClamAV, PostgreSQL + pgvector
 ```

@@ -2,11 +2,11 @@
 
 - **담당자**: 박아름
 - **작성일**: 2026-05-05
-- **참조**: `docs/class_diagram_resolution_proposal.md` (H-1, H-4 확정), `modules/nodes-graph/README.md`
+- **참조**: `docs/class_diagram_resolution_proposal.md` (H-1, H-4 확정), `modules/nodes_graph/README.md`
 
 ---
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|
@@ -31,13 +31,13 @@ from common_schemas.enums import RiskLevel, ErrorCode
 from common_schemas.exceptions import ValidationError, NotFoundError
 ```
 
-**중요 (H-1 합의)**: 이 모듈은 WorkflowSchema, NodeInstance, Edge를 자체 정의하지 않는다. 반드시 common-schemas에서 import한다.
+**중요 (H-1 합의)**: 이 모듈은 WorkflowSchema, NodeInstance, Edge를 자체 정의하지 않는다. 반드시 common_schemas에서 import한다.
 
 ---
 
 ## 이 모듈에서 구현할 클래스
 
-### Domain Layer (`modules/nodes-graph/domain/`)
+### Domain Layer (`modules/nodes_graph/domain/`)
 
 #### entities/node_definition.py — `NodeDefinition`
 
@@ -248,7 +248,7 @@ class NodeDefinitionRepository(ABC):
 
 ---
 
-### Application Layer (`modules/nodes-graph/application/`)
+### Application Layer (`modules/nodes_graph/application/`)
 
 #### use_cases/validate_graph_use_case.py — `ValidateGraphUseCase`
 
@@ -261,7 +261,7 @@ class ValidateGraphUseCase:
     
     async def execute(self, workflow: WorkflowSchema) -> ValidationErrorResponse:
         """
-        1. workflow.validate_graph() — 기본 참조 무결성 (common-schemas 내장)
+        1. workflow.validate_graph() — 기본 참조 무결성 (common_schemas 내장)
         2. GraphValidator.validate() — 정적/의미적 검증
         3. ValidationErrorResponse 반환
         """
@@ -310,7 +310,7 @@ class RegisterNodesUseCase:
 
 ---
 
-### Infrastructure/Adapter Layer (`modules/nodes-graph/adapters/`)
+### Infrastructure/Adapter Layer (`modules/nodes_graph/adapters/`)
 
 #### tool_to_node_wrapper.py — `ToolToNodeWrapper`
 
@@ -356,7 +356,8 @@ from abc import ABC, abstractmethod
 
 class EmbedderPort(ABC):
     """텍스트 → 벡터 임베딩 변환 인터페이스.
-    구현체: BGE-M3 모델 (768차원) — modules/ai-agent 또는 외부 서비스."""
+    구현체: BGE-M3 모델 (768차원) — modules/ai_agent 또는 외부 서비스.
+    ⚠️ 임베딩 차원 변경 시 storage ORM의 Vector 컬럼도 반드시 동기화 (REQ-008)."""
     
     @abstractmethod
     async def embed(self, text: str) -> list[float]:
@@ -387,7 +388,7 @@ class EmbedderPort(ABC):
 
 ```
 Upstream (이 모듈이 의존):
-  ├── packages/common-schemas (REQ-012)
+  ├── packages/common_schemas (REQ-012)
   │     └── WorkflowSchema, NodeInstance, NodeConfig, Edge, Position
   │     └── RiskLevel, ErrorCode
   │     └── ValidationErrorItem, ValidationErrorResponse
@@ -398,12 +399,12 @@ Downstream (이 모듈에 의존):
   ├── modules/auth (REQ-002)
   │     └── NodeDefinitionRepository ABC import
   │     └── CredentialInjectionService가 get_by_id() → NodeDefinition 필드 접근
-  ├── modules/ai-agent (REQ-004)
+  ├── modules/ai_agent (REQ-004)
   │     └── GraphValidator 호출 (워크플로우 생성/수정 시 검증)
   │     └── SearchNodesUseCase (노드 추천)
-  ├── services/execution-engine (REQ-007)
+  ├── services/execution_engine (REQ-007)
   │     └── 위상 정렬로 실행 순서 결정
-  ├── services/api-server (REQ-009)
+  ├── services/api_server (REQ-009)
   │     └── 노드 목록 조회, 그래프 검증 엔드포인트
   └── modules/storage (REQ-008) / database (REQ-001)
         └── NodeDefinitionRepository 구현체 제공
@@ -422,7 +423,7 @@ Downstream (이 모듈에 의존):
 ## 디렉토리 구조 (목표)
 
 ```
-modules/nodes-graph/
+modules/nodes_graph/
 ├── __init__.py
 ├── domain/
 │   ├── entities/

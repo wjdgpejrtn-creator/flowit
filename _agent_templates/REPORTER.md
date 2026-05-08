@@ -87,7 +87,7 @@ docs/reports/{module_name}_report.md
 
 - [ ] 의존성 방향 위반 0건
 - [ ] ORM 모델 도메인 누출 0건
-- [ ] 공유 타입 SSOT 준수 (common-schemas import)
+- [ ] 공유 타입 SSOT 준수 (common_schemas import)
 - [ ] Port/Adapter 분리 유지
 
 ---

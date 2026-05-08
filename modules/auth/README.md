@@ -17,7 +17,7 @@ pip install -e "modules/auth[dev]"
 from auth.domain.services import PermissionResolver, CredentialInjectionService
 from auth.domain.entities import Session, OAuthConnection
 from auth.domain.value_objects import TokenPair
-from auth.domain.ports import SessionRepository, OAuthConnectionRepository, CipherPort
+from auth.domain.ports import SessionRepository, OAuthConnectionRepository, CipherPort, OAuthClientPort
 from auth.application.use_cases import (
     AuthenticateUseCase,
     IssueTokenUseCase,
@@ -62,6 +62,7 @@ from auth.application.use_cases import (
 | | `async update_tokens(credential_id: UUID, new_tokens: dict) → None` | |
 | | `async revoke(credential_id: UUID) → None` | |
 | `CipherPort` | `encrypt(plaintext: bytes) → bytes`, `decrypt(ciphertext: bytes) → bytes` | `auth/adapters/cipher/` (자체 구현) |
+| `OAuthClientPort` | `async exchange_code(code: str) → dict`, `async refresh_access_token(refresh_token: str) → dict`, `async get_user_info(access_token: str) → dict` | `auth/adapters/oauth/` (자체 구현) |
 
 ### application/use_cases
 
@@ -76,22 +77,28 @@ from auth.application.use_cases import (
 
 | 어댑터 | 설명 |
 |--------|------|
-| `AESGCMCipher` | AES-256-GCM 암호화 (CipherPort 구현). `database/src/protocols.py`의 `BaseCipher(typing.Protocol)`도 구조적 만족 (ADR-0004) |
-| `FernetCipher` | Fernet 대칭키 암호화 (CipherPort 구현) |
+| `AESGCMCipher` | AES-256-GCM 암호화 (`CipherPort` 구현). `database/src/protocols.py`의 `BaseCipher(typing.Protocol)`도 구조적 만족 (ADR-0004) |
+| `FernetCipher` | Fernet 대칭키 암호화 (`CipherPort` 구현) |
+
+### adapters/oauth
+
+| 어댑터 | 설명 |
+|--------|------|
+| `GoogleOAuthClient` | Google OAuth 2.0 클라이언트 (`OAuthClientPort` 구현). 코드 교환, 토큰 갱신, 사용자 정보 조회 |
 
 ## 의존 관계
 
 ```
 Upstream (이 모듈이 의존):
-  ├── common-schemas (REQ-012)
+  ├── common_schemas (REQ-012)
   │     └── PermissionSource, PlaintextCredential, RiskLevel, ErrorCode
-  └── nodes-graph (REQ-003)
+  └── nodes_graph (REQ-003)
         └── NodeDefinitionRepository ABC (CredentialInjectionService가 get_by_id 후 필드 접근)
 
 Downstream (이 모듈에 의존):
-  ├── ai-agent (REQ-004)      → CredentialInjectionService 호출
-  ├── api-server (REQ-009)    → AuthMiddleware, JWT 검증
-  ├── execution-engine (REQ-007) → InjectCredentialUseCase 호출
+  ├── ai_agent (REQ-004)      → CredentialInjectionService 호출
+  ├── api_server (REQ-009)    → AuthMiddleware, JWT 검증
+  ├── execution_engine (REQ-007) → InjectCredentialUseCase 호출
   └── storage (REQ-008)       → SessionRepository, OAuthConnectionRepository 구현체 제공
 ```
 

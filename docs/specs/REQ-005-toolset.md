@@ -6,9 +6,9 @@
 
 ---
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
-아래 타입은 `packages/common-schemas`(REQ-012)에서 정의된 SSOT이다. **절대로 모듈 내 재정의 금지.**
+아래 타입은 `packages/common_schemas`(REQ-012)에서 정의된 SSOT이다. **절대로 모듈 내 재정의 금지.**
 
 | 클래스명 | 소스 모듈 | import 경로 | 용도 |
 |----------|-----------|-------------|------|
@@ -110,7 +110,7 @@ class BaseTool(ABC):
     @property
     @abstractmethod
     def risk_level(self) -> RiskLevel:
-        """도구 위험도 등급 (common-schemas에서 import)."""
+        """도구 위험도 등급 (common_schemas에서 import)."""
         ...
 
     @property
@@ -131,16 +131,25 @@ class BaseTool(ABC):
         ...
 ```
 
+#### risk_level 판정 기준
+
+| 등급 | 기준 |
+|------|------|
+| Low | 순수 연산, 외부 부작용 없음 |
+| Medium | 로컬 쓰기 또는 설정된 엔드포인트 호출 (범위 제한, 통제 가능) |
+| High | 사람에게 직접 메시지 전송, 또는 임의 외부 시스템에 비가역적 변경 |
+| Restricted | 관리자 전용 시스템 조작 (현재 해당 없음) |
+
 #### 구체 Tool 구현체 (~15개 클래스)
 
 아래는 구현해야 할 구체 도구 목록이다. 모두 `BaseTool`을 상속한다.
 
 | 카테고리 | 클래스명 | risk_level | 설명 |
 |----------|----------|------------|------|
-| **API 호출** | `HttpRequestTool` | Medium | 범용 HTTP 요청 (GET/POST/PUT/DELETE) |
+| **API 호출** | `HttpRequestTool` | High | 범용 HTTP 요청 (임의 URL, DELETE 포함, 비가역적) |
 | **API 호출** | `RestApiTool` | Medium | REST API 호출 + 응답 파싱 |
 | **API 호출** | `GraphqlTool` | Medium | GraphQL 쿼리/뮤테이션 실행 |
-| **API 호출** | `WebhookTool` | Low | 웹훅 발송 (fire-and-forget) |
+| **API 호출** | `WebhookTool` | High | 웹훅 발송 (fire-and-forget, 외부 엔드포인트 비가역적) |
 | **파일 처리** | `FileReadTool` | Low | 파일 읽기 (텍스트/바이너리) |
 | **파일 처리** | `FileWriteTool` | Medium | 파일 쓰기/생성 |
 | **파일 처리** | `FileTransformTool` | Low | 파일 포맷 변환 (CSV↔JSON, Excel→CSV 등) |
@@ -151,7 +160,7 @@ class BaseTool(ABC):
 | **조건/제어** | `LoopTool` | Medium | 반복 실행 (배열 순회) |
 | **조건/제어** | `DelayTool` | Low | 대기/지연 (sleep) |
 | **알림** | `EmailSendTool` | High | 이메일 발송 |
-| **알림** | `SlackNotifyTool` | Medium | Slack 메시지 전송 |
+| **알림** | `SlackNotifyTool` | High | Slack 메시지 전송 (사람에게 직접, 비가역적) |
 
 > **구현 위치**: `adapters/tools/` 디렉토리에 카테고리별 서브폴더로 배치한다.
 
@@ -161,7 +170,7 @@ class BaseTool(ABC):
 
 | 항목 | 변경 전 | 변경 후 | 사유 |
 |------|---------|---------|------|
-| BaseTool.risk_level 타입 | 자체 Enum 정의 | `RiskLevel` (REQ-012 import) | SSOT 원칙 — common-schemas에 단일 정의 |
+| BaseTool.risk_level 타입 | 자체 Enum 정의 | `RiskLevel` (REQ-012 import) | SSOT 원칙 — common_schemas에 단일 정의 |
 | RuntimeValidator 역할 | 모호 | "도구 실행 시점 I/O 스키마 검증"으로 명확화 | QAEvaluatorService(REQ-004)와 역할 중복 방지 |
 | NodeDef 참조 | 자체 타입 | `NodeConfig` (REQ-012 import) | 클래스명 통일 |
 | ErrorCode | 자체 정의 | REQ-012에서 import | 에러 코드 전역 통일 |
@@ -173,7 +182,7 @@ class BaseTool(ABC):
 ### 이 모듈이 import하는 대상
 
 ```python
-# common-schemas (REQ-012) — 공유 타입
+# common_schemas (REQ-012) — 공유 타입
 from common_schemas import NodeConfig
 from common_schemas.enums import RiskLevel, ErrorCode
 from common_schemas.exceptions import ExecutionError, ValidationError
@@ -181,7 +190,7 @@ from common_schemas.exceptions import ExecutionError, ValidationError
 # auth (REQ-002) — domain/services만 허용
 from auth.domain.services import CredentialInjectionService
 
-# common-schemas 보안 타입
+# common_schemas 보안 타입
 from common_schemas import PermissionSource, PlaintextCredential
 ```
 
@@ -195,8 +204,8 @@ from common_schemas import PermissionSource, PlaintextCredential
 
 | 소비자 | import 대상 | 용도 |
 |--------|-------------|------|
-| `services/execution-engine/` (REQ-007) | `toolset.application.use_cases.ExecuteToolUseCase` | 워크플로우 실행 시 각 노드의 도구 호출 |
-| `services/api-server/` (REQ-009) | `toolset.application.use_cases.ListToolsUseCase` | 도구 카탈로그 API 제공 |
+| `services/execution_engine/` (REQ-007) | `toolset.application.use_cases.ExecuteToolUseCase` | 워크플로우 실행 시 각 노드의 도구 호출 |
+| `services/api_server/` (REQ-009) | `toolset.application.use_cases.ListToolsUseCase` | 도구 카탈로그 API 제공 |
 
 ---
 

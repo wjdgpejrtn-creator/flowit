@@ -1,12 +1,12 @@
 # REQ-007 Execution Engine -- 구현 명세
 
 > 담당: 황대원  
-> 서비스 경로: `services/execution-engine/`  
-> 의존 패키지: `common-schemas >= 0.1.0`, `celery >= 5.3`, `langgraph >= 0.1`
+> 서비스 경로: `services/execution_engine/`  
+> 의존 패키지: `common_schemas >= 0.1.0`, `celery >= 5.3`, `langgraph >= 0.1`
 
 ---
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|
@@ -126,7 +126,7 @@ from common_schemas import (
 | LangGraph StateGraph + Celery 2-Tier 구조 | 워크플로우 실행(사용자 정의)은 Celery 태스크, AI Agent 내부 그래프(REQ-004)는 LangGraph. 역할 분리 확정 | HIGH-003 아키텍처 결정 |
 | 핸드오프 수신 인터페이스 추가 | REQ-004 QA 통과 후 HandoffPayload -> WorkflowRepository.get() -> 디스패치 흐름 확정 | HIGH-004 |
 | credential_id -> REQ-002 주입 | NodeInstance.credential_id를 통해 CredentialProviderPort가 런타임에 복호화된 자격증명 주입 | MEDIUM-001 |
-| `ExecutionStatus` enum common-schemas 사용 | 자체 정의 삭제, common-schemas의 ExecutionStatus(RUNNING/PAUSED/COMPLETED/FAILED) 사용 | HIGH-001 SSOT |
+| `ExecutionStatus` enum common_schemas 사용 | 자체 정의 삭제, common_schemas의 ExecutionStatus(RUNNING/PAUSED/COMPLETED/FAILED) 사용 | HIGH-001 SSOT |
 | WorkflowSchema.validate_graph() 활용 | 실행 전 재검증 시 WorkflowSchema 내장 validate_graph() 호출 + TopologicalScheduler.validate_dag() 보완 | MEDIUM-005 |
 
 ---
@@ -134,18 +134,18 @@ from common_schemas import (
 ## 의존성 관계
 
 ```
-services/execution-engine
+services/execution_engine
 ├── depends on ─────────────────────────────────────────────────────────────
-│   ├── packages/common-schemas   (WorkflowSchema, NodeInstance, Edge, ExecutionStatus, HandoffPayload, EvaluationResult, ErrorCode)
-│   ├── modules/nodes-graph       (REQ-003: GraphValidator -- 실행 전 재검증)
+│   ├── packages/common_schemas   (WorkflowSchema, NodeInstance, Edge, ExecutionStatus, HandoffPayload, EvaluationResult, ErrorCode)
+│   ├── modules/nodes_graph       (REQ-003: GraphValidator -- 실행 전 재검증)
 │   ├── modules/toolset           (REQ-005: ExecuteToolUseCase -- 외부 도구 실행)
-│   ├── modules/ai-agent          (REQ-004: LangGraph 에이전트 노드 실행)
+│   ├── modules/ai_agent          (REQ-004: LangGraph 에이전트 노드 실행)
 │   ├── modules/auth              (REQ-002: CredentialStore -- 자격증명 복호화)
 │   └── modules/storage           (REQ-001: WorkflowRepository, ExecutionRepository)
 │
 ├── depended by ────────────────────────────────────────────────────────────
-│   ├── services/api-server       (Celery task dispatch: execute_workflow.delay())
-│   └── modules/ai-agent          (REQ-004 QA 통과 후 핸드오프 발신 -> 본 서비스가 수신)
+│   ├── services/api_server       (Celery task dispatch: execute_workflow.delay())
+│   └── modules/ai_agent          (REQ-004 QA 통과 후 핸드오프 발신 -> 본 서비스가 수신)
 │
 └── runtime dependencies ───────────────────────────────────────────────────
     ├── Redis                     (Celery broker + result backend + SSE pub/sub)
@@ -158,7 +158,7 @@ services/execution-engine
 ```toml
 [project]
 dependencies = [
-    "common-schemas",
+    "common_schemas",
     "pydantic>=2.0",
     "celery[redis]>=5.3",
     "langgraph>=0.1",
@@ -173,7 +173,7 @@ dependencies = [
 ## 디렉토리 구조 (목표)
 
 ```
-services/execution-engine/
+services/execution_engine/
 ├── Dockerfile
 ├── pyproject.toml
 ├── src/

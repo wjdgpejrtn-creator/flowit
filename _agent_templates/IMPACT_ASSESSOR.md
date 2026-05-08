@@ -44,16 +44,16 @@ git diff main...HEAD --name-only | grep -E "^[^/]+/[^/]+/" | \
 | 모듈 내 표준 계층(domain/application/adapters) 누락 | HIGH | CA 구조 위반 |
 
 **모노레포 허용 폴더 목록**:
-- `packages/common-schemas/`
-- `modules/auth/`, `modules/nodes-graph/`, `modules/ai-agent/`, `modules/toolset/`, `modules/doc-parser/`, `modules/storage/`
-- `services/api-server/`, `services/execution-engine/`, `services/frontend/`
+- `packages/common_schemas/`
+- `modules/auth/`, `modules/nodes_graph/`, `modules/ai_agent/`, `modules/toolset/`, `modules/doc_parser/`, `modules/storage/`
+- `services/api_server/`, `services/execution_engine/`, `services/frontend/`
 - `database/`, `infra/`, `docs/`, `_agent_templates/`, `scripts/`, `.github/`
 
 ---
 
 ### Step 2. 계층별 영향 분석
 
-#### Foundation — packages/common-schemas (REQ-012)
+#### Foundation — packages/common_schemas (REQ-012)
 
 - [ ] Pydantic 모델 필드 추가/삭제/타입 변경
 - [ ] Enum 값 추가/변경 → 모든 소비 모듈 영향
@@ -73,14 +73,14 @@ git diff main...HEAD --name-only | grep -E "^[^/]+/[^/]+/" | \
 - [ ] Repository 구현체 변경 → Port ABC 계약 준수 여부 확인
 - [ ] Mapper 변경 → 도메인 ↔ ORM 변환 정합성
 
-#### API Server — services/api-server (REQ-009)
+#### API Server — services/api_server (REQ-009)
 
 - [ ] 엔드포인트 추가/삭제/경로 변경 → 프론트엔드 영향
 - [ ] 요청/응답 DTO 변경 → 프론트엔드 API 클라이언트 수정
 - [ ] DI 컨테이너 변경 → 의존성 주입 정합성
 - [ ] SSE 프레임 타입 변경 → 프론트엔드 sseParser 수정
 
-#### Execution Engine — services/execution-engine (REQ-007)
+#### Execution Engine — services/execution_engine (REQ-007)
 
 - [ ] TopologicalScheduler 로직 변경 → 실행 순서 영향
 - [ ] Celery 태스크 시그니처 변경 → 큐 백로그 호환성
@@ -90,7 +90,7 @@ git diff main...HEAD --name-only | grep -E "^[^/]+/[^/]+/" | \
 
 - [ ] 컴포넌트 props 변경 → UI 렌더링 영향
 - [ ] Zustand 스토어 상태 구조 변경 → 전체 UI 상태 관리 영향
-- [ ] TypeScript 타입 불일치 → common-schemas 재생성 필요
+- [ ] TypeScript 타입 불일치 → common_schemas 재생성 필요
 
 #### Database — database/ (REQ-001)
 
@@ -107,12 +107,12 @@ git diff main...HEAD --name-only | grep -E "^[^/]+/[^/]+/" | \
 변경이 의존성 방향을 따라 전파되는 경로를 추적한다.
 
 ```
-common-schemas 변경
+common_schemas 변경
   → modules/*/domain/ (import하는 모든 모듈)
   → modules/*/application/ (domain에 의존)
   → modules/storage/ (도메인 모델 변환)
-  → services/api-server/ (DTO/응답 모델)
-  → services/execution-engine/ (실행 상태)
+  → services/api_server/ (DTO/응답 모델)
+  → services/execution_engine/ (실행 상태)
   → services/frontend/ (TypeScript 타입)
 ```
 
@@ -129,14 +129,14 @@ modules/*/domain/ports/ 변경
 
 | 등급 | 기준 | 대응 |
 |------|------|------|
-| HIGH | 기존 데이터 손실 / common-schemas 브레이킹 / Port ABC 시그니처 변경 / 폴더 구조 위반 | 전체 팀 검토 필수 |
+| HIGH | 기존 데이터 손실 / common_schemas 브레이킹 / Port ABC 시그니처 변경 / 폴더 구조 위반 | 전체 팀 검토 필수 |
 | MEDIUM | 단일 모듈 인터페이스 변경 / API 엔드포인트 변경 / 성능 영향 | 담당자 검토 후 병합 |
 | LOW | 신규 추가만 / 내부 로직 개선 / 문서 수정 / 테스트 추가 | 자동 병합 가능 |
 
 ### Step 5. 롤백 계획 수립
 
 - 마이그레이션이 있으면 DOWN 스크립트 존재 여부
-- common-schemas 변경 시 이전 버전 호환 여부 (Optional 필드로 추가했는지)
+- common_schemas 변경 시 이전 버전 호환 여부 (Optional 필드로 추가했는지)
 - 배포 전 DB 스냅샷 필요 여부
 
 ---
@@ -157,7 +157,7 @@ modules/*/domain/ports/ 변경
 | 계층 | 영향 여부 | 상세 |
 |------|-----------|------|
 | 폴더 구조 규칙 | 준수 / 위반 | |
-| common-schemas (SSOT) | 영향 있음 / 해당 없음 | |
+| common_schemas (SSOT) | 영향 있음 / 해당 없음 | |
 | Domain (Port/Entity) | 영향 있음 / 해당 없음 | |
 | Storage (ORM/Repository) | 영향 있음 / 해당 없음 | |
 | API 계약 | 영향 있음 / 해당 없음 | |

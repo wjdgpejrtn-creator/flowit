@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from common_schemas.types import UtcDatetime
+from pydantic import BaseModel
 
 
 class Session(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
     session_id: UUID
     user_id: UUID
     session_hash: str
-    expires_at: datetime
+    expires_at: UtcDatetime
     is_revoked: bool = False
-    created_at: datetime
+    created_at: UtcDatetime
+    device_info: str | None = None
 
-    def is_valid(self) -> bool:
-        return not self.is_revoked and datetime.now(timezone.utc) < self.expires_at
+    def is_expired(self) -> bool:
+        return datetime.now(UTC) >= self.expires_at
+
+    def revoke(self) -> None:
+        self.is_revoked = True

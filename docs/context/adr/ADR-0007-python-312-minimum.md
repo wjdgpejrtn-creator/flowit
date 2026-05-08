@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-05-05
 - **Deciders**: @dhwang0803-glitch
-- **Tags**: area/infra, area/common-schemas
+- **Tags**: area/infra, area/common_schemas
 
 ## Context
 
@@ -18,7 +18,7 @@
 **모든 패키지와 서비스의 `requires-python`을 `>=3.12`로 통일한다.**
 
 적용 범위:
-- `packages/common-schemas/python/pyproject.toml`
+- `packages/common_schemas/python/pyproject.toml`
 - `.github/workflows/codegen-drift.yml` (CI Python 버전)
 - 향후 추가되는 모든 `pyproject.toml` / `Dockerfile`
 
