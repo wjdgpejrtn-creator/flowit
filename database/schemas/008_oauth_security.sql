@@ -1,26 +1,18 @@
 -- 008_oauth_security.sql
--- OAuth connections (encrypted tokens) and security audit log
+-- OAuth connections (Spec: OAuthConnection entity) and security audit log
 
--- ============================================================
--- oauth_connections
--- ============================================================
 CREATE TABLE oauth_connections (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id                 UUID NOT NULL REFERENCES users(id),
-    credential_id           UUID REFERENCES credentials(id),
+    oauth_id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                 UUID NOT NULL REFERENCES users(user_id),
     service                 VARCHAR(50) NOT NULL,
-    access_token_encrypted  BYTEA,
+    credential_id           UUID NOT NULL UNIQUE REFERENCES credentials(credential_id),
+    access_token_encrypted  BYTEA NOT NULL,
     refresh_token_encrypted BYTEA,
-    token_expires_at        TIMESTAMPTZ,
-    scopes                  JSONB DEFAULT '[]'::JSONB,
+    scopes                  TEXT[] NOT NULL DEFAULT '{}',
     is_active               BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    connected_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_refreshed_at       TIMESTAMPTZ
 );
-
-CREATE TRIGGER set_oauth_connections_updated_at
-    BEFORE UPDATE ON oauth_connections
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
 CREATE INDEX idx_oauth_connections_user_id ON oauth_connections(user_id);
 CREATE INDEX idx_oauth_connections_service ON oauth_connections(service);
@@ -31,8 +23,8 @@ CREATE UNIQUE INDEX idx_oauth_connections_user_service_active
 -- security_logs (append-only audit trail)
 -- ============================================================
 CREATE TABLE security_logs (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID REFERENCES users(id),
+    log_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID REFERENCES users(user_id),
     event_type      VARCHAR(100) NOT NULL,
     ip_address      INET,
     user_agent      TEXT,

@@ -36,7 +36,7 @@ async def test_store_and_retrieve(db_session):
 
     store = CredentialStore(db_session, cipher)
     cred_id = await store.store(
-        user_id=user.id,
+        user_id=user.user_id,
         name="My API Key",
         credential_kind="api_key",
         plaintext=b"secret-api-key-12345",
@@ -55,7 +55,7 @@ async def test_delete_credential(db_session):
 
     store = CredentialStore(db_session, cipher)
     cred_id = await store.store(
-        user_id=user.id,
+        user_id=user.user_id,
         name="Temp Key",
         credential_kind="password",
         plaintext=b"temp-pass",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from src.models.marketplace import SkillReviewModel
 from src.models.skill import SkillModel, SkillStatsModel
@@ -14,18 +14,14 @@ class MarketplaceSkillRepository(BaseRepository[SkillModel]):
     async def search(
         self,
         query_embedding: list[float] | None = None,
-        scope_filter: str | None = None,
-        category: str | None = None,
         tags: list[str] | None = None,
         sort_by: str = "relevance",
         top_k: int = 20,
     ) -> Sequence[SkillModel]:
-        stmt = select(self.model).where(self.model.status == "approved")
+        stmt = select(self.model).where(
+            self.model.lifecycle_state == "approved"
+        )
 
-        if scope_filter:
-            stmt = stmt.where(self.model.scope == scope_filter)
-        if category:
-            stmt = stmt.where(self.model.category == category)
         if tags:
             stmt = stmt.where(self.model.tags.contains(tags))
 

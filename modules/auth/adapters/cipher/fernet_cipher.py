@@ -4,10 +4,10 @@ import os
 
 from cryptography.fernet import Fernet
 
-from .base_cipher import BaseCipher
+from ...domain.ports.cipher_port import CipherPort
 
 
-class FernetCipher(BaseCipher):
+class FernetCipher(CipherPort):
     def __init__(self, key: bytes | None = None) -> None:
         if key is None:
             key = os.getenv("FERNET_KEY", "").encode()

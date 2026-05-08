@@ -1,15 +1,12 @@
 -- 004_approval_notifications.sql
 -- Workflow/skill approval requests and user notifications
 
--- ============================================================
--- approvals
--- ============================================================
 CREATE TABLE approvals (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workflow_id     UUID REFERENCES workflows(id),
+    approval_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workflow_id     UUID REFERENCES workflows(workflow_id),
     skill_id        UUID,
-    requester_id    UUID NOT NULL REFERENCES users(id),
-    approver_id     UUID REFERENCES users(id),
+    requester_id    UUID NOT NULL REFERENCES users(user_id),
+    approver_id     UUID REFERENCES users(user_id),
     status          VARCHAR(20) NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
     comment         TEXT,
@@ -21,12 +18,9 @@ CREATE INDEX idx_approvals_requester_id ON approvals(requester_id);
 CREATE INDEX idx_approvals_approver_id ON approvals(approver_id);
 CREATE INDEX idx_approvals_status ON approvals(status) WHERE status = 'pending';
 
--- ============================================================
--- notifications
--- ============================================================
 CREATE TABLE notifications (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id),
+    notification_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES users(user_id),
     type            VARCHAR(50) NOT NULL,
     title           VARCHAR(300) NOT NULL,
     body            TEXT,

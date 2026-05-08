@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.chat import ChatSessionModel
+from src.models.chat import SessionModel
 
 
 class SessionManager:
@@ -32,18 +32,16 @@ class SessionManager:
     async def create_session(
         self,
         user_id: uuid.UUID,
-        kind: str = "chat",
         session_hash: str | None = None,
-    ) -> ChatSessionModel:
+    ) -> SessionModel:
         await self._evict_oldest(user_id)
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(seconds=self._ttl_max)
         hash_value = session_hash or uuid.uuid4().hex
 
-        instance = ChatSessionModel(
+        instance = SessionModel(
             user_id=user_id,
             session_hash=hash_value,
-            kind=kind,
             expires_at=expires_at,
         )
         self._session.add(instance)
@@ -53,38 +51,36 @@ class SessionManager:
 
     async def resume_or_create(
         self, user_id: uuid.UUID, session_hash: str | None = None
-    ) -> ChatSessionModel:
+    ) -> SessionModel:
         if session_hash:
-            stmt = select(ChatSessionModel).where(
-                ChatSessionModel.session_hash == session_hash,
-                ChatSessionModel.is_revoked.is_(False),
+            stmt = select(SessionModel).where(
+                SessionModel.session_hash == session_hash,
+                SessionModel.is_revoked.is_(False),
             )
             result = await self._session.execute(stmt)
             existing = result.scalars().first()
             if existing and existing.expires_at > datetime.now(timezone.utc):
-                existing.last_activity_at = datetime.now(timezone.utc)
-                await self._session.flush()
                 return existing
         return await self.create_session(user_id)
 
     async def _evict_oldest(self, user_id: uuid.UUID) -> None:
         stmt = (
-            select(ChatSessionModel)
+            select(SessionModel)
             .where(
-                ChatSessionModel.user_id == user_id,
-                ChatSessionModel.is_revoked.is_(False),
+                SessionModel.user_id == user_id,
+                SessionModel.is_revoked.is_(False),
             )
-            .order_by(ChatSessionModel.last_activity_at.desc())
+            .order_by(SessionModel.created_at.desc())
         )
         result = await self._session.execute(stmt)
         sessions = result.scalars().all()
 
         if len(sessions) >= self._max_sessions:
             to_revoke = sessions[self._max_sessions - 1 :]
-            ids = [s.id for s in to_revoke]
+            ids = [s.session_id for s in to_revoke]
             revoke_stmt = (
-                update(ChatSessionModel)
-                .where(ChatSessionModel.id.in_(ids))
+                update(SessionModel)
+                .where(SessionModel.session_id.in_(ids))
                 .values(is_revoked=True)
             )
             await self._session.execute(revoke_stmt)

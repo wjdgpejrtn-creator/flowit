@@ -1,11 +1,7 @@
--- 001_core.sql: users, departments, workflows, executions
--- Foundation tables for the entire platform
+-- 001_core.sql: extensions, trigger helper, departments, users, workflows, executions
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- ============================================================
--- Trigger function for auto-updating updated_at
--- ============================================================
 CREATE OR REPLACE FUNCTION trigger_set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -18,22 +14,22 @@ $$ LANGUAGE plpgsql;
 -- departments
 -- ============================================================
 CREATE TABLE departments (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name        VARCHAR(100) NOT NULL UNIQUE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    department_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(100) NOT NULL UNIQUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ============================================================
 -- users
 -- ============================================================
 CREATE TABLE users (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email           VARCHAR(255) NOT NULL UNIQUE,
     name            VARCHAR(100) NOT NULL,
-    role            VARCHAR(20) NOT NULL DEFAULT 'user'
-                    CHECK (role IN ('user', 'admin')),
+    role            VARCHAR(20) NOT NULL DEFAULT 'User'
+                    CHECK (role IN ('User', 'Admin')),
     department      VARCHAR(100),
-    department_id   UUID REFERENCES departments(id),
+    department_id   UUID REFERENCES departments(department_id),
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -47,11 +43,11 @@ CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_department_id ON users(department_id);
 
 -- ============================================================
--- workflows
+-- workflows  (Spec: WorkflowSchema + DB ownership)
 -- ============================================================
 CREATE TABLE workflows (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id                 UUID NOT NULL REFERENCES users(id),
+    workflow_id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                 UUID NOT NULL REFERENCES users(user_id),
     name                    VARCHAR(200) NOT NULL,
     description             TEXT,
     scope                   VARCHAR(20) NOT NULL DEFAULT 'private'
@@ -76,18 +72,18 @@ CREATE INDEX idx_workflows_scope ON workflows(scope);
 CREATE INDEX idx_workflows_is_draft ON workflows(is_draft) WHERE is_draft = TRUE;
 
 -- ============================================================
--- executions
+-- executions  (Spec: ExecutionResult + ExecutionContext.user_id)
 -- ============================================================
 CREATE TABLE executions (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workflow_id     UUID NOT NULL REFERENCES workflows(id),
-    user_id         UUID NOT NULL REFERENCES users(id),
+    execution_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workflow_id     UUID NOT NULL REFERENCES workflows(workflow_id),
+    user_id         UUID NOT NULL REFERENCES users(user_id),
     status          VARCHAR(30) NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'running', 'success', 'failed', 'cancelled', 'timeout')),
+                    CHECK (status IN ('pending', 'running', 'paused', 'completed', 'failed', 'cancelled')),
     node_results    JSONB NOT NULL DEFAULT '{}'::JSONB,
-    error_message   TEXT,
+    error           TEXT,
     started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    finished_at     TIMESTAMPTZ
+    completed_at    TIMESTAMPTZ
 );
 
 CREATE INDEX idx_executions_workflow_id ON executions(workflow_id);

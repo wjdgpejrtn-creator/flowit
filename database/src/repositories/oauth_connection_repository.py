@@ -40,7 +40,7 @@ class OAuthConnectionRepository(BaseRepository[OAuthConnectionModel]):
             values["refresh_token_encrypted"] = refresh_token_encrypted
         stmt = (
             update(self.model)
-            .where(self.model.id == connection_id)
+            .where(self.model.oauth_id == connection_id)
             .values(**values)
         )
         await self.session.execute(stmt)
@@ -49,7 +49,7 @@ class OAuthConnectionRepository(BaseRepository[OAuthConnectionModel]):
     async def revoke(self, connection_id: uuid.UUID) -> None:
         stmt = (
             update(self.model)
-            .where(self.model.id == connection_id)
+            .where(self.model.oauth_id == connection_id)
             .values(is_active=False)
         )
         await self.session.execute(stmt)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Integer, String, func
+from sqlalchemy import DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,8 +20,10 @@ class CheckpointModel(Base):
     parent_checkpoint_id: Mapped[str | None] = mapped_column(String(200))
     type: Mapped[str | None] = mapped_column(String(50))
     checkpoint: Mapped[dict] = mapped_column(JSONB)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, server_default="'{}'::jsonb")
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    metadata_json: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, server_default="'{}'::jsonb"
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CheckpointWriteModel(Base):

@@ -5,8 +5,8 @@
 -- credentials
 -- ============================================================
 CREATE TABLE credentials (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id),
+    credential_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES users(user_id),
     name            VARCHAR(200) NOT NULL,
     credential_kind VARCHAR(50) NOT NULL
                     CHECK (credential_kind IN ('api_key', 'oauth_token', 'password', 'certificate', 'custom')),
@@ -28,7 +28,7 @@ CREATE INDEX idx_credentials_kind ON credentials(credential_kind);
 -- agents
 -- ============================================================
 CREATE TABLE agents (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(200) NOT NULL,
     agent_type      VARCHAR(50) NOT NULL,
     public_key      TEXT,
@@ -48,15 +48,19 @@ CREATE TRIGGER set_agents_updated_at
 -- webhook_registry
 -- ============================================================
 CREATE TABLE webhook_registry (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID NOT NULL REFERENCES users(id),
-    workflow_id     UUID REFERENCES workflows(id),
+    webhook_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES users(user_id),
+    name            VARCHAR(200) NOT NULL,
     url             TEXT NOT NULL,
-    event_type      VARCHAR(100) NOT NULL,
     secret_hash     VARCHAR(128),
+    events          TEXT[] NOT NULL DEFAULT '{}',
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TRIGGER set_webhook_registry_updated_at
+    BEFORE UPDATE ON webhook_registry
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
 CREATE INDEX idx_webhook_registry_user_id ON webhook_registry(user_id);
-CREATE INDEX idx_webhook_registry_event_type ON webhook_registry(event_type);

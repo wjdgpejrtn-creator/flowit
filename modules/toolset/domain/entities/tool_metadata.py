@@ -7,7 +7,7 @@ from uuid import UUID
 from common_schemas.enums import RiskLevel
 
 if TYPE_CHECKING:
-    from .base_tool import BaseTool
+    from ..base_tool import BaseTool
 
 
 @dataclass(frozen=True)
@@ -23,11 +23,11 @@ class ToolMetadata:
     is_enabled: bool = True
 
     @classmethod
-    def from_tool(cls, tool: BaseTool, tool_id: UUID, version: str, category: str) -> ToolMetadata:
+    def from_tool(cls, tool: BaseTool, tool_id: UUID, category: str) -> ToolMetadata:
         return cls(
             tool_id=tool_id,
             name=tool.name,
-            version=version,
+            version=tool.version,
             category=category,
             description=tool.description,
             risk_level=tool.risk_level,

@@ -1,8 +1,8 @@
-import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from auth.application.use_cases.issue_token import IssueTokenUseCase
+import pytest
+from auth.application.use_cases.issue_token_use_case import IssueTokenUseCase
 from common_schemas.exceptions import AuthorizationError
 
 
@@ -18,8 +18,8 @@ class FakeJWT:
 
 @pytest.mark.asyncio
 async def test_issue_token_returns_token_pair(session_repo):
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-    session = await session_repo.create(uuid4(), "hash_abc", expires_at)
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
+    await session_repo.create(uuid4(), "hash_abc", expires_at=expires_at)
 
     uc = IssueTokenUseCase(session_repo, FakeJWT())
     pair = await uc.execute("hash_abc")
@@ -31,8 +31,8 @@ async def test_issue_token_returns_token_pair(session_repo):
 
 @pytest.mark.asyncio
 async def test_issue_token_encodes_correct_type(session_repo):
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-    await session_repo.create(uuid4(), "hash_xyz", expires_at)
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
+    await session_repo.create(uuid4(), "hash_xyz", expires_at=expires_at)
 
     jwt = FakeJWT()
     uc = IssueTokenUseCase(session_repo, jwt)
@@ -47,8 +47,8 @@ async def test_issue_token_encodes_correct_type(session_repo):
 
 @pytest.mark.asyncio
 async def test_issue_token_revoked_session_raises(session_repo):
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-    session = await session_repo.create(uuid4(), "hash_revoked", expires_at)
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
+    session = await session_repo.create(uuid4(), "hash_revoked", expires_at=expires_at)
     await session_repo.revoke(session.session_id)
 
     uc = IssueTokenUseCase(session_repo, FakeJWT())
@@ -59,8 +59,8 @@ async def test_issue_token_revoked_session_raises(session_repo):
 
 @pytest.mark.asyncio
 async def test_issue_token_expired_session_raises(session_repo):
-    expired_at = datetime.now(timezone.utc) - timedelta(seconds=1)
-    await session_repo.create(uuid4(), "hash_expired", expired_at)
+    expired_at = datetime.now(UTC) - timedelta(seconds=1)
+    await session_repo.create(uuid4(), "hash_expired", expires_at=expired_at)
 
     uc = IssueTokenUseCase(session_repo, FakeJWT())
     with pytest.raises(AuthorizationError) as exc_info:

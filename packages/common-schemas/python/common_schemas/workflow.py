@@ -51,6 +51,15 @@ class NodeConfig(BaseModel):
     is_mvp: bool
 
 
+class NodeExecutionState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    node_instance_id: UUID
+    status: Literal["pending", "running", "succeeded", "failed", "retrying", "cancelled"]
+    attempt: int = 0
+    last_error: Optional[str] = None
+
+
 class WorkflowSchema(BaseModel):
     model_config = ConfigDict(frozen=True)
 

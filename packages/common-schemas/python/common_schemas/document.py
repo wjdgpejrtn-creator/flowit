@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from .types import UtcDatetime
+
 
 class BBox(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -52,7 +54,7 @@ class FileMeta(BaseModel):
     file_size: int
     page_count: Optional[int] = None
     unit_type: Optional[str] = None
-    created_at: Optional[datetime] = None
+    created_at: Optional[UtcDatetime] = None
     author: Optional[str] = None
     sheet_meta: Optional[list[SheetMeta]] = None
 

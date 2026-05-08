@@ -1,5 +1,4 @@
-﻿from .aesgcm_cipher import AESGCMCipher
-from .base_cipher import BaseCipher
+﻿from .aes_gcm import AESGCMCipher
 from .fernet_cipher import FernetCipher
 
-__all__ = ["BaseCipher", "AESGCMCipher", "FernetCipher"]
+__all__ = ["AESGCMCipher", "FernetCipher"]

@@ -15,7 +15,7 @@ class AgentRepository(BaseRepository[AgentModel]):
     async def heartbeat(self, agent_id: uuid.UUID) -> None:
         stmt = (
             update(self.model)
-            .where(self.model.id == agent_id)
+            .where(self.model.agent_id == agent_id)
             .values(last_heartbeat=func.now(), status="active")
         )
         await self.session.execute(stmt)

@@ -7,18 +7,19 @@ from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.base import Base, TimestampMixin, UUIDMixin
+from src.models.base import Base, TimestampMixin, uuid_pk
 
 if TYPE_CHECKING:
     from src.models.user import UserModel
     from src.models.execution import ExecutionModel
 
 
-class WorkflowModel(UUIDMixin, TimestampMixin, Base):
+class WorkflowModel(TimestampMixin, Base):
     __tablename__ = "workflows"
 
+    workflow_id: Mapped[uuid.UUID] = uuid_pk("workflow_id")
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id")
+        UUID(as_uuid=True), ForeignKey("users.user_id")
     )
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)

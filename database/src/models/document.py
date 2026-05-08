@@ -4,46 +4,40 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.models.base import Base, UUIDMixin
+from src.models.base import Base, uuid_pk
 
 
-class DocumentModel(UUIDMixin, Base):
+class DocumentModel(Base):
     __tablename__ = "documents"
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id")
-    )
-    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("workflows.id")
-    )
-    filename: Mapped[str] = mapped_column(String(500))
-    mime_type: Mapped[str] = mapped_column(String(100))
-    file_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    storage_path: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), server_default="pending")
-    metadata: Mapped[dict | None] = mapped_column(JSONB, server_default="'{}'::jsonb")
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    document_id: Mapped[uuid.UUID] = uuid_pk("document_id")
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    file_meta: Mapped[dict] = mapped_column(JSONB)
+    parser_meta: Mapped[dict | None] = mapped_column(JSONB)
+    blocks: Mapped[list] = mapped_column(JSONB, server_default="'[]'::jsonb")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    blocks: Mapped[list[DocumentBlockModel]] = relationship(
+    chunks: Mapped[list[DocumentChunkModel]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
     )
 
 
-class DocumentBlockModel(UUIDMixin, Base):
-    __tablename__ = "document_blocks"
+class DocumentChunkModel(Base):
+    __tablename__ = "document_chunks"
 
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
+    chunk_id: Mapped[uuid.UUID] = uuid_pk("chunk_id")
+    parent_document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.document_id", ondelete="CASCADE")
     )
-    block_index: Mapped[int] = mapped_column(Integer)
-    block_type: Mapped[str] = mapped_column(String(30))
-    content: Mapped[str] = mapped_column(Text)
-    embedding = mapped_column(Vector(1024), nullable=True)
-    metadata: Mapped[dict | None] = mapped_column(JSONB, server_default="'{}'::jsonb")
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    block_data: Mapped[dict] = mapped_column(JSONB)
+    importance_score: Mapped[float | None] = mapped_column(Float)
+    embedding = mapped_column(Vector(768), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    document: Mapped[DocumentModel] = relationship(back_populates="blocks")
+    document: Mapped[DocumentModel] = relationship(back_populates="chunks")

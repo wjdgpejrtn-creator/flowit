@@ -13,7 +13,7 @@ from src.models.node_definition import NodeDefinitionModel
 from src.repositories.node_definition_repository import NodeDefinitionRepository
 
 
-def _random_embedding(dim: int = 1024) -> list[float]:
+def _random_embedding(dim: int = 768) -> list[float]:
     """Generate a normalized random embedding vector."""
     import random
     vec = [random.gauss(0, 1) for _ in range(dim)]
@@ -31,13 +31,13 @@ async def test_vector_search_returns_results(db_session):
     await repo.upsert(
         node_type="test_node_a",
         category="action",
-        display_name="Test Node A",
+        name="Test Node A",
         embedding=emb1,
     )
     await repo.upsert(
         node_type="test_node_b",
         category="trigger",
-        display_name="Test Node B",
+        name="Test Node B",
         embedding=emb2,
     )
 
@@ -54,7 +54,7 @@ async def test_reembed_updates_vector(db_session):
     await repo.upsert(
         node_type="reembed_test",
         category="utility",
-        display_name="Reembed Test",
+        name="Reembed Test",
         embedding=old_emb,
     )
 
@@ -68,7 +68,7 @@ async def test_reembed_updates_vector(db_session):
     node = result.scalars().first()
 
     new_emb = _random_embedding()
-    await repo.reembed(node.id, new_emb)
+    await repo.reembed(node.node_id, new_emb)
     await db_session.refresh(node)
 
     assert list(node.embedding) != old_emb

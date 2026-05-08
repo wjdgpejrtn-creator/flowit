@@ -3,7 +3,7 @@ from __future__ import annotations
 from common_schemas.exceptions import AuthorizationError
 from common_schemas.security import PermissionSource
 
-from ..entities.base_tool import BaseTool
+from ..base_tool import BaseTool
 
 _RISK_ORDER = ["Low", "Medium", "High", "Restricted"]
 
@@ -22,7 +22,7 @@ class RiskAssessmentService:
         if tool_idx > ceiling_idx:
             raise AuthorizationError(
                 message=(
-                    f"Tool '{tool.tool_id}' requires risk level '{tool.risk_level.value}', "
+                    f"Tool '{tool.name}' requires risk level '{tool.risk_level.value}', "
                     f"but user's ceiling is '{context.risk_ceiling}'."
                 ),
                 code="E_PERMISSION_DENIED",

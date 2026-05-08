@@ -4,21 +4,21 @@ import uuid
 
 from sqlalchemy import select, update
 
-from src.models.chat import ChatSessionModel
+from src.models.chat import SessionModel
 from src.repositories.base import BaseRepository
 
 
-class SessionRepository(BaseRepository[ChatSessionModel]):
+class SessionRepository(BaseRepository[SessionModel]):
     """H-3 contract: implements REQ-002 session ABC signatures."""
 
     async def create_session(
         self, user_id: uuid.UUID, session_hash: str, **kwargs
-    ) -> ChatSessionModel:
+    ) -> SessionModel:
         return await self.create(
             user_id=user_id, session_hash=session_hash, **kwargs
         )
 
-    async def find_by_hash(self, session_hash: str) -> ChatSessionModel | None:
+    async def find_by_hash(self, session_hash: str) -> SessionModel | None:
         stmt = select(self.model).where(
             self.model.session_hash == session_hash,
             self.model.is_revoked.is_(False),
@@ -29,7 +29,7 @@ class SessionRepository(BaseRepository[ChatSessionModel]):
     async def revoke(self, session_id: uuid.UUID) -> None:
         stmt = (
             update(self.model)
-            .where(self.model.id == session_id)
+            .where(self.model.session_id == session_id)
             .values(is_revoked=True)
         )
         await self.session.execute(stmt)

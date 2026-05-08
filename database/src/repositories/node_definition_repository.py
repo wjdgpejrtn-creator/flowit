@@ -15,7 +15,6 @@ class NodeDefinitionRepository(BaseRepository[NodeDefinitionModel]):
     ) -> Sequence[NodeDefinitionModel]:
         stmt = (
             select(self.model)
-            .where(self.model.is_active.is_(True))
             .order_by(self.model.embedding.cosine_distance(query_vec))
             .limit(top_k)
         )
