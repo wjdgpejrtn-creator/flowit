@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "doc-parser"
+name = "doc_parser"
 version = "0.1.0"
 description = "REQ-006: 7종 문서 파서, 청킹, 품질 게이트"
 requires-python = ">=3.11"
@@ -11,7 +11,7 @@ dependencies = [
     # 공통
     "pydantic>=2.0",
     "pyyaml>=6.0",
-    # common-schemas 는 로컬 패키지 → pip install -e packages/common-schemas/python
+    # common_schemas 는 로컬 패키지 → pip install -e packages/common_schemas/python
     # PDF
     "pymupdf>=1.23",
     "pdfplumber>=0.10",

@@ -13,11 +13,11 @@ select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = [
-    "services/api-server/tests",
-    "services/execution-engine/tests",
+    "services/api_server/tests",
+    "services/execution_engine/tests",
     "modules/*/tests",
     "database/tests",
-    "packages/common-schemas/python/tests",
+    "packages/common_schemas/python/tests",
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"

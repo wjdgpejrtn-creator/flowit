@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/services/chunking_service.py
+REQ-006 doc_parser — domain/services/chunking_service.py
 
 청킹 서비스
 청킹 전략 우선순위:

@@ -15,9 +15,9 @@ source .venv/bin/activate  # Linux/Mac
 .venv\Scripts\activate     # Windows
 
 # 각 모듈 개발 모드 설치
-pip install -e packages/common-schemas/python
+pip install -e packages/common_schemas/python
 pip install -e "modules/auth[dev]"
-pip install -e "modules/nodes-graph[dev]"
+pip install -e "modules/nodes_graph[dev]"
 # ... 각 모듈별로 설치
 ```
 
@@ -25,31 +25,31 @@ pip install -e "modules/nodes-graph[dev]"
 
 ## 모듈별 실행 순서
 
-### 1단계: Foundation — common-schemas
+### 1단계: Foundation — common_schemas
 
 ```bash
-pytest packages/common-schemas/python/tests/ -v 2>&1
-ruff check packages/common-schemas/python/
+pytest packages/common_schemas/python/tests/ -v 2>&1
+ruff check packages/common_schemas/python/
 ```
 
-common-schemas가 FAIL이면 나머지 모듈 테스트를 진행하지 않는다.
+common_schemas가 FAIL이면 나머지 모듈 테스트를 진행하지 않는다.
 
 ### 2단계: Domain Modules
 
 ```bash
 # 각 모듈의 domain 레이어 (순수 단위 테스트, 외부 의존 없음)
 pytest modules/auth/tests/unit/domain/ -v 2>&1
-pytest modules/nodes-graph/tests/unit/domain/ -v 2>&1
-pytest modules/ai-agent/tests/unit/domain/ -v 2>&1
+pytest modules/nodes_graph/tests/unit/domain/ -v 2>&1
+pytest modules/ai_agent/tests/unit/domain/ -v 2>&1
 pytest modules/toolset/tests/unit/domain/ -v 2>&1
-pytest modules/doc-parser/tests/unit/domain/ -v 2>&1
+pytest modules/doc_parser/tests/unit/domain/ -v 2>&1
 
 # 각 모듈의 application 레이어 (Port mock)
 pytest modules/auth/tests/unit/application/ -v 2>&1
-pytest modules/nodes-graph/tests/unit/application/ -v 2>&1
-pytest modules/ai-agent/tests/unit/application/ -v 2>&1
+pytest modules/nodes_graph/tests/unit/application/ -v 2>&1
+pytest modules/ai_agent/tests/unit/application/ -v 2>&1
 pytest modules/toolset/tests/unit/application/ -v 2>&1
-pytest modules/doc-parser/tests/unit/application/ -v 2>&1
+pytest modules/doc_parser/tests/unit/application/ -v 2>&1
 ```
 
 ### 3단계: Storage — 통합 테스트 (DB 필요)
@@ -64,11 +64,11 @@ DB 연결 실패 시 재시도 없이 즉시 Orchestrator에 보고한다.
 ### 4단계: Services
 
 ```bash
-# api-server (httpx TestClient)
-pytest services/api-server/tests/ -v 2>&1
+# api_server (httpx TestClient)
+pytest services/api_server/tests/ -v 2>&1
 
-# execution-engine (Celery eager mode)
-pytest services/execution-engine/tests/ -v 2>&1
+# execution_engine (Celery eager mode)
+pytest services/execution_engine/tests/ -v 2>&1
 ```
 
 ### 5단계: Frontend
@@ -109,7 +109,7 @@ echo "PASS: $pass_count, FAIL: $fail_count, SKIP: $skip_count"
 ## Lint 검증 (모든 Python 모듈 공통)
 
 ```bash
-ruff check modules/ packages/ services/api-server/ services/execution-engine/ --config pyproject.toml
+ruff check modules/ packages/ services/api_server/ services/execution_engine/ --config pyproject.toml
 ```
 
 Ruff 규칙: `line-length=120`, Python ≥ 3.11
@@ -126,7 +126,7 @@ Ruff 규칙: `line-length=120`, Python ≥ 3.11
 [모듈별 결과]
 | 모듈 | 전체 | PASS | FAIL | SKIP |
 |------|------|------|------|------|
-| common-schemas | X | X | X | X |
+| common_schemas | X | X | X | X |
 | auth/domain | X | X | X | X |
 | auth/application | X | X | X | X |
 | ... | | | | |

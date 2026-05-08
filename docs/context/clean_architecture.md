@@ -22,7 +22,7 @@
 
 | 원칙 | 출처 | Clean Architecture 매핑 |
 |------|------|------------------------|
-| SSOT | 교차분석 확정 | `packages/common-schemas/`가 공유 Entity·VO·Enum의 단일 정의 |
+| SSOT | 교차분석 확정 | `packages/common_schemas/`가 공유 Entity·VO·Enum의 단일 정의 |
 | 도메인 소유권 | 교차분석 확정 | 각 모듈 `domain/ports/`에서 ABC를 정의, 소유 모듈이 인터페이스를 결정 |
 | 합집합 확장 | 교차분석 확정 | SSOT 엔티티에 Optional 필드로 합집합 반영 |
 | import 규칙 | ADR-0001 | `services/* → modules/* → packages/*` (Clean Architecture 의존성 방향과 일치) |
@@ -44,20 +44,20 @@
 ├─────────────────────────────────────────────────────────────────────┤
 │  Interface Adapters                                                 │
 │                                                                     │
-│  services/api-server/         REQ-009  Inbound (HTTP → Use Case)   │
-│  services/execution-engine/   REQ-007  Inbound (Celery → Use Case) │
+│  services/api_server/         REQ-009  Inbound (HTTP → Use Case)   │
+│  services/execution_engine/   REQ-007  Inbound (Celery → Use Case) │
 │  modules/storage/             REQ-008  Outbound (Use Case → DB)    │
 │  modules/*/adapters/          각 REQ   외부 SDK·프레임워크 래핑      │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Application (Use Cases)                                            │
 │                                                                     │
 │  modules/*/application/       REQ-002~006  유스케이스 오케스트레이션 │
-│  services/execution-engine/   REQ-007      워크플로우 실행 유스케이스 │
+│  services/execution_engine/   REQ-007      워크플로우 실행 유스케이스 │
 │       src/application/                                              │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Domain (Entities)                                                  │
 │                                                                     │
-│  packages/common-schemas/     REQ-012  공유 Entity·VO·Enum (SSOT)  │
+│  packages/common_schemas/     REQ-012  공유 Entity·VO·Enum (SSOT)  │
 │  modules/*/domain/            각 REQ   모듈 전용 도메인 로직         │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -67,13 +67,13 @@
 ```
                     ┌──────────────────────┐
                     │ packages/            │
-                    │   common-schemas/    │  ← 최내곽: 아무것도 import하지 않음
+                    │   common_schemas/    │  ← 최내곽: 아무것도 import하지 않음
                     │   (REQ-012 SSOT)     │     (Pydantic v2만 예외 허용)
                     └──────────┬───────────┘
                                │ import
               ┌────────────────┼────────────────┐
               ▼                ▼                ▼
-    modules/auth/      modules/ai-agent/   modules/doc-parser/
+    modules/auth/      modules/ai_agent/   modules/doc_parser/
       domain/            domain/              domain/
       ├── ports/  ◄──── 안쪽이 인터페이스 정의
       ├── entities/
@@ -87,8 +87,8 @@
     modules/storage/             ← Repository 구현체 제공
               │ import
               ▼
-    services/api-server/         ← DI로 조립, HTTP 라우팅
-    services/execution-engine/   ← DI로 조립, Celery 디스패치
+    services/api_server/         ← DI로 조립, HTTP 라우팅
+    services/execution_engine/   ← DI로 조립, Celery 디스패치
               │ import
               ▼
     database/ (SQL)
@@ -103,19 +103,19 @@
 | `modules/*/domain/` → SQLAlchemy, FastAPI, Celery | 도메인이 프레임워크에 의존하면 안 됨 |
 | `modules/*/domain/` → `modules/*/adapters/` | 안쪽이 바깥을 모른다 |
 | `modules/*/application/` → 구현체 직접 import | Port 인터페이스로만 참조 |
-| `packages/common-schemas/` → `modules/*` | Foundation은 독립적 |
+| `packages/common_schemas/` → `modules/*` | Foundation은 독립적 |
 | `modules/*` → `services/*` | 순환 의존 방지 |
 
 ---
 
-## 3. Foundation — packages/common-schemas/ (REQ-012)
+## 3. Foundation — packages/common_schemas/ (REQ-012)
 
 Clean Architecture의 **최내곽 원**. 모든 모듈이 공유하는 Entity·VO·Enum의 SSOT.
 
 ### 3.1 디렉토리 구조
 
 ```
-packages/common-schemas/
+packages/common_schemas/
 ├── python/
 │   ├── common_schemas/
 │   │   ├── __init__.py
@@ -155,7 +155,7 @@ packages/common-schemas/
 
 ### 4.1 모듈 내부 표준 템플릿
 
-모든 도메인 모듈(`modules/auth/`, `modules/ai-agent/` 등)은 아래 3계층 구조를 따른다.
+모든 도메인 모듈(`modules/auth/`, `modules/ai_agent/` 등)은 아래 3계층 구조를 따른다.
 
 ```
 modules/{module_name}/
@@ -189,13 +189,13 @@ modules/{module_name}/
 
 ```
 domain/
-  ├── entities/     ← common-schemas import만 허용
-  ├── value_objects/← common-schemas import만 허용
-  ├── services/     ← entities + value_objects + ports + common-schemas
-  └── ports/        ← entities + value_objects + common-schemas (ABC만 정의)
+  ├── entities/     ← common_schemas import만 허용
+  ├── value_objects/← common_schemas import만 허용
+  ├── services/     ← entities + value_objects + ports + common_schemas
+  └── ports/        ← entities + value_objects + common_schemas (ABC만 정의)
 
 application/
-  └── use_cases/    ← domain/* + common-schemas (ports를 통해서만 외부 접근)
+  └── use_cases/    ← domain/* + common_schemas (ports를 통해서만 외부 접근)
 
 adapters/
   └── ...           ← domain/ports 구현 + 외부 라이브러리 자유 사용
@@ -274,7 +274,7 @@ modules/auth/
 ### 5.2 REQ-003 Nodes-Graph
 
 ```
-modules/nodes-graph/
+modules/nodes_graph/
 ├── __init__.py
 ├── domain/
 │   ├── entities/
@@ -315,7 +315,7 @@ modules/nodes-graph/
 ### 5.3 REQ-004 AI Agent
 
 ```
-modules/ai-agent/
+modules/ai_agent/
 ├── __init__.py
 ├── domain/
 │   ├── entities/
@@ -450,7 +450,7 @@ modules/toolset/
 ### 5.5 REQ-006 Doc Parser
 
 ```
-modules/doc-parser/
+modules/doc_parser/
 ├── __init__.py
 ├── domain/
 │   ├── entities/
@@ -490,7 +490,7 @@ modules/doc-parser/
 실행 엔진은 `services/`에 위치하지만, 내부적으로 Clean Architecture를 따른다.
 
 ```
-services/execution-engine/
+services/execution_engine/
 ├── src/
 │   ├── domain/
 │   │   ├── services/
@@ -571,12 +571,12 @@ modules/storage/
 │   ├── __init__.py
 │   ├── pg_session_repository.py        # → auth/domain/ports/SessionRepository
 │   ├── pg_oauth_repository.py          # → auth/domain/ports/OAuthConnectionRepository
-│   ├── pg_workflow_repository.py       # → ai-agent/domain/ports/WorkflowRepository
+│   ├── pg_workflow_repository.py       # → ai_agent/domain/ports/WorkflowRepository
 │   ├── pg_skill_repository.py          # → 자체 (마켓플레이스)
-│   ├── pg_node_definition_repository.py # → nodes-graph/domain/ports/NodeDefinitionRepository
-│   ├── pg_agent_memory_repository.py   # → ai-agent/domain/ports/AgentMemoryRepository
+│   ├── pg_node_definition_repository.py # → nodes_graph/domain/ports/NodeDefinitionRepository
+│   ├── pg_agent_memory_repository.py   # → ai_agent/domain/ports/AgentMemoryRepository
 │   ├── pg_tool_execution_repository.py # → toolset/domain/ports/ToolExecutionRepository
-│   ├── pg_document_repository.py       # → doc-parser (향후)
+│   ├── pg_document_repository.py       # → doc_parser (향후)
 │   └── pg_execution_repository.py      # → 자체
 ├── mappers/                            # ORM ↔ 도메인 엔티티 변환 (10개 매퍼)
 │   ├── __init__.py
@@ -662,11 +662,11 @@ class SessionMapper:
 |---------------------|-------------------------------|
 | `auth/domain/ports/SessionRepository` | `pg_session_repository.py` |
 | `auth/domain/ports/OAuthConnectionRepository` | `pg_oauth_repository.py` |
-| `nodes-graph/domain/ports/NodeDefinitionRepository` | `pg_node_definition_repository.py` |
-| `ai-agent/domain/ports/AgentMemoryRepository` | `pg_agent_memory_repository.py` |
-| `ai-agent/domain/ports/WorkflowRepository` | `pg_workflow_repository.py` |
+| `nodes_graph/domain/ports/NodeDefinitionRepository` | `pg_node_definition_repository.py` |
+| `ai_agent/domain/ports/AgentMemoryRepository` | `pg_agent_memory_repository.py` |
+| `ai_agent/domain/ports/WorkflowRepository` | `pg_workflow_repository.py` |
 | `toolset/domain/ports/ToolExecutionRepository` | `pg_tool_execution_repository.py` |
-| `doc-parser` (향후) | `pg_document_repository.py` |
+| `doc_parser` (향후) | `pg_document_repository.py` |
 
 ### 6.4 Storage 자체 도메인
 
@@ -684,7 +684,7 @@ Storage는 단순 Repository 구현체 모음이 아니라, 파일 스토리지 
 ### 7.1 REQ-009 API Server
 
 ```
-services/api-server/
+services/api_server/
 ├── app/
 │   ├── main.py                         # FastAPI 엔트리포인트
 │   │   # CORS, 미들웨어, 라우터 등록
@@ -728,7 +728,7 @@ services/api-server/
 - `Depends()`로 Use Case를 주입받아 `execute()` 호출
 
 ```python
-# services/api-server/app/routers/workflows.py 예시
+# services/api_server/app/routers/workflows.py 예시
 
 @router.post("/", response_model=WorkflowResponse)
 async def create_workflow(
@@ -837,15 +837,15 @@ infra/
 ### 9.1 조립 지점 (Composition Root)
 
 DI 조립은 **애플리케이션 진입점**에서만 수행한다:
-- `services/api-server/app/dependencies/` — FastAPI `Depends()`
-- `services/execution-engine/src/dependencies/` — Celery worker 초기화
+- `services/api_server/app/dependencies/` — FastAPI `Depends()`
+- `services/execution_engine/src/dependencies/` — Celery worker 초기화
 
 **도메인과 애플리케이션 계층은 DI 프레임워크를 모른다.**
 
 ### 9.2 DI 흐름 예시
 
 ```
-┌─ services/api-server/app/dependencies/ ─────────────────────────┐
+┌─ services/api_server/app/dependencies/ ─────────────────────────┐
 │                                                                  │
 │  AsyncSession ──────────────────────────────────────┐            │
 │       │                                             │            │
@@ -863,14 +863,14 @@ DI 조립은 **애플리케이션 진입점**에서만 수행한다:
 │       │                                                          │
 │       ▼                                                          │
 │  Router.authenticate(use_case=Depends(...))                      │
-│  (services/api-server/app/routers)                               │
+│  (services/api_server/app/routers)                               │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ### 9.3 코드 예시
 
 ```python
-# services/api-server/app/dependencies/database.py
+# services/api_server/app/dependencies/database.py
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 engine = create_async_engine(os.getenv("DATABASE_URL"))
@@ -880,7 +880,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-# services/api-server/app/dependencies/repositories.py
+# services/api_server/app/dependencies/repositories.py
 from modules.auth.domain.ports.session_repository import SessionRepository
 from modules.storage.repositories.session_repository import PostgresSessionRepository
 
@@ -890,7 +890,7 @@ def get_session_repository(
     return PostgresSessionRepository(db)
 
 
-# services/api-server/app/dependencies/use_cases.py
+# services/api_server/app/dependencies/use_cases.py
 from modules.auth.application.use_cases.authenticate import AuthenticateUseCase
 
 def get_authenticate_use_case(
@@ -912,7 +912,7 @@ def get_authenticate_use_case(
 ### 10.1 도메인 예외 계층
 
 ```python
-# packages/common-schemas/python/common_schemas/exceptions.py
+# packages/common_schemas/python/common_schemas/exceptions.py
 
 class DomainError(Exception):
     """모든 도메인 예외의 베이스"""
@@ -1101,7 +1101,7 @@ class TestAuthenticateUseCase:
 Workflow_Automation/
 │
 ├── packages/
-│   └── common-schemas/                     # REQ-012 SSOT (최내곽 원)
+│   └── common_schemas/                     # REQ-012 SSOT (최내곽 원)
 │       ├── python/
 │       │   ├── common_schemas/
 │       │   │   ├── __init__.py
@@ -1151,7 +1151,7 @@ Workflow_Automation/
 │   │   │   └── middleware.py
 │   │   └── tests/
 │   │
-│   ├── nodes-graph/                        # REQ-003 Nodes-Graph
+│   ├── nodes_graph/                        # REQ-003 Nodes-Graph
 │   │   ├── __init__.py
 │   │   ├── domain/
 │   │   │   ├── entities/
@@ -1169,7 +1169,7 @@ Workflow_Automation/
 │   │   │   └── tool_to_node_wrapper.py
 │   │   └── tests/
 │   │
-│   ├── ai-agent/                           # REQ-004 AI Agent
+│   ├── ai_agent/                           # REQ-004 AI Agent
 │   │   ├── __init__.py
 │   │   ├── domain/
 │   │   │   ├── entities/
@@ -1236,7 +1236,7 @@ Workflow_Automation/
 │   │   │   └── state_manager.py
 │   │   └── tests/
 │   │
-│   ├── doc-parser/                         # REQ-006 Doc Parser
+│   ├── doc_parser/                         # REQ-006 Doc Parser
 │   │   ├── __init__.py
 │   │   ├── domain/
 │   │   │   ├── entities/
@@ -1303,7 +1303,7 @@ Workflow_Automation/
 │       └── tests/
 │
 ├── services/
-│   ├── api-server/                         # REQ-009 Inbound Adapter
+│   ├── api_server/                         # REQ-009 Inbound Adapter
 │   │   ├── app/
 │   │   │   ├── main.py
 │   │   │   ├── routers/
@@ -1337,7 +1337,7 @@ Workflow_Automation/
 │   │   ├── Dockerfile
 │   │   └── pyproject.toml
 │   │
-│   ├── execution-engine/                   # REQ-007 Worker Adapter
+│   ├── execution_engine/                   # REQ-007 Worker Adapter
 │   │   ├── src/
 │   │   │   ├── domain/
 │   │   │   │   ├── services/
@@ -1421,27 +1421,27 @@ Workflow_Automation/
 | `auth/domain/ports/` | `SessionRepository` | `storage/repositories/session_repository.py` |
 | `auth/domain/ports/` | `OAuthConnectionRepository` | `storage/repositories/oauth_repository.py` |
 | `auth/domain/ports/` | `CipherPort` | `auth/adapters/cipher/aesgcm_cipher.py` |
-| `nodes-graph/domain/ports/` | `NodeDefinitionRepository` | `storage/repositories/node_definition_repository.py` |
-| `ai-agent/domain/ports/` | `AgentMemoryRepository` | `storage/repositories/agent_memory_repository.py` |
-| `ai-agent/domain/ports/` | `NodeRegistry` | `ai-agent/adapters/` (내부 Facade, REQ-003 ABC 래핑) |
-| `ai-agent/domain/ports/` | `LLMPort` | `ai-agent/adapters/llm/modal_adapter.py` |
+| `nodes_graph/domain/ports/` | `NodeDefinitionRepository` | `storage/repositories/node_definition_repository.py` |
+| `ai_agent/domain/ports/` | `AgentMemoryRepository` | `storage/repositories/agent_memory_repository.py` |
+| `ai_agent/domain/ports/` | `NodeRegistry` | `ai_agent/adapters/` (내부 Facade, REQ-003 ABC 래핑) |
+| `ai_agent/domain/ports/` | `LLMPort` | `ai_agent/adapters/llm/modal_adapter.py` |
 | `toolset/domain/ports/` | `ToolRegistry` | `toolset/adapters/` (내부 등록) |
 | `toolset/domain/ports/` | `SecureConnectorPort` | `toolset/adapters/secure_connector.py` |
-| `doc-parser/domain/ports/` | `ParserPort` | `doc-parser/adapters/parsers/*.py` (7개) |
-| `execution-engine/domain/ports/` | `WorkflowRepositoryPort` | `storage/repositories/workflow_repository.py` |
-| `execution-engine/domain/ports/` | `NodeExecutorPort` | `execution-engine/adapters/sandbox_executor.py` |
-| `execution-engine/domain/ports/` | `TaskQueuePort` | `execution-engine/adapters/celery_adapter.py` |
+| `doc_parser/domain/ports/` | `ParserPort` | `doc_parser/adapters/parsers/*.py` (7개) |
+| `execution_engine/domain/ports/` | `WorkflowRepositoryPort` | `storage/repositories/workflow_repository.py` |
+| `execution_engine/domain/ports/` | `NodeExecutorPort` | `execution_engine/adapters/sandbox_executor.py` |
+| `execution_engine/domain/ports/` | `TaskQueuePort` | `execution_engine/adapters/celery_adapter.py` |
 
 ### 14.2 모듈 간 import 방향
 
 ```
-                    common-schemas (REQ-012)
+                    common_schemas (REQ-012)
                     ┌──────┴──────┐
                     ▼             ▼
-               auth (002)    nodes-graph (003)
+               auth (002)    nodes_graph (003)
                ┌──┴──┐          │
                ▼     ▼          ▼
-          ai-agent  toolset   doc-parser
+          ai_agent  toolset   doc_parser
            (004)    (005)      (006)
                │      │         │
                ▼      ▼         ▼
@@ -1449,7 +1449,7 @@ Workflow_Automation/
                     │
           ┌────────┼────────┐
           ▼                 ▼
-    api-server (009)   execution-engine (007)
+    api_server (009)   execution_engine (007)
           │
           ▼
     frontend (010)
@@ -1459,11 +1459,11 @@ Workflow_Automation/
 
 | From → To | 허용 범위 | 예시 |
 |-----------|----------|------|
-| `ai-agent` → `auth` | `domain/ports/` + `domain/services/` | CredentialInjectionService 호출 |
-| `ai-agent` → `nodes-graph` | `domain/ports/` | NodeDefinitionRepository ABC |
-| `ai-agent` → `doc-parser` | `application/use_cases/` | ParseDocumentUseCase (청크 조회) |
-| `execution-engine` → `toolset` | `application/use_cases/` | ExecuteToolUseCase |
-| `execution-engine` → `auth` | `domain/services/` | CredentialInjectionService |
+| `ai_agent` → `auth` | `domain/ports/` + `domain/services/` | CredentialInjectionService 호출 |
+| `ai_agent` → `nodes_graph` | `domain/ports/` | NodeDefinitionRepository ABC |
+| `ai_agent` → `doc_parser` | `application/use_cases/` | ParseDocumentUseCase (청크 조회) |
+| `execution_engine` → `toolset` | `application/use_cases/` | ExecuteToolUseCase |
+| `execution_engine` → `auth` | `domain/services/` | CredentialInjectionService |
 | `storage` → 다른 모듈 `domain/ports/` | ABC만 import (구현 목적) | SessionRepository ABC |
 
 ---
@@ -1476,11 +1476,11 @@ Workflow_Automation/
 
 | 단계 | 작업 | 영향 범위 | 우선순위 |
 |------|------|----------|---------|
-| **1** | `packages/common-schemas/` 내부 파일 구조화 (현재 13개 모듈 → 정리) | REQ-012 | P0 |
+| **1** | `packages/common_schemas/` 내부 파일 구조화 (현재 13개 모듈 → 정리) | REQ-012 | P0 |
 | **2** | `modules/storage/` 에 `orm/`, `repositories/`, `mappers/` 하위 구조 생성 | REQ-008 | P0 |
 | **3** | 각 `modules/*/` 에 `domain/`, `application/`, `adapters/` 3계층 생성 | REQ-002~006 | P0 |
-| **4** | `services/api-server/` 에 `dependencies/`, `middleware/` 구조화 | REQ-009 | P0 |
-| **5** | `services/execution-engine/` 내부 Clean Architecture 적용 | REQ-007 | P0 |
+| **4** | `services/api_server/` 에 `dependencies/`, `middleware/` 구조화 | REQ-009 | P0 |
+| **5** | `services/execution_engine/` 내부 Clean Architecture 적용 | REQ-007 | P0 |
 | **6** | 기존 flat 파일을 각 계층으로 이동 + import 경로 갱신 | 전체 | P1 |
 | **7** | CI에 import 방향 검증 추가 (import-linter 등) | CI/CD | P2 |
 
@@ -1521,14 +1521,14 @@ layers = ["services", "modules", "packages"]
 
 | 용어 | 정의 | 프로젝트 내 위치 |
 |------|------|----------------|
-| **Entity** | 도메인의 핵심 비즈니스 객체 (ID 보유) | `common-schemas/` + `modules/*/domain/entities/` |
-| **Value Object (VO)** | 불변 값 객체 (ID 없음, 동등성으로 비교) | `common-schemas/` + `modules/*/domain/value_objects/` |
+| **Entity** | 도메인의 핵심 비즈니스 객체 (ID 보유) | `common_schemas/` + `modules/*/domain/entities/` |
+| **Value Object (VO)** | 불변 값 객체 (ID 없음, 동등성으로 비교) | `common_schemas/` + `modules/*/domain/value_objects/` |
 | **Domain Service** | 단일 엔티티에 속하지 않는 비즈니스 로직 | `modules/*/domain/services/` |
 | **Port** | 도메인이 정의하는 인터페이스 (ABC) | `modules/*/domain/ports/` |
 | **Adapter** | Port의 구현체 (외부 시스템 연동) | `modules/*/adapters/` + `modules/storage/` |
 | **Use Case** | 하나의 사용자 시나리오를 오케스트레이션 | `modules/*/application/use_cases/` |
 | **DI (Dependency Injection)** | 런타임에 Port에 Adapter를 주입 | `services/*/dependencies/` |
-| **SSOT** | Single Source of Truth (공유 타입 단일 정의) | `packages/common-schemas/` |
+| **SSOT** | Single Source of Truth (공유 타입 단일 정의) | `packages/common_schemas/` |
 | **Mapper** | ORM ↔ 도메인 엔티티 양방향 변환 | `modules/storage/mappers/` |
 
 ---

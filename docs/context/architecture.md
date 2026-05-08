@@ -10,21 +10,21 @@
 │ Frontend Layer         services/frontend/    REQ-010  │
 │   Next.js 14 + React Flow + Zustand                  │
 ├──────────────────────────────────────────────────────┤
-│ Core API Layer         services/api-server/  REQ-009  │
+│ Core API Layer         services/api_server/  REQ-009  │
 │   FastAPI 라우터 / DI / SSE 중계                       │
 ├──────────────────────────────────────────────────────┤
 │ Domain Layer           modules/                       │
-│   auth (REQ-002) · nodes-graph (REQ-003)              │
-│   ai-agent (REQ-004) · toolset (REQ-005)              │
-│   doc-parser (REQ-006)                                │
-│   + services/execution-engine/ (REQ-007)              │
+│   auth (REQ-002) · nodes_graph (REQ-003)              │
+│   ai_agent (REQ-004) · toolset (REQ-005)              │
+│   doc_parser (REQ-006)                                │
+│   + services/execution_engine/ (REQ-007)              │
 ├──────────────────────────────────────────────────────┤
 │ Persistence Layer                                     │
 │   database/ (REQ-001) · modules/storage/ (REQ-008)   │
 │   PostgreSQL 16 + pgvector + Redis + GCS              │
 ├──────────────────────────────────────────────────────┤
 │ Foundation                                            │
-│   packages/common-schemas/ (REQ-012)                  │
+│   packages/common_schemas/ (REQ-012)                  │
 │   infra/ (REQ-011)                                    │
 └──────────────────────────────────────────────────────┘
 ```
@@ -36,28 +36,28 @@
      ↓ (Frontend SSE 설정)
 [services/frontend] ChatPanel → POST /api/v1/ai/compose?stream=true
      ↓
-[services/api-server] Router → 권한 검증 (modules/auth) + Permission Source 주입
+[services/api_server] Router → 권한 검증 (modules/auth) + Permission Source 주입
      ↓
-[modules/ai-agent] LangGraph: security → onboarding → intent → retriever → drafter ↔ validator
+[modules/ai_agent] LangGraph: security → onboarding → intent → retriever → drafter ↔ validator
      ↓ [SSE] result.intent=draft
 [services/frontend] 캔버스에 적용
      ↓ (사용자 [Save])
-[services/api-server] POST /api/v1/workflows → [modules/storage] 저장
+[services/api_server] POST /api/v1/workflows → [modules/storage] 저장
      ↓ (사용자 [Execute])
-[services/execution-engine] execute_workflow.delay() → Celery Worker
+[services/execution_engine] execute_workflow.delay() → Celery Worker
      ↓ (노드별)
 [modules/toolset] Secure Connector → Google Drive / Gemma4 / Slack API
      ↓ (database/ node_logs flush)
-[services/api-server] 폴링 → [services/frontend] ResultDrawer 렌더
+[services/api_server] 폴링 → [services/frontend] ResultDrawer 렌더
 ```
 
 ## 경계 및 계약
 
 | 경계 | 인터페이스 | 스키마 SSOT |
 |------|-----------|-------------|
-| Frontend ↔ API | REST + SSE | `packages/common-schemas/typescript/` |
-| API ↔ Domain Modules | Python import | `packages/common-schemas/python/` |
-| API ↔ Execution Engine | Celery task queue (Redis) | `packages/common-schemas/python/` |
+| Frontend ↔ API | REST + SSE | `packages/common_schemas/typescript/` |
+| API ↔ Domain Modules | Python import | `packages/common_schemas/python/` |
+| API ↔ Execution Engine | Celery task queue (Redis) | `packages/common_schemas/python/` |
 | Domain ↔ Persistence | Repository 패턴 | `modules/storage/repositories/` |
 | Execution Engine ↔ Tools | Tool 인터페이스 | `modules/toolset/tools/` |
 

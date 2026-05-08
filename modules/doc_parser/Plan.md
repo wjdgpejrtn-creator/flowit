@@ -12,9 +12,9 @@
 
 ```
 Port(ABC) 계약이 확정되어야
-  → 다른 모듈(ai-agent, storage)이 의존 가능
+  → 다른 모듈(ai_agent, storage)이 의존 가능
   → adapter/use_case와 독립적으로 테스트 가능
-  → common-schemas import 경로 확정
+  → common_schemas import 경로 확정
 ```
 
 ---
@@ -58,7 +58,7 @@ Port(ABC) 계약이 확정되어야
 
 ---
 
-### 반드시 사용해야 하는 클래스 (common-schemas에서 import)
+### 반드시 사용해야 하는 클래스 (common_schemas에서 import)
 
 ```python
 from common_schemas.document import (
@@ -208,7 +208,7 @@ from openpyxl import ...       # adapters/에서만 허용
 from lxml import ...           # adapters/에서만 허용
 
 # ❌ domain/application에서 프레임워크 import
-from fastapi import ...        # api-server에서만 허용
+from fastapi import ...        # api_server에서만 허용
 from sqlalchemy import ...     # storage에서만 허용
 
 # ❌ application에서 구체 Adapter 직접 import

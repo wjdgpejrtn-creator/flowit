@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — application/use_cases/parse_document.py
+REQ-006 doc_parser — application/use_cases/parse_document.py
 
 ParseDocumentUseCase
 파일 경로 + FileMeta → DocumentBlock + QualityGateResult

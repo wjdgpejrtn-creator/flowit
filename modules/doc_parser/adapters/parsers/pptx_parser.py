@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/parsers/pptx_parser.py
+REQ-006 doc_parser — adapters/parsers/pptx_parser.py
 
 PptxParser
 python-pptx 기반 PowerPoint 파서

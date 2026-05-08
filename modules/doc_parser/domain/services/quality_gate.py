@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/services/quality_gate.py
+REQ-006 doc_parser — domain/services/quality_gate.py
 
 Parser Quality Gate 서비스
 모든 임계값은 config/parser_quality.yaml 에서 읽음 — 코드 내 숫자 직접 기입 금지!

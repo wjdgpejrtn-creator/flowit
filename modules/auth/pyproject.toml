@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "REQ-002: 인증/인가, OAuth 연동, JWT 발급, 자격증명 암호화"
 requires-python = ">=3.11"
 dependencies = [
-    "common-schemas",
+    "common_schemas",
     "pydantic>=2.0",
     "cryptography>=42.0",
     "PyJWT>=2.8",

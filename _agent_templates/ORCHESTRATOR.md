@@ -41,15 +41,15 @@
 
 | 모듈/서비스 | README 경로 | REQ |
 |------------|------------|-----|
-| common-schemas | `packages/common-schemas/README.md` | REQ-012 |
+| common_schemas | `packages/common_schemas/README.md` | REQ-012 |
 | auth | `modules/auth/README.md` | REQ-002 |
-| nodes-graph | `modules/nodes-graph/README.md` | REQ-003 |
-| ai-agent | `modules/ai-agent/README.md` | REQ-004 |
+| nodes_graph | `modules/nodes_graph/README.md` | REQ-003 |
+| ai_agent | `modules/ai_agent/README.md` | REQ-004 |
 | toolset | `modules/toolset/README.md` | REQ-005 |
-| doc-parser | `modules/doc-parser/README.md` | REQ-006 |
+| doc_parser | `modules/doc_parser/README.md` | REQ-006 |
 | storage | `modules/storage/README.md` | REQ-008 |
-| api-server | `services/api-server/README.md` | REQ-009 |
-| execution-engine | `services/execution-engine/README.md` | REQ-007 |
+| api_server | `services/api_server/README.md` | REQ-009 |
+| execution_engine | `services/execution_engine/README.md` | REQ-007 |
 | frontend | `services/frontend/README.md` | REQ-010 |
 
 ---
@@ -64,7 +64,7 @@
 ### 계층별 의존성
 
 ```
-1. packages/common-schemas (Foundation — 모든 모듈의 기반)
+1. packages/common_schemas (Foundation — 모든 모듈의 기반)
 2. modules/*/domain/ (각 모듈 독립)
 3. modules/*/application/ (domain에 의존)
 4. modules/*/adapters/ (domain/ports에 의존)

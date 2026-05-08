@@ -1,8 +1,8 @@
 """
-REQ-006 doc-parser — domain/ports/parser_port.py
+REQ-006 doc_parser — domain/ports/parser_port.py
 
 파서 구현체가 반드시 따라야 할 ABC 계약
-구현체 위치: doc-parser/adapters/parsers/
+구현체 위치: doc_parser/adapters/parsers/
 """
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/parsers/csv_parser.py
+REQ-006 doc_parser — adapters/parsers/csv_parser.py
 
 CsvParser
 stdlib csv 기반 CSV 파서

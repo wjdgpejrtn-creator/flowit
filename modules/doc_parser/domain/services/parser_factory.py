@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/parsers/parser_factory.py
+REQ-006 doc_parser — adapters/parsers/parser_factory.py
 
 ParserFactory
 MIME 타입 기준으로 적절한 파서 선택

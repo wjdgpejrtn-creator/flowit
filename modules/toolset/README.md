@@ -121,15 +121,15 @@ class BaseTool(ABC):
 
 ```
 Upstream (이 모듈이 의존):
-  ├── common-schemas (REQ-012)
+  ├── common_schemas (REQ-012)
   │     └── RiskLevel, NodeConfig, ErrorCode, PermissionSource, PlaintextCredential
   └── auth (REQ-002)
         └── CredentialInjectionService (SecureConnectorAdapter에서 활용)
 
 Downstream (이 모듈에 의존):
-  ├── execution-engine (REQ-007) → ExecuteToolUseCase 호출
-  ├── api-server (REQ-009)       → ListToolsUseCase 호출
-  ├── nodes-graph (REQ-003)      → ToolToNodeWrapper로 BaseTool → NodeDefinition 변환
+  ├── execution_engine (REQ-007) → ExecuteToolUseCase 호출
+  ├── api_server (REQ-009)       → ListToolsUseCase 호출
+  ├── nodes_graph (REQ-003)      → ToolToNodeWrapper로 BaseTool → NodeDefinition 변환
   └── storage (REQ-008)          → ToolExecutionRepository 구현체 제공
 ```
 

@@ -35,11 +35,11 @@ from storage.repositories import (
 |-----------|-------------------|------------|
 | `PgSessionRepository` | `auth/domain/ports/` | `async create(user_id, session_hash, expires_at: datetime) → Session`, `async find_by_hash(hash) → Session`, `async revoke(session_id)`, `async revoke_all_for_user(user_id) → int` |
 | `PgOAuthRepository` | `auth/domain/ports/` | `async create(user_id, service, tokens) → OAuthConnection`, `async get_by_credential_id(id)`, `async get_active_for_user(user_id, service)`, `async update_tokens(credential_id, tokens)`, `async revoke(credential_id)` |
-| `PgNodeDefinitionRepository` | `nodes-graph/domain/ports/` | `async get_by_id(node_id) → Optional[NodeDefinition]`, `async list_all(mvp_only) → list[NodeDefinition]`, `async search_by_embedding(query, limit) → list[NodeDefinition]`, `async upsert(definition) → NodeDefinition` |
-| `PgAgentMemoryRepository` | `ai-agent/domain/ports/` | `save(entry: MemoryEntry) → None`, `find_by_user(user_id, limit) → list[MemoryEntry]`, `find_by_session(session_id, limit) → list[MemoryEntry]` |
-| `PgWorkflowRepository` | `execution-engine/domain/ports/` | `get(workflow_id: UUID) → WorkflowSchema`, `save(schema: WorkflowSchema) → UUID`, `get_node_config(node_id: UUID) → NodeConfig` |
-| `PgExecutionRepository` | `execution-engine/domain/ports/` | `save(result: ExecutionResult) → None`, `get(execution_id: UUID) → ExecutionResult`, `update_node_state(execution_id, state: NodeExecutionState) → None` |
-| `PgDocumentRepository` | `doc-parser/domain/ports/` | `save(document: DocumentBlock) → UUID`, `save_chunks(chunks: list[Chunk]) → None`, `save_quality_log(result, document_id) → None` |
+| `PgNodeDefinitionRepository` | `nodes_graph/domain/ports/` | `async get_by_id(node_id) → Optional[NodeDefinition]`, `async list_all(mvp_only) → list[NodeDefinition]`, `async search_by_embedding(query, limit) → list[NodeDefinition]`, `async upsert(definition) → NodeDefinition` |
+| `PgAgentMemoryRepository` | `ai_agent/domain/ports/` | `save(entry: MemoryEntry) → None`, `find_by_user(user_id, limit) → list[MemoryEntry]`, `find_by_session(session_id, limit) → list[MemoryEntry]` |
+| `PgWorkflowRepository` | `execution_engine/domain/ports/` | `get(workflow_id: UUID) → WorkflowSchema`, `save(schema: WorkflowSchema) → UUID`, `get_node_config(node_id: UUID) → NodeConfig` |
+| `PgExecutionRepository` | `execution_engine/domain/ports/` | `save(result: ExecutionResult) → None`, `get(execution_id: UUID) → ExecutionResult`, `update_node_state(execution_id, state: NodeExecutionState) → None` |
+| `PgDocumentRepository` | `doc_parser/domain/ports/` | `save(document: DocumentBlock) → UUID`, `save_chunks(chunks: list[Chunk]) → None`, `save_quality_log(result, document_id) → None` |
 | `PgToolExecutionRepository` | `toolset/domain/ports/` | `save(record: ToolExecutionRecord) → None`, `find_by_tool(tool_name, limit) → list[ToolExecutionRecord]` |
 | `PgSkillRepository` | 자체 정의 | `upsert`, `get_by_id`, `list`, `search` (하이브리드) |
 
@@ -66,16 +66,16 @@ from storage.repositories import (
 
 ```
 Upstream (이 모듈이 의존):
-  ├── common-schemas (REQ-012)       → 모든 도메인 엔티티 타입
+  ├── common_schemas (REQ-012)       → 모든 도메인 엔티티 타입
   ├── auth/domain/ports (REQ-002)    → SessionRepository, OAuthConnectionRepository ABC
-  ├── nodes-graph/domain/ports (REQ-003) → NodeDefinitionRepository ABC
-  ├── ai-agent/domain/ports (REQ-004)    → AgentMemoryRepository, WorkflowRepository ABC
+  ├── nodes_graph/domain/ports (REQ-003) → NodeDefinitionRepository ABC
+  ├── ai_agent/domain/ports (REQ-004)    → AgentMemoryRepository, WorkflowRepository ABC
   ├── toolset/domain/ports (REQ-005)     → ToolExecutionRepository ABC
-  └── doc-parser/domain/ports (REQ-006)  → DocumentRepositoryPort ABC
+  └── doc_parser/domain/ports (REQ-006)  → DocumentRepositoryPort ABC
 
 Downstream (이 모듈에 의존):
-  ├── api-server (REQ-009)           → DI 컨테이너에서 Repository 주입
-  └── execution-engine (REQ-007)     → ExecutionRepository, WorkflowRepository 사용
+  ├── api_server (REQ-009)           → DI 컨테이너에서 Repository 주입
+  └── execution_engine (REQ-007)     → ExecutionRepository, WorkflowRepository 사용
 ```
 
 ## 환경 변수

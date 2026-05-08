@@ -6,7 +6,7 @@
 
 ---
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|
@@ -360,19 +360,19 @@ class GoogleOAuthClient:
 
 ```
 Upstream (이 모듈이 의존):
-  ├── packages/common-schemas (REQ-012)
+  ├── packages/common_schemas (REQ-012)
   │     └── PermissionSource, PlaintextCredential, RiskLevel, ErrorCode
-  └── modules/nodes-graph (REQ-003)
+  └── modules/nodes_graph (REQ-003)
         └── NodeDefinitionRepository ABC (CredentialInjectionService에서 사용)
 
 Downstream (이 모듈에 의존):
-  ├── modules/ai-agent (REQ-004)
+  ├── modules/ai_agent (REQ-004)
   │     └── CredentialInjectionService 호출 (노드 실행 전 자격증명 주입)
-  ├── services/api-server (REQ-009)
+  ├── services/api_server (REQ-009)
   │     └── AuthMiddleware, JWT 검증, 라우터 인증
   ├── modules/storage (REQ-008) / database (REQ-001)
   │     └── SessionRepository, OAuthConnectionRepository 구현체 제공
-  └── services/execution-engine (REQ-007)
+  └── services/execution_engine (REQ-007)
         └── 노드 실행 시 InjectCredentialUseCase 호출
 ```
 

@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/parsers/__init__.py
+REQ-006 doc_parser — adapters/parsers/__init__.py
 
 adapters/parsers 레이어 public export
 """

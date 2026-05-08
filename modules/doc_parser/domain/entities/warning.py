@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/entities/warning.py
+REQ-006 doc_parser — domain/entities/warning.py
 
 파싱 중 발생한 경고 정보 및 단계별 처리 시간 엔티티
 """

@@ -9,8 +9,8 @@
 docker compose -f infra/docker/docker-compose.dev.yml up -d postgres redis
 
 # API 서버
-pip install -e packages/common-schemas/python -e services/api-server[dev]
-uvicorn app.main:app --reload --app-dir services/api-server
+pip install -e packages/common_schemas/python -e services/api_server[dev]
+uvicorn app.main:app --reload --app-dir services/api_server
 
 # 프론트엔드
 cd services/frontend && npm install && npm run dev
@@ -23,8 +23,8 @@ cd services/frontend && npm install && npm run dev
 | 디렉토리 | 설명 |
 |---|---|
 | `packages/` | 공유 패키지 (Pydantic v2 → TypeScript SSOT) |
-| `services/` | 배포 가능 서비스 (api-server, execution-engine, frontend) |
-| `modules/` | 도메인 모듈 (auth, nodes-graph, ai-agent, toolset, doc_parser, storage) |
+| `services/` | 배포 가능 서비스 (api_server, execution_engine, frontend) |
+| `modules/` | 도메인 모듈 (auth, nodes_graph, ai_agent, toolset, doc_parser, storage) |
 | `database/` | PostgreSQL 스키마 (15개) + 마이그레이션 |
 | `infra/` | Terraform + Docker |
 

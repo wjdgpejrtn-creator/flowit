@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/ports/__init__.py
+REQ-006 doc_parser — domain/ports/__init__.py
 
 domain/ports 레이어 public export
 """

@@ -12,7 +12,7 @@
 Toolset은 워크플로우 실행 시 **외부 도구(Google Drive, Gmail, Slack 등)를 실행하는 어댑터 계층**이다.
 
 ```
-execution-engine (REQ-007)
+execution_engine (REQ-007)
   → ExecuteToolUseCase (REQ-005)
     → RiskAssessmentService (권한 검사)
     → RuntimeValidator (입력 검증)
@@ -23,18 +23,18 @@ execution-engine (REQ-007)
     → ToolExecutionRepository.save() (실행 이력 저장)
 ```
 
-- **실행 주체**: `services/execution-engine`이 DI로 `ExecuteToolUseCase`를 주입받아 호출
+- **실행 주체**: `services/execution_engine`이 DI로 `ExecuteToolUseCase`를 주입받아 호출
 - **보안 흐름**: `PermissionSource.risk_ceiling` 검사 → Credential 획득 → 실행 → Credential 즉시 `wipe()`
-- **노드 등록**: `nodes-graph`의 `ToolToNodeWrapper`가 `BaseTool` 메타데이터를 `NodeDefinition`으로 변환
+- **노드 등록**: `nodes_graph`의 `ToolToNodeWrapper`가 `BaseTool` 메타데이터를 `NodeDefinition`으로 변환
 - **이력 저장**: `ToolExecutionRepository` Port를 통해 `modules/storage`에 위임
 
 ---
 
 ## Phase 0 상태: ✅ DONE (PR #11 merged → development)
 
-**REQ-012(황대원)이 `feature/req-012-common-schemas` → `development` PR #11로 merge 완료.**
+**REQ-012(황대원)이 `feature/req-012-common_schemas` → `development` PR #11로 merge 완료.**
 
-이가원은 `packages/common-schemas/`를 직접 수정하지 않는다.
+이가원은 `packages/common_schemas/`를 직접 수정하지 않는다.
 import만 하면 된다.
 
 ### 실제 구현된 타입 (반드시 이 값 사용)
@@ -204,7 +204,7 @@ from auth.domain.services import CredentialInjectionService
 
 | 대상 | 내용 | 시점 | 상태 |
 |------|------|------|------|
-| REQ-012 황대원 | common-schemas 타입 확정 | ✅ 완료 (PR #11) | Done |
+| REQ-012 황대원 | common_schemas 타입 확정 | ✅ 완료 (PR #11) | Done |
 | REQ-002 박아름 | `CredentialInjectionService.inject()` 시그니처 확인 (node_id 필요성) | Phase 3 전 | 대기 |
 | REQ-007 황대원 | `ExecuteToolUseCase` 호출 패턴 전달 (tool_name, input_data, context) | Phase 2 완료 후 | 대기 |
 | REQ-003 박아름 | `BaseTool` 메타데이터 구조 → `ToolToNodeWrapper` 연동 | Phase 1 완료 후 | 대기 |
@@ -228,7 +228,7 @@ from auth.domain.services import CredentialInjectionService
 
 | 파일 | 내용 |
 |------|------|
-| `req-005-phase0-schemas.md` | common-schemas 실제 구현 내용 + toolset 로컬 예외 |
+| `req-005-phase0-schemas.md` | common_schemas 실제 구현 내용 + toolset 로컬 예외 |
 | `req-005-phase1-domain.md` | Domain Layer 상세 구현 |
 | `req-005-phase2-application.md` | Application Layer 상세 구현 (3개 유스케이스) |
 | `req-005-phase3-adapters.md` | Adapter Core 상세 구현 |

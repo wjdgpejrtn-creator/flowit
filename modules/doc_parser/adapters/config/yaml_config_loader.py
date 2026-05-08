@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/config/yaml_config_loader.py
+REQ-006 doc_parser — adapters/config/yaml_config_loader.py
 
 YamlConfigLoader
 ConfigLoaderPort 구현체

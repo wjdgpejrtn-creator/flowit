@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/entities/__init__.py
+REQ-006 doc_parser — domain/entities/__init__.py
 
 domain/entities 레이어 public export
 """

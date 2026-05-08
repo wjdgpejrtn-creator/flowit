@@ -41,7 +41,7 @@ grep -rn "from services\.\|from api_server\.\|from execution_engine\." modules/
 - [ ] ORM 모델이 도메인 레이어 밖으로 누출되지 않는지 확인
 - [ ] Repository가 도메인 엔티티를 반환하는지 확인 (ORM 모델 아님)
 - [ ] Port(ABC)와 Adapter 구현 분리 확인
-- [ ] 공유 타입이 common-schemas에서 import되는지 확인 (중복 정의 금지)
+- [ ] 공유 타입이 common_schemas에서 import되는지 확인 (중복 정의 금지)
 
 ### Python 코드 품질
 

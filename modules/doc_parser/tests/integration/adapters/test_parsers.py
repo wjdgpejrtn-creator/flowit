@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — tests/integration/adapters/test_parsers.py
+REQ-006 doc_parser — tests/integration/adapters/test_parsers.py
 
 파서 통합 테스트 (실제 파일 기반)
 fixtures/ 폴더의 실제 파일로 파서 동작 검증

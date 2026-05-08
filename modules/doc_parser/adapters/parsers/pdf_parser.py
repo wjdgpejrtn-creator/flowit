@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/parsers/pdf_parser.py
+REQ-006 doc_parser — adapters/parsers/pdf_parser.py
 
 PdfParser
 PyMuPDF(fitz) 기반 PDF 파서

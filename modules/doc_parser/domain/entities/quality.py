@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/entities/quality.py
+REQ-006 doc_parser — domain/entities/quality.py
 
 품질 게이트 결과 및 설정 엔티티
 모든 임계값은 config/parser_quality.yaml 에서 읽음 — 코드 내 숫자 직접 기입 금지
