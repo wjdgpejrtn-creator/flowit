@@ -269,6 +269,31 @@ modules/{module_name}/
 - 구현체(Repository)가 ABC의 메서드명을 따름 (반대 아님)
 - Repository는 도메인 엔티티를 반환 — ORM 모델 반환 금지
 
+### datetime은 반드시 timezone-aware
+
+DDL의 모든 timestamp 컬럼은 `TIMESTAMPTZ`이므로, Python 코드 전체에서 timezone-aware datetime만 사용한다.
+
+```python
+# ❌ 절대 금지 — naive datetime (Python 3.12 deprecated)
+datetime.utcnow()
+datetime.now()          # 인자 없이 호출
+datetime(2026, 5, 8)    # tzinfo 없는 리터럴
+
+# ✅ 올바른 방식
+datetime.now(timezone.utc)
+datetime(2026, 5, 8, tzinfo=timezone.utc)
+```
+
+| 레이어 | 적용 방식 |
+|--------|----------|
+| ORM 모델 (database/, storage/orm/) | `DateTime(timezone=True)` 필수 |
+| Pydantic 도메인 엔티티 | `UtcDatetime` 타입 사용 (`from common_schemas.types import UtcDatetime`) — naive 입력 시 UTC 자동 부여 |
+| dataclass 엔티티 | `default_factory=lambda: datetime.now(timezone.utc)` |
+| 테스트 코드 | `datetime.now(timezone.utc)` 사용 |
+
+> `UtcDatetime`은 `common_schemas.types`에 정의된 `Annotated[datetime, BeforeValidator]` 타입.
+> naive datetime이 들어오면 에러 없이 UTC로 자동 변환하므로 프로그램이 중단되지 않음.
+
 ---
 
 ## 주요 실행 흐름

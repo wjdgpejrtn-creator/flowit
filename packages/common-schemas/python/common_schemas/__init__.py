@@ -30,6 +30,7 @@ from .transport import (
     SlotFillQuestionFrame,
     SSEFrame,
 )
+from .types import UtcDatetime
 from .validation import ValidationErrorItem, ValidationErrorResponse
 from .workflow import Edge, NodeConfig, NodeExecutionState, NodeInstance, Position, WorkflowSchema
 
@@ -86,4 +87,6 @@ __all__ = [
     # handoff
     "EvaluationResult",
     "HandoffPayload",
+    # types
+    "UtcDatetime",
 ]
