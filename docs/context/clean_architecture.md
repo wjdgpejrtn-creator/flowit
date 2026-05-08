@@ -221,7 +221,8 @@ modules/auth/
 │   │   │                               #   입력: user_id, role, department
 │   │   │                               #   출력: PermissionSource (REQ-012)
 │   │   └── credential_injection.py     # CredentialInjectionService
-│   │                                   #   NodeInstance.credential_id → PlaintextCredential
+│   │                                   #   inject(credential_id: UUID, node_id: UUID) → PlaintextCredential
+│   │                                   #   node_id: 감사 추적·스코프 제한용 (PR #31 확정)
 │   │                                   #   메모리 내 복호화, 사용 후 wipe()
 │   └── ports/
 │       ├── session_repository.py       # SessionRepository (ABC)
@@ -274,7 +275,7 @@ modules/auth/
 ### 5.2 REQ-003 Nodes-Graph
 
 ```
-modules/nodes-graph/
+modules/nodes_graph/
 ├── __init__.py
 ├── domain/
 │   ├── entities/
@@ -282,6 +283,21 @@ modules/nodes-graph/
 │   │       # NodeConfig(REQ-012) 확장
 │   │       # 추가 필드: service_type, required_connections (H-4 확정)
 │   │       # 54종 노드 정의의 도메인 표현
+│   ├── catalog/                        # 노드 카탈로그 (30종 구현, PR #30)
+│   │   ├── __init__.py                 # ⚠️ get_all_node_definitions()는 여기 두지 않음
+│   │   │                               #   → application/catalog_registry.py에서 조립
+│   │   ├── data/                       # 데이터 처리 노드
+│   │   │   ├── google_drive.py         # GoogleDriveNode
+│   │   │   ├── google_sheets.py        # GoogleSheetsNode
+│   │   │   └── ...                     # gmail, pdf, http_request 등
+│   │   ├── control/                    # 흐름 제어 노드
+│   │   │   ├── condition.py            # ConditionNode
+│   │   │   ├── delay.py               # DelayNode
+│   │   │   └── ...                     # loop, merge, split 등
+│   │   └── trigger/                    # 트리거 노드
+│   │       ├── webhook.py              # WebhookTriggerNode
+│   │       ├── schedule.py             # ScheduleTriggerNode
+│   │       └── ...
 │   ├── services/
 │   │   ├── graph_validator.py          # GraphValidator (SchemaValidation)
 │   │   │   # WorkflowSchema → ValidationErrorResponse
@@ -295,20 +311,29 @@ modules/nodes-graph/
 │           # search_by_embedding(query, k) → list[NodeDefinition]
 │           # upsert(node_def) → NodeDefinition
 ├── application/
-│   └── use_cases/
-│       ├── validate_graph.py           # ValidateGraphUseCase
-│       │   # WorkflowSchema → ValidationErrorResponse
-│       └── search_nodes.py             # SearchNodesUseCase
-│           # query → list[NodeDefinition] (임베딩 기반)
+│   ├── use_cases/
+│   │   ├── validate_graph.py           # ValidateGraphUseCase
+│   │   │   # WorkflowSchema → ValidationErrorResponse
+│   │   └── search_nodes.py             # SearchNodesUseCase
+│   │       # query → list[NodeDefinition] (임베딩 기반)
+│   └── catalog_registry.py            # CatalogRegistry
+│       # get_all_node_definitions() → list[NodeDefinition]
+│       # domain/catalog/* 개별 노드를 조립하여 반환
+│       # ⚠️ domain/__init__.py에서 adapters import 금지 — 여기서 조립
 └── adapters/
-    └── tool_to_node_wrapper.py         # ToolToNodeWrapper
-        # REQ-005 BaseTool → REQ-003 NodeDefinition 변환
-        # risk_level 매핑 (RiskLevel Enum, M-8 확정)
+    ├── tool_to_node_wrapper.py         # ToolToNodeWrapper
+    │   # REQ-005 BaseTool → REQ-003 NodeDefinition 변환
+    │   # risk_level 매핑 (RiskLevel Enum, M-8 확정)
+    └── catalog/
+        └── external/                   # 외부 서비스 연동 노드 어댑터
+            ├── http_request.py         # HttpRequestAdapter (외부 API 호출)
+            └── pdf_generate.py         # PdfGenerateAdapter (PDF 렌더링)
 ```
 
 **핵심 결정 (교차분석 확정 반영):**
 - WorkflowSchema, NodeInstance, Edge → 자체 정의 삭제, REQ-012 import (H-1)
 - NodeDefinition은 NodeConfig(REQ-012)를 확장하되 모듈 전용 엔티티로 유지 (H-4)
+- `get_all_node_definitions()`는 `domain/catalog/__init__.py`가 아닌 `application/catalog_registry.py`에 배치 (Clean Architecture 위반 방지, PR #30 리뷰 확정)
 
 ---
 
