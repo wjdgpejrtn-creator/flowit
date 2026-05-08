@@ -247,3 +247,4 @@ class_diagram/
 
 # 개인 작업 일지 (로컬 전용)
 _private/
+login_test.py
