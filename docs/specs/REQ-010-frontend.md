@@ -7,12 +7,12 @@
 
 ---
 
-## 1. common-schemas에서 import할 타입 (TypeScript)
+## 1. common_schemas에서 import할 타입 (TypeScript)
 
 ### 1.1 import 소스
 
 ```
-packages/common-schemas/typescript/src/generated/index.ts
+packages/common_schemas/typescript/src/generated/index.ts
 ```
 
 > 이 파일은 Python common_schemas에서 `scripts/generate_ts.py`로 자동 생성됨.
@@ -102,7 +102,7 @@ import {
   ResultFrame,
   ErrorFrame,
   AnySSEFrame,
-} from '@workflow-automation/common-schemas';
+} from '@workflow-automation/common_schemas';
 ```
 
 ---
@@ -190,7 +190,7 @@ import {
 ### 3.1 useSSEStream Hook 핵심 로직
 
 ```typescript
-import { AnySSEFrame } from '@workflow-automation/common-schemas';
+import { AnySSEFrame } from '@workflow-automation/common_schemas';
 
 type FrameHandler = {
   onSession?: (frame: SessionFrame) => void;
@@ -275,10 +275,10 @@ function handleFrame(frame: AnySSEFrame): void {
 ```
 services/frontend/
 ├── imports types from ─────────────────────────────────────┐
-│   packages/common-schemas/typescript/src/generated/       │ (SSOT TypeScript 타입)
+│   packages/common_schemas/typescript/src/generated/       │ (SSOT TypeScript 타입)
 │                                                           │
 ├── calls API ──────────────────────────────────────────────┐
-│   services/api-server/ (REQ-009)                          │
+│   services/api_server/ (REQ-009)                          │
 │     - REST: /workflows, /agents, /documents, /auth        │
 │     - SSE:  /agents/sessions/{id}/stream                  │
 │                                                           │
@@ -294,14 +294,14 @@ services/frontend/
     End Users (웹 브라우저)                                  │
 ```
 
-### 5.1 React Flow ↔ common-schemas 어댑터
+### 5.1 React Flow ↔ common_schemas 어댑터
 
-React Flow는 자체 `Node`, `Edge` 타입을 사용하므로, common-schemas 타입과의 변환 어댑터가 필요:
+React Flow는 자체 `Node`, `Edge` 타입을 사용하므로, common_schemas 타입과의 변환 어댑터가 필요:
 
 ```typescript
 // lib/adapters/reactFlowAdapter.ts
 
-import { NodeInstance, Edge as SchemaEdge, Position } from '@workflow-automation/common-schemas';
+import { NodeInstance, Edge as SchemaEdge, Position } from '@workflow-automation/common_schemas';
 import { Node as RFNode, Edge as RFEdge } from '@xyflow/react';
 
 function toReactFlowNode(instance: NodeInstance): RFNode {
@@ -390,7 +390,7 @@ services/frontend/
 │   │   ├── documentApi.ts
 │   │   └── authApi.ts
 │   └── adapters/
-│       └── reactFlowAdapter.ts          # common-schemas ↔ React Flow 변환
+│       └── reactFlowAdapter.ts          # common_schemas ↔ React Flow 변환
 ├── types/
 │   └── index.ts                         # 프론트엔드 전용 타입 (UI 상태 등)
 ├── package.json
@@ -407,7 +407,7 @@ services/frontend/
 ### 7.1 타입 안전성
 
 - **AnySSEFrame의 exhaustive check**: switch-case에서 모든 frame_type을 처리하고, default에 `never` 타입 할당으로 누락 방지
-- **null vs undefined**: common-schemas의 Optional 필드는 `T | null`로 생성됨. `undefined`와 혼동하지 않을 것
+- **null vs undefined**: common_schemas의 Optional 필드는 `T | null`로 생성됨. `undefined`와 혼동하지 않을 것
 
 ### 7.2 성능
 

@@ -10,7 +10,7 @@ from ..orm.execution_model import ExecutionModel
 
 @dataclass
 class ExecutionResult:
-    """스펙 기반 임시 정의. execution-engine 도메인 엔티티 생성 시 교체."""
+    """스펙 기반 임시 정의. execution_engine 도메인 엔티티 생성 시 교체."""
 
     execution_id: UUID
     workflow_id: UUID

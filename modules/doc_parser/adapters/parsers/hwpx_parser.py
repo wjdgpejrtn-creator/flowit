@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/parsers/hwpx_parser.py
+REQ-006 doc_parser — adapters/parsers/hwpx_parser.py
 
 HwpxParser
 ZIP + lxml 기반 HWPX 2.0 파서

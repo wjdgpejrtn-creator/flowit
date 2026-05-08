@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/services/pii_masking_service.py
+REQ-006 doc_parser — domain/services/pii_masking_service.py
 
 PII 마스킹 서비스
 마스킹 순서: 정규화 이후, 청킹 이전

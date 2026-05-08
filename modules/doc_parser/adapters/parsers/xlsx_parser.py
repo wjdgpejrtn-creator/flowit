@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/parsers/xlsx_parser.py
+REQ-006 doc_parser — adapters/parsers/xlsx_parser.py
 
 XlsxParser
 openpyxl 기반 Excel 파서

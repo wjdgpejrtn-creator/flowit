@@ -53,8 +53,8 @@ class ExecuteToolUseCase:
     7. ToolExecutionRepository.save() — 실행 이력 저장
     8. [finally] credential.wipe() — 자격증명 즉시 폐기
 
-    DI 조립 위치: services/api-server/app/dependencies/tools.py
-    호출 주체: services/execution-engine (REQ-007)
+    DI 조립 위치: services/api_server/app/dependencies/tools.py
+    호출 주체: services/execution_engine (REQ-007)
     """
 
     def __init__(
@@ -214,7 +214,7 @@ class ListToolsUseCase:
     """
     도구 카탈로그 조회 유스케이스.
 
-    호출 주체: services/api-server (REQ-009)
+    호출 주체: services/api_server (REQ-009)
     용도: 사용자가 워크플로우 편집기에서 사용 가능한 도구 목록을 볼 때
     """
 
@@ -268,7 +268,7 @@ class ValidateToolConfigUseCase:
     해당 도구의 input_schema에 맞는지 미리 검증한다.
 
     실제 실행(credential 획득, API 호출)은 하지 않음.
-    호출 주체: services/api-server (워크플로우 저장 API)
+    호출 주체: services/api_server (워크플로우 저장 API)
     """
 
     def __init__(
@@ -321,10 +321,10 @@ __all__ = ["ExecuteToolUseCase", "ListToolsUseCase", "ValidateToolConfigUseCase"
 
 ---
 
-## DI 조립 예시 (services/api-server)
+## DI 조립 예시 (services/api_server)
 
 ```python
-# services/api-server/app/dependencies/tools.py
+# services/api_server/app/dependencies/tools.py
 
 from toolset.adapters.tool_registry_adapter import ToolRegistryAdapter
 from toolset.adapters.secure_connector import SecureConnector

@@ -46,7 +46,7 @@
 
 ---
 
-## 사용해야 하는 클래스 목록 (common-schemas import)
+## 사용해야 하는 클래스 목록 (common_schemas import)
 
 | 클래스 | import 경로 | 사용처 |
 |--------|-------------|--------|
@@ -91,7 +91,7 @@
 ## 구현 순서 (Clean Architecture 원칙)
 
 ```
-1. common-schemas 타입 확인 (SSOT 기반)
+1. common_schemas 타입 확인 (SSOT 기반)
 2. domain/entities → domain/value_objects
 3. domain/ports (ABC 정의)
 4. domain/services (Port에만 의존)

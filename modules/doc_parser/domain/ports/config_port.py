@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/ports/config_port.py
+REQ-006 doc_parser — domain/ports/config_port.py
 
 ConfigLoaderPort
 설정 로더 ABC 계약

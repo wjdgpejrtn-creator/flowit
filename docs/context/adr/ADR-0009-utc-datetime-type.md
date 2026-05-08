@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-05-08
 - **Deciders**: @dhwang0803-glitch
-- **Tags**: area/common-schemas, layer/domain, layer/orm
+- **Tags**: area/common_schemas, layer/domain, layer/orm
 
 ## Context
 

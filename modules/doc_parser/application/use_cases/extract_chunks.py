@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — application/use_cases/extract_chunks.py
+REQ-006 doc_parser — application/use_cases/extract_chunks.py
 
 ExtractChunksUseCase
 DocumentBlock → list[Chunk]

@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/ports/repository_port.py
+REQ-006 doc_parser — domain/ports/repository_port.py
 
 DocumentRepositoryPort
 파싱 결과 저장소 ABC 계약

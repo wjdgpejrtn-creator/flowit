@@ -26,7 +26,7 @@ from doc_parser.adapters.parsers import PdfParser, DocxParser, XlsxParser
 |--------|------|
 | `ParserMeta` | 파서 메타데이터 (이름, 버전, 설정) |
 
-> 파싱 결과 엔티티(`DocumentBlock`, `ContentBlock`, `FileMeta`)는 `common-schemas`에서 import
+> 파싱 결과 엔티티(`DocumentBlock`, `ContentBlock`, `FileMeta`)는 `common_schemas`에서 import
 
 ### domain/services
 
@@ -64,10 +64,10 @@ from doc_parser.adapters.parsers import PdfParser, DocxParser, XlsxParser
 ## 의존 관계
 
 ```
-이 모듈 → common-schemas (DocumentBlock, ContentBlock, FileMeta, SourceRef, BBox, ParserMeta)
-이 모듈 ← ai-agent (문서 기반 워크플로우 생성 시 청크 조회)
+이 모듈 → common_schemas (DocumentBlock, ContentBlock, FileMeta, SourceRef, BBox, ParserMeta)
+이 모듈 ← ai_agent (문서 기반 워크플로우 생성 시 청크 조회)
 이 모듈 ← storage (DocumentRepository가 파싱 결과 영속화)
-이 모듈 ← api-server (문서 업로드 엔드포인트에서 호출)
+이 모듈 ← api_server (문서 업로드 엔드포인트에서 호출)
 ```
 
 ## 환경 변수

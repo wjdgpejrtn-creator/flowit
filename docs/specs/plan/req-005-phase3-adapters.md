@@ -178,7 +178,7 @@ class SecureConnector(SecureConnectorPort):
 
 **협의 포인트 (REQ-002 박아름):**
 - `CredentialInjectionService.inject(credential_id: UUID, node_id: UUID)` — `node_id`는 어떤 값 사용?
-- execution-engine에서 `ExecuteToolUseCase` 호출 시 현재 노드 ID를 `context`에 포함시키는 방안 검토
+- execution_engine에서 `ExecuteToolUseCase` 호출 시 현재 노드 ID를 `context`에 포함시키는 방안 검토
 - 대안: `node_id=None` 허용하도록 inject 시그니처 수정 요청
 
 ---

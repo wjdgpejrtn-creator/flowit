@@ -1,6 +1,6 @@
 # REQ-001 Database — 구현 명세
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|

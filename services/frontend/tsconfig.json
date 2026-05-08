@@ -16,7 +16,7 @@
     "plugins": [{ "name": "next" }],
     "paths": {
       "@/*": ["./src/*"],
-      "@common/*": ["../../packages/common-schemas/typescript/src/*"]
+      "@common/*": ["../../packages/common_schemas/typescript/src/*"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],

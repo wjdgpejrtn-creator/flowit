@@ -1,10 +1,10 @@
-# REQ-006 doc-parser — config/parser_quality.yaml
+# REQ-006 doc_parser — config/parser_quality.yaml
 #
 # Parser Quality Gate 임계값 설정
 # 코드 내 숫자 직접 기입 금지 — 모든 임계값은 여기서 관리
 #
 # 담당: 김진형 (REQ-006)
-# 참고: modules/doc-parser/README.md § Parser Quality Gate
+# 참고: modules/doc_parser/README.md § Parser Quality Gate
 
 # ──────────────────────────────────────────
 # 청킹 설정

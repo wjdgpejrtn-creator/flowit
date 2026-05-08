@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/entities/pii.py
+REQ-006 doc_parser — domain/entities/pii.py
 
 PII 마스킹 규칙 정의 엔티티
 """

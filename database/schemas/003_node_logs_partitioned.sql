@@ -1,6 +1,6 @@
 -- 003_node_logs_partitioned.sql
 -- RANGE partitioned by started_at (monthly) for high-volume node execution logs
--- Status values aligned with common-schemas NodeExecutionState
+-- Status values aligned with common_schemas NodeExecutionState
 
 CREATE TABLE node_logs (
     log_id          UUID NOT NULL DEFAULT gen_random_uuid(),

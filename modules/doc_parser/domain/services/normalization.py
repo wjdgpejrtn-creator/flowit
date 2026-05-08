@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/services/normalizer.py
+REQ-006 doc_parser — domain/services/normalizer.py
 
 기본 정규화 서비스
 처리 순서: 파싱 직후, PII 마스킹 이전

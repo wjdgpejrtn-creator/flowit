@@ -1,8 +1,8 @@
-# Phase 0 — common-schemas 실제 구현 (REQ-012 완료)
+# Phase 0 — common_schemas 실제 구현 (REQ-012 완료)
 
-> **상태**: ✅ DONE — PR #11 (`feature/req-012-common-schemas` → `development`) merge 완료
+> **상태**: ✅ DONE — PR #11 (`feature/req-012-common_schemas` → `development`) merge 완료
 > **담당**: 황대원 (REQ-012), 이가원은 수정 불가 — import만 사용
-> **실제 파일 위치**: `packages/common-schemas/python/common_schemas/`
+> **실제 파일 위치**: `packages/common_schemas/python/common_schemas/`
 
 ---
 

@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/parsers/markdown_parser.py
+REQ-006 doc_parser — adapters/parsers/markdown_parser.py
 
 MarkdownParser
 markdown-it-py 기반 Markdown 파서

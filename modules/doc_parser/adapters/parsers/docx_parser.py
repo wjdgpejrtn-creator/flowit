@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/parsers/docx_parser.py
+REQ-006 doc_parser — adapters/parsers/docx_parser.py
 
 DocxParser
 python-docx 기반 Word 문서 파서

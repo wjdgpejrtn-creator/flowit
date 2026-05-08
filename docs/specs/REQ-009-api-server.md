@@ -1,13 +1,13 @@
 # REQ-009 API Server — 구현 명세
 
 - **담당자**: 황대원
-- **모듈 경로**: `services/api-server/`
+- **모듈 경로**: `services/api_server/`
 - **기술 스택**: Python 3.11+, FastAPI, Uvicorn, SSE (Server-Sent Events)
 - **아키텍처 계층**: Interface Adapters (Inbound — HTTP → Use Case)
 
 ---
 
-## 1. common-schemas에서 import할 클래스
+## 1. common_schemas에서 import할 클래스
 
 ### 1.1 Python import (from common_schemas)
 
@@ -138,8 +138,8 @@ class TopologicalScheduler:
 | # | 합의 사항 | 영향 |
 |---|-----------|------|
 | 1 | DAGScheduler → **TopologicalScheduler** 개명 | 클래스명 변경. 그래프 알고리즘의 본질(위상정렬)을 정확히 반영 |
-| 2 | SSE transport 스키마를 common-schemas로 이동 | API 서버는 transport 모듈 import만 하면 됨 (자체 정의 불필요) |
-| 3 | ValidationErrorResponse를 common-schemas에서 관리 | 검증 에러 포맷 통일 (프론트엔드와 동일 스키마 공유) |
+| 2 | SSE transport 스키마를 common_schemas로 이동 | API 서버는 transport 모듈 import만 하면 됨 (자체 정의 불필요) |
+| 3 | ValidationErrorResponse를 common_schemas에서 관리 | 검증 에러 포맷 통일 (프론트엔드와 동일 스키마 공유) |
 | 4 | ID 타입 = UUID (str 아님) | 모든 *_id 필드는 `uuid.UUID` 타입 사용 |
 | 5 | Optional 필드 합집합 확장 전략 | 공유 스키마의 Optional 필드는 각 모듈에서 선택적으로 활용 |
 | 6 | `scope` 필드 소문자 통일 (ADR-0006) | "private" / "team" / "public" (PascalCase 금지) |
@@ -149,19 +149,19 @@ class TopologicalScheduler:
 ## 4. 의존성 관계
 
 ```
-services/api-server/
+services/api_server/
 ├── imports from ─────────────────────────────────────────┐
-│   packages/common-schemas/python/                       │ (SSOT 엔티티/VO/Enum)
+│   packages/common_schemas/python/                       │ (SSOT 엔티티/VO/Enum)
 │                                                         │
 ├── calls (via Port interface) ───────────────────────────┐
-│   modules/ai-agent/application/                         │ (에이전트 세션 유스케이스)
+│   modules/ai_agent/application/                         │ (에이전트 세션 유스케이스)
 │   modules/workflow-manager/application/                  │ (워크플로우 CRUD 유스케이스)
-│   modules/doc-parser/application/                       │ (문서 파싱 유스케이스)
+│   modules/doc_parser/application/                       │ (문서 파싱 유스케이스)
 │   modules/auth/application/                             │ (인증/인가 유스케이스)
 │   modules/storage/                                      │ (Repository 구현체)
 │                                                         │
 ├── integrates with ──────────────────────────────────────┐
-│   services/execution-engine/ (REQ-007)                  │ (워크플로우 실행 위임)
+│   services/execution_engine/ (REQ-007)                  │ (워크플로우 실행 위임)
 │                                                         │
 └── consumed by ──────────────────────────────────────────┐
     services/frontend/ (REQ-010)                          │ (HTTP/SSE 클라이언트)
@@ -178,7 +178,7 @@ services/api-server/
 ## 5. 디렉토리 구조 (최종)
 
 ```
-services/api-server/
+services/api_server/
 ├── src/
 │   ├── main.py                          # FastAPI app factory + Uvicorn 실행
 │   ├── domain/

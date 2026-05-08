@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/entities/chunk.py
+REQ-006 doc_parser — domain/entities/chunk.py
 
 청킹 결과 단위 엔티티 및 청킹 전략 설정 VO
 """

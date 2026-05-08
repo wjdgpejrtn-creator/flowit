@@ -6,9 +6,9 @@
 
 ---
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
-아래 타입은 `packages/common-schemas`(REQ-012)에서 정의된 SSOT이다. **절대로 모듈 내 재정의 금지.**
+아래 타입은 `packages/common_schemas`(REQ-012)에서 정의된 SSOT이다. **절대로 모듈 내 재정의 금지.**
 
 | 클래스명 | 소스 모듈 | import 경로 | 용도 |
 |----------|-----------|-------------|------|
@@ -110,7 +110,7 @@ class BaseTool(ABC):
     @property
     @abstractmethod
     def risk_level(self) -> RiskLevel:
-        """도구 위험도 등급 (common-schemas에서 import)."""
+        """도구 위험도 등급 (common_schemas에서 import)."""
         ...
 
     @property
@@ -170,7 +170,7 @@ class BaseTool(ABC):
 
 | 항목 | 변경 전 | 변경 후 | 사유 |
 |------|---------|---------|------|
-| BaseTool.risk_level 타입 | 자체 Enum 정의 | `RiskLevel` (REQ-012 import) | SSOT 원칙 — common-schemas에 단일 정의 |
+| BaseTool.risk_level 타입 | 자체 Enum 정의 | `RiskLevel` (REQ-012 import) | SSOT 원칙 — common_schemas에 단일 정의 |
 | RuntimeValidator 역할 | 모호 | "도구 실행 시점 I/O 스키마 검증"으로 명확화 | QAEvaluatorService(REQ-004)와 역할 중복 방지 |
 | NodeDef 참조 | 자체 타입 | `NodeConfig` (REQ-012 import) | 클래스명 통일 |
 | ErrorCode | 자체 정의 | REQ-012에서 import | 에러 코드 전역 통일 |
@@ -182,7 +182,7 @@ class BaseTool(ABC):
 ### 이 모듈이 import하는 대상
 
 ```python
-# common-schemas (REQ-012) — 공유 타입
+# common_schemas (REQ-012) — 공유 타입
 from common_schemas import NodeConfig
 from common_schemas.enums import RiskLevel, ErrorCode
 from common_schemas.exceptions import ExecutionError, ValidationError
@@ -190,7 +190,7 @@ from common_schemas.exceptions import ExecutionError, ValidationError
 # auth (REQ-002) — domain/services만 허용
 from auth.domain.services import CredentialInjectionService
 
-# common-schemas 보안 타입
+# common_schemas 보안 타입
 from common_schemas import PermissionSource, PlaintextCredential
 ```
 
@@ -204,8 +204,8 @@ from common_schemas import PermissionSource, PlaintextCredential
 
 | 소비자 | import 대상 | 용도 |
 |--------|-------------|------|
-| `services/execution-engine/` (REQ-007) | `toolset.application.use_cases.ExecuteToolUseCase` | 워크플로우 실행 시 각 노드의 도구 호출 |
-| `services/api-server/` (REQ-009) | `toolset.application.use_cases.ListToolsUseCase` | 도구 카탈로그 API 제공 |
+| `services/execution_engine/` (REQ-007) | `toolset.application.use_cases.ExecuteToolUseCase` | 워크플로우 실행 시 각 노드의 도구 호출 |
+| `services/api_server/` (REQ-009) | `toolset.application.use_cases.ListToolsUseCase` | 도구 카탈로그 API 제공 |
 
 ---
 

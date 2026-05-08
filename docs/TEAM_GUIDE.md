@@ -15,11 +15,11 @@
 
 | 담당자 | REQ | 모듈/서비스 | README 위치 |
 |--------|-----|-----------|------------|
-| 황대원 (조장) | 001, 007~012 | database, execution-engine, storage, api-server, frontend, infra, common-schemas | 각 모듈 하위 `README.md` |
-| 박아름 (리포 오너) | 002, 003 | auth, nodes-graph | `modules/auth/`, `modules/nodes-graph/` |
-| 신정혜 | 004 | ai-agent | `modules/ai-agent/` |
+| 황대원 (조장) | 001, 007~012 | database, execution_engine, storage, api_server, frontend, infra, common_schemas | 각 모듈 하위 `README.md` |
+| 박아름 (리포 오너) | 002, 003 | auth, nodes_graph | `modules/auth/`, `modules/nodes_graph/` |
+| 신정혜 | 004 | ai_agent | `modules/ai_agent/` |
 | 햄햄 | 005 | toolset | `modules/toolset/` |
-| 김진형 | 006 | doc-parser | `modules/doc-parser/` |
+| 김진형 | 006 | doc_parser | `modules/doc_parser/` |
 
 ---
 
@@ -27,17 +27,17 @@
 
 ```
 Workflow_Automation/
-├── packages/common-schemas/    ← 공유 타입 (Pydantic v2, 모든 모듈의 기반)
+├── packages/common_schemas/    ← 공유 타입 (Pydantic v2, 모든 모듈의 기반)
 ├── modules/                    ← 도메인 모듈 (비즈니스 로직)
 │   ├── auth/                   ←   인증/권한 (REQ-002)
-│   ├── nodes-graph/            ←   노드 카탈로그 + 그래프 검증 (REQ-003)
-│   ├── ai-agent/               ←   AI 워크플로우 생성 (REQ-004)
+│   ├── nodes_graph/            ←   노드 카탈로그 + 그래프 검증 (REQ-003)
+│   ├── ai_agent/               ←   AI 워크플로우 생성 (REQ-004)
 │   ├── toolset/                ←   외부 도구 실행 (REQ-005)
-│   ├── doc-parser/             ←   문서 파싱 (REQ-006)
+│   ├── doc_parser/             ←   문서 파싱 (REQ-006)
 │   └── storage/                ←   ORM + Repository 구현체 (REQ-008)
 ├── services/                   ← 서비스 (조립 + 인프라)
-│   ├── api-server/             ←   FastAPI 게이트웨이 (REQ-009)
-│   ├── execution-engine/       ←   Celery 실행 엔진 (REQ-007)
+│   ├── api_server/             ←   FastAPI 게이트웨이 (REQ-009)
+│   ├── execution_engine/       ←   Celery 실행 엔진 (REQ-007)
 │   └── frontend/               ←   Next.js 14 UI (REQ-010)
 ├── _agent_templates/           ← Claude Code 에이전트 템플릿 (9개)
 ├── .claude/commands/           ← Claude Code 슬래시 커맨드
@@ -92,11 +92,11 @@ git pull origin development
 git checkout -b feature/req-004-intent-analyzer
 
 # 2) 코드 작성 (README 먼저 읽기!)
-#    → modules/ai-agent/README.md 확인
+#    → modules/ai_agent/README.md 확인
 
 # 3) 커밋
-git add modules/ai-agent/
-git commit -m "feat(ai-agent): IntentAnalyzerService 구현"
+git add modules/ai_agent/
+git commit -m "feat(ai_agent): IntentAnalyzerService 구현"
 
 # 4) 푸시 + PR
 git push -u origin feature/req-004-intent-analyzer
@@ -243,32 +243,32 @@ modules/{module_name}/
 ### 의존성 방향 (안쪽 → 바깥 참조 금지)
 
 ```
-  adapters/ → application/ → domain/ → common-schemas
+  adapters/ → application/ → domain/ → common_schemas
      ↓ OK      ↓ OK           ↓ OK
-  외부 라이브러리  Port ABC만     common-schemas만
+  외부 라이브러리  Port ABC만     common_schemas만
 ```
 
 **Port와 Adapter가 분리되는 핵심 이유:**
 - `domain/ports/`에 인터페이스(ABC)를 정의
 - `storage/repositories/` 또는 자체 `adapters/`에 구현체를 배치
-- `services/api-server/`가 DI로 조립 (Composition Root)
+- `services/api_server/`가 DI로 조립 (Composition Root)
 
 이렇게 하면 domain 레이어가 DB, 프레임워크에 의존하지 않아서 테스트와 교체가 쉬워집니다.
 
 ---
 
-## 9. 공유 타입 (common-schemas)
+## 9. 공유 타입 (common_schemas)
 
-모든 모듈이 공통으로 사용하는 타입은 `packages/common-schemas/`에 단일 정의(SSOT)합니다. 같은 타입을 모듈 내부에서 재정의하면 안 됩니다.
+모든 모듈이 공통으로 사용하는 타입은 `packages/common_schemas/`에 단일 정의(SSOT)합니다. 같은 타입을 모듈 내부에서 재정의하면 안 됩니다.
 
 | 타입 | 파일 | 사용 모듈 |
 |------|------|----------|
-| `WorkflowSchema`, `NodeInstance`, `Edge` | workflow.py | nodes-graph, ai-agent, storage |
-| `AgentState`, `IntentResult`, `DraftSpec` | agent.py | ai-agent |
-| `DocumentBlock`, `ContentBlock` | document.py | doc-parser |
+| `WorkflowSchema`, `NodeInstance`, `Edge` | workflow.py | nodes_graph, ai_agent, storage |
+| `AgentState`, `IntentResult`, `DraftSpec` | agent.py | ai_agent |
+| `DocumentBlock`, `ContentBlock` | document.py | doc_parser |
 | `PermissionSource`, `PlaintextCredential` | security.py | auth, toolset |
 | `RiskLevel`, `ExecutionStatus` 등 Enum | enums.py | 전 모듈 |
-| `SSEFrame`, `AgentNodeFrame` | transport.py | api-server, frontend |
+| `SSEFrame`, `AgentNodeFrame` | transport.py | api_server, frontend |
 
 ```python
 # 올바른 import
@@ -284,7 +284,7 @@ from common_schemas.exceptions import DomainError, ValidationError
 | 실수 | 왜 문제인가 | 해결책 |
 |------|-----------|--------|
 | `domain/`에서 `from sqlalchemy import ...` | 도메인이 프레임워크에 결합됨 | `adapters/`에서만 import |
-| `from storage.repositories import XRepo` 를 다른 모듈에서 직접 import | 의존성 방향 위반 | `services/api-server/dependencies/`에서 DI로 주입 |
+| `from storage.repositories import XRepo` 를 다른 모듈에서 직접 import | 의존성 방향 위반 | `services/api_server/dependencies/`에서 DI로 주입 |
 | `WorkflowSchema`를 모듈 내부에서 재정의 | SSOT 위반 | `from common_schemas import WorkflowSchema` |
 | API 키를 코드에 하드코딩 | 보안 위반 | `os.getenv("KEY_NAME")` |
 | `main`에 직접 PR | 브랜치 전략 위반 | base를 `development`로 설정 |

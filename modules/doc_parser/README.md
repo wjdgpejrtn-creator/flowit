@@ -24,7 +24,7 @@ from doc_parser.application.use_cases import (
 )
 ```
 
-## common-schemas에서 import하는 타입
+## common_schemas에서 import하는 타입
 
 | 클래스 | import 경로 | 용도 |
 |--------|-------------|------|
@@ -102,15 +102,15 @@ from doc_parser.application.use_cases import (
 
 ```
 Upstream (이 모듈이 의존):
-  ├── common-schemas (REQ-012)
+  ├── common_schemas (REQ-012)
   │     └── DocumentBlock, ContentBlock, FileMeta, ParserMeta, SourceRef, BBox, SheetMeta
   └── storage (REQ-008) / database (REQ-001)
         └── DocumentRepositoryPort 구현체 (파싱 결과 영속화)
 
 Downstream (이 모듈에 의존):
-  ├── ai-agent (REQ-004)          → 문서 기반 워크플로우 생성 시 청크 조회
-  ├── api-server (REQ-009)        → 문서 업로드 엔드포인트에서 ParseDocumentUseCase 호출
-  └── execution-engine (REQ-007)  → 워크플로우 노드로 파서 호출 시
+  ├── ai_agent (REQ-004)          → 문서 기반 워크플로우 생성 시 청크 조회
+  ├── api_server (REQ-009)        → 문서 업로드 엔드포인트에서 ParseDocumentUseCase 호출
+  └── execution_engine (REQ-007)  → 워크플로우 노드로 파서 호출 시
 ```
 
 ## 환경 변수

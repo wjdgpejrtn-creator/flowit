@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — application/use_cases/parsing_pipeline.py
+REQ-006 doc_parser — application/use_cases/parsing_pipeline.py
 
 ParsingPipeline
 전체 파이프라인 오케스트레이션

@@ -1,14 +1,14 @@
 # REQ-004 AI Agent — 구현 명세
 
 > **담당**: 신정혜  
-> **모듈 경로**: `modules/ai-agent/`  
+> **모듈 경로**: `modules/ai_agent/`  
 > **기준 문서**: 클래스 다이어그램 교차분석 확정본 (2026-05-05)
 
 ---
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
-아래 타입은 `packages/common-schemas`(REQ-012)에서 정의된 SSOT이다. **절대로 모듈 내 재정의 금지.**
+아래 타입은 `packages/common_schemas`(REQ-012)에서 정의된 SSOT이다. **절대로 모듈 내 재정의 금지.**
 
 | 클래스명 | 소스 모듈 | import 경로 | 용도 |
 |----------|-----------|-------------|------|
@@ -67,7 +67,7 @@
 | `WorkflowRepository` | 워크플로우 저장소 | `save(workflow: WorkflowSchema) -> UUID`, `find_by_id(workflow_id: UUID) -> Optional[WorkflowSchema]` | `modules/storage/repositories/` |
 | `NodeRegistry` | 노드 카탈로그 검색 퍼사드 | `search(query: str, limit: int) -> list[NodeConfig]`, `get_schema(node_id: UUID) -> NodeConfig` | `adapters/node_registry.py` |
 
-> **NodeRegistry 구현 주의**: `NodeDefinitionRepository`(nodes-graph 모듈 Port)를 DI로 주입받는 Facade 패턴. `search`와 `get_schema`만 외부에 노출한다. 내부적으로 `NodeDefinitionRepository.find_by_category()`, `.get_by_id()` 등을 위임 호출한다.
+> **NodeRegistry 구현 주의**: `NodeDefinitionRepository`(nodes_graph 모듈 Port)를 DI로 주입받는 Facade 패턴. `search`와 `get_schema`만 외부에 노출한다. 내부적으로 `NodeDefinitionRepository.find_by_category()`, `.get_by_id()` 등을 위임 호출한다.
 
 ---
 
@@ -88,7 +88,7 @@
 | 어댑터 | 설명 | 구현하는 Port | 외부 의존성 |
 |--------|------|---------------|-------------|
 | `ModalLLMAdapter` | Modal GPU 서버 호출 (Gemma 4 + BGE-M3) | `LLMPort` | `modal`, `httpx` |
-| `NodeRegistryAdapter` | nodes-graph의 `NodeDefinitionRepository`를 감싸는 Facade | `NodeRegistry` | `nodes_graph.domain.ports.NodeDefinitionRepository` (DI 주입) |
+| `NodeRegistryAdapter` | nodes_graph의 `NodeDefinitionRepository`를 감싸는 Facade | `NodeRegistry` | `nodes_graph.domain.ports.NodeDefinitionRepository` (DI 주입) |
 | `LangGraphOrchestrator` | LangGraph StateGraph 기반 내부 워크플로우 그래프 | (내부용, Port 아님) | `langgraph` |
 
 #### LangGraph StateGraph 노드 구성
@@ -160,9 +160,9 @@ ConsultantNode
 
 | 항목 | 변경 전 | 변경 후 | 사유 |
 |------|---------|---------|------|
-| AgentState 위치 | REQ-004 자체 정의 | REQ-012 common-schemas import | SSOT 원칙 — 여러 모듈에서 참조 가능해야 함 |
+| AgentState 위치 | REQ-004 자체 정의 | REQ-012 common_schemas import | SSOT 원칙 — 여러 모듈에서 참조 가능해야 함 |
 | WorkflowDraft | 별도 클래스 존재 | `WorkflowSchema`로 통합 (is_draft 필드로 구분) | 중복 제거, 단일 스키마로 draft/published 구분 |
-| WorkflowNode | 별도 클래스 | 삭제 → `NodeInstance` import | common-schemas의 NodeInstance가 동일 역할 수행 |
+| WorkflowNode | 별도 클래스 | 삭제 → `NodeInstance` import | common_schemas의 NodeInstance가 동일 역할 수행 |
 | NodeDef | REQ-004 자체 정의 | `NodeConfig` (REQ-012) import | 클래스명 통일 |
 | MemoryEntry.source_session_id | 없음 | `Optional[UUID]` 필드 추가 | 메모리 출처 추적 가능하도록 신규 추가 |
 | NodeRegistry | 독립 서비스 | Facade 패턴 (NodeDefinitionRepository DI 주입) | Clean Architecture 의존성 방향 준수 |
@@ -174,7 +174,7 @@ ConsultantNode
 ### 이 모듈이 import하는 대상
 
 ```python
-# common-schemas (REQ-012) — 모든 공유 타입
+# common_schemas (REQ-012) — 모든 공유 타입
 from common_schemas import (
     AgentState, DraftSpec, IntentResult, SlotFillingState,
     UnresolvedNode, WorkflowSchema, NodeInstance, NodeConfig,
@@ -187,7 +187,7 @@ from common_schemas.transport import SSEFrame, AgentNodeFrame, SessionFrame
 # auth (REQ-002) — domain/services만 허용
 from auth.domain.services import CredentialInjectionService
 
-# nodes-graph (REQ-003) — domain/ports, domain/services만 허용
+# nodes_graph (REQ-003) — domain/ports, domain/services만 허용
 from nodes_graph.domain.ports import NodeDefinitionRepository
 from nodes_graph.domain.services import GraphValidator
 ```
@@ -204,8 +204,8 @@ from nodes_graph.domain.services import GraphValidator
 | 소비자 | import 대상 |
 |--------|-------------|
 | `modules/storage/` | `ai_agent.domain.ports.AgentMemoryRepository` (구현을 위해) |
-| `services/api-server/` | `ai_agent.application.use_cases.ComposeWorkflowUseCase` (DI 조립) |
-| `services/execution-engine/` | (간접 — HandoffPayload를 통해 workflow_id 전달) |
+| `services/api_server/` | `ai_agent.application.use_cases.ComposeWorkflowUseCase` (DI 조립) |
+| `services/execution_engine/` | (간접 — HandoffPayload를 통해 workflow_id 전달) |
 
 ---
 
@@ -233,7 +233,7 @@ tests/
 ## 파일 배치 요약
 
 ```
-modules/ai-agent/
+modules/ai_agent/
 ├── __init__.py
 ├── domain/
 │   ├── __init__.py

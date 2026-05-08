@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — domain/__init__.py
+REQ-006 doc_parser — domain/__init__.py
 
 domain 레이어 전체 public export
 

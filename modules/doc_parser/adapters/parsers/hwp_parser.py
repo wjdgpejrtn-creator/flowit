@@ -1,5 +1,5 @@
 """
-REQ-006 doc-parser — adapters/parsers/hwp_parser.py
+REQ-006 doc_parser — adapters/parsers/hwp_parser.py
 
 HwpParser
 pyhwp(hwp5txt) 기반 HWP 파서
