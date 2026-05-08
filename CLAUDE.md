@@ -252,6 +252,7 @@ modules/{module_name}/
 | `WorkflowSchema`, `NodeInstance`, `Edge` | common-schemas/workflow.py | nodes-graph, ai-agent |
 | `AgentState`, `IntentResult`, `DraftSpec` | common-schemas/agent.py | ai-agent |
 | `DocumentBlock`, `ContentBlock`, `FileMeta` | common-schemas/document.py | doc-parser |
+| `Chunk`, `ChunkingStrategy`, `QualityGateResult`, `QualityMetrics`, `WarningInfo` | common-schemas/document.py | doc-parser, ai-agent, storage |
 | `PermissionSource`, `PlaintextCredential` | common-schemas/security.py | auth |
 | `RiskLevel`, `AgentMode`, `ExecutionStatus` | common-schemas/enums.py | toolset, ai-agent |
 | `HandoffPayload`, `EvaluationResult` | common-schemas/handoff.py | ai-agent, execution-engine |
