@@ -1,12 +1,12 @@
-# doc-parser
+# doc_parser
 
 > REQ-006: 7종 문서 파서, 청킹, 품질 게이트
 
 ## 설치
 
 ```bash
-pip install -e modules/doc-parser
-pip install -e "modules/doc-parser[dev]"
+pip install -e modules/doc_parser
+pip install -e "modules/doc_parser[dev]"
 ```
 
 ## Quick Start
@@ -39,7 +39,7 @@ from doc_parser.adapters.parsers import PdfParser, DocxParser, XlsxParser
 
 | 포트 (ABC) | 메서드 | 구현 위치 |
 |------------|--------|----------|
-| `ParserPort` | `parse(file_path, file_meta) → DocumentBlock` | `doc-parser/adapters/parsers/` (자체 구현) |
+| `ParserPort` | `parse(file_path, file_meta) → DocumentBlock` | `doc_parser/adapters/parsers/` (자체 구현) |
 | | `supports(mime_type) → bool` | |
 
 ### application/use_cases
@@ -222,5 +222,5 @@ class ParserFactory:
 ## 테스트
 
 ```bash
-pytest modules/doc-parser/tests/
+pytest modules/doc_parser/tests/
 ```

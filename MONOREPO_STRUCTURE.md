@@ -124,7 +124,7 @@ Workflow_Automation/
 │   │       ├── unit/{domain,application}/
 │   │       └── integration/adapters/
 │   │
-│   ├── doc-parser/                         # REQ-006 Doc Parser
+│   ├── doc_parser/                         # REQ-006 Doc Parser
 │   │   ├── __init__.py
 │   │   ├── domain/
 │   │   │   ├── entities/                   # ParserMeta
@@ -291,7 +291,7 @@ Workflow_Automation/
 | REQ-003 | `modules/nodes-graph/` | 박아름 | P0 |
 | REQ-004 | `modules/ai-agent/` | 신정혜 | P0 |
 | REQ-005 | `modules/toolset/` | 햄햄 | P0 |
-| REQ-006 | `modules/doc-parser/` | 김진형 | P0 |
+| REQ-006 | `modules/doc_parser/` | 김진형 | P0 |
 | REQ-007 | `services/execution-engine/` | TBD | P0 |
 | REQ-008 | `modules/storage/` | 황대원 | P0 |
 | REQ-009 | `services/api-server/` | 황대원 | P0 |
@@ -361,7 +361,7 @@ gh pr create --base development --title "feat(auth): Google SSO + JWT 구현"
                                │ import
               ┌────────────────┼────────────────┐
               ▼                ▼                ▼
-    modules/auth/      modules/ai-agent/   modules/doc-parser/
+    modules/auth/      modules/ai-agent/   modules/doc_parser/
     modules/nodes-graph/  modules/toolset/
       domain/
       ├── ports/  ◄──── 안쪽이 인터페이스 정의
@@ -398,7 +398,7 @@ gh pr create --base development --title "feat(auth): Google SSO + JWT 구현"
 | `ai-agent/domain/ports/` | `LLMPort` | `ai-agent/adapters/llm/` |
 | `toolset/domain/ports/` | `ToolRegistry` | `toolset/adapters/` |
 | `toolset/domain/ports/` | `SecureConnectorPort` | `toolset/adapters/` |
-| `doc-parser/domain/ports/` | `ParserPort` | `doc-parser/adapters/parsers/` |
+| `doc_parser/domain/ports/` | `ParserPort` | `doc_parser/adapters/parsers/` |
 | `execution-engine/domain/ports/` | `WorkflowRepositoryPort` | `storage/repositories/` |
 | `execution-engine/domain/ports/` | `NodeExecutorPort` | `execution-engine/adapters/` |
 | `execution-engine/domain/ports/` | `TaskQueuePort` | `execution-engine/adapters/` |
@@ -587,7 +587,7 @@ release → main       : 안정 병합 (수동)
 /modules/nodes-graph/               @billionaireahreum
 /modules/ai-agent/                  # 신정혜 GitHub 계정 추가 예정
 /modules/toolset/                   # 햄햄 GitHub 계정 추가 예정
-/modules/doc-parser/                # 김진형 GitHub 계정 추가 예정
+/modules/doc_parser/                # 김진형 GitHub 계정 추가 예정
 /modules/storage/                   @dhwang0803-glitch
 /database/                          @dhwang0803-glitch
 /infra/                             @dhwang0803-glitch
