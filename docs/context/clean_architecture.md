@@ -124,7 +124,9 @@ packages/common_schemas/
 │   │   ├── agent.py                # AgentState, DraftSpec, IntentResult,
 │   │   │                           # SlotFillingState, UnresolvedNode
 │   │   ├── document.py             # DocumentBlock, ContentBlock, FileMeta,
-│   │   │                           # SourceRef, BBox, ParserMeta, AnalysisResult
+│   │   │                           # SourceRef, BBox, ParserMeta, AnalysisResult,
+│   │   │                           # Chunk, ChunkingStrategy,
+│   │   │                           # QualityGateResult, QualityMetrics, WarningInfo
 │   │   ├── security.py             # PermissionSource, PlaintextCredential
 │   │   ├── validation.py           # ValidationErrorResponse, ValidationErrorItem
 │   │   ├── transport.py            # SSEFrame, SessionFrame, AgentNodeFrame,
@@ -221,7 +223,8 @@ modules/auth/
 │   │   │                               #   입력: user_id, role, department
 │   │   │                               #   출력: PermissionSource (REQ-012)
 │   │   └── credential_injection.py     # CredentialInjectionService
-│   │                                   #   NodeInstance.credential_id → PlaintextCredential
+│   │                                   #   inject(credential_id: UUID, node_id: UUID) → PlaintextCredential
+│   │                                   #   node_id: 감사 추적·스코프 제한용 (PR #31 확정)
 │   │                                   #   메모리 내 복호화, 사용 후 wipe()
 │   └── ports/
 │       ├── session_repository.py       # SessionRepository (ABC)
@@ -282,6 +285,21 @@ modules/nodes_graph/
 │   │       # NodeConfig(REQ-012) 확장
 │   │       # 추가 필드: service_type, required_connections (H-4 확정)
 │   │       # 54종 노드 정의의 도메인 표현
+│   ├── catalog/                        # 노드 카탈로그 (30종 구현, PR #30)
+│   │   ├── __init__.py                 # ⚠️ get_all_node_definitions()는 여기 두지 않음
+│   │   │                               #   → application/catalog_registry.py에서 조립
+│   │   ├── data/                       # 데이터 처리 노드
+│   │   │   ├── google_drive.py         # GoogleDriveNode
+│   │   │   ├── google_sheets.py        # GoogleSheetsNode
+│   │   │   └── ...                     # gmail, pdf, http_request 등
+│   │   ├── control/                    # 흐름 제어 노드
+│   │   │   ├── condition.py            # ConditionNode
+│   │   │   ├── delay.py               # DelayNode
+│   │   │   └── ...                     # loop, merge, split 등
+│   │   └── trigger/                    # 트리거 노드
+│   │       ├── webhook.py              # WebhookTriggerNode
+│   │       ├── schedule.py             # ScheduleTriggerNode
+│   │       └── ...
 │   ├── services/
 │   │   ├── graph_validator.py          # GraphValidator (SchemaValidation)
 │   │   │   # WorkflowSchema → ValidationErrorResponse
@@ -295,20 +313,29 @@ modules/nodes_graph/
 │           # search_by_embedding(query, k) → list[NodeDefinition]
 │           # upsert(node_def) → NodeDefinition
 ├── application/
-│   └── use_cases/
-│       ├── validate_graph.py           # ValidateGraphUseCase
-│       │   # WorkflowSchema → ValidationErrorResponse
-│       └── search_nodes.py             # SearchNodesUseCase
-│           # query → list[NodeDefinition] (임베딩 기반)
+│   ├── use_cases/
+│   │   ├── validate_graph.py           # ValidateGraphUseCase
+│   │   │   # WorkflowSchema → ValidationErrorResponse
+│   │   └── search_nodes.py             # SearchNodesUseCase
+│   │       # query → list[NodeDefinition] (임베딩 기반)
+│   └── catalog_registry.py            # CatalogRegistry
+│       # get_all_node_definitions() → list[NodeDefinition]
+│       # domain/catalog/* 개별 노드를 조립하여 반환
+│       # ⚠️ domain/__init__.py에서 adapters import 금지 — 여기서 조립
 └── adapters/
-    └── tool_to_node_wrapper.py         # ToolToNodeWrapper
-        # REQ-005 BaseTool → REQ-003 NodeDefinition 변환
-        # risk_level 매핑 (RiskLevel Enum, M-8 확정)
+    ├── tool_to_node_wrapper.py         # ToolToNodeWrapper
+    │   # REQ-005 BaseTool → REQ-003 NodeDefinition 변환
+    │   # risk_level 매핑 (RiskLevel Enum, M-8 확정)
+    └── catalog/
+        └── external/                   # 외부 서비스 연동 노드 어댑터
+            ├── http_request.py         # HttpRequestAdapter (외부 API 호출)
+            └── pdf_generate.py         # PdfGenerateAdapter (PDF 렌더링)
 ```
 
 **핵심 결정 (교차분석 확정 반영):**
 - WorkflowSchema, NodeInstance, Edge → 자체 정의 삭제, REQ-012 import (H-1)
 - NodeDefinition은 NodeConfig(REQ-012)를 확장하되 모듈 전용 엔티티로 유지 (H-4)
+- `get_all_node_definitions()`는 `domain/catalog/__init__.py`가 아닌 `application/catalog_registry.py`에 배치 (Clean Architecture 위반 방지, PR #30 리뷰 확정)
 
 ---
 
@@ -454,33 +481,71 @@ modules/doc_parser/
 ├── __init__.py
 ├── domain/
 │   ├── entities/
-│   │   └── parser_meta.py              # ParserMeta
-│   │       # parser_name, parser_version, config
+│   │   ├── chunk.py                    # Chunk, ChunkingStrategy
+│   │   │   # ⚠️ common-schemas/document.py로 승격 예정
+│   │   │   # Chunk: block, chunk_index, parent_document_id,
+│   │   │   #        importance_score=None (REQ-004 담당), embedding=None (REQ-004 담당)
+│   │   │   # ChunkingStrategy: max_tokens, overlap_tokens, token_estimator_mode
+│   │   ├── quality.py                  # QualityGateResult, QualityMetrics, QualityConfig
+│   │   │   # ⚠️ QualityGateResult, QualityMetrics → common-schemas/document.py 승격 예정
+│   │   │   # QualityConfig: 임계값 설정 VO (doc_parser 내부 유지)
+│   │   ├── warning.py                  # WarningInfo, ElapsedDetail
+│   │   │   # WarningInfo: code, message, detail (파싱 경고 정보)
+│   │   │   # ElapsedDetail: 파이프라인 단계별 처리 시간 (ms)
+│   │   └── pii.py                      # PIIMaskRule
+│   │       # pattern, replacement, label (PII 마스킹 규칙)
 │   ├── services/
 │   │   ├── chunking_service.py         # ChunkingService
-│   │   │   # ContentBlock[] → Chunk[] (토큰 기반 분할)
+│   │   │   # DocumentBlock → Chunk[] (토큰 기반 분할)
 │   │   │   # importance_score=None (REQ-004가 나중에 채움, M-7 확정)
-│   │   └── quality_gate.py             # QualityGate
-│   │       # 파싱 품질 검증 (빈 블록 제거, 최소 토큰 수 등)
+│   │   ├── quality_gate.py             # QualityGate
+│   │   │   # evaluate(DocumentBlock, list[Chunk]) → QualityGateResult
+│   │   │   # 임계값은 config/parser_quality.yaml에서 로드
+│   │   ├── normalization.py            # NormalizationService
+│   │   │   # normalize_document(DocumentBlock) → DocumentBlock
+│   │   │   # 파싱 직후, PII 마스킹 이전 실행
+│   │   ├── pii_masking.py              # PIIMaskingService
+│   │   │   # mask_document(DocumentBlock) → (DocumentBlock, list[WarningInfo])
+│   │   │   # 주민번호, 전화번호, 이메일, 계좌, 카드번호 마스킹
+│   │   └── parser_factory.py           # ParserFactory
+│   │       # get(mime_type) → ParserPort (MIME 기반 파서 선택)
 │   └── ports/
-│       └── parser_port.py              # ParserPort (ABC)
-│           # parse(file_bytes, file_meta) → list[ContentBlock]
-│           # supported_types() → list[str]
+│       ├── parser_port.py              # ParserPort (ABC)
+│       │   # parse(file_path: str, file_meta: FileMeta) → DocumentBlock
+│       │   # supports(mime_type: str) → bool
+│       ├── config_port.py              # ConfigLoaderPort (ABC)
+│       │   # load_quality_config() → QualityConfig
+│       │   # load_chunking_strategy() → ChunkingStrategy
+│       │   # load_pii_rules() → list[PIIMaskRule]
+│       └── document_repository_port.py # DocumentRepositoryPort (ABC)
+│           # save(DocumentBlock) → UUID
+│           # save_chunks(list[Chunk]) → None
+│           # save_quality_log(QualityGateResult, document_id: UUID) → None
+│           # ⚠️ 구현체는 storage(REQ-008)에서 제공 — §6.3 참조
 ├── application/
 │   └── use_cases/
 │       ├── parse_document.py           # ParseDocumentUseCase
-│       │   # file → ParserPort.parse() → QualityGate → DocumentBlock
-│       └── extract_chunks.py           # ExtractChunksUseCase
-│           # DocumentBlock → ChunkingService → Chunk[]
-└── adapters/
-    └── parsers/                        # 7개 ParserPort 구현체
-        ├── pdf_parser.py               # PyMuPDF / pdfplumber
-        ├── docx_parser.py              # python-docx
-        ├── xlsx_parser.py              # openpyxl
-        ├── csv_parser.py               # csv stdlib
-        ├── pptx_parser.py              # python-pptx
-        ├── hwp_parser.py               # pyhwp / olefile
-        └── hwpx_parser.py              # lxml (OOXML)
+│       │   # file_path + FileMeta → (DocumentBlock, QualityGateResult)
+│       │   # 파이프라인: 파서 선택 → parse → normalize → PII mask → quality gate
+│       ├── extract_chunks.py           # ExtractChunksUseCase
+│       │   # DocumentBlock → ChunkingService.chunk() → list[Chunk]
+│       └── parsing_pipeline.py         # ParsingPipeline
+│           # 전체 오케스트레이션: parse → normalize → PII → chunk → quality → save
+│           # DocumentRepositoryPort 의존 — DI 시점에 storage 구현체 주입
+├── adapters/
+│   ├── parsers/                        # 8개 ParserPort 구현체
+│   │   ├── pdf_parser.py               # PyMuPDF / pdfplumber
+│   │   ├── docx_parser.py              # python-docx
+│   │   ├── xlsx_parser.py              # openpyxl
+│   │   ├── csv_parser.py               # csv stdlib
+│   │   ├── pptx_parser.py              # python-pptx
+│   │   ├── hwp_parser.py               # pyhwp / olefile
+│   │   ├── hwpx_parser.py              # lxml (OOXML)
+│   │   └── markdown_parser.py          # markdown stdlib
+│   └── config/
+│       └── yaml_config_loader.py       # YamlConfigLoader (ConfigLoaderPort 구현)
+└── config/
+    └── parser_quality.yaml             # 품질 게이트 임계값 설정
 ```
 
 ---
@@ -666,7 +731,7 @@ class SessionMapper:
 | `ai_agent/domain/ports/AgentMemoryRepository` | `pg_agent_memory_repository.py` |
 | `ai_agent/domain/ports/WorkflowRepository` | `pg_workflow_repository.py` |
 | `toolset/domain/ports/ToolExecutionRepository` | `pg_tool_execution_repository.py` |
-| `doc_parser` (향후) | `pg_document_repository.py` |
+| `doc_parser/domain/ports/DocumentRepositoryPort` | `pg_document_repository.py` |
 
 ### 6.4 Storage 자체 도메인
 
@@ -1427,7 +1492,9 @@ Workflow_Automation/
 | `ai_agent/domain/ports/` | `LLMPort` | `ai_agent/adapters/llm/modal_adapter.py` |
 | `toolset/domain/ports/` | `ToolRegistry` | `toolset/adapters/` (내부 등록) |
 | `toolset/domain/ports/` | `SecureConnectorPort` | `toolset/adapters/secure_connector.py` |
-| `doc_parser/domain/ports/` | `ParserPort` | `doc_parser/adapters/parsers/*.py` (7개) |
+| `doc_parser/domain/ports/` | `ParserPort` | `doc_parser/adapters/parsers/*.py` (8개) |
+| `doc_parser/domain/ports/` | `DocumentRepositoryPort` | `storage/repositories/pg_document_repository.py` |
+| `doc_parser/domain/ports/` | `ConfigLoaderPort` | `doc_parser/adapters/config/yaml_config_loader.py` |
 | `execution_engine/domain/ports/` | `WorkflowRepositoryPort` | `storage/repositories/workflow_repository.py` |
 | `execution_engine/domain/ports/` | `NodeExecutorPort` | `execution_engine/adapters/sandbox_executor.py` |
 | `execution_engine/domain/ports/` | `TaskQueuePort` | `execution_engine/adapters/celery_adapter.py` |
