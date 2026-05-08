@@ -1,14 +1,14 @@
-# doc-parser
+# doc_parser
 
 > REQ-006: 8종 문서 파서, 청킹, PII 마스킹, 품질 게이트
 >
-> 구현 명세 → [`docs/specs/REQ-006-doc-parser.md`](../../docs/specs/REQ-006-doc-parser.md)
+> 구현 명세 → [`docs/specs/REQ-006-doc_parser.md`](../../docs/specs/REQ-006-doc_parser.md)
 
 ## 설치
 
 ```bash
-pip install -e modules/doc-parser
-pip install -e "modules/doc-parser[dev]"
+pip install -e modules/doc_parser
+pip install -e "modules/doc_parser[dev]"
 ```
 
 ## Quick Start
@@ -68,7 +68,7 @@ from doc_parser.application.use_cases import (
 
 | 포트 (ABC) | 메서드 | 구현 위치 |
 |------------|--------|----------|
-| `ParserPort` | `parse(file_path: str, file_meta: FileMeta) → DocumentBlock` | `doc-parser/adapters/parsers/` (자체 구현) |
+| `ParserPort` | `parse(file_path: str, file_meta: FileMeta) → DocumentBlock` | `doc_parser/adapters/parsers/` (자체 구현) |
 | | `supports(mime_type: str) → bool` | |
 | `DocumentRepositoryPort` | `save(document: DocumentBlock) → UUID` | `adapters/persistence/` (REQ-001 연동) |
 | | `save_chunks(chunks: list[Chunk]) → None` | |
@@ -146,5 +146,5 @@ Downstream (이 모듈에 의존):
 ## 테스트
 
 ```bash
-pytest modules/doc-parser/tests/
+pytest modules/doc_parser/tests/
 ```

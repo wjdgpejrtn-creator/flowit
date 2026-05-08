@@ -113,7 +113,7 @@ doc_parser/domain/
 ## 4. 파일 구조
 
 ```
-modules/doc-parser/
+modules/doc_parser/
 ├── __init__.py
 ├── pyproject.toml                         ← ✅ 완료
 ├── config/
