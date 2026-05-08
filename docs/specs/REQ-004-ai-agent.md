@@ -221,7 +221,8 @@ tests/
 │   │   ├── test_slot_filling_service.py       # 순수 로직, mock 불필요
 │   │   └── test_memory_entry.py               # entity validation
 │   └── application/
-│       ├── test_compose_workflow_use_case.py   # 모든 Port mock
+│       ├── test_compose_workflow_use_case.py           # 모든 Port mock
+│       ├── test_continue_conversation_use_case.py      # AgentMemoryRepository, LLMPort mock
 │       └── test_save_memory_use_case.py
 └── integration/
     ├── test_langgraph_orchestrator.py         # 실제 StateGraph 흐름 (LLM은 mock)
