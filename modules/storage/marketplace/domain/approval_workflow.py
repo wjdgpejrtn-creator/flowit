@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
+from common_schemas.types import UtcDatetime
 from pydantic import BaseModel, ConfigDict
 
 
@@ -15,5 +16,5 @@ class ApprovalWorkflow(BaseModel):
     reviewer_id: UUID
     status: Literal["pending", "approved", "rejected"]
     comment: Optional[str] = None
-    reviewed_at: Optional[datetime] = None
-    created_at: datetime
+    reviewed_at: Optional[UtcDatetime] = None
+    created_at: UtcDatetime

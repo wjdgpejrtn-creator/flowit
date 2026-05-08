@@ -1,6 +1,6 @@
 # REQ-008 Storage — 구현 명세
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|
@@ -51,11 +51,11 @@
 |-----------|-------------|------------|
 | `PgSessionRepository` | `auth/domain/ports/SessionRepository` | `create(user_id, session_hash, expires_at: datetime) → Session`, `find_by_hash(hash) → Session`, `revoke(session_id)`, `revoke_all_for_user(user_id) → int` |
 | `PgOAuthRepository` | `auth/domain/ports/OAuthConnectionRepository` | `create(user_id, service, tokens) → OAuthConnection`, `get_by_credential_id(id)`, `get_active_for_user(user_id, service)`, `update_tokens(credential_id, tokens)`, `revoke(credential_id)` |
-| `PgNodeDefinitionRepository` | `nodes-graph/domain/ports/NodeDefinitionRepository` | `get_by_id(node_id) → Optional[NodeDefinition]`, `list_all(mvp_only) → list[NodeDefinition]`, `search_by_embedding(query, limit) → list[NodeDefinition]`, `upsert(definition) → NodeDefinition` |
-| `PgAgentMemoryRepository` | `ai-agent/domain/ports/AgentMemoryRepository` | `save(entry: MemoryEntry) → None`, `find_by_user(user_id, limit) → list[MemoryEntry]`, `find_by_session(session_id: UUID, limit: int) → list[MemoryEntry]` |
-| `PgWorkflowRepository` | `execution-engine/domain/ports/` | `get(workflow_id: UUID) → WorkflowSchema`, `save(schema: WorkflowSchema) → UUID`, `get_node_config(node_id: UUID) → NodeConfig` |
-| `PgExecutionRepository` | `execution-engine/domain/ports/` | `save(result: ExecutionResult) → None`, `get(execution_id: UUID) → ExecutionResult`, `update_node_state(execution_id, state: NodeExecutionState) → None` |
-| `PgDocumentRepository` | `doc-parser/domain/ports/` | `save(document: DocumentBlock) → UUID`, `save_chunks(chunks: list[Chunk]) → None`, `save_quality_log(result, document_id) → None` |
+| `PgNodeDefinitionRepository` | `nodes_graph/domain/ports/NodeDefinitionRepository` | `get_by_id(node_id) → Optional[NodeDefinition]`, `list_all(mvp_only) → list[NodeDefinition]`, `search_by_embedding(query, limit) → list[NodeDefinition]`, `upsert(definition) → NodeDefinition` |
+| `PgAgentMemoryRepository` | `ai_agent/domain/ports/AgentMemoryRepository` | `save(entry: MemoryEntry) → None`, `find_by_user(user_id, limit) → list[MemoryEntry]`, `find_by_session(session_id: UUID, limit: int) → list[MemoryEntry]` |
+| `PgWorkflowRepository` | `execution_engine/domain/ports/` | `get(workflow_id: UUID) → WorkflowSchema`, `save(schema: WorkflowSchema) → UUID`, `get_node_config(node_id: UUID) → NodeConfig` |
+| `PgExecutionRepository` | `execution_engine/domain/ports/` | `save(result: ExecutionResult) → None`, `get(execution_id: UUID) → ExecutionResult`, `update_node_state(execution_id, state: NodeExecutionState) → None` |
+| `PgDocumentRepository` | `doc_parser/domain/ports/` | `save(document: DocumentBlock) → UUID`, `save_chunks(chunks: list[Chunk]) → None`, `save_quality_log(result, document_id) → None` |
 | `PgToolExecutionRepository` | `toolset/domain/ports/ToolExecutionRepository` | `save(record: ToolExecutionRecord) → None`, `find_by_tool(tool_name, limit) → list[ToolExecutionRecord]` |
 | `PgSkillRepository` | 자체 정의 | `upsert(skill) → Skill`, `get_by_id(skill_id) → Skill`, `list(offset, limit) → list[Skill]`, `search(query, embedding, limit) → list[Skill]` (하이브리드: 0.4×FTS + 0.6×vector) |
 
@@ -77,7 +77,7 @@ upstream:  REQ-002 (PermissionSource 권한 검증, SessionRepository/OAuthConne
            REQ-004 (AgentMemoryRepository ABC),
            REQ-005 (ToolExecutionRepository ABC),
            REQ-006 (파싱 대상 원본 파일, DocumentRepositoryPort ABC),
-           REQ-012 (common-schemas 도메인 엔티티)
+           REQ-012 (common_schemas 도메인 엔티티)
 downstream: REQ-006 (원본 파일 읽기), REQ-007 (ExecutionRepository, WorkflowRepository),
             REQ-009 (DI 컨테이너 Repository 주입), REQ-010 (파일 다운로드/미리보기)
 infra: GCP Cloud Storage, ClamAV, PostgreSQL + pgvector

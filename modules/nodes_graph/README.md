@@ -1,0 +1,124 @@
+# nodes_graph
+
+> REQ-003: 54종 노드 정의 카탈로그, 그래프 검증 (위상 정렬), 직렬화
+>
+> 구현 명세 → [`docs/specs/REQ-003-nodes_graph.md`](../../docs/specs/REQ-003-nodes_graph.md)
+
+## 설치
+
+```bash
+pip install -e modules/nodes_graph
+pip install -e "modules/nodes_graph[dev]"
+```
+
+## Quick Start
+
+```python
+from nodes_graph.domain.entities import NodeDefinition, NodeMetadata, BaseNode
+from nodes_graph.domain.services import GraphValidator, GraphSerializer
+from nodes_graph.domain.ports import NodeDefinitionRepository, EmbedderPort
+from nodes_graph.application.use_cases import (
+    ValidateGraphUseCase,
+    SearchNodesUseCase,
+    RegisterNodesUseCase,
+)
+```
+
+## Public API
+
+### domain/entities
+
+| 클래스 | 주요 필드 | 설명 |
+|--------|----------|------|
+| `NodeDefinition` | `node_id: UUID`, `node_type: str`, `name: str`, `category: str`, `version: str`, `input_schema: dict`, `output_schema: dict`, `parameter_schema: dict`, `risk_level: RiskLevel`, `required_connections: list[str]`, `description: str`, `is_mvp: bool`, `service_type: Optional[str]`, `embedding: Optional[list[float]]` | NodeConfig(REQ-012) 확장. REQ-002가 `risk_level`, `required_connections`, `service_type`을 필드 접근으로 사용 (H-4 합의) |
+| `NodeMetadata` | `node_id: UUID`, `name: str`, `category: str`, `risk_level: RiskLevel`, `is_mvp: bool` | BaseNode의 메타데이터 (frozen) |
+| `BaseNode` | `metadata: NodeMetadata`, `input_schema: type[TInput]`, `output_schema: type[TOutput]` | 모든 노드의 ABC. `Generic[TInput, TOutput]`. `async process(input: TInput) → TOutput` 구현 필요 |
+
+### domain/services
+
+| 서비스 | 메서드 | 설명 |
+|--------|--------|------|
+| `GraphValidator` | `async validate(workflow: WorkflowSchema) → ValidationErrorResponse` | 사이클 감지, 고립 노드, 타입 불일치, 중복 ID, 필수 연결 누락 검증. 생성자에 `NodeDefinitionRepository` 주입 필요 |
+| `GraphSerializer` | `serialize(workflow: WorkflowSchema) → dict`, `deserialize(data: dict) → WorkflowSchema` | Pydantic model_dump/model_validate 래핑 |
+
+### domain/ports (인터페이스 — 구현체는 `modules/storage`)
+
+| 포트 (ABC) | 메서드 | 구현 위치 |
+|------------|--------|----------|
+| `NodeDefinitionRepository` | `async upsert(definition: NodeDefinition) → NodeDefinition` | `storage/repositories/` |
+| | `async list_all(mvp_only: bool = False) → list[NodeDefinition]` | |
+| | `async get_by_id(node_id: UUID) → Optional[NodeDefinition]` | |
+| | `async search_by_embedding(query_embedding: list[float], limit: int = 10) → list[NodeDefinition]` | |
+| `EmbedderPort` | `async embed(text: str) → list[float]` | 외부 구현 (BGE-M3, 768차원) |
+| | `async embed_batch(texts: list[str]) → list[list[float]]` | |
+
+### application/use_cases
+
+| 유스케이스 | Input → Output | 설명 |
+|-----------|----------------|------|
+| `ValidateGraphUseCase` | `WorkflowSchema → ValidationErrorResponse` | 그래프 무결성 검증 |
+| `SearchNodesUseCase` | `query: str, limit: int → list[NodeDefinition]` | 벡터 임베딩 기반 노드 검색 |
+| `RegisterNodesUseCase` | `nodes: list[NodeDefinition] → int` | Plugin discovery 노드 일괄 등록. 임베딩 자동 생성 후 upsert |
+
+### adapters
+
+| 어댑터 | 설명 |
+|--------|------|
+| `ToolToNodeWrapper` | REQ-005 `BaseTool` → `BaseNode` 래핑. `to_node_definition() → NodeDefinition` 메서드로 카탈로그 등록용 엔티티 생성 |
+
+## 의존 관계
+
+```
+Upstream (이 모듈이 의존):
+  ├── common_schemas (REQ-012)
+  │     └── WorkflowSchema, NodeInstance, NodeConfig, Edge, Position
+  │     └── RiskLevel, ErrorCode, ValidationErrorItem, ValidationErrorResponse
+  └── toolset (REQ-005) [Optional — ToolToNodeWrapper용]
+        └── BaseTool
+
+Downstream (이 모듈에 의존):
+  ├── auth (REQ-002)            → NodeDefinitionRepository ABC import (CredentialInjectionService)
+  ├── ai_agent (REQ-004)        → GraphValidator 호출, NodeRegistry 퍼사드로 래핑
+  ├── execution_engine (REQ-007) → 실행 시 위상 정렬
+  ├── api_server (REQ-009)      → 노드 목록 조회, 그래프 검증 엔드포인트
+  └── storage (REQ-008)         → NodeDefinitionRepository 구현체 제공
+```
+
+## 환경 변수
+
+| 변수명 | 필수 | 설명 |
+|--------|------|------|
+| 없음 | — | 순수 도메인 로직. 임베딩 설정은 EmbedderPort 구현체가 관리 |
+
+## 노드 카탈로그 요약 (54종 MVP)
+
+| 카테고리 | MVP | 예시 node_type |
+|---------|:---:|------|
+| 데이터 소스 | 5종 | `google_drive_read`, `google_sheets_read` |
+| 트리거 | 8종 | `schedule_trigger`, `webhook_trigger`, `gmail_trigger` |
+| AI / LLM | 10종 | `llm_generate`, `llm_summarize`, `embedding_create` |
+| 데이터 처리 | 14종 | `json_transform`, `text_split`, `merge_data` |
+| 조건 / 제어 | 8종 | `if_condition`, `switch_case`, `loop_for_each` |
+| 문서 생성 | 4종 | `google_docs_write`, `pdf_generate` |
+| 커뮤니케이션 | 2종 | `gmail_send`, `slack_post` |
+| 외부 API 연동 | 3종 | `http_request`, `google_calendar_create` |
+
+## 에러 코드
+
+| 코드 | 의미 | HTTP |
+|------|------|------|
+| E-NODE-001 | 존재하지 않는 노드 타입 | 404 |
+| E-NODE-002 | 노드 파라미터 스키마 불일치 | 422 |
+| E-NODE-003 | 권한 없는 노드 사용 시도 | 403 |
+| E-NODE-004 | 외부 서비스 연결 누락 (credential_id) | 422 |
+| E-NODE-005 | 추후 노드 사용 시도 (MVP 단계 차단) | 403 |
+| E-WF-001 | 워크플로우 찾을 수 없음 | 404 |
+| E-WF-002 | 소유자 아님 (Ownership 위반) | 403 |
+| E-WF-003 | 워크플로우 스키마 검증 실패 | 422 |
+| E-WF-004 | 그래프 무결성 위반 | 422 |
+
+## 테스트
+
+```bash
+pytest modules/nodes_graph/tests/
+```

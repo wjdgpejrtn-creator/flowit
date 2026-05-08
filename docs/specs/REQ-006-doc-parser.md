@@ -1,12 +1,12 @@
 # REQ-006 Doc-Parser -- 구현 명세
 
 > 담당: 김진형  
-> 모듈 경로: `modules/doc-parser/`  
-> 의존 패키지: `common-schemas >= 0.1.0`
+> 모듈 경로: `modules/doc_parser/`  
+> 의존 패키지: `common_schemas >= 0.1.0`
 
 ---
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
 자체적으로 DocumentBlock, FileMeta, Block, SourceRef 등을 재정의하지 않는다. 모두 REQ-012에서 import한다.
 
@@ -117,27 +117,27 @@ from common_schemas import (
 
 | 항목 | 변경 내용 | 근거 |
 |------|----------|------|
-| 자체 DocumentBlock/FileMeta/Block/SourceRef 삭제 | REQ-012 common-schemas SSOT 원칙. 중복 정의 전면 제거 | HIGH-001 교차분석 결과 |
+| 자체 DocumentBlock/FileMeta/Block/SourceRef 삭제 | REQ-012 common_schemas SSOT 원칙. 중복 정의 전면 제거 | HIGH-001 교차분석 결과 |
 | `QualityGateResult` 신규 정의 | `AnalysisResult`(REQ-012)와는 목적이 다름 (파서 QC vs LLM 분석). 별도 타입으로 확정 | HIGH-005 논의 결정 |
 | `QualityMetrics` 신규 정의 | QualityGateResult 내부에서 사용하는 수치 메트릭 VO | HIGH-005 |
 | `Chunk.importance_score` Optional | REQ-004 IntentAnalyzer가 나중에 채우는 필드. 파서 시점에는 None | MEDIUM-003 |
 | `mime_type` FileMeta에 포함 확인 | REQ-012 FileMeta 정의에 `mime_type: str` 이미 포함됨. 추가 작업 불필요 | LOW-002 확인 완료 |
-| `ParserMeta` common-schemas import | 파서 메타데이터도 SSOT에서 가져옴. 자체 정의 불필요 | HIGH-001 |
+| `ParserMeta` common_schemas import | 파서 메타데이터도 SSOT에서 가져옴. 자체 정의 불필요 | HIGH-001 |
 
 ---
 
 ## 의존성 관계
 
 ```
-modules/doc-parser
+modules/doc_parser
 ├── depends on ─────────────────────────────────────────────────────────────
-│   ├── packages/common-schemas   (DocumentBlock, ContentBlock, FileMeta, ParserMeta, SourceRef, BBox, SheetMeta)
+│   ├── packages/common_schemas   (DocumentBlock, ContentBlock, FileMeta, ParserMeta, SourceRef, BBox, SheetMeta)
 │   └── modules/storage           (DocumentRepository가 파싱 결과 영속화 — REQ-001)
 │
 ├── depended by ────────────────────────────────────────────────────────────
-│   ├── modules/ai-agent          (REQ-004: 문서 기반 워크플로우 생성 시 청크 조회)
-│   ├── services/api-server       (문서 업로드 엔드포인트에서 ParseDocumentUseCase 호출)
-│   └── services/execution-engine (워크플로우 노드로 파서 호출 시)
+│   ├── modules/ai_agent          (REQ-004: 문서 기반 워크플로우 생성 시 청크 조회)
+│   ├── services/api_server       (문서 업로드 엔드포인트에서 ParseDocumentUseCase 호출)
+│   └── services/execution_engine (워크플로우 노드로 파서 호출 시)
 │
 └── runtime dependencies ───────────────────────────────────────────────────
     ├── PostgreSQL                 (parsed_documents, document_chunks 저장)
@@ -149,7 +149,7 @@ modules/doc-parser
 ```toml
 [project]
 dependencies = [
-    "common-schemas",
+    "common_schemas",
     "pydantic>=2.0",
     "pdfplumber>=0.10",
     "python-docx>=1.0",
@@ -165,7 +165,7 @@ dependencies = [
 ## 디렉토리 구조 (목표)
 
 ```
-modules/doc-parser/
+modules/doc_parser/
 ├── __init__.py
 ├── domain/
 │   ├── __init__.py

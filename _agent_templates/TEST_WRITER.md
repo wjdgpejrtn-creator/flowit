@@ -21,15 +21,15 @@
 
 | 모듈/서비스 | 테스트 디렉토리 | 프레임워크 |
 |------------|--------------|-----------|
-| `packages/common-schemas` | `python/tests/` | pytest |
+| `packages/common_schemas` | `python/tests/` | pytest |
 | `modules/auth` | `tests/unit/domain/`, `tests/unit/application/`, `tests/integration/` | pytest + pytest-asyncio |
-| `modules/nodes-graph` | `tests/unit/domain/`, `tests/unit/application/` | pytest |
-| `modules/ai-agent` | `tests/unit/domain/`, `tests/unit/application/`, `tests/integration/` | pytest + pytest-asyncio |
+| `modules/nodes_graph` | `tests/unit/domain/`, `tests/unit/application/` | pytest |
+| `modules/ai_agent` | `tests/unit/domain/`, `tests/unit/application/`, `tests/integration/` | pytest + pytest-asyncio |
 | `modules/toolset` | `tests/unit/domain/`, `tests/unit/application/`, `tests/integration/` | pytest + pytest-asyncio |
-| `modules/doc-parser` | `tests/unit/domain/`, `tests/unit/application/`, `tests/integration/` | pytest |
+| `modules/doc_parser` | `tests/unit/domain/`, `tests/unit/application/`, `tests/integration/` | pytest |
 | `modules/storage` | `tests/unit/`, `tests/integration/` | pytest + pytest-asyncio |
-| `services/api-server` | `tests/` | pytest + httpx AsyncClient |
-| `services/execution-engine` | `tests/` | pytest + Celery eager mode |
+| `services/api_server` | `tests/` | pytest + httpx AsyncClient |
+| `services/execution_engine` | `tests/` | pytest + Celery eager mode |
 | `services/frontend` | `tests/` | Jest + Playwright |
 
 ---
@@ -110,10 +110,10 @@ async def test_save_and_retrieve(repo):
     assert loaded.name == "test"
 ```
 
-### api-server 라우터 테스트
+### api_server 라우터 테스트
 
 ```python
-# services/api-server/tests/test_workflow_routes.py
+# services/api_server/tests/test_workflow_routes.py
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import create_app
@@ -151,7 +151,7 @@ test("renders empty canvas with add-node button", () => {
 
 ## 필수 테스트 카테고리
 
-### common-schemas (REQ-012)
+### common_schemas (REQ-012)
 - 각 Pydantic 모델의 직렬화/역직렬화 라운드트립
 - Enum 값 검증 (str 상속으로 JSON 호환)
 - 예외 계층 상속 관계 확인
@@ -161,12 +161,12 @@ test("renders empty canvas with add-node button", () => {
 - CredentialInjectionService 복호화 + wipe 동작
 - CipherPort encrypt → decrypt 대칭성
 
-### nodes-graph (REQ-003)
+### nodes_graph (REQ-003)
 - GraphValidator 사이클 감지, 고립 노드, 타입 불일치, 필수 연결 누락
 - NodeDefinition 54종 노드 타입 정의 유효성
 - SearchNodesUseCase 벡터 검색 결과 정합성
 
-### ai-agent (REQ-004)
+### ai_agent (REQ-004)
 - IntentAnalyzerService 의도 분류 (clarify/draft/refine/propose)
 - QAEvaluatorService 점수 ≥ 8 통과 판정
 - ComposeWorkflowUseCase 턴 제한 (≤ 25) 준수
@@ -177,7 +177,7 @@ test("renders empty canvas with add-node button", () => {
 - ExecuteToolUseCase 검증 → 실행 → 검증 파이프라인
 - SecureConnectorPort 자격증명 획득/해제
 
-### doc-parser (REQ-006)
+### doc_parser (REQ-006)
 - ParserPort 7종 파서별 DocumentBlock 변환
 - ChunkingService 의미 단위 블록 분할
 - QualityGate 파싱 품질 검증
@@ -187,12 +187,12 @@ test("renders empty canvas with add-node button", () => {
 - ORM ↔ 도메인 모델 Mapper 변환 정합성
 - SkillLifecycle 상태 머신 전이
 
-### api-server (REQ-009)
+### api_server (REQ-009)
 - 워크플로우 CRUD 엔드포인트 (생성/조회/수정/삭제)
 - SSE 스트리밍 연결 수립 및 프레임 전송
 - AuthMiddleware JWT 검증 + PermissionSource 주입
 
-### execution-engine (REQ-007)
+### execution_engine (REQ-007)
 - TopologicalScheduler 위상 정렬 + 병렬 레벨 계산
 - ExecuteWorkflowUseCase 전체 오케스트레이션
 - 동일 execution_id 중복 실행 시 멱등성 보장

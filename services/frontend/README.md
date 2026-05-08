@@ -19,9 +19,9 @@ npm run build  # 프로덕션 빌드
 npm run start  # 프로덕션 서버
 ```
 
-## common-schemas에서 import하는 타입 (TypeScript)
+## common_schemas에서 import하는 타입 (TypeScript)
 
-**import 소스**: `packages/common-schemas/typescript/src/generated/index.ts`
+**import 소스**: `packages/common_schemas/typescript/src/generated/index.ts`
 > Python common_schemas에서 `scripts/generate_ts.py`로 자동 생성. **절대 수동 편집 금지**.
 
 ### Interfaces
@@ -80,7 +80,7 @@ import {
   ValidationErrorItem, ValidationErrorResponse,
   SSEFrame, SessionFrame, AgentNodeFrame, RationaleDeltaFrame,
   SlotFillQuestionFrame, DraftSpecDeltaFrame, ResultFrame, ErrorFrame, AnySSEFrame,
-} from '@workflow-automation/common-schemas';
+} from '@workflow-automation/common_schemas';
 ```
 
 ## Pages (Next.js App Router)
@@ -159,13 +159,13 @@ import {
 | `agentStore` | AgentState + 메시지 히스토리 |
 | `authStore` | 인증 토큰 + 사용자 정보 |
 
-## React Flow ↔ common-schemas 어댑터
+## React Flow ↔ common_schemas 어댑터
 
-React Flow는 자체 `Node`, `Edge` 타입을 사용하므로 common-schemas 타입과의 변환 어댑터 필요:
+React Flow는 자체 `Node`, `Edge` 타입을 사용하므로 common_schemas 타입과의 변환 어댑터 필요:
 
 ```typescript
 // lib/adapters/reactFlowAdapter.ts
-import { NodeInstance, Edge as SchemaEdge } from '@workflow-automation/common-schemas';
+import { NodeInstance, Edge as SchemaEdge } from '@workflow-automation/common_schemas';
 import { Node as RFNode, Edge as RFEdge } from '@xyflow/react';
 
 function toReactFlowNode(instance: NodeInstance): RFNode { ... }
@@ -198,8 +198,8 @@ function fromReactFlowNode(rfNode: RFNode): Partial<NodeInstance> { ... }
 
 ```
 Upstream (이 서비스가 의존):
-  ├── common-schemas/typescript (REQ-012) → 모든 TypeScript 타입 (자동 생성)
-  └── api-server (REQ-009)               → HTTP REST + SSE 스트리밍
+  ├── common_schemas/typescript (REQ-012) → 모든 TypeScript 타입 (자동 생성)
+  └── api_server (REQ-009)               → HTTP REST + SSE 스트리밍
 
 Downstream (이 서비스를 소비):
   └── End Users (웹 브라우저)

@@ -4,11 +4,12 @@ version = "0.1.0"
 description = "REQ-008: Repository implementations, ORM models, file storage, Marketplace domain"
 requires-python = ">=3.12"
 dependencies = [
-    "common-schemas",
+    "common_schemas",
     "pydantic>=2.0",
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",
     "pgvector>=0.3",
+    "cloud-sql-python-connector[asyncpg]>=1.12",
 ]
 
 [project.optional-dependencies]

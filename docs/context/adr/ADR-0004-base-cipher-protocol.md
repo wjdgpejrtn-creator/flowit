@@ -34,7 +34,7 @@ class BaseCipher(Protocol):
 database/src/protocols.py     → BaseCipher (Protocol 정의)
 database/src/repositories/    → BaseCipher를 생성자 주입으로 사용
 auth/adapters/cipher/         → AESGCMCipher (Protocol 구현체, REQ-002 담당)
-services/api-server/          → Composition Root에서 AESGCMCipher → BaseCipher 주입
+services/api_server/          → Composition Root에서 AESGCMCipher → BaseCipher 주입
 ```
 
 ### @runtime_checkable 사용 이유
@@ -60,7 +60,7 @@ services/api-server/          → Composition Root에서 AESGCMCipher → BaseCi
 
 - [ ] REQ-002: `auth/adapters/cipher/aes_gcm.py`에 `AESGCMCipher` 구현 (이 Protocol 만족)
 - [ ] REQ-002: `auth/domain/ports/CipherPort` ABC와 이 Protocol의 시그니처 일치 검증
-- [ ] services/api-server DI 설정에서 `AESGCMCipher` → `BaseCipher` 바인딩
+- [ ] services/api_server DI 설정에서 `AESGCMCipher` → `BaseCipher` 바인딩
 
 ## Alternatives Considered
 
