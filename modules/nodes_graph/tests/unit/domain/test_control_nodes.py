@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from nodes_graph.catalog.control.if_condition import IfConditionInput, IfConditionNode
-from nodes_graph.catalog.control.loop_count import LoopCountInput, LoopCountNode
-from nodes_graph.catalog.control.loop_list import LoopListInput, LoopListNode
-from nodes_graph.catalog.control.merge_branch import MergeBranchInput, MergeBranchNode
-from nodes_graph.catalog.control.retry import RetryInput, RetryNode
-from nodes_graph.catalog.control.stop_workflow import StopWorkflowError, StopWorkflowInput, StopWorkflowNode
-from nodes_graph.catalog.control.switch_case import SwitchCaseInput, SwitchCaseNode
+from nodes_graph.domain.catalog.control.if_condition import IfConditionInput, IfConditionNode
+from nodes_graph.domain.catalog.control.loop_count import LoopCountInput, LoopCountNode
+from nodes_graph.domain.catalog.control.loop_list import LoopListInput, LoopListNode
+from nodes_graph.domain.catalog.control.merge_branch import MergeBranchInput, MergeBranchNode
+from nodes_graph.domain.catalog.control.retry import RetryInput, RetryNode
+from nodes_graph.domain.catalog.control.stop_workflow import StopWorkflowError, StopWorkflowInput, StopWorkflowNode
+from nodes_graph.domain.catalog.control.switch_case import SwitchCaseInput, SwitchCaseNode
 
 
 @pytest.mark.asyncio

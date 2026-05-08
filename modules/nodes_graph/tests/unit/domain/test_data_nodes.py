@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import pytest
 
-from nodes_graph.catalog.data.base64_decode import Base64DecodeInput, Base64DecodeNode
-from nodes_graph.catalog.data.base64_encode import Base64EncodeInput, Base64EncodeNode
-from nodes_graph.catalog.data.csv_build import CsvBuildInput, CsvBuildNode
-from nodes_graph.catalog.data.csv_parse import CsvParseInput, CsvParseNode
-from nodes_graph.catalog.data.date_format import DateFormatInput, DateFormatNode
-from nodes_graph.catalog.data.json_extract import JsonExtractInput, JsonExtractNode
-from nodes_graph.catalog.data.json_merge import JsonMergeInput, JsonMergeNode
-from nodes_graph.catalog.data.list_filter import ListFilterInput, ListFilterNode
-from nodes_graph.catalog.data.list_map import ListMapInput, ListMapNode
-from nodes_graph.catalog.data.number_calc import NumberCalcInput, NumberCalcNode
-from nodes_graph.catalog.data.regex_extract import RegexExtractInput, RegexExtractNode
-from nodes_graph.catalog.data.regex_replace import RegexReplaceInput, RegexReplaceNode
-from nodes_graph.catalog.data.string_template import StringTemplateInput, StringTemplateNode
-from nodes_graph.catalog.data.text_transform import TextTransformInput, TextTransformNode
+from nodes_graph.domain.catalog.data.base64_decode import Base64DecodeInput, Base64DecodeNode
+from nodes_graph.domain.catalog.data.base64_encode import Base64EncodeInput, Base64EncodeNode
+from nodes_graph.domain.catalog.data.csv_build import CsvBuildInput, CsvBuildNode
+from nodes_graph.domain.catalog.data.csv_parse import CsvParseInput, CsvParseNode
+from nodes_graph.domain.catalog.data.date_format import DateFormatInput, DateFormatNode
+from nodes_graph.domain.catalog.data.json_extract import JsonExtractInput, JsonExtractNode
+from nodes_graph.domain.catalog.data.json_merge import JsonMergeInput, JsonMergeNode
+from nodes_graph.domain.catalog.data.list_filter import ListFilterInput, ListFilterNode
+from nodes_graph.domain.catalog.data.list_map import ListMapInput, ListMapNode
+from nodes_graph.domain.catalog.data.number_calc import NumberCalcInput, NumberCalcNode
+from nodes_graph.domain.catalog.data.regex_extract import RegexExtractInput, RegexExtractNode
+from nodes_graph.domain.catalog.data.regex_replace import RegexReplaceInput, RegexReplaceNode
+from nodes_graph.domain.catalog.data.string_template import StringTemplateInput, StringTemplateNode
+from nodes_graph.domain.catalog.data.text_transform import TextTransformInput, TextTransformNode
 
 
 @pytest.mark.asyncio
