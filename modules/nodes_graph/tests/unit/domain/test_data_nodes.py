@@ -182,7 +182,7 @@ async def test_list_map_to_str():
 async def test_string_template():
     node = StringTemplateNode()
     out = await node.process(StringTemplateInput(
-        template="안녕하세요, {name}님!",
+        template="안녕하세요, ${name}님!",
         variables={"name": "아름"},
     ))
     assert out.result == "안녕하세요, 아름님!"

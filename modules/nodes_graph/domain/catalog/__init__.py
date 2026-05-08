@@ -23,8 +23,8 @@ from .data.regex_extract import get_node_definition as _regex_extract
 from .data.regex_replace import get_node_definition as _regex_replace
 from .data.string_template import get_node_definition as _string_template
 from .data.text_transform import get_node_definition as _text_transform
-from .external.http_request import get_node_definition as _http_request
-from .external.pdf_generate import get_node_definition as _pdf_generate
+from ...adapters.catalog.external.http_request import get_node_definition as _http_request
+from ...adapters.catalog.external.pdf_generate import get_node_definition as _pdf_generate
 from .trigger.api_poll_trigger import get_node_definition as _api_poll_trigger
 from .trigger.event_trigger import get_node_definition as _event_trigger
 from .trigger.file_watch_trigger import get_node_definition as _file_watch_trigger

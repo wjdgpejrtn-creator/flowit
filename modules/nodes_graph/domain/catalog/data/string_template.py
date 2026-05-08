@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import string
 from dataclasses import dataclass
 from uuid import uuid5
 
@@ -37,7 +38,7 @@ class StringTemplateNode(BaseNode[StringTemplateInput, StringTemplateOutput]):
     output_schema = StringTemplateOutput
 
     async def process(self, input: StringTemplateInput) -> StringTemplateOutput:
-        result = input.template.format(**input.variables)
+        result = string.Template(input.template).safe_substitute(input.variables)
         return StringTemplateOutput(result=result)
 
 
@@ -51,7 +52,7 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "template": {"type": "string", "description": "예: '안녕하세요, {name}님'"},
+                "template": {"type": "string", "description": "예: '안녕하세요, ${name}님' (string.Template $변수명 형식)"},
                 "variables": {"type": "object", "additionalProperties": {"type": "string"}},
             },
             "required": ["template", "variables"],
@@ -63,7 +64,7 @@ def get_node_definition() -> NodeDefinition:
         parameter_schema={},
         risk_level=RiskLevel.LOW,
         required_connections=[],
-        description="템플릿 문자열에 변수를 치환 ({변수명} 형식)",
+        description="템플릿 문자열에 변수를 치환 ($변수명 형식, string.Template 사용으로 포맷 인젝션 차단)",
         is_mvp=True,
         service_type=None,
     )

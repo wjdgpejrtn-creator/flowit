@@ -10,7 +10,7 @@ from common_schemas.enums import RiskLevel
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from .._catalog_ns import _CATALOG_NS
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "http_request"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)

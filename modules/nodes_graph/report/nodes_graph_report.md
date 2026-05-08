@@ -20,10 +20,10 @@
 | domain/services | 2 | `GraphValidator`, `GraphSerializer` |
 | application/use_cases | 3 | `ValidateGraphUseCase`, `SearchNodesUseCase`, `RegisterNodesUseCase` |
 | adapters | 1 | `ToolToNodeWrapper` |
-| catalog/data | 14 | `text_transform`, `json_extract`, `json_merge`, `csv_parse`, `csv_build`, `number_calc`, `date_format`, `list_filter`, `list_map`, `string_template`, `regex_extract`, `regex_replace`, `base64_encode`, `base64_decode` |
-| catalog/control | 8 | `if_condition`, `switch_case`, `loop_list`, `loop_count`, `delay`, `retry`, `merge_branch`, `stop_workflow` |
-| catalog/trigger | 6 | `schedule_trigger`, `webhook_trigger`, `manual_trigger`, `file_watch_trigger`, `event_trigger`, `api_poll_trigger` |
-| catalog/external | 2 | `http_request`, `pdf_generate` |
+| domain/catalog/data | 14 | `text_transform`, `json_extract`, `json_merge`, `csv_parse`, `csv_build`, `number_calc`, `date_format`, `list_filter`, `list_map`, `string_template`, `regex_extract`, `regex_replace`, `base64_encode`, `base64_decode` |
+| domain/catalog/control | 8 | `if_condition`, `switch_case`, `loop_list`, `loop_count`, `delay`, `retry`, `merge_branch`, `stop_workflow` |
+| domain/catalog/trigger | 6 | `schedule_trigger`, `webhook_trigger`, `manual_trigger`, `file_watch_trigger`, `event_trigger`, `api_poll_trigger` |
+| adapters/catalog/external | 2 | `http_request`, `pdf_generate` (외부 I/O 라이브러리 — adapter 계층으로 분리) |
 
 ### 주요 구현 내용
 
@@ -115,7 +115,7 @@ Critical/Major 없음.
 | `adapters/tool_to_node_wrapper.py` | `tool: Any` → `tool: "BaseTool"` (TYPE_CHECKING 블록 활용) | 조장 리뷰 반영: spec 준수, IDE 타입 지원 확보 (2026-05-08, PR #17) |
 | `adapters/tool_to_node_wrapper.py` | uuid5 namespace를 `_TOOL_NAMESPACE` 프로젝트 전용 상수로 변경 | 조장 리뷰 반영: DNS namespace 직접 사용 제거 (2026-05-08, PR #17) |
 | `tests/unit/domain/test_graph_validator.py` | `test_type_compatibility_returns_no_errors` 추가 | 조장 리뷰 반영: 5종 검증 전부 테스트 커버 (2026-05-08, PR #17) |
-| `catalog/` 신설 (30종 노드) | `_catalog_ns.py`, `data/`(14), `control/`(8), `trigger/`(6), `external/`(2) | 54종 MVP 중 외부 서비스 인증 불필요한 30종 선구현. `get_all_node_definitions()`로 RegisterNodesUseCase 연동 준비 |
+| `domain/catalog/` + `adapters/catalog/external/` 신설 (30종 노드) | `domain/catalog/`: `_catalog_ns.py`, `data/`(14), `control/`(8), `trigger/`(6) / `adapters/catalog/external/`: `http_request`, `pdf_generate` | 54종 MVP 중 외부 서비스 인증 불필요한 30종 선구현. httpx/fpdf2 의존 노드는 adapter 계층 분리. `get_all_node_definitions()`로 RegisterNodesUseCase 연동 준비 |
 | Ruff E501 수정 (카탈로그 파일 2건) | `if_condition.py:90`, `number_calc.py:87` enum 목록 줄 분리 | line-length=120 준수 |
 | `tests/unit/domain/test_data_nodes.py` 신설 | 데이터 처리 14종 24건 | 카탈로그 노드 process() 로직 검증 |
 | `tests/unit/domain/test_control_nodes.py` 신설 | 조건/제어 7종 13건 | StopWorkflowError 예외 포함 |
