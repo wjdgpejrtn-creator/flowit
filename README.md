@@ -24,7 +24,7 @@ cd services/frontend && npm install && npm run dev
 |---|---|
 | `packages/` | 공유 패키지 (Pydantic v2 → TypeScript SSOT) |
 | `services/` | 배포 가능 서비스 (api-server, execution-engine, frontend) |
-| `modules/` | 도메인 모듈 (auth, nodes-graph, ai-agent, toolset, doc-parser, storage) |
+| `modules/` | 도메인 모듈 (auth, nodes-graph, ai-agent, toolset, doc_parser, storage) |
 | `database/` | PostgreSQL 스키마 (15개) + 마이그레이션 |
 | `infra/` | Terraform + Docker |
 

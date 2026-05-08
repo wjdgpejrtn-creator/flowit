@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doc-parser"
+version = "0.1.0"
+description = "REQ-006: 7종 문서 파서, 청킹, 품질 게이트"
+requires-python = ">=3.11"
+dependencies = [
+    # 공통
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    # common-schemas 는 로컬 패키지 → pip install -e packages/common-schemas/python
+    # PDF
+    "pymupdf>=1.23",
+    "pdfplumber>=0.10",
+    # DOCX
+    "python-docx>=1.1",
+    # XLSX
+    "openpyxl>=3.1",
+    # PPTX
+    "python-pptx>=0.6",
+    # HWP
+    "pyhwp",
+    # HWPX
+    "lxml>=5.0",
+    # Markdown
+    "markdown-it-py>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["doc_parser*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
