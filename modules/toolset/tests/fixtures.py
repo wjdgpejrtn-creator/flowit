@@ -44,3 +44,15 @@ class RestrictedDummyTool(BaseTool):
 
     async def execute(self, input_data: dict, **kwargs) -> dict:
         return {"ok": True}
+
+
+class RestrictedDummyTool(BaseTool):
+    name = "restricted_dummy"
+    description = "RESTRICTED 위험도 테스트용"
+    version = "1.0.0"
+    risk_level = RiskLevel.RESTRICTED
+    input_schema = {"type": "object", "properties": {}}
+    output_schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+
+    async def execute(self, input_data: dict, **kwargs) -> dict:
+        return {"ok": True}
