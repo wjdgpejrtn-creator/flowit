@@ -16,6 +16,8 @@ class ToolExecutionRecord:
     execution_id: UUID = field(default_factory=uuid4)
     output_data: Optional[dict] = None
     error_message: Optional[str] = None
+    node_id: Optional[UUID] = None
+    user_id: Optional[UUID] = None
 
     def is_successful(self) -> bool:
         return self.status == "success"

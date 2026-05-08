@@ -89,6 +89,8 @@ class ExecuteToolUseCase:
                     duration_ms=duration_ms,
                     executed_at=datetime.now(timezone.utc),
                     error_message=error_msg,
+                    node_id=node_id,
+                    user_id=context.user_id,
                 )
                 await self._repo.save(record)
             except Exception:

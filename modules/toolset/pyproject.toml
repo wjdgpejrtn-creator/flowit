@@ -2,7 +2,7 @@
 name = "toolset"
 version = "0.1.0"
 description = "REQ-005: 15종 외부 도구, 런타임 I/O 검증, 보안 커넥터"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "common_schemas",
     "pydantic>=2.0",
