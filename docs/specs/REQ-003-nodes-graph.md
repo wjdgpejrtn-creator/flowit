@@ -310,6 +310,26 @@ class RegisterNodesUseCase:
 
 ---
 
+#### application/catalog_registry.py — `CatalogRegistry`
+
+```python
+class CatalogRegistry:
+    """카탈로그 전체 NodeDefinition 조립 클래스.
+
+    domain/catalog/* 개별 노드 + adapters/catalog/external/* 노드를
+    application 레이어에서 조립한다.
+    domain/__init__.py에서 adapter를 import하면 Clean Architecture 위반이므로
+    반드시 이 클래스를 통해 조립한다 (PR #30 리뷰 확정, PR #34 spec 반영).
+    """
+
+    def get_all_node_definitions(self) -> list[NodeDefinition]:
+        """카탈로그 전체 30종 NodeDefinition 반환.
+        RegisterNodesUseCase.execute()의 입력으로 사용."""
+        ...
+```
+
+---
+
 ### Infrastructure/Adapter Layer (`modules/nodes_graph/adapters/`)
 
 #### tool_to_node_wrapper.py — `ToolToNodeWrapper`
