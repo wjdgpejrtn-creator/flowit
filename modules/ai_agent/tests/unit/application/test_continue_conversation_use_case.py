@@ -27,6 +27,9 @@ class TestContinueConversationUseCase:
 
         assert any(isinstance(f, SessionFrame) for f in frames)
         assert any(isinstance(f, ResultFrame) for f in frames)
+        # M2: langgraph_thread_id 생성 여부 확인
+        session = next(f for f in frames if isinstance(f, SessionFrame))
+        assert session.langgraph_thread_id is not None
 
     @pytest.mark.asyncio
     async def test_yields_agent_node_frame(self):
@@ -34,7 +37,9 @@ class TestContinueConversationUseCase:
         gen = await uc.execute(uuid4(), "계속 진행해줘")
         frames = [f async for f in gen]
 
-        assert any(isinstance(f, AgentNodeFrame) for f in frames)
+        # M1: agent_node_name 값 검증
+        node_frame = next(f for f in frames if isinstance(f, AgentNodeFrame))
+        assert node_frame.agent_node_name == "context_node"
 
     @pytest.mark.asyncio
     async def test_result_frame_contains_llm_response(self):
@@ -43,7 +48,20 @@ class TestContinueConversationUseCase:
         frames = [f async for f in gen]
 
         result = next(f for f in frames if isinstance(f, ResultFrame))
+        # H1: intent 값 명시 검증
+        assert result.intent == "continue"
         assert result.payload["response"] == "완료했습니다"
+
+    @pytest.mark.asyncio
+    async def test_frame_emission_order(self):
+        # H2: SSE 프레임 방출 순서 검증
+        uc, _, _ = _build_uc()
+        gen = await uc.execute(uuid4(), "테스트")
+        frames = [f async for f in gen]
+
+        assert isinstance(frames[0], SessionFrame)
+        assert isinstance(frames[1], AgentNodeFrame)
+        assert isinstance(frames[2], ResultFrame)
 
     @pytest.mark.asyncio
     async def test_memory_fetched_with_session_id(self):
