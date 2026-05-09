@@ -14,7 +14,8 @@ from ...domain.ports.secure_connector_port import SecureConnectorPort
 from ...domain.ports.tool_execution_repository import ToolExecutionRepository
 from ...domain.ports.tool_registry import ToolRegistry
 from ...domain.services.risk_assessment_service import RiskAssessmentService
-from ...domain.services.runtime_validator import RuntimeValidator
+from ...domain.services.tool_execution_service import ToolExecutionService
+from ...domain.value_objects import ToolOutput
 
 
 class ExecuteToolUseCase:
@@ -22,14 +23,14 @@ class ExecuteToolUseCase:
         self,
         tool_registry: ToolRegistry,
         secure_connector: SecureConnectorPort,
-        validator: RuntimeValidator,
+        execution_svc: ToolExecutionService,
         risk_service: RiskAssessmentService,
         execution_repo: ToolExecutionRepository,
         credential_injection_svc: CredentialInjectionService,
     ) -> None:
         self._registry = tool_registry
         self._connector = secure_connector
-        self._validator = validator
+        self._execution_svc = execution_svc
         self._risk = risk_service
         self._repo = execution_repo
         self._credential_svc = credential_injection_svc
@@ -41,10 +42,9 @@ class ExecuteToolUseCase:
         context: PermissionSource,
         credential_id: UUID | None = None,
         node_id: UUID | None = None,
-    ) -> dict:
+    ) -> ToolOutput:
         tool = self._registry.get(tool_name)
         self._risk.assess(tool, context)
-        self._validator.validate_input(input_data, tool.input_schema)
 
         credential: PlaintextCredential | None = None
         if credential_id is not None:
@@ -64,24 +64,18 @@ class ExecuteToolUseCase:
         start_ms = time.monotonic()
         status = "failed"
         error_msg: str | None = None
-        result: dict = {}
+        output: ToolOutput | None = None
 
         try:
-            result = await tool.execute(input_data, credential=credential, connector=self._connector)
-            self._validator.validate_output(result, tool.output_schema)
+            output = await self._execution_svc.execute(
+                tool, input_data, credential=credential, connector=self._connector
+            )
             status = "success"
-            return result
+            return output
 
         except (AuthorizationError, ToolExecutionError, CredentialError) as e:
             error_msg = str(e)
             raise
-
-        except Exception as e:
-            error_msg = str(e)
-            raise ToolExecutionError(
-                message=f"Tool '{tool_name}' execution failed: {e}",
-                code="TOOL_EXECUTION_ERROR",
-            ) from e
 
         finally:
             duration_ms = int((time.monotonic() - start_ms) * 1000)
@@ -90,7 +84,7 @@ class ExecuteToolUseCase:
                 record = ToolExecutionRecord(
                     tool_name=tool_name,
                     input_data=input_data,
-                    output_data=result if status == "success" else None,
+                    output_data=output.data if output is not None else None,
                     status=status,
                     duration_ms=duration_ms,
                     executed_at=datetime.now(timezone.utc),

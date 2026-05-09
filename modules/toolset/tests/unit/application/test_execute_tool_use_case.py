@@ -12,6 +12,8 @@ from toolset.application.use_cases.execute_tool_use_case import ExecuteToolUseCa
 from toolset.domain.exceptions import CredentialError, ToolExecutionError
 from toolset.domain.services.risk_assessment_service import RiskAssessmentService
 from toolset.domain.services.runtime_validator import RuntimeValidator
+from toolset.domain.services.tool_execution_service import ToolExecutionService
+from toolset.domain.value_objects import ToolOutput
 from toolset.tests.fixtures import DummyTool, RestrictedDummyTool
 
 
@@ -29,6 +31,7 @@ def make_permission(ceiling: str = "High") -> PermissionSource:
 def make_use_case(
     tool_registry=None,
     secure_connector=None,
+    execution_svc=None,
     execution_repo=None,
     credential_injection_svc=None,
 ):
@@ -40,7 +43,7 @@ def make_use_case(
     return ExecuteToolUseCase(
         tool_registry=tool_registry,
         secure_connector=secure_connector or AsyncMock(),
-        validator=RuntimeValidator(),
+        execution_svc=execution_svc or ToolExecutionService(validator=RuntimeValidator()),
         risk_service=RiskAssessmentService(),
         execution_repo=execution_repo or AsyncMock(),
         credential_injection_svc=credential_injection_svc or AsyncMock(),
@@ -57,7 +60,8 @@ class TestExecuteToolSuccess:
             context=make_permission("High"),
             credential_id=None,
         )
-        assert result == {"result": "ok: hello"}
+        assert isinstance(result, ToolOutput)
+        assert result.data == {"result": "ok: hello"}
 
     @pytest.mark.asyncio
     async def test_execute_with_credential(self, mock_credential):
@@ -75,7 +79,7 @@ class TestExecuteToolSuccess:
             credential_id=cred_id,
             node_id=node_id,
         )
-        assert result["result"] == "ok: world"
+        assert result.data["result"] == "ok: world"
         cred_svc.inject.assert_called_once_with(cred_id, node_id)
 
 
@@ -176,4 +180,5 @@ class TestRepoBestEffort:
         uc = make_use_case(execution_repo=repo)
 
         result = await uc.execute("dummy", {"message": "hi"}, make_permission("High"))
-        assert result == {"result": "ok: hi"}
+        assert isinstance(result, ToolOutput)
+        assert result.data == {"result": "ok: hi"}
