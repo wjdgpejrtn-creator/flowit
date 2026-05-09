@@ -23,8 +23,6 @@ from .data.regex_extract import get_node_definition as _regex_extract
 from .data.regex_replace import get_node_definition as _regex_replace
 from .data.string_template import get_node_definition as _string_template
 from .data.text_transform import get_node_definition as _text_transform
-from ...adapters.catalog.external.http_request import get_node_definition as _http_request
-from ...adapters.catalog.external.pdf_generate import get_node_definition as _pdf_generate
 from .trigger.api_poll_trigger import get_node_definition as _api_poll_trigger
 from .trigger.event_trigger import get_node_definition as _event_trigger
 from .trigger.file_watch_trigger import get_node_definition as _file_watch_trigger
@@ -33,8 +31,8 @@ from .trigger.schedule_trigger import get_node_definition as _schedule_trigger
 from .trigger.webhook_trigger import get_node_definition as _webhook_trigger
 
 
-def get_all_node_definitions() -> list[NodeDefinition]:
-    """카탈로그 전체 NodeDefinition 목록 반환. RegisterNodesUseCase에서 사용."""
+def get_domain_node_definitions() -> list[NodeDefinition]:
+    """도메인 28종 NodeDefinition (external 2종 제외). application/catalog_registry에서 조합."""
     return [
         # 데이터 처리 (14)
         _text_transform(),
@@ -67,7 +65,4 @@ def get_all_node_definitions() -> list[NodeDefinition]:
         _file_watch_trigger(),
         _event_trigger(),
         _api_poll_trigger(),
-        # 외부 (2)
-        _http_request(),
-        _pdf_generate(),
     ]

@@ -17,7 +17,7 @@ _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
 
 @dataclass
 class StringTemplateInput:
-    template: str                  # "안녕하세요, {name}님. 나이는 {age}세입니다."
+    template: str                  # "안녕하세요, ${name}님. 나이는 ${age}세입니다."
     variables: dict[str, str]
 
 

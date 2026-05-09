@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from nodes_graph.domain.catalog import get_all_node_definitions
+from nodes_graph.application.catalog_registry import get_all_node_definitions
 from nodes_graph.domain.catalog.trigger.api_poll_trigger import ApiPollTriggerInput, ApiPollTriggerNode
 from nodes_graph.domain.catalog.trigger.manual_trigger import ManualTriggerInput, ManualTriggerNode
 from nodes_graph.domain.catalog.trigger.schedule_trigger import ScheduleTriggerInput, ScheduleTriggerNode

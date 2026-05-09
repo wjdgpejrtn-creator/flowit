@@ -14,7 +14,7 @@ from pathlib import Path
 warnings.filterwarnings("ignore", category=UserWarning, module="google.auth")
 
 # .env 수동 로드 (python-dotenv 없어도 동작)
-env_path = Path(__file__).parent / ".env"
+env_path = Path(__file__).resolve().parent.parent / ".env"
 if env_path.exists():
     for line in env_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
