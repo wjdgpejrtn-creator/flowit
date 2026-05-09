@@ -39,7 +39,7 @@ class HttpRequestNode(BaseNode[HttpRequestInput, HttpRequestOutput]):
         node_id=_NODE_ID,
         name="HTTP 요청",
         category="외부 API 연동",
-        risk_level=RiskLevel.MEDIUM,
+        risk_level=RiskLevel.HIGH,
         is_mvp=True,
     )
     input_schema = HttpRequestInput
@@ -95,7 +95,7 @@ def get_node_definition() -> NodeDefinition:
             },
         },
         parameter_schema={},
-        risk_level=RiskLevel.MEDIUM,
+        risk_level=RiskLevel.HIGH,
         required_connections=[],
         description="외부 HTTP API 호출 (GET/POST/PUT/DELETE/PATCH). httpx 비동기 클라이언트 사용",
         is_mvp=True,
