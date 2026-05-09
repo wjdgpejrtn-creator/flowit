@@ -2,10 +2,10 @@
 
 **모듈**: nodes_graph  
 **REQ**: REQ-003  
-**작성일**: 2026-05-06 (최종 수정: 2026-05-08)  
+**작성일**: 2026-05-06 (최종 수정: 2026-05-09)  
 **담당자**: 박아름  
-**브랜치**: `feature/req-003-nodes_graph`  
-**상태**: ✅ PASS 완료 (PR #17 리뷰 반영 완료 + 노드 카탈로그 30종 추가)
+**브랜치**: `feature/req-003-nodes-graph`  
+**상태**: ✅ PASS 완료 (PR #30 3차 리뷰 반영 완료 — Clean Architecture 3계층 분리 확정)
 
 ---
 
@@ -19,6 +19,7 @@
 | domain/ports | 2 | `NodeDefinitionRepository`, `EmbedderPort` |
 | domain/services | 2 | `GraphValidator`, `GraphSerializer` |
 | application/use_cases | 3 | `ValidateGraphUseCase`, `SearchNodesUseCase`, `RegisterNodesUseCase` |
+| application | 1 | `catalog_registry` — `get_all_node_definitions()` (domain 28종 + adapters 2종 조합) |
 | adapters | 1 | `ToolToNodeWrapper` |
 | domain/catalog/data | 14 | `text_transform`, `json_extract`, `json_merge`, `csv_parse`, `csv_build`, `number_calc`, `date_format`, `list_filter`, `list_map`, `string_template`, `regex_extract`, `regex_replace`, `base64_encode`, `base64_decode` |
 | domain/catalog/control | 8 | `if_condition`, `switch_case`, `loop_list`, `loop_count`, `delay`, `retry`, `merge_branch`, `stop_workflow` |
@@ -32,7 +33,10 @@
 - `NodeDefinition`: H-4 합의 준수 — `risk_level`, `required_connections`, `service_type` 필드 포함 (REQ-002가 필드 접근으로 사용)
 - H-1 합의 준수 — `WorkflowSchema`, `NodeInstance`, `Edge`, `Position` 자체 정의 없음, 전부 `common_schemas` import
 - `pyproject.toml`: 하이픈 디렉토리(`nodes_graph`) 문제 해결을 위해 `package-dir` 명시적 매핑 사용
-- **노드 카탈로그 30종** (`catalog/`): `BaseNode` + `NodeDefinition` 패턴으로 일관 구현. `uuid5(_CATALOG_NS, node_type)`으로 UUID 안정성 보장. `get_all_node_definitions()`로 `RegisterNodesUseCase` 연동 준비 완료
+- **노드 카탈로그 30종** (3계층 분리): `BaseNode` + `NodeDefinition` 패턴으로 일관 구현. `uuid5(_CATALOG_NS, node_type)`으로 UUID 안정성 보장
+  - `domain/catalog/` (28종): 순수 비즈니스 로직 노드 — 표준 라이브러리만 사용
+  - `adapters/catalog/external/` (2종): httpx/fpdf2 의존 노드 — adapter 계층 격리
+  - `application/catalog_registry.py`: `get_all_node_definitions()` — domain 28종 + adapters 2종 조합. `RegisterNodesUseCase` 연동 준비 완료
   - 나머지 24종(AI/LLM 10, 데이터 소스 5, 문서 생성 4, 커뮤니케이션 2, 트리거 2, 외부 1)은 외부 서비스 인증(Google/Slack 등) 필요 — 이후 스프린트 범위
 
 ---
@@ -84,7 +88,7 @@
 | Clean Architecture | 0 | - |
 | Readability | 0 | - |
 
-Critical/Major 없음.
+Critical/Major 없음. (PR #30 1~3차 리뷰를 통해 모두 해소)
 
 ---
 
@@ -95,6 +99,9 @@ Critical/Major 없음.
 - [x] 공유 타입 SSOT 준수 (`WorkflowSchema`, `NodeInstance`, `Edge` → `common_schemas`)
 - [x] H-1 합의 준수 — 자체 WorkflowSchema/NodeInstance/Edge 정의 없음
 - [x] H-4 합의 준수 — NodeDefinitionRepository에 get_risk_level() 등 추가 없음
+- [x] domain 계층에서 외부 I/O 라이브러리(httpx, fpdf2) import 없음 — adapters 격리
+- [x] domain → adapters 역방향 import 없음 — `get_all_node_definitions()` application 계층으로 이동
+- [x] `string.Template.safe_substitute()` 사용 — format injection 차단
 
 ---
 
@@ -120,6 +127,14 @@ Critical/Major 없음.
 | `tests/unit/domain/test_data_nodes.py` 신설 | 데이터 처리 14종 24건 | 카탈로그 노드 process() 로직 검증 |
 | `tests/unit/domain/test_control_nodes.py` 신설 | 조건/제어 7종 13건 | StopWorkflowError 예외 포함 |
 | `tests/unit/domain/test_catalog.py` 신설 | 카탈로그 통합 9건 | 30종 등록, UUID/type 유일성, 트리거 패스스루 |
+| **[PR #30 1차 리뷰]** `catalog/` → `domain/catalog/` 이동 | 30개 노드 파일 import depth 수정, 테스트 import 경로 수정 | Clean Architecture 3계층 바깥 위치 해소 (2026-05-08) |
+| **[PR #30 1차 리뷰]** `pyproject.toml` requires-python `>=3.11` → `>=3.12` | `_test_db.py` → `scripts/` 이동 | Python 버전 통일, 파일 위치 컨벤션 (2026-05-08) |
+| **[PR #30 2차 리뷰]** `domain/catalog/external/` → `adapters/catalog/external/` 이동 | httpx/fpdf2 import를 domain에서 adapters로 격리 | domain 계층 외부 I/O 라이브러리 금지 원칙 준수 (2026-05-08) |
+| **[PR #30 2차 리뷰]** `string_template.py` `str.format()` → `string.Template.safe_substitute()` | 템플릿 형식 `{변수명}` → `$변수명` | format injection 차단 (2026-05-08) |
+| **[PR #30 3차 리뷰]** `application/catalog_registry.py` 신설 | `get_all_node_definitions()` domain → application 이동 | domain이 adapters를 역참조하던 구조 해소 (2026-05-09) |
+| **[PR #30 3차 리뷰]** `domain/catalog/__init__.py` 정리 | `get_domain_node_definitions()` 28종만 노출, adapters import 완전 제거 | 단방향 의존성 완성 (2026-05-09) |
+| **[PR #30 3차 리뷰]** `domain/catalog/external/__init__.py` 삭제 | 빈 파일 제거 | 불필요 파일 정리 (2026-05-09) |
+| **[PR #30 3차 리뷰]** `scripts/_test_db.py` .env 경로 수정 | `parent.parent / ".env"` → 프로젝트 루트 참조 | 실제 .env 위치와 일치 (2026-05-09) |
 
 ### Ruff lint 최종 결과
 
