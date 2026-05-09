@@ -190,13 +190,13 @@ execute(tool_name, input_data, context, credential_id, node_id)
 │   ├─ [node_id == None] → CredentialError("credential_id requires node_id")
 │   └─ credential_svc.inject(credential_id, node_id)   → CredentialError 가능
 │
-├─ tool.execute(input_data, credential=..., connector=..) → ToolExecutionError 가능 (래핑)
+├─ tool.execute(input_data, credential=..., connector=..)          → ToolExecutionError 가능 (래핑)
 │   └─ tool 내부에서 connector.connect(endpoint, credential) 호출 → ConnectorResponse
-├─ validator.validate_output(result, schema)            → ValidationError 가능
+├─ validator.validate_output(result, schema)                       → ValidationError 가능
 │
 └─ [finally]
-    ├─ repo.save(record)                                ← best-effort (예외 무시)
-    └─ credential.wipe()                                ← 항상 실행
+    ├─ repo.save(record)                                           ← best-effort (예외 무시)
+    └─ credential.wipe()                                           ← 항상 실행
 ```
 
 ### 엣지 케이스
@@ -365,11 +365,11 @@ def create_execute_tool_use_case(
     registry = ToolRegistryAdapter()
     registry.register_tool(GoogleDriveTool(), tool_id=uuid4(), category="google")
     registry.register_tool(GmailTool(), tool_id=uuid4(), category="google")
-    # ... 8개 등록
+    # ... 나머지 등록
 
     return ExecuteToolUseCase(
         tool_registry=registry,
-        secure_connector=SecureConnector(inject_credential_svc),
+        secure_connector=SecureConnector(),
         validator=RuntimeValidator(),
         risk_service=RiskAssessmentService(),
         execution_repo=execution_repo,

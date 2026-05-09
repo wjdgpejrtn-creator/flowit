@@ -1,0 +1,25 @@
+[project]
+name = "toolset"
+version = "0.1.0"
+description = "REQ-005: 15종 외부 도구, 런타임 I/O 검증, 보안 커넥터"
+requires-python = ">=3.12"
+dependencies = [
+    "common_schemas",
+    "pydantic>=2.0",
+    "jsonschema>=4.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["toolset*"]
