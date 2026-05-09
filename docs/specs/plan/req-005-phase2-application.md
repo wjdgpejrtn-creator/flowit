@@ -49,6 +49,7 @@ class ExecuteToolUseCase:
     1. ToolRegistry에서 도구 조회
     2. RiskAssessmentService.assess() — 권한/위험도 검사
     3. RuntimeValidator.validate_input() — 입력 스키마 검증
+<<<<<<< Updated upstream
     4. CredentialInjectionService.inject() — 자격증명 획득 (credential_id 있을 때만)
     5. BaseTool.execute() — 도구 실행
     6. RuntimeValidator.validate_output() — 출력 스키마 검증
@@ -91,6 +92,7 @@ class ExecuteToolUseCase:
             input_data: 도구 입력 파라미터 (raw dict, 검증 전)
             context: 요청자 권한 컨텍스트 (JWT에서 추출한 PermissionSource)
             credential_id: OAuth 자격증명 UUID. 인증 불필요 도구는 None.
+<<<<<<< Updated upstream
             node_id: 워크플로우 노드 UUID. credential 주입 시 필요.
 
         Returns:
@@ -112,6 +114,7 @@ class ExecuteToolUseCase:
         # 3. 입력 스키마 검증
         self._validator.validate_input(input_data, tool.input_schema)
 
+<<<<<<< Updated upstream
         # 4. Credential 획득 (credential_id + node_id 있을 때만)
         credential: PlaintextCredential | None = None
         if credential_id is not None:
@@ -190,13 +193,13 @@ execute(tool_name, input_data, context, credential_id, node_id)
 │   ├─ [node_id == None] → CredentialError("credential_id requires node_id")
 │   └─ credential_svc.inject(credential_id, node_id)   → CredentialError 가능
 │
-├─ tool.execute(input_data, credential=..., connector=..) → ToolExecutionError 가능 (래핑)
+├─ tool.execute(input_data, credential=..., connector=..)          → ToolExecutionError 가능 (래핑)
 │   └─ tool 내부에서 connector.connect(endpoint, credential) 호출 → ConnectorResponse
-├─ validator.validate_output(result, schema)            → ValidationError 가능
+├─ validator.validate_output(result, schema)                       → ValidationError 가능
 │
 └─ [finally]
-    ├─ repo.save(record)                                ← best-effort (예외 무시)
-    └─ credential.wipe()                                ← 항상 실행
+    ├─ repo.save(record)                                           ← best-effort (예외 무시)
+    └─ credential.wipe()                                           ← 항상 실행
 ```
 
 ### 엣지 케이스
@@ -365,11 +368,11 @@ def create_execute_tool_use_case(
     registry = ToolRegistryAdapter()
     registry.register_tool(GoogleDriveTool(), tool_id=uuid4(), category="google")
     registry.register_tool(GmailTool(), tool_id=uuid4(), category="google")
-    # ... 8개 등록
+    # ... 나머지 등록
 
     return ExecuteToolUseCase(
         tool_registry=registry,
-        secure_connector=SecureConnector(inject_credential_svc),
+        secure_connector=SecureConnector(),
         validator=RuntimeValidator(),
         risk_service=RiskAssessmentService(),
         execution_repo=execution_repo,

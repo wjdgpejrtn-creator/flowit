@@ -47,7 +47,12 @@ class ExecuteToolUseCase:
         self._validator.validate_input(input_data, tool.input_schema)
 
         credential: PlaintextCredential | None = None
-        if credential_id is not None and node_id is not None:
+        if credential_id is not None:
+            if node_id is None:
+                raise CredentialError(
+                    message="credential_id requires node_id",
+                    code="E_CREDENTIAL_NODE_ID_MISSING",
+                )
             try:
                 credential = await self._credential_svc.inject(credential_id, node_id)
             except Exception as e:
@@ -67,7 +72,8 @@ class ExecuteToolUseCase:
             status = "success"
             return result
 
-        except (AuthorizationError, ToolExecutionError, CredentialError):
+        except (AuthorizationError, ToolExecutionError, CredentialError) as e:
+            error_msg = str(e)
             raise
 
         except Exception as e:

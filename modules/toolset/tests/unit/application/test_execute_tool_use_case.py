@@ -121,6 +121,16 @@ class TestCredentialLifecycle:
         await uc.execute("dummy", {"message": "x"}, make_permission("High"), credential_id=None)
         cred_svc.inject.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_credential_id_without_node_id_raises_credential_error(self):
+        uc = make_use_case()
+        with pytest.raises(CredentialError) as exc_info:
+            await uc.execute(
+                "dummy", {"message": "x"}, make_permission("High"),
+                credential_id=uuid4(), node_id=None,
+            )
+        assert exc_info.value.code == "E_CREDENTIAL_NODE_ID_MISSING"
+
 
 class TestPermissionGating:
     @pytest.mark.asyncio
