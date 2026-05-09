@@ -5,7 +5,7 @@
 **작성일**: 2026-05-06 (최종 수정: 2026-05-09)  
 **담당자**: 박아름  
 **브랜치**: `feature/req-003-nodes-graph`  
-**상태**: ✅ PASS 완료 (PR #30 3차 리뷰 반영 완료 — Clean Architecture 3계층 분리 확정)
+**상태**: ✅ PASS 완료 (PR #30 4차 리뷰 + 스펙 전수 대조 완료 — Approve 대기 중)
 
 ---
 
@@ -135,6 +135,8 @@ Critical/Major 없음. (PR #30 1~3차 리뷰를 통해 모두 해소)
 | **[PR #30 3차 리뷰]** `domain/catalog/__init__.py` 정리 | `get_domain_node_definitions()` 28종만 노출, adapters import 완전 제거 | 단방향 의존성 완성 (2026-05-09) |
 | **[PR #30 3차 리뷰]** `domain/catalog/external/__init__.py` 삭제 | 빈 파일 제거 | 불필요 파일 정리 (2026-05-09) |
 | **[PR #30 3차 리뷰]** `scripts/_test_db.py` .env 경로 수정 | `parent.parent / ".env"` → 프로젝트 루트 참조 | 실제 .env 위치와 일치 (2026-05-09) |
+| **[PR #30 4차 리뷰]** `HttpRequestNode` risk_level `MEDIUM` → `HIGH` | NodeMetadata, get_node_definition() 둘 다 변경 | 임의 URL DELETE/POST 가능 → 비가역적 외부 변경, REQ-005 기준 일치 (2026-05-09) |
+| **[스펙 전수 대조]** control 8종 category `"조건/제어"` → `"조건 / 제어"` | 슬래시 양옆 공백 추가 (8개 파일 × 2곳) | REQ-003 스펙 카테고리명과 정확히 일치 (2026-05-09) |
 
 ### Ruff lint 최종 결과
 

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
@@ -31,7 +31,7 @@ class MergeBranchNode(BaseNode[MergeBranchInput, MergeBranchOutput]):
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="브랜치 병합",
-        category="조건/제어",
+        category="조건 / 제어",
         risk_level=RiskLevel.LOW,
         is_mvp=True,
     )
@@ -62,7 +62,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="브랜치 병합",
-        category="조건/제어",
+        category="조건 / 제어",
         version="1.0.0",
         input_schema={
             "type": "object",
