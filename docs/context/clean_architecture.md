@@ -482,16 +482,16 @@ modules/doc_parser/
 ├── domain/
 │   ├── entities/
 │   │   ├── chunk.py                    # Chunk, ChunkingStrategy
-│   │   │   # ⚠️ common-schemas/document.py로 승격 예정
+│   │   │   # ✅ SSOT 확정 (PR #34): common_schemas/document.py에서 import
 │   │   │   # Chunk: block, chunk_index, parent_document_id,
 │   │   │   #        importance_score=None (REQ-004 담당), embedding=None (REQ-004 담당)
 │   │   │   # ChunkingStrategy: max_tokens, overlap_tokens, token_estimator_mode
 │   │   ├── quality.py                  # QualityGateResult, QualityMetrics, QualityConfig
-│   │   │   # ⚠️ QualityGateResult, QualityMetrics → common-schemas/document.py 승격 예정
+│   │   │   # ✅ SSOT 확정 (PR #34): QualityGateResult, QualityMetrics → common_schemas/document.py에서 import
 │   │   │   # QualityConfig: 임계값 설정 VO (doc_parser 내부 유지)
 │   │   ├── warning.py                  # WarningInfo, ElapsedDetail
-│   │   │   # WarningInfo: code, message, detail (파싱 경고 정보)
-│   │   │   # ElapsedDetail: 파이프라인 단계별 처리 시간 (ms)
+│   │   │   # ✅ SSOT 확정 (PR #34): WarningInfo → common_schemas/document.py에서 import
+│   │   │   # ElapsedDetail: 파이프라인 단계별 처리 시간 (ms, 내부 유지)
 │   │   └── pii.py                      # PIIMaskRule
 │   │       # pattern, replacement, label (PII 마스킹 규칙)
 │   ├── services/
