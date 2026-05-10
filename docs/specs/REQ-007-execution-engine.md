@@ -52,11 +52,11 @@ from common_schemas import (
 | 클래스 | 필드 | 설명 |
 |--------|------|------|
 | `ExecutionContext` | `execution_id: UUID`, `workflow_id: UUID`, `user_id: UUID`, `trigger_type: Literal["manual", "scheduled", "handoff"]`, `started_at: datetime`, `parameters: dict[str, Any]` | 워크플로우 실행 컨텍스트 (실행 한 번의 메타정보) |
-| `ExecutionResult` | `execution_id: UUID`, `workflow_id: UUID`, `status: ExecutionStatus`, `node_results: list[NodeResult]`, `started_at: datetime`, `completed_at: Optional[datetime]`, `error: Optional[str]` | 워크플로우 전체 실행 결과 |
+| `ExecutionResult` | `execution_id: UUID`, `workflow_id: UUID`, `user_id: Optional[UUID]`, `status: ExecutionStatus`, `node_results: list[NodeResult]`, `started_at: datetime`, `completed_at: Optional[datetime]`, `error: Optional[str]` | 워크플로우 전체 실행 결과 (user_id: 실행 발신자 추적, EvaluateAndRefine 재실행 시 활용) |
 | `NodeResult` | `node_instance_id: UUID`, `status: Literal["succeeded", "failed", "cancelled", "skipped"]`, `output: dict[str, Any]`, `started_at: datetime`, `completed_at: datetime`, `retry_count: int`, `error: Optional[str]` | 개별 노드 실행 결과 |
 | `ExecutionLevel` | `level: int`, `nodes: list[NodeInstance]` | 위상 정렬 결과의 한 실행 레벨 (같은 레벨 = 병렬 실행 가능) |
 | `RetryPolicy` | `max_retries: int`, `backoff_base_seconds: float`, `retryable_errors: list[str]` | 노드 재시도 정책 VO |
-| `NodeExecutionState` | `node_instance_id: UUID`, `status: Literal["pending", "running", "succeeded", "failed", "retrying", "cancelled"]`, `attempt: int`, `last_error: Optional[str]` | 노드 실행 상태 추적 |
+| `NodeExecutionState` | *(common_schemas.workflow에서 import)* `node_instance_id: UUID`, `status: Literal["pending", "running", "succeeded", "failed", "retrying", "cancelled"]`, `attempt: int`, `last_error: Optional[str]` | 노드 실행 상태 추적 (SSOT: common_schemas에 정의됨) |
 
 #### domain/services
 
@@ -66,9 +66,9 @@ from common_schemas import (
 | | `validate_dag(workflow: WorkflowSchema) -> None` | 순환 참조 검출. 발견 시 `ValidationError(code=E_CYCLE_DETECTED)` 발생 |
 | `RetryManager` | `should_retry(error: Exception, policy: RetryPolicy, attempt: int) -> bool` | 재시도 가능 여부 판정 |
 | | `get_backoff_delay(policy: RetryPolicy, attempt: int) -> float` | 지수 백오프 지연 시간 계산 |
-| `ExecutionOrchestrator` | `run(workflow: WorkflowSchema, context: ExecutionContext) -> ExecutionResult` | 레벨별 순차 실행, 레벨 내 병렬 실행 오케스트레이션 |
-| | `pause(execution_id: UUID) -> None` | HITL 노드에서 일시 중지 |
-| | `resume(execution_id: UUID, approval: dict) -> None` | 사용자 승인 후 재개 |
+| `ExecutionOrchestrator` | `plan(workflow: WorkflowSchema) -> list[ExecutionLevel]` | 그래프 검증(validate_graph + validate_dag) 후 위상 정렬. 순수 비즈니스 규칙만 캡슐화 (Port 의존 없음) |
+| | `has_failures(level_results: list[NodeResult]) -> bool` | 레벨 실행 결과 중 실패 노드 존재 여부 판정 |
+| | `validate_state_transition(current: ExecutionStatus, target: ExecutionStatus) -> None` | 상태 전이 유효성 검증. 위반 시 ExecutionError 발생 |
 
 #### domain/ports (ABC 인터페이스)
 
@@ -91,7 +91,7 @@ from common_schemas import (
 | 유스케이스 | Input -> Output | 설명 |
 |-----------|----------------|------|
 | `ExecuteWorkflowUseCase` | `(workflow_id: UUID, context: ExecutionContext) -> ExecutionResult` | 전체 오케스트레이션: 워크플로우 조회 -> DAG 검증 -> 위상 정렬 -> 레벨별 실행 -> 결과 저장 |
-| `DispatchNodeUseCase` | `(node: NodeInstance, config: NodeConfig, inputs: dict) -> NodeResult` | 단일 노드 실행: credential 주입 -> NodeExecutor 호출 -> 재시도 처리 -> 결과 반환 |
+| `DispatchNodeUseCase` | `(node: NodeInstance, config: NodeConfig, inputs: dict, user_id: UUID, execution_id: UUID) -> NodeResult` | 단일 노드 실행: credential 주입(__user_id__ + __credentials__) -> NodeExecutor 호출 -> 재시도 처리 -> 결과 반환 |
 | `HandleHandoffUseCase` | `(payload: HandoffPayload) -> ExecutionResult` | REQ-004 QA 통과 후 핸드오프 수신: WorkflowSchema 조회 -> ExecuteWorkflowUseCase 위임 |
 | `PauseResumeUseCase` | `(execution_id: UUID, action: Literal["pause", "resume"], approval: Optional[dict]) -> None` | HITL 노드 일시 중지/재개 처리 |
 | `EvaluateAndRefineUseCase` | `(execution_id: UUID, evaluation: EvaluationResult) -> Optional[ExecutionResult]` | QA score < 8 시 Self-Refine 재실행 (최대 3회) |
@@ -186,8 +186,7 @@ services/execution_engine/
 │   │   │   ├── execution_context.py    ← ExecutionContext
 │   │   │   ├── execution_result.py     ← ExecutionResult, NodeResult
 │   │   │   ├── execution_level.py      ← ExecutionLevel
-│   │   │   ├── retry_policy.py         ← RetryPolicy
-│   │   │   └── node_state.py           ← NodeExecutionState
+│   │   │   └── retry_policy.py         ← RetryPolicy
 │   │   ├── services/
 │   │   │   ├── __init__.py
 │   │   │   ├── topological_scheduler.py  ← TopologicalScheduler (Kahn's algorithm)
