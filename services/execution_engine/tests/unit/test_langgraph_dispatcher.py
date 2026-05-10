@@ -63,16 +63,21 @@ class TestLangGraphDispatcher:
         call_kwargs = mock_fn.call_args[1]
         assert call_kwargs["inputs"]["parameters"]["prompt"] == "summarize this"
 
-    def test_strips_credentials_from_inputs(self):
+    def test_strips_all_dunder_keys_from_inputs(self):
         mock_fn = MagicMock(return_value={})
         dispatcher = LangGraphDispatcher(invoke_graph=mock_fn)
         node = _make_node()
         config = _make_config()
 
-        dispatcher.execute(node, config, {"__credentials__": {"key": "secret"}, "data": "ok"})
+        dispatcher.execute(node, config, {
+            "__credentials__": {"key": "secret"},
+            "__user_id__": "uid",
+            "data": "ok",
+        })
 
         call_kwargs = mock_fn.call_args[1]
         assert "__credentials__" not in call_kwargs["inputs"]
+        assert "__user_id__" not in call_kwargs["inputs"]
         assert call_kwargs["inputs"]["data"] == "ok"
 
     def test_includes_node_instance_id(self):

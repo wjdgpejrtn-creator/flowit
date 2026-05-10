@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID
 
 from common_schemas.enums import ExecutionStatus
 
 from ...domain.entities.execution_context import ExecutionContext
+from ...domain.entities.execution_level import ExecutionLevel
 from ...domain.entities.execution_result import ExecutionResult, NodeResult
 from ...domain.ports.event_publisher_port import EventPublisherPort
 from ...domain.ports.execution_repository_port import ExecutionRepositoryPort
@@ -64,17 +66,31 @@ class ExecuteWorkflowUseCase:
         self._events.publish_status(context.execution_id, result.status)
         return result
 
-    def _execute_level(self, level, workflow_id, context):
+    def _execute_level(
+        self, level: ExecutionLevel, workflow_id: UUID, context: ExecutionContext,
+    ) -> list[NodeResult]:
+        if len(level.nodes) == 1:
+            return [self._dispatch_single(level.nodes[0], context)]
+
         node_results: list[NodeResult] = []
-        for node in level.nodes:
-            config = self._workflow_repo.get_node_config(node.node_id)
-            node_result = self._dispatch_node.execute(
-                node=node,
-                config=config,
-                inputs=context.parameters,
-                user_id=context.user_id,
-                execution_id=context.execution_id,
-            )
-            self._events.publish_node_complete(context.execution_id, node_result)
-            node_results.append(node_result)
+        with ThreadPoolExecutor(max_workers=len(level.nodes)) as pool:
+            futures = {
+                pool.submit(self._dispatch_single, node, context): node
+                for node in level.nodes
+            }
+            for future in as_completed(futures):
+                node_results.append(future.result())
+
         return node_results
+
+    def _dispatch_single(self, node, context: ExecutionContext) -> NodeResult:
+        config = self._workflow_repo.get_node_config(node.node_id)
+        node_result = self._dispatch_node.execute(
+            node=node,
+            config=config,
+            inputs=context.parameters,
+            user_id=context.user_id,
+            execution_id=context.execution_id,
+        )
+        self._events.publish_node_complete(context.execution_id, node_result)
+        return node_result

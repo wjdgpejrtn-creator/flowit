@@ -33,7 +33,6 @@ class ExecutionOrchestrator:
                 "워크플로우 그래프가 유효하지 않습니다",
                 code="E_INVALID_GRAPH",
             )
-        self._scheduler.validate_dag(workflow)
         return self._scheduler.schedule(workflow)
 
     def has_failures(self, level_results: list[NodeResult]) -> bool:

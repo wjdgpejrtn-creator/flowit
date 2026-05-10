@@ -53,7 +53,12 @@ class EvaluateAndRefineUseCase:
                 code="E_MAX_REFINE_EXCEEDED",
             )
 
-        user_id = original.user_id or UUID("00000000-0000-0000-0000-000000000000")
+        if original.user_id is None:
+            raise ExecutionError(
+                f"Execution {execution_id} has no user_id — cannot re-execute",
+                code="E_MISSING_USER_ID",
+            )
+        user_id = original.user_id
 
         logger.info(
             "QA failed (score=%.1f, reason=%s). Re-executing workflow=%s (attempt %d/%d)",
@@ -81,7 +86,6 @@ class EvaluateAndRefineUseCase:
 
     @staticmethod
     def _extract_attempt(result: ExecutionResult) -> int:
-        params = {}
         if result.node_results:
             for nr in result.node_results:
                 if "refine_attempt" in nr.output:

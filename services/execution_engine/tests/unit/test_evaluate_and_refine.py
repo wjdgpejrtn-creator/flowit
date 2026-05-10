@@ -73,6 +73,7 @@ class TestQAFailed:
         original = ExecutionResult(
             execution_id=eid,
             workflow_id=uuid4(),
+            user_id=uuid4(),
             status=ExecutionStatus.COMPLETED,
             node_results=[],
         )
@@ -95,6 +96,7 @@ class TestQAFailed:
         original = ExecutionResult(
             execution_id=eid,
             workflow_id=uuid4(),
+            user_id=uuid4(),
             status=ExecutionStatus.COMPLETED,
             node_results=[],
         )
@@ -112,6 +114,23 @@ class TestQAFailed:
         assert context.parameters["qa_score"] == 3.0
         assert context.parameters["refine_attempt"] == 1
         assert context.trigger_type == "handoff"
+
+    def test_missing_user_id_raises(self, use_case, mock_execution_repo):
+        eid = uuid4()
+        original = ExecutionResult(
+            execution_id=eid,
+            workflow_id=uuid4(),
+            status=ExecutionStatus.COMPLETED,
+            node_results=[],
+        )
+        mock_execution_repo.get.return_value = original
+
+        evaluation = EvaluationResult(
+            score=4.0, pass_flag=False, reason="Low", feedback="Fix",
+        )
+
+        with pytest.raises(ExecutionError, match="no user_id"):
+            use_case.execute(eid, evaluation)
 
     def test_max_attempts_exceeded_raises(
         self, use_case, mock_execution_repo,

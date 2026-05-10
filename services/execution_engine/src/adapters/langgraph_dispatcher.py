@@ -33,9 +33,8 @@ class LangGraphDispatcher(NodeExecutorPort):
         graph_inputs = {
             "node_instance_id": str(node.instance_id),
             "parameters": node.parameters,
-            **inputs,
+            **{k: v for k, v in inputs.items() if not k.startswith("__")},
         }
-        graph_inputs.pop("__credentials__", None)
 
         logger.info(
             "LangGraphDispatcher: invoking graph=%s, node=%s",
