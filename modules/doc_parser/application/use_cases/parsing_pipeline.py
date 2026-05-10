@@ -101,6 +101,7 @@ class ParsingPipeline:
 
         # ── 6. 품질 검증 ──
         quality_config = self._config_loader.load_quality_config()
-        quality_result = self._quality_gate.evaluate(masked_document, chunks)
+        quality_result = self._quality_gate.evaluate(masked_document, chunks, quality_config)
 
         return masked_document, chunks, quality_result
+    

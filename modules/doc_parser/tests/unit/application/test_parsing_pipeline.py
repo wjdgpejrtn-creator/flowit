@@ -279,3 +279,4 @@ def test_pipeline_returns_all_quality_statuses(quality_status, mock_document, mo
     assert quality.quality_status == quality_status
     assert document is not None
     assert isinstance(chunks, list)
+    
