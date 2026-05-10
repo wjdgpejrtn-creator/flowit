@@ -134,8 +134,8 @@ def test_all_strategies_passed_correctly(strategy, mock_chunks):
     mock_chunking.chunk.assert_called_once_with(mock_doc, strategy=strategy)
 
 
-def test_chunking_service_called_exactly_once(use_case, mock_document):
-    """ChunkingService.chunk() 정확히 1번만 호출"""
+def test_chunking_service_called_once_per_execute(use_case, mock_document):
+    """execute() 호출당 ChunkingService.chunk() 1번씩 호출 검증 (W-3 반영)"""
     use_case.execute(mock_document)
     use_case.execute(mock_document)
 

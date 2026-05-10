@@ -6,7 +6,7 @@ Port mock 사용 — 실제 파서/파일 없이 로직만 검증
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -20,7 +20,7 @@ from doc_parser.domain.entities.warning import WarningInfo
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def mock_document(tmp_path):
+def mock_document():
     """더미 DocumentBlock"""
     return MagicMock(spec=DocumentBlock, document_id=uuid4())
 
@@ -57,12 +57,10 @@ def mock_quality_result():
 @pytest.fixture
 def use_case(mock_document, mock_quality_result):
     """ParseDocumentUseCase with mock ports"""
-    # mock parser
     mock_parser = MagicMock()
     mock_parser.supports.return_value = True
     mock_parser.parse.return_value = mock_document
 
-    # mock services
     mock_normalizer = MagicMock()
     mock_normalizer.normalize_document.return_value = mock_document
 
@@ -186,7 +184,7 @@ def test_pii_masked_document_passed_to_quality_gate(mock_quality_result):
     mock_normalizer.normalize_document.return_value = original_doc
 
     mock_pii = MagicMock()
-    mock_pii.mask_document.return_value = (masked_doc, [])  # 마스킹 후 다른 객체
+    mock_pii.mask_document.return_value = (masked_doc, [])
 
     mock_quality_gate = MagicMock()
     mock_quality_gate.evaluate.return_value = mock_quality_result
@@ -202,7 +200,6 @@ def test_pii_masked_document_passed_to_quality_gate(mock_quality_result):
     meta.mime_type = "application/pdf"
     uc.execute("dummy/path.pdf", meta)
 
-    # quality gate에는 원본이 아닌 마스킹된 문서가 전달되어야 함
     args, _ = mock_quality_gate.evaluate.call_args
     assert args[0] is masked_doc
     assert args[0] is not original_doc
@@ -258,7 +255,7 @@ def test_quality_status_failed_still_returns(mock_document):
 
 
 def test_pii_warnings_do_not_break_pipeline(mock_document, mock_quality_result):
-    """PII 경고가 있어도 파이프라인 정상 완료"""
+    """PII 경고가 있어도 파이프라인 정상 완료 — WarningInfo 실제 VO 사용"""
     mock_parser = MagicMock()
     mock_parser.supports.return_value = True
     mock_parser.parse.return_value = mock_document
@@ -266,9 +263,9 @@ def test_pii_warnings_do_not_break_pipeline(mock_document, mock_quality_result):
     mock_normalizer = MagicMock()
     mock_normalizer.normalize_document.return_value = mock_document
 
-    # PII 경고 2개 발생 시뮬레이션
-    pii_warning_1 = MagicMock()
-    pii_warning_2 = MagicMock()
+    # WarningInfo 실제 VO 인스턴스 사용 (W-2 반영)
+    pii_warning_1 = WarningInfo(code="W0101", message="PII 감지: 이름")
+    pii_warning_2 = WarningInfo(code="W0102", message="PII 감지: 전화번호")
     mock_pii = MagicMock()
     mock_pii.mask_document.return_value = (mock_document, [pii_warning_1, pii_warning_2])
 

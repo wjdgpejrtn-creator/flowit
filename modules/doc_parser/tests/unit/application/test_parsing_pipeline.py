@@ -6,7 +6,7 @@ Port mock 사용 — 전체 파이프라인 오케스트레이션 로직만 검�
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -68,7 +68,7 @@ def mock_file_meta():
 
 @pytest.fixture
 def pipeline(mock_document, mock_chunks, mock_quality_result):
-    """ParsingPipeline with all mock ports"""
+    """ParsingPipeline with all mock ports (저장 로직 제거됨)"""
     mock_parser = MagicMock()
     mock_parser.parse.return_value = mock_document
 
@@ -87,9 +87,6 @@ def pipeline(mock_document, mock_chunks, mock_quality_result):
     mock_chunking = MagicMock()
     mock_chunking.chunk.return_value = mock_chunks
 
-    mock_repo = MagicMock()
-    mock_repo.save.return_value = mock_document.document_id
-
     mock_config = MagicMock()
     mock_config.load_pii_rules.return_value = []
     mock_config.load_chunking_strategy.return_value = ChunkingStrategy(
@@ -105,7 +102,6 @@ def pipeline(mock_document, mock_chunks, mock_quality_result):
         pii_masking_service=mock_pii,
         quality_gate=mock_quality_gate,
         chunking_service=mock_chunking,
-        repository=mock_repo,
         config_loader=mock_config,
     )
 
@@ -130,15 +126,6 @@ def test_pipeline_calls_all_steps(pipeline, mock_file_meta):
     pipeline._pii.mask_document.assert_called_once()
     pipeline._chunking.chunk.assert_called_once()
     pipeline._quality_gate.evaluate.assert_called_once()
-
-
-def test_repository_save_called(pipeline, mock_file_meta):
-    """저장 메서드 3개 모두 호출 검증"""
-    pipeline.execute("dummy/path.pdf", mock_file_meta)
-
-    pipeline._repo.save.assert_called_once()
-    pipeline._repo.save_chunks.assert_called_once()
-    pipeline._repo.save_quality_log.assert_called_once()
 
 
 def test_chunks_importance_score_none(pipeline, mock_file_meta):
@@ -188,9 +175,6 @@ def test_chunking_strategy_passed_to_chunking_service(mock_document, mock_chunks
     mock_chunking = MagicMock()
     mock_chunking.chunk.return_value = mock_chunks
 
-    mock_repo = MagicMock()
-    mock_repo.save.return_value = mock_document.document_id
-
     strategy = ChunkingStrategy(
         max_tokens=256,
         overlap_tokens=30,
@@ -207,7 +191,6 @@ def test_chunking_strategy_passed_to_chunking_service(mock_document, mock_chunks
         pii_masking_service=mock_pii,
         quality_gate=mock_quality_gate,
         chunking_service=mock_chunking,
-        repository=mock_repo,
         config_loader=mock_config,
     )
 
@@ -215,17 +198,7 @@ def test_chunking_strategy_passed_to_chunking_service(mock_document, mock_chunks
     meta.mime_type = "application/pdf"
     p.execute("dummy/path.pdf", meta)
 
-    # chunking service에 strategy.token_estimator_mode 전달 검증
-    mock_chunking.chunk.assert_called_once_with(mock_document, strategy="tiktoken")
-
-
-def test_save_quality_log_receives_correct_document_id(pipeline, mock_file_meta, mock_document):
-    """save_quality_log에 올바른 document_id 전달 검증"""
-    pipeline.execute("dummy/path.pdf", mock_file_meta)
-
-    _, kwargs_list = pipeline._repo.save_quality_log.call_args
-    args, _ = pipeline._repo.save_quality_log.call_args
-    assert args[1] == mock_document.document_id
+    mock_chunking.chunk.assert_called_once_with(mock_document, strategy=strategy)
 
 
 def test_unsupported_mime_propagates(pipeline):
@@ -237,18 +210,6 @@ def test_unsupported_mime_propagates(pipeline):
 
     with pytest.raises(ValueError, match="E0201"):
         pipeline.execute("dummy/file.jpg", meta)
-
-
-def test_repo_not_called_on_parse_failure(pipeline, mock_file_meta):
-    """파싱 실패 시 repository 저장 메서드 호출되지 않아야 함"""
-    pipeline._factory.get.return_value.parse.side_effect = RuntimeError("E0202: 파일 손상")
-
-    with pytest.raises(RuntimeError):
-        pipeline.execute("corrupt.pdf", mock_file_meta)
-
-    pipeline._repo.save.assert_not_called()
-    pipeline._repo.save_chunks.assert_not_called()
-    pipeline._repo.save_quality_log.assert_not_called()
 
 
 @pytest.mark.parametrize("quality_status", [
@@ -293,9 +254,6 @@ def test_pipeline_returns_all_quality_statuses(quality_status, mock_document, mo
     mock_chunking = MagicMock()
     mock_chunking.chunk.return_value = mock_chunks
 
-    mock_repo = MagicMock()
-    mock_repo.save.return_value = mock_document.document_id
-
     mock_config = MagicMock()
     mock_config.load_pii_rules.return_value = []
     mock_config.load_chunking_strategy.return_value = ChunkingStrategy(
@@ -311,7 +269,6 @@ def test_pipeline_returns_all_quality_statuses(quality_status, mock_document, mo
         pii_masking_service=mock_pii,
         quality_gate=mock_quality_gate,
         chunking_service=mock_chunking,
-        repository=mock_repo,
         config_loader=mock_config,
     )
 
