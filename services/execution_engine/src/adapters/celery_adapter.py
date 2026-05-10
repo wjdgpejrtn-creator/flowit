@@ -18,6 +18,7 @@ class CeleryAdapter(TaskQueuePort):
         self._app = app
 
     def dispatch(self, task_name: str, args: dict[str, Any]) -> str:
+        args = dict(args)
         queue = args.pop("__queue__", "default")
         result = self._app.send_task(task_name, kwargs=args, queue=queue)
         return result.id

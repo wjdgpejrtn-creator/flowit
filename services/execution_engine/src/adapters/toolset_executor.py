@@ -16,6 +16,8 @@ class ToolExecuteCallable(Protocol):
         tool_name: str,
         input_data: dict[str, Any],
         credential_id: str | None = None,
+        credentials: dict[str, str] | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -31,9 +33,13 @@ class ToolsetExecutor(NodeExecutorPort):
         inputs: dict[str, Any],
     ) -> dict[str, Any]:
         tool_name = config.node_type
-        input_data = {**node.parameters, **inputs}
-        input_data.pop("__credentials__", None)
-        input_data.pop("__user_id__", None)
+        user_id = inputs.get("__user_id__")
+        credentials = inputs.get("__credentials__")
+
+        input_data = {
+            k: v for k, v in {**node.parameters, **inputs}.items()
+            if not k.startswith("__")
+        }
 
         credential_id = str(node.credential_id) if node.credential_id else None
 
@@ -42,4 +48,6 @@ class ToolsetExecutor(NodeExecutorPort):
             tool_name=tool_name,
             input_data=input_data,
             credential_id=credential_id,
+            credentials=credentials,
+            user_id=user_id,
         )

@@ -6,7 +6,6 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 from common_schemas.enums import ExecutionStatus
 from common_schemas.exceptions import NotFoundError
@@ -29,10 +28,10 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
             session.execute(
                 text("""
                     INSERT INTO execution_results
-                        (execution_id, workflow_id, status, node_results,
+                        (execution_id, workflow_id, user_id, status, node_results,
                          started_at, completed_at, error)
                     VALUES
-                        (:execution_id, :workflow_id, :status, :node_results,
+                        (:execution_id, :workflow_id, :user_id, :status, :node_results,
                          :started_at, :completed_at, :error)
                     ON CONFLICT (execution_id) DO UPDATE SET
                         status = EXCLUDED.status,
@@ -43,6 +42,7 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
                 {
                     "execution_id": data["execution_id"],
                     "workflow_id": data["workflow_id"],
+                    "user_id": data.get("user_id"),
                     "status": data["status"],
                     "node_results": json.dumps(data["node_results"]),
                     "started_at": data["started_at"],
@@ -66,9 +66,11 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
         if isinstance(node_results_raw, str):
             node_results_raw = json.loads(node_results_raw)
 
+        user_id_raw = row.get("user_id")
         return ExecutionResult(
             execution_id=UUID(row["execution_id"]),
             workflow_id=UUID(row["workflow_id"]),
+            user_id=UUID(user_id_raw) if user_id_raw else None,
             status=ExecutionStatus(row["status"]),
             node_results=[NodeResult.model_validate(nr) for nr in node_results_raw],
             started_at=row["started_at"],

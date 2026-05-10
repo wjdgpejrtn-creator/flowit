@@ -5,7 +5,6 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 from common_schemas.enums import RiskLevel
 from common_schemas.exceptions import NotFoundError
@@ -13,7 +12,6 @@ from common_schemas.workflow import (
     Edge,
     NodeConfig,
     NodeInstance,
-    Position,
     WorkflowSchema,
 )
 
@@ -37,16 +35,16 @@ class PostgresWorkflowRepository(WorkflowRepositoryPort):
         if row is None:
             raise NotFoundError(f"Workflow {workflow_id} not found")
 
-        nodes = [
-            NodeInstance.model_validate(n) for n in row["nodes"]
-        ]
-        edges = [Edge.model_validate(e) for e in row["edges"]]
+        nodes = [NodeInstance.model_validate(n) for n in row["nodes"]]
+        connections = [Edge.model_validate(e) for e in row["connections"]]
 
         return WorkflowSchema(
             workflow_id=UUID(row["workflow_id"]),
             name=row["name"],
+            scope=row["scope"],
+            is_draft=row["is_draft"],
             nodes=nodes,
-            edges=edges,
+            connections=connections,
         )
 
     def get_node_config(self, node_id: UUID) -> NodeConfig:

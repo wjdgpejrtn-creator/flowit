@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from functools import cached_property
 from typing import Any
 
 from ..adapters.celery_adapter import CeleryAdapter
@@ -12,6 +13,7 @@ from ..application.use_cases.evaluate_and_refine import EvaluateAndRefineUseCase
 from ..application.use_cases.execute_workflow import ExecuteWorkflowUseCase
 from ..application.use_cases.handle_handoff import HandleHandoffUseCase
 from ..application.use_cases.pause_resume import PauseResumeUseCase
+from ..domain.services.execution_orchestrator import ExecutionOrchestrator
 from ..domain.services.retry_manager import RetryManager
 from ..domain.services.topological_scheduler import TopologicalScheduler
 
@@ -35,9 +37,10 @@ class Container:
         self._task_queue = task_queue
 
         self._scheduler = TopologicalScheduler()
+        self._orchestrator = ExecutionOrchestrator(self._scheduler)
         self._retry_manager = RetryManager()
 
-    @property
+    @cached_property
     def dispatch_node_use_case(self) -> DispatchNodeUseCase:
         return DispatchNodeUseCase(
             node_executor=self._node_executor,
@@ -46,31 +49,32 @@ class Container:
             retry_manager=self._retry_manager,
         )
 
-    @property
+    @cached_property
     def execute_workflow_use_case(self) -> ExecuteWorkflowUseCase:
         return ExecuteWorkflowUseCase(
             workflow_repo=self._workflow_repo,
             execution_repo=self._execution_repo,
-            scheduler=self._scheduler,
+            orchestrator=self._orchestrator,
             dispatch_node=self.dispatch_node_use_case,
             event_publisher=self._event_publisher,
         )
 
-    @property
+    @cached_property
     def handle_handoff_use_case(self) -> HandleHandoffUseCase:
         return HandleHandoffUseCase(
             workflow_repo=self._workflow_repo,
             execute_workflow=self.execute_workflow_use_case,
         )
 
-    @property
+    @cached_property
     def pause_resume_use_case(self) -> PauseResumeUseCase:
         return PauseResumeUseCase(
             execution_repo=self._execution_repo,
             event_publisher=self._event_publisher,
+            orchestrator=self._orchestrator,
         )
 
-    @property
+    @cached_property
     def evaluate_and_refine_use_case(self) -> EvaluateAndRefineUseCase:
         return EvaluateAndRefineUseCase(
             execution_repo=self._execution_repo,
@@ -129,17 +133,13 @@ def create_container() -> Container:
     return _container
 
 
-def _noop_credential_store_decrypt(credential_id, user_id):
-    raise NotImplementedError("CredentialStore not wired — provide auth module adapter")
-
-
 class _NoopCredentialStore:
     def decrypt(self, credential_id, user_id):
-        return _noop_credential_store_decrypt(credential_id, user_id)
+        raise NotImplementedError("CredentialStore not wired — provide auth module adapter")
 
 
 _noop_credential_store = _NoopCredentialStore()
 
 
-def _noop_tool_executor(tool_name, input_data, credential_id=None):
+def _noop_tool_executor(tool_name, input_data, credential_id=None, credentials=None, user_id=None):
     raise NotImplementedError("ToolsetExecutor not wired — provide toolset module adapter")

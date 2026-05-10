@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from common_schemas.exceptions import ExecutionError, ValidationError
+from common_schemas.exceptions import ValidationError
 from common_schemas.handoff import HandoffPayload
 
 from ...domain.entities.execution_context import ExecutionContext

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from celery import Celery
+from kombu import Queue
 
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
@@ -27,11 +28,11 @@ celery_app.conf.update(
         "execution_engine.handle_handoff": {"queue": "default"},
         "execution_engine.level_callback": {"queue": "default"},
     },
-    task_queues={
-        "default": {"routing_key": "workflow.node.default"},
-        "llm": {"routing_key": "workflow.node.llm"},
-        "external_api": {"routing_key": "workflow.node.external"},
-    },
+    task_queues=[
+        Queue("default", routing_key="workflow.node.default"),
+        Queue("llm", routing_key="workflow.node.llm"),
+        Queue("external_api", routing_key="workflow.node.external"),
+    ],
 )
 
 celery_app.autodiscover_tasks(["execution_engine.src.adapters"])

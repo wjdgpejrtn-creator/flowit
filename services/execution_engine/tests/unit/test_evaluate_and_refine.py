@@ -1,6 +1,7 @@
 """EvaluateAndRefineUseCase 단위 테스트 — QA 평가 → Self-Refine."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -15,7 +16,7 @@ from src.application.use_cases.evaluate_and_refine import (
     MAX_REFINE_ATTEMPTS,
     PASS_THRESHOLD,
 )
-from src.domain.entities.execution_result import ExecutionResult
+from src.domain.entities.execution_result import ExecutionResult, NodeResult
 
 
 @pytest.fixture
@@ -109,7 +110,58 @@ class TestQAFailed:
         assert context.parameters["refine_feedback"] == "Fix the output format"
         assert context.parameters["previous_execution_id"] == str(eid)
         assert context.parameters["qa_score"] == 3.0
+        assert context.parameters["refine_attempt"] == 1
         assert context.trigger_type == "handoff"
+
+    def test_max_attempts_exceeded_raises(
+        self, use_case, mock_execution_repo,
+    ):
+        eid = uuid4()
+        original = ExecutionResult(
+            execution_id=eid,
+            workflow_id=uuid4(),
+            status=ExecutionStatus.COMPLETED,
+            node_results=[
+                NodeResult(
+                    node_instance_id=uuid4(),
+                    status="succeeded",
+                    output={"refine_attempt": MAX_REFINE_ATTEMPTS},
+                    started_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(timezone.utc),
+                ),
+            ],
+        )
+        mock_execution_repo.get.return_value = original
+
+        evaluation = EvaluationResult(
+            score=2.0, pass_flag=False, reason="Still bad", feedback="Try again",
+        )
+
+        with pytest.raises(ExecutionError, match="Maximum refine attempts"):
+            use_case.execute(eid, evaluation)
+
+    def test_user_id_from_original(
+        self, use_case, mock_execution_repo, mock_execute_workflow,
+    ):
+        eid = uuid4()
+        uid = uuid4()
+        original = ExecutionResult(
+            execution_id=eid,
+            workflow_id=uuid4(),
+            user_id=uid,
+            status=ExecutionStatus.COMPLETED,
+            node_results=[],
+        )
+        mock_execution_repo.get.return_value = original
+
+        evaluation = EvaluationResult(
+            score=4.0, pass_flag=False, reason="Low", feedback="Fix",
+        )
+
+        use_case.execute(eid, evaluation)
+
+        context = mock_execute_workflow.execute.call_args[0][1]
+        assert context.user_id == uid
 
 
 class TestThresholdConstants:

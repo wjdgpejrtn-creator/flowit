@@ -11,6 +11,8 @@ from common_schemas.exceptions import ExecutionError
 
 from src.application.use_cases.pause_resume import PauseResumeUseCase
 from src.domain.entities.execution_result import ExecutionResult
+from src.domain.services.execution_orchestrator import ExecutionOrchestrator
+from src.domain.services.topological_scheduler import TopologicalScheduler
 
 
 @pytest.fixture
@@ -24,10 +26,16 @@ def mock_events():
 
 
 @pytest.fixture
-def use_case(mock_execution_repo, mock_events):
+def orchestrator():
+    return ExecutionOrchestrator(TopologicalScheduler())
+
+
+@pytest.fixture
+def use_case(mock_execution_repo, mock_events, orchestrator):
     return PauseResumeUseCase(
         execution_repo=mock_execution_repo,
         event_publisher=mock_events,
+        orchestrator=orchestrator,
     )
 
 
@@ -57,14 +65,14 @@ class TestPause:
         result = _make_result(ExecutionStatus.COMPLETED)
         mock_execution_repo.get.return_value = result
 
-        with pytest.raises(ExecutionError, match="Cannot pause"):
+        with pytest.raises(ExecutionError, match="Cannot transition"):
             use_case.execute(result.execution_id, "pause")
 
     def test_pause_already_paused_raises(self, use_case, mock_execution_repo):
         result = _make_result(ExecutionStatus.PAUSED)
         mock_execution_repo.get.return_value = result
 
-        with pytest.raises(ExecutionError, match="Cannot pause"):
+        with pytest.raises(ExecutionError, match="Cannot transition"):
             use_case.execute(result.execution_id, "pause")
 
 
@@ -86,7 +94,7 @@ class TestResume:
         result = _make_result(ExecutionStatus.RUNNING)
         mock_execution_repo.get.return_value = result
 
-        with pytest.raises(ExecutionError, match="Cannot resume"):
+        with pytest.raises(ExecutionError, match="Cannot transition"):
             use_case.execute(result.execution_id, "resume")
 
     def test_resume_with_approval(self, use_case, mock_execution_repo, mock_events):

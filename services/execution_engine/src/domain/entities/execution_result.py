@@ -31,6 +31,7 @@ class ExecutionResult(BaseModel):
 
     execution_id: UUID
     workflow_id: UUID
+    user_id: Optional[UUID] = None
     status: ExecutionStatus = ExecutionStatus.RUNNING
     node_results: list[NodeResult] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=_utcnow)

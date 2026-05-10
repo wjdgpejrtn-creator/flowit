@@ -87,7 +87,7 @@ class TestDispatchNodeSuccess:
         assert result.error is None
 
     def test_credential_injection(self, use_case, mock_executor, mock_credentials):
-        """credential_id 있으면 __credentials__ 주입"""
+        """credential_id 있으면 __credentials__ + __user_id__ 주입"""
         mock_executor.execute.return_value = {}
         cred_id = uuid4()
         user_id = uuid4()
@@ -103,19 +103,25 @@ class TestDispatchNodeSuccess:
         call_args = mock_executor.execute.call_args
         inputs_passed = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("inputs", call_args[0][2])
         assert "__credentials__" in inputs_passed
+        assert inputs_passed["__user_id__"] == str(user_id)
 
     def test_no_credential_when_none(self, use_case, mock_executor, mock_credentials):
-        """credential_id=None이면 credential 조회 안 함"""
+        """credential_id=None이면 credential 조회 안 하지만 __user_id__는 주입"""
         mock_executor.execute.return_value = {}
         node = _make_node(credential_id=None)
         config = _make_config()
+        user_id = uuid4()
 
         use_case.execute(
             node=node, config=config, inputs={"x": 1},
-            user_id=uuid4(), execution_id=uuid4(),
+            user_id=user_id, execution_id=uuid4(),
         )
 
         mock_credentials.get_credential.assert_not_called()
+        call_args = mock_executor.execute.call_args
+        inputs_passed = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("inputs", call_args[0][2])
+        assert "__credentials__" not in inputs_passed
+        assert inputs_passed["__user_id__"] == str(user_id)
 
 
 class TestDispatchNodeRetry:

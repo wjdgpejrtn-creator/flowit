@@ -82,7 +82,8 @@ class DispatchNodeUseCase:
         inputs: dict[str, Any],
         user_id: UUID,
     ) -> dict[str, Any]:
+        enriched = {**inputs, "__user_id__": str(user_id)}
         if node.credential_id is None:
-            return inputs
+            return enriched
         creds = self._credentials.get_credential(node.credential_id, user_id)
-        return {**inputs, "__credentials__": creds}
+        return {**enriched, "__credentials__": creds}

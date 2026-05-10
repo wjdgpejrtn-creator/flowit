@@ -46,13 +46,14 @@ class SandboxExecutor(NodeExecutorPort):
         }
 
     def _run_isolated(self, code: str) -> tuple[str, str, int]:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False
-        ) as tmp:
-            tmp.write(code)
-            tmp_path = Path(tmp.name)
-
+        tmp_path: Path | None = None
         try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False,
+            ) as tmp:
+                tmp.write(code)
+                tmp_path = Path(tmp.name)
+
             result = subprocess.run(
                 ["python", str(tmp_path)],
                 capture_output=True,
@@ -68,4 +69,5 @@ class SandboxExecutor(NodeExecutorPort):
                 f"Sandbox execution exceeded {self._timeout}s timeout"
             )
         finally:
-            tmp_path.unlink(missing_ok=True)
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)

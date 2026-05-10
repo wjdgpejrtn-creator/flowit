@@ -14,6 +14,7 @@ from common_schemas.enums import RiskLevel
 from src.application.use_cases.execute_workflow import ExecuteWorkflowUseCase
 from src.domain.entities.execution_context import ExecutionContext
 from src.domain.entities.execution_result import NodeResult
+from src.domain.services.execution_orchestrator import ExecutionOrchestrator
 from src.domain.services.topological_scheduler import TopologicalScheduler
 
 
@@ -83,10 +84,12 @@ def mock_events():
 
 @pytest.fixture
 def use_case(mock_workflow_repo, mock_execution_repo, mock_dispatch_node, mock_events):
+    scheduler = TopologicalScheduler()
+    orchestrator = ExecutionOrchestrator(scheduler)
     return ExecuteWorkflowUseCase(
         workflow_repo=mock_workflow_repo,
         execution_repo=mock_execution_repo,
-        scheduler=TopologicalScheduler(),
+        orchestrator=orchestrator,
         dispatch_node=mock_dispatch_node,
         event_publisher=mock_events,
     )

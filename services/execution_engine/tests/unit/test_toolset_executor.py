@@ -106,6 +106,24 @@ class TestToolsetExecutor:
         call_kwargs = mock_fn.call_args[1]
         assert call_kwargs["credential_id"] is None
 
+    def test_forwards_credentials_and_user_id(self):
+        mock_fn = MagicMock(return_value={})
+        executor = ToolsetExecutor(execute_tool=mock_fn)
+        node = _make_node()
+        config = _make_config()
+
+        executor.execute(node, config, {
+            "__user_id__": "u-123",
+            "__credentials__": {"token": "abc"},
+            "real": "data",
+        })
+
+        call_kwargs = mock_fn.call_args[1]
+        assert call_kwargs["user_id"] == "u-123"
+        assert call_kwargs["credentials"] == {"token": "abc"}
+        assert "__user_id__" not in call_kwargs["input_data"]
+        assert "__credentials__" not in call_kwargs["input_data"]
+
     def test_propagates_execution_error(self):
         mock_fn = MagicMock(side_effect=RuntimeError("tool failed"))
         executor = ToolsetExecutor(execute_tool=mock_fn)
