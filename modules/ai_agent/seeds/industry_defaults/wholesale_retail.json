@@ -1,0 +1,160 @@
+{
+  "industry_code": "wholesale_retail",
+  "industry_name": "도소매",
+  "description": "도소매업 표준 자동화 — 재고·발주·매출·가격·정산",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "wholesale_inventory_low_alert",
+      "name": "재고 알림",
+      "category": "action",
+      "description": "재고가 임계값 이하로 떨어지면 담당자에게 슬랙 알림 + 발주 추천 노드 트리거",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "warehouse_id": {"type": "string"},
+          "product_code": {"type": "string"},
+          "current_stock": {"type": "integer", "minimum": 0},
+          "threshold": {"type": "integer", "minimum": 0},
+          "alert_channel": {"type": "string"}
+        },
+        "required": ["warehouse_id", "product_code", "current_stock", "threshold"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "alert_sent": {"type": "boolean"},
+          "alert_at": {"type": "string", "format": "date-time"},
+          "trigger_purchase_order": {"type": "boolean"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["slack"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "wholesale_auto_purchase_order",
+      "name": "발주 자동화",
+      "category": "action",
+      "description": "재고 부족 SKU 목록 → 공급사별로 자동 발주서 작성 + 메일 발송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "shortage_items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "product_code": {"type": "string"},
+                "supplier_id": {"type": "string"},
+                "order_quantity": {"type": "integer"}
+              }
+            }
+          },
+          "po_template_id": {"type": "string"}
+        },
+        "required": ["shortage_items"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "po_ids": {"type": "array", "items": {"type": "string"}},
+          "emails_sent": {"type": "integer"},
+          "submitted_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "wholesale_daily_sales_report",
+      "name": "일일 매출 리포트",
+      "category": "output",
+      "description": "전일 매출(SKU별·매장별) 집계 후 PDF 리포트 생성 + 경영진 메일 발송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "report_date": {"type": "string", "format": "date"},
+          "spreadsheet_id": {"type": "string"},
+          "recipients": {"type": "array", "items": {"type": "string", "format": "email"}}
+        },
+        "required": ["report_date", "spreadsheet_id", "recipients"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "pdf_url": {"type": "string"},
+          "total_revenue": {"type": "number"},
+          "sent_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Low",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "wholesale_price_change_notice",
+      "name": "가격 변동 공지",
+      "category": "action",
+      "description": "신규 가격표 적용 시 거래처에 변경 사항 일괄 메일 공지",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "effective_date": {"type": "string", "format": "date"},
+          "price_changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "product_code": {"type": "string"},
+                "old_price": {"type": "number"},
+                "new_price": {"type": "number"}
+              }
+            }
+          },
+          "customer_emails": {"type": "array", "items": {"type": "string", "format": "email"}}
+        },
+        "required": ["effective_date", "price_changes", "customer_emails"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "notifications_sent": {"type": "integer"},
+          "notice_pdf_url": {"type": "string"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "wholesale_settlement_statement",
+      "name": "정산서 발송",
+      "category": "action",
+      "description": "월간 정산서 작성 후 거래처 담당자에게 PDF 메일 발송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "billing_period": {"type": "string", "pattern": "^\\d{4}-\\d{2}$"},
+          "partner_id": {"type": "string"},
+          "partner_email": {"type": "string", "format": "email"},
+          "line_items": {"type": "array", "items": {"type": "object"}},
+          "total_amount": {"type": "number"}
+        },
+        "required": ["billing_period", "partner_id", "partner_email", "total_amount"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "statement_pdf_url": {"type": "string"},
+          "email_message_id": {"type": "string"},
+          "sent_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    }
+  ]
+}
