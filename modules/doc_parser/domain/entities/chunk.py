@@ -21,6 +21,8 @@ class Chunk(BaseModel):
         block: 청크에 해당하는 ContentBlock
         chunk_index: 문서 내 청크 순번
         parent_document_id: 원본 DocumentBlock ID
+        token_count: 청크 토큰 수 (quality gate 계산용)
+        chunk_type: 청크 유형 (structural / page / token / table)
         importance_score: 중요도 점수 — REQ-004 AI_Agent 담당 (파서는 None)
         embedding: 임베딩 벡터 — REQ-004 AI_Agent 담당 (파서는 None)
     """
@@ -29,6 +31,8 @@ class Chunk(BaseModel):
     block: ContentBlock
     chunk_index: int
     parent_document_id: UUID
+    token_count: int = 0
+    chunk_type: str = "structural"
     importance_score: Optional[float] = None   # REQ-004 AI_Agent 담당
     embedding: Optional[list[float]] = None    # REQ-004 AI_Agent 담당
 

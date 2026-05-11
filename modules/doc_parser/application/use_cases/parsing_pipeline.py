@@ -10,9 +10,8 @@ ParsingPipeline
       → parse() → DocumentBlock
       → NormalizationService.normalize_document()
       → PIIMaskingService.mask_document()
-      → QualityGate.evaluate()
       → ChunkingService.chunk()
-      → DocumentRepositoryPort.save() + save_chunks() + save_quality_log()
+      → QualityGate.evaluate()
       → (DocumentBlock, list[Chunk], QualityGateResult) 반환
 """
 from __future__ import annotations
@@ -22,7 +21,6 @@ from common_schemas.document import DocumentBlock, FileMeta
 from doc_parser.domain.entities.chunk import Chunk
 from doc_parser.domain.entities.quality import QualityGateResult
 from doc_parser.domain.ports.config_port import ConfigLoaderPort
-from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
 from doc_parser.domain.services.chunking_service import ChunkingService
 from doc_parser.domain.services.normalization import NormalizationService
 from doc_parser.domain.services.parser_factory import ParserFactory
@@ -34,7 +32,9 @@ class ParsingPipeline:
     """전체 파싱 파이프라인 오케스트레이션.
 
     파서 선택 → 파싱 → 정규화 → PII 마스킹 →
-    품질 검증 → 청킹 → 저장 → 결과 반환.
+    청킹 → 품질 검증 → 결과 반환.
+
+    저장은 storage(REQ-008) DocumentRepositoryPort 담당.
 
     Args:
         parser_factory: ParserFactory 인스턴스
@@ -42,7 +42,6 @@ class ParsingPipeline:
         pii_masking_service: PIIMaskingService 인스턴스
         quality_gate: QualityGate 인스턴스
         chunking_service: ChunkingService 인스턴스
-        repository: DocumentRepositoryPort 구현체 (DI로 주입)
         config_loader: ConfigLoaderPort 구현체 (DI로 주입)
     """
 
@@ -53,7 +52,6 @@ class ParsingPipeline:
         pii_masking_service: PIIMaskingService,
         quality_gate: QualityGate,
         chunking_service: ChunkingService,
-        repository: DocumentRepositoryPort,
         config_loader: ConfigLoaderPort,
     ) -> None:
         self._factory = parser_factory
@@ -61,7 +59,6 @@ class ParsingPipeline:
         self._pii = pii_masking_service
         self._quality_gate = quality_gate
         self._chunking = chunking_service
-        self._repo = repository
         self._config_loader = config_loader
 
     def execute(
@@ -100,15 +97,10 @@ class ParsingPipeline:
 
         # ── 5. 청킹 ──
         strategy = self._config_loader.load_chunking_strategy()
-        chunks = self._chunking.chunk(masked_document, strategy=strategy.token_estimator_mode)
+        chunks = self._chunking.chunk(masked_document, strategy=strategy)
 
         # ── 6. 품질 검증 ──
         quality_config = self._config_loader.load_quality_config()
-        quality_result = self._quality_gate.evaluate(masked_document, chunks)
-
-        # ── 7. 저장 ──
-        self._repo.save(masked_document)
-        self._repo.save_chunks(chunks)
-        self._repo.save_quality_log(quality_result, masked_document.document_id)
+        quality_result = self._quality_gate.evaluate(masked_document, chunks, quality_config)
 
         return masked_document, chunks, quality_result
