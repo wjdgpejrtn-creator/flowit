@@ -90,23 +90,31 @@ Workflow_Automation/
 │   │       ├── unit/{domain,application}/
 │   │       └── integration/adapters/
 │   │
-│   ├── ai_agent/                           # REQ-004 AI Agent
+│   ├── ai_agent/                           # REQ-004 AI Agent (Sprint 3 멀티 에이전트)
 │   │   ├── __init__.py
 │   │   ├── domain/
-│   │   │   ├── entities/                   # MemoryEntry, CorrectionPattern
-│   │   │   ├── value_objects/              # EvaluationResult
-│   │   │   ├── services/                   # IntentAnalyzer, QAEvaluator, Drafter, OnboardingConsultant
-│   │   │   └── ports/                      # AgentMemoryRepository, NodeRegistry, LLMPort (ABC)
+│   │   │   ├── entities/                   # MemoryEntry, ConversationMessage, PersonalSkill, SkillNode
+│   │   │   ├── value_objects/              # TurnLimit, QualityThreshold
+│   │   │   ├── services/                   # IntentAnalyzer, Drafter, QAEvaluator, SlotFilling
+│   │   │   └── ports/                      # LLMPort, EmbeddingPort, AgentMemoryRepository,
+│   │   │                                   #   PersonalMemoryStore, WorkflowRepository, NodeRegistry,
+│   │   │                                   #   SubAgentClient(선택)
 │   │   ├── application/
-│   │   │   └── use_cases/                  # ComposeWorkflow, Onboarding
+│   │   │   └── agents/                     # ⇐ sub-agent 별로 분리
+│   │   │       ├── orchestrator/           # 신정혜: RouteRequestUseCase
+│   │   │       ├── workflow_composer/      # 신정혜: Compose, ContinueConversation
+│   │   │       ├── skills_builder/         # 박아름: BuildFromSOP, BuildFromIndustryDefault
+│   │   │       └── personalization/        # 햄햄: Load/Update/Recall/SaveMemory
 │   │   ├── adapters/
-│   │   │   ├── langgraph/
-│   │   │   │   ├── nodes/                  # 13개 AgentNode 구현
-│   │   │   │   └── ...                     # GraphBuilder, Checkpointer
-│   │   │   └── llm/                        # ModalAdapter
+│   │   │   ├── langgraph/                  # supervisor_graph, composer_graph
+│   │   │   ├── llm/                        # modal_llm_adapter, modal_embedding_adapter
+│   │   │   ├── memory/                     # gcs_memory_store (PersonalMemoryStore 구현, GCS)
+│   │   │   ├── agent_clients/              # http_sub_agent_client (orchestrator HTTP)
+│   │   │   └── node_registry_adapter.py
+│   │   ├── seeds/industry_defaults/        # Skills Builder seed (5종 산업)
 │   │   └── tests/
 │   │       ├── conftest.py
-│   │       ├── unit/{domain,application}/
+│   │       ├── unit/{domain,application/{orchestrator,workflow_composer,skills_builder,personalization}}/
 │   │       └── integration/adapters/
 │   │
 │   ├── toolset/                            # REQ-005 Toolset
@@ -394,8 +402,12 @@ gh pr create --base development --title "feat(auth): Google SSO + JWT 구현"
 | `auth/domain/ports/` | `CipherPort` | `auth/adapters/cipher/` |
 | `nodes_graph/domain/ports/` | `NodeDefinitionRepository` | `storage/repositories/` |
 | `ai_agent/domain/ports/` | `AgentMemoryRepository` | `storage/repositories/` |
-| `ai_agent/domain/ports/` | `NodeRegistry` | `ai_agent/adapters/` |
-| `ai_agent/domain/ports/` | `LLMPort` | `ai_agent/adapters/llm/` |
+| `ai_agent/domain/ports/` | `WorkflowRepository` | `storage/repositories/` |
+| `ai_agent/domain/ports/` | `NodeRegistry` | `ai_agent/adapters/node_registry_adapter.py` (Facade) |
+| `ai_agent/domain/ports/` | `LLMPort` | `ai_agent/adapters/llm/modal_llm_adapter.py` |
+| `ai_agent/domain/ports/` | `EmbeddingPort` | `ai_agent/adapters/llm/modal_embedding_adapter.py` (Sprint 3) |
+| `ai_agent/domain/ports/` | `PersonalMemoryStore` | `ai_agent/adapters/memory/gcs_memory_store.py` (Sprint 3, GCS — storage 경유 X) |
+| `ai_agent/domain/ports/` | `SubAgentClient` (선택) | `ai_agent/adapters/agent_clients/http_sub_agent_client.py` (Sprint 3) |
 | `toolset/domain/ports/` | `ToolRegistry` | `toolset/adapters/` |
 | `toolset/domain/ports/` | `SecureConnectorPort` | `toolset/adapters/` |
 | `doc_parser/domain/ports/` | `ParserPort` | `doc_parser/adapters/parsers/` |

@@ -1,15 +1,13 @@
-import json
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
-from common_schemas import DraftSpec, SlotFillingState, WorkflowSchema
-from common_schemas.exceptions import AuthorizationError, ValidationError
-from common_schemas.transport import AgentNodeFrame, ResultFrame, SessionFrame, SSEFrame
+from common_schemas import WorkflowSchema
+from common_schemas.transport import ResultFrame, SessionFrame
 
-from ai_agent.application.use_cases import ComposeWorkflowUseCase
-from ai_agent.domain.ports import AgentMemoryRepository, NodeRegistry, WorkflowRepository
+from ai_agent.application.agents.workflow_composer import ComposeWorkflowUseCase
+from ai_agent.domain.ports import NodeRegistry, WorkflowRepository
 from ai_agent.domain.services import (
     DrafterService,
     IntentAnalyzerService,
@@ -111,31 +109,3 @@ class TestComposeWorkflowUseCase:
         gen = await uc.execute(uuid4(), uuid4(), "보고서 자동화")
         frames = [f async for f in gen]
         assert drafter.draft.call_count == 3
-
-
-class TestSaveMemoryUseCase:
-    @pytest.mark.asyncio
-    async def test_saves_non_ephemeral_entries(self):
-        from ai_agent.application.use_cases import SaveMemoryUseCase
-        from ai_agent.domain.entities import MemoryEntry
-        repo = AsyncMock(spec=AgentMemoryRepository)
-        repo.save = AsyncMock()
-        uc = SaveMemoryUseCase(repo)
-        sid = uuid4()
-        entries = [
-            MemoryEntry(user_id=uuid4(), memory_type="preference", content="슬랙 선호"),
-            MemoryEntry(user_id=uuid4(), memory_type="summary", content="   "),
-        ]
-        await uc.execute(sid, entries)
-        assert repo.save.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_skips_ephemeral_entries(self):
-        from ai_agent.application.use_cases import SaveMemoryUseCase
-        from ai_agent.domain.entities import MemoryEntry
-        repo = AsyncMock(spec=AgentMemoryRepository)
-        repo.save = AsyncMock()
-        uc = SaveMemoryUseCase(repo)
-        entries = [MemoryEntry(user_id=uuid4(), memory_type="summary", content="  ")]
-        await uc.execute(uuid4(), entries)
-        repo.save.assert_not_called()

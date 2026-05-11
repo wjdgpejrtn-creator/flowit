@@ -166,11 +166,34 @@ test("renders empty canvas with add-node button", () => {
 - NodeDefinition 54종 노드 타입 정의 유효성
 - SearchNodesUseCase 벡터 검색 결과 정합성
 
-### ai_agent (REQ-004)
-- IntentAnalyzerService 의도 분류 (clarify/draft/refine/propose)
+### ai_agent (REQ-004) — Sprint 3 멀티 에이전트
+
+도메인 (sub-agent 공통):
+- IntentAnalyzerService 의도 분류 (clarify/draft/refine/propose/build_skill)
 - QAEvaluatorService 점수 ≥ 8 통과 판정
-- ComposeWorkflowUseCase 턴 제한 (≤ 25) 준수
-- AgentState 상태 전이 정합성
+- AgentState 상태 전이 정합성, TurnLimit ≤25 / QualityThreshold ≥8 VO
+
+application/agents/orchestrator/:
+- RouteRequestUseCase 라우팅 분기 (composer / skills_builder / personalization HTTP 호출)
+- personal_memory 로드 후 state 주입 검증
+
+application/agents/workflow_composer/:
+- ComposeWorkflowUseCase 턴 제한 (≤25) 준수, QA retry ≤3
+- ContinueConversationUseCase memory 검색 + prompt 주입
+
+application/agents/skills_builder/:
+- BuildFromSOPUseCase DocumentBlock → SkillNode 추출 → NodeDefinitionRepository.upsert 호출
+- BuildFromIndustryDefaultUseCase 5종 산업 seed 로드 검증
+
+application/agents/personalization/:
+- LoadUserMemoryUseCase GCS `MEMORY.md` 인덱스 + entry 로드
+- UpdateUserMemoryUseCase LLM 패턴 추출 → .md 작성/갱신
+- RecallPersonalSkillsUseCase BGE-M3 코사인 유사도 top-k
+- SaveMemoryUseCase ephemeral 항목 필터링
+
+inter-agent:
+- AgentProtocolRequest/Response 직렬화 왕복
+- sub-agent 간 직접 import 금지 — `import ai_agent.application.agents.X` 형태 발견 시 fail
 
 ### toolset (REQ-005)
 - RuntimeValidator 입출력 스키마 검증

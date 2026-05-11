@@ -53,6 +53,8 @@
 | `PgOAuthRepository` | `auth/domain/ports/OAuthConnectionRepository` | `create(user_id, service, tokens) → OAuthConnection`, `get_by_credential_id(id)`, `get_active_for_user(user_id, service)`, `update_tokens(credential_id, tokens)`, `revoke(credential_id)` |
 | `PgNodeDefinitionRepository` | `nodes_graph/domain/ports/NodeDefinitionRepository` | `get_by_id(node_id) → Optional[NodeDefinition]`, `list_all(mvp_only) → list[NodeDefinition]`, `search_by_embedding(query, limit) → list[NodeDefinition]`, `upsert(definition) → NodeDefinition` |
 | `PgAgentMemoryRepository` | `ai_agent/domain/ports/AgentMemoryRepository` | `save(entry: MemoryEntry) → None`, `find_by_user(user_id, limit) → list[MemoryEntry]`, `find_by_session(session_id: UUID, limit: int) → list[MemoryEntry]` |
+
+> **ai_agent의 `PersonalMemoryStore`(REQ-004 §2.1, Sprint 3 신규)는 storage 모듈에서 구현하지 않는다.** GCS 파일(`gs://workflow-automation-personal/users/{user_id}/MEMORY.md`) 기반이라 RDB Repository 패턴과 다르며, 어댑터는 `modules/ai_agent/adapters/memory/gcs_memory_store.py`에 위치한다. storage 모듈의 `GCSAdapter`(파일 업로드/다운로드 범용 어댑터)와도 별개 — Personalization은 memory.md 포맷 파싱·인덱싱 책임을 직접 가진다.
 | `PgWorkflowRepository` | `execution_engine/domain/ports/` | `get(workflow_id: UUID) → WorkflowSchema`, `save(schema: WorkflowSchema) → UUID`, `get_node_config(node_id: UUID) → NodeConfig` |
 | `PgExecutionRepository` | `execution_engine/domain/ports/` | `save(result: ExecutionResult) → None`, `get(execution_id: UUID) → ExecutionResult`, `update_node_state(execution_id, state: NodeExecutionState) → None` |
 | `PgDocumentRepository` | `doc_parser/domain/ports/` | `save(document: DocumentBlock) → UUID`, `save_chunks(chunks: list[Chunk]) → None`, `save_quality_log(result, document_id) → None` |

@@ -342,70 +342,67 @@ modules/nodes_graph/
 ### 5.3 REQ-004 AI Agent
 
 ```
-modules/ai_agent/
+modules/ai_agent/                       # Sprint 3 멀티 에이전트 구조 (REQ-004)
 ├── __init__.py
 ├── domain/
 │   ├── entities/
-│   │   ├── memory_entry.py             # MemoryEntry
-│   │   │   # user_id, memory_type, content, source_session_id (M-10)
-│   │   │   # ORM 전용 필드(confidence, usage_count) 미포함
-│   │   └── correction_pattern.py       # CorrectionPattern
-│   │       # 에이전트 자기교정 패턴
+│   │   ├── memory_entry.py             # MemoryEntry (RDB 대화 메모리)
+│   │   ├── conversation_message.py     # ConversationMessage
+│   │   ├── personal_skill.py           # PersonalSkill (Sprint 3 신규)
+│   │   └── skill_node.py               # SkillNode (Sprint 3 신규)
 │   ├── value_objects/
-│   │   └── evaluation_result.py        # EvaluationResult
-│   │       # score, pass_flag, reason, feedback
+│   │   ├── turn_limit.py               # TurnLimit (MAX=25)
+│   │   └── quality_threshold.py        # QualityThreshold (MIN_SCORE=8.0)
 │   ├── services/
-│   │   ├── intent_analyzer.py          # IntentAnalyzerService
-│   │   │   # messages → IntentResult (clarify/draft/refine/propose)
-│   │   │   # importance_score 계산 담당 (M-7 확정)
-│   │   ├── qa_evaluator.py             # QAEvaluatorService
-│   │   │   # LLM-as-a-Judge, score ≥ 8 통과
-│   │   │   # WorkflowSchema → EvaluationResult
-│   │   ├── drafter.py                  # DrafterService
-│   │   │   # IntentResult + NodeCandidates → WorkflowSchema 초안
-│   │   └── onboarding_consultant.py    # OnboardingConsultant (Skills Wizard)
-│   │       # 신규 사용자 온보딩 대화 관리
+│   │   ├── intent_analyzer_service.py  # IntentAnalyzerService
+│   │   ├── drafter_service.py          # DrafterService
+│   │   ├── qa_evaluator_service.py     # QAEvaluatorService (score ≥ 8)
+│   │   └── slot_filling_service.py     # SlotFillingService
 │   └── ports/
-│       ├── agent_memory_repository.py  # AgentMemoryRepository (ABC)
-│       │   # save(entry) → MemoryEntry
-│       │   # search(user_id, query, k) → list[MemoryEntry]
-│       │   # delete(memory_id) → None
-│       ├── node_registry.py            # NodeRegistry (Facade, M-11 확정)
-│       │   # NodeDefinitionRepository를 주입받는 어댑터
-│       │   # search(query, k) → list[NodeConfig]
-│       │   # get_schema(node_type) → dict
-│       └── llm_port.py                 # LLMPort (ABC)
-│           # generate(messages, tools?) → response
-│           # embed(text) → vector
+│       ├── llm_port.py                 # LLMPort (ABC, Gemma 4)
+│       ├── embedding_port.py           # EmbeddingPort (Sprint 3 신규, BGE-M3)
+│       ├── agent_memory_repository.py  # AgentMemoryRepository (RDB)
+│       ├── personal_memory_store.py    # PersonalMemoryStore (Sprint 3 신규, GCS)
+│       ├── workflow_repository.py      # WorkflowRepository
+│       ├── node_registry.py            # NodeRegistry (Facade)
+│       └── sub_agent_client.py         # SubAgentClient (선택, orchestrator HTTP)
 ├── application/
-│   └── use_cases/
-│       ├── compose_workflow.py         # ComposeWorkflowUseCase
-│       │   # 메인 LangGraph 오케스트레이션 진입점
-│       │   # AgentState 관리, 13 노드 그래프 실행
-│       │   # turn_count ≤ 25 제한 (H-9)
-│       └── onboarding.py              # OnboardingUseCase
-│           # Skills Wizard 세션 관리
-└── adapters/
-    ├── langgraph/
-    │   ├── graph_builder.py            # LangGraph StateGraph 정의
-    │   │   # 13개 AgentNode 연결: security → onboarding → intent
-    │   │   #   → retriever → drafter ↔ validator (max 3) → qa → propose/promote
-    │   ├── nodes/                      # 13개 AgentNode 구현
-    │   │   ├── security_node.py
-    │   │   ├── onboarding_node.py
-    │   │   ├── intent_node.py
-    │   │   ├── retriever_node.py
-    │   │   ├── drafter_node.py
-    │   │   ├── validator_node.py
-    │   │   ├── qa_evaluator_node.py
-    │   │   ├── propose_node.py
-    │   │   └── promote_node.py
-    │   └── checkpointer.py            # LangGraph Checkpointer 설정
-    │       # thread_id = f"{user_id}:{session_id}"
-    └── llm/
-        └── modal_adapter.py           # Modal L4 GPU LLM 클라이언트
-            # Gemma 4 + BGE-M3 호출
+│   └── agents/                         # ⇐ Sprint 3: sub-agent 별로 분리
+│       ├── orchestrator/               # Main Orchestrator (신정혜)
+│       │   └── route_request_use_case.py
+│       ├── workflow_composer/          # Workflow Composer (신정혜)
+│       │   ├── compose_workflow_use_case.py
+│       │   └── continue_conversation_use_case.py
+│       ├── skills_builder/             # Skills Builder (박아름)
+│       │   ├── build_from_sop_use_case.py
+│       │   └── build_from_industry_default_use_case.py
+│       └── personalization/            # Personalization (햄햄/이가원)
+│           ├── load_user_memory_use_case.py
+│           ├── update_user_memory_use_case.py
+│           ├── recall_personal_skills_use_case.py
+│           └── save_memory_use_case.py
+├── adapters/
+│   ├── langgraph/
+│   │   ├── supervisor_graph.py         # Orchestrator supervisor (Sprint 3 신규)
+│   │   └── composer_graph.py           # Workflow Composer 13-노드 StateGraph
+│   ├── llm/
+│   │   ├── modal_llm_adapter.py        # Modal Gemma 4
+│   │   └── modal_embedding_adapter.py  # Modal BGE-M3 (Sprint 3 신규)
+│   ├── memory/
+│   │   └── gcs_memory_store.py         # PersonalMemoryStore 구현 (Sprint 3 신규)
+│   ├── agent_clients/                  # Orchestrator → sub-agent HTTP (Sprint 3 신규)
+│   │   └── http_sub_agent_client.py
+│   └── node_registry_adapter.py        # nodes_graph Facade
+└── seeds/
+    └── industry_defaults/              # Skills Builder seed (Sprint 3 신규)
+        ├── manufacturing.json
+        ├── service.json
+        ├── wholesale_retail.json
+        ├── food.json
+        └── it.json
 ```
+
+> Sprint 3 (2026-05-11~05-31)에서 ai_agent는 단일 ComposeWorkflowUseCase 구조에서 **Main Orchestrator + 3 Sub-Agent** 멀티 에이전트 구조로 전환되었다. sub-agent는 별도 Modal app으로 배포되며, sub-agent 간 직접 import는 금지되고 HTTP 어댑터(`adapters/agent_clients/`)를 거친다. 상세: `docs/specs/REQ-004-ai-agent.md` §0, §2.
 
 **핵심 의존성 흐름:**
 ```
@@ -1234,43 +1231,28 @@ Workflow_Automation/
 │   │   │   └── tool_to_node_wrapper.py
 │   │   └── tests/
 │   │
-│   ├── ai_agent/                           # REQ-004 AI Agent
+│   ├── ai_agent/                           # REQ-004 AI Agent (Sprint 3 멀티 에이전트)
 │   │   ├── __init__.py
 │   │   ├── domain/
-│   │   │   ├── entities/
-│   │   │   │   ├── memory_entry.py
-│   │   │   │   └── correction_pattern.py
-│   │   │   ├── value_objects/
-│   │   │   │   └── evaluation_result.py
-│   │   │   ├── services/
-│   │   │   │   ├── intent_analyzer.py
-│   │   │   │   ├── qa_evaluator.py
-│   │   │   │   ├── drafter.py
-│   │   │   │   └── onboarding_consultant.py
-│   │   │   └── ports/
-│   │   │       ├── agent_memory_repository.py
-│   │   │       ├── node_registry.py
-│   │   │       └── llm_port.py
+│   │   │   ├── entities/                   # MemoryEntry, ConversationMessage, PersonalSkill, SkillNode
+│   │   │   ├── value_objects/              # TurnLimit, QualityThreshold
+│   │   │   ├── services/                   # IntentAnalyzer, Drafter, QAEvaluator, SlotFilling
+│   │   │   └── ports/                      # LLMPort, EmbeddingPort, AgentMemoryRepository,
+│   │   │                                   #   PersonalMemoryStore, WorkflowRepository, NodeRegistry,
+│   │   │                                   #   SubAgentClient(선택)
 │   │   ├── application/
-│   │   │   └── use_cases/
-│   │   │       ├── compose_workflow.py
-│   │   │       └── onboarding.py
+│   │   │   └── agents/                     # ⇐ sub-agent 별로 분리
+│   │   │       ├── orchestrator/           # 신정혜: RouteRequestUseCase
+│   │   │       ├── workflow_composer/      # 신정혜: Compose, ContinueConversation
+│   │   │       ├── skills_builder/         # 박아름: BuildFromSOP, BuildFromIndustryDefault
+│   │   │       └── personalization/        # 햄햄: Load/Update/Recall/SaveMemory
 │   │   ├── adapters/
-│   │   │   ├── langgraph/
-│   │   │   │   ├── graph_builder.py
-│   │   │   │   ├── nodes/
-│   │   │   │   │   ├── security_node.py
-│   │   │   │   │   ├── onboarding_node.py
-│   │   │   │   │   ├── intent_node.py
-│   │   │   │   │   ├── retriever_node.py
-│   │   │   │   │   ├── drafter_node.py
-│   │   │   │   │   ├── validator_node.py
-│   │   │   │   │   ├── qa_evaluator_node.py
-│   │   │   │   │   ├── propose_node.py
-│   │   │   │   │   └── promote_node.py
-│   │   │   │   └── checkpointer.py
-│   │   │   └── llm/
-│   │   │       └── modal_adapter.py
+│   │   │   ├── langgraph/                  # supervisor_graph, composer_graph
+│   │   │   ├── llm/                        # modal_llm_adapter, modal_embedding_adapter
+│   │   │   ├── memory/                     # gcs_memory_store (PersonalMemoryStore 구현)
+│   │   │   ├── agent_clients/              # http_sub_agent_client (orchestrator HTTP)
+│   │   │   └── node_registry_adapter.py
+│   │   ├── seeds/industry_defaults/        # Skills Builder seed (5종 산업)
 │   │   └── tests/
 │   │
 │   ├── toolset/                            # REQ-005 Toolset
@@ -1488,8 +1470,12 @@ Workflow_Automation/
 | `auth/domain/ports/` | `CipherPort` | `auth/adapters/cipher/aesgcm_cipher.py` |
 | `nodes_graph/domain/ports/` | `NodeDefinitionRepository` | `storage/repositories/node_definition_repository.py` |
 | `ai_agent/domain/ports/` | `AgentMemoryRepository` | `storage/repositories/agent_memory_repository.py` |
-| `ai_agent/domain/ports/` | `NodeRegistry` | `ai_agent/adapters/` (내부 Facade, REQ-003 ABC 래핑) |
-| `ai_agent/domain/ports/` | `LLMPort` | `ai_agent/adapters/llm/modal_adapter.py` |
+| `ai_agent/domain/ports/` | `WorkflowRepository` | `storage/repositories/pg_workflow_repository.py` |
+| `ai_agent/domain/ports/` | `NodeRegistry` | `ai_agent/adapters/node_registry_adapter.py` (Facade, REQ-003 ABC 래핑) |
+| `ai_agent/domain/ports/` | `LLMPort` | `ai_agent/adapters/llm/modal_llm_adapter.py` (Modal Gemma 4) |
+| `ai_agent/domain/ports/` | `EmbeddingPort` | `ai_agent/adapters/llm/modal_embedding_adapter.py` (Modal BGE-M3, Sprint 3) |
+| `ai_agent/domain/ports/` | `PersonalMemoryStore` | `ai_agent/adapters/memory/gcs_memory_store.py` (GCS, Sprint 3 — storage 모듈 경유 X) |
+| `ai_agent/domain/ports/` | `SubAgentClient` (선택) | `ai_agent/adapters/agent_clients/http_sub_agent_client.py` (orchestrator HTTP, Sprint 3) |
 | `toolset/domain/ports/` | `ToolRegistry` | `toolset/adapters/` (내부 등록) |
 | `toolset/domain/ports/` | `SecureConnectorPort` | `toolset/adapters/secure_connector.py` |
 | `doc_parser/domain/ports/` | `ParserPort` | `doc_parser/adapters/parsers/*.py` (8개) |
