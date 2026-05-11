@@ -36,4 +36,4 @@ class ContinueConversationUseCase:
         prompt = f"User memories:\n{memory_context}\n\nUser message: {message}"
         response = await self._llm.generate(prompt)
 
-        yield ResultFrame(intent="clarify", payload={"response": response})
+        yield ResultFrame(intent="continue", payload={"response": response})
