@@ -144,7 +144,9 @@ modules/doc_parser
 │   └── modules/storage           (DocumentRepository가 파싱 결과 영속화 — REQ-001)
 │
 ├── depended by ────────────────────────────────────────────────────────────
-│   ├── modules/ai_agent          (REQ-004: 문서 기반 워크플로우 생성 시 청크 조회)
+│   ├── modules/ai_agent — Workflow Composer (REQ-004: 문서 기반 워크플로우 생성 시 청크 조회)
+│   ├── modules/ai_agent — Skills Builder   (REQ-004: BuildFromSOPUseCase가 DocumentBlock 소비
+│   │                                        → SkillNode 추출 → NodeDefinitionRepository.upsert)
 │   ├── services/api_server       (문서 업로드 엔드포인트에서 ParseDocumentUseCase 호출)
 │   └── services/execution_engine (워크플로우 노드로 파서 호출 시)
 │

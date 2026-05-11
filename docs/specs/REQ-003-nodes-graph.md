@@ -419,9 +419,13 @@ Downstream (이 모듈에 의존):
   ├── modules/auth (REQ-002)
   │     └── NodeDefinitionRepository ABC import
   │     └── CredentialInjectionService가 get_by_id() → NodeDefinition 필드 접근
-  ├── modules/ai_agent (REQ-004)
+  ├── modules/ai_agent (REQ-004) — Workflow Composer
   │     └── GraphValidator 호출 (워크플로우 생성/수정 시 검증)
   │     └── SearchNodesUseCase (노드 추천)
+  ├── modules/ai_agent (REQ-004) — Skills Builder
+  │     └── NodeDefinitionRepository.upsert() 호출 — SOP 문서/산업 default에서 추출한
+  │        SkillNode를 NodeDefinition으로 변환해 카탈로그에 등록
+  │        (BuildFromSOPUseCase, BuildFromIndustryDefaultUseCase)
   ├── services/execution_engine (REQ-007)
   │     └── 위상 정렬로 실행 순서 결정
   ├── services/api_server (REQ-009)

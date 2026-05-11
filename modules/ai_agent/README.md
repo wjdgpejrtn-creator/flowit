@@ -85,13 +85,38 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 | `NodeRegistry` | `search(query: str, limit: int) → list[NodeConfig]` | `ai_agent/adapters/node_registry.py` (Facade) |
 | | `get_schema(node_id: UUID) → NodeConfig` | |
 
-### application/use_cases
+### application/agents (Sprint 3 멀티 에이전트)
+
+각 sub-agent는 별도 Modal app으로 배포되며 sub-agent 간 직접 import는 금지. 상세: `docs/specs/REQ-004-ai-agent.md` §2.2.
+
+#### orchestrator/ (Main Orchestrator — 신정혜)
+
+| 유스케이스 | Input → Output | 설명 |
+|-----------|----------------|------|
+| `RouteRequestUseCase` | `user_id: UUID, session_id: UUID, message: str → AsyncGenerator[SSEFrame]` | LangGraph supervisor — personal_memory 로드 → intent 분류 → sub-agent HTTP 라우팅 → 결과 통합 |
+
+#### workflow_composer/ (Workflow Composer — 신정혜)
 
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
 | `ComposeWorkflowUseCase` | `user_id: UUID, session_id: UUID, message: str → AsyncGenerator[SSEFrame]` | 13-노드 LangGraph 상태머신 실행 (턴 제한 ≤25, 스트리밍) |
 | `ContinueConversationUseCase` | `session_id: UUID, message: str → AsyncGenerator[SSEFrame]` | 기존 세션 대화 이어가기 |
-| `SaveMemoryUseCase` | `session_id: UUID, entries: list[MemoryEntry] → None` | 대화 종료 후 메모리 저장 |
+
+#### skills_builder/ (Skills Builder — 박아름)
+
+| 유스케이스 | Input → Output | 설명 |
+|-----------|----------------|------|
+| `BuildFromSOPUseCase` | `user_id: UUID, document: DocumentBlock → AsyncGenerator[SSEFrame]` | SOP 문서 → SkillNode 추출 → `NodeDefinitionRepository.upsert()` |
+| `BuildFromIndustryDefaultUseCase` | `user_id: UUID, industry_code: str → AsyncGenerator[SSEFrame]` | 산업 seed (5종) → NodeDefinition 카탈로그 등록 |
+
+#### personalization/ (Personalization — 햄햄/이가원)
+
+| 유스케이스 | Input → Output | 설명 |
+|-----------|----------------|------|
+| `LoadUserMemoryUseCase` | `user_id: UUID → list[MemoryEntry]` | GCS `MEMORY.md` + 관련 .md 파일 로드 |
+| `UpdateUserMemoryUseCase` | `user_id: UUID, session_summary: dict, workflow: WorkflowSchema → None` | 워크플로우 완료 후 LLM 패턴 추출 → .md 갱신 |
+| `RecallPersonalSkillsUseCase` | `user_id: UUID, query: str, limit: int → list[PersonalSkill]` | BGE-M3 코사인 유사도 top-k |
+| `SaveMemoryUseCase` | `session_id: UUID, entries: list[MemoryEntry] → None` | 대화 종료 후 RDB 메모리 저장 (`AgentMemoryRepository`) |
 
 ### adapters
 

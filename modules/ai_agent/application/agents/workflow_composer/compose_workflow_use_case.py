@@ -13,15 +13,12 @@ from common_schemas.transport import (
     SSEFrame,
 )
 
-from ....domain.ports.agent_memory_repository import AgentMemoryRepository
 from ....domain.ports.node_registry import NodeRegistry
 from ....domain.ports.workflow_repository import WorkflowRepository
 from ....domain.services import DrafterService, IntentAnalyzerService, QAEvaluatorService, SlotFillingService
-from ....domain.value_objects.turn_limit import TurnLimit
-from ....domain.value_objects.quality_threshold import QualityThreshold
 
-_TURN_LIMIT = TurnLimit()
-_QA_THRESHOLD = QualityThreshold()
+# 후속 구현에서 사용 — TurnLimit(≤25 강제), QualityThreshold(score≥8 통과) VO는
+# 각각 turn_count 검증 / qa_evaluator 통과 판정에 적용 예정. spec §2.1 도메인 VO 참조.
 _MAX_QA_RETRY = 3
 
 
