@@ -278,4 +278,3 @@ class QualityGate:
     def _extract_full_text(self, blocks: list[ContentBlock]) -> str:
         """전체 블록에서 텍스트 추출."""
         return " ".join(b.content or "" for b in blocks if b.content)
-    

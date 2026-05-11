@@ -163,4 +163,3 @@ def test_large_chunk_count(mock_document):
     assert len(chunks) == 100
     assert all(c.importance_score is None for c in chunks)
     assert all(c.embedding is None for c in chunks)
-    

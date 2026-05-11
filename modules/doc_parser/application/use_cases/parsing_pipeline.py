@@ -104,4 +104,3 @@ class ParsingPipeline:
         quality_result = self._quality_gate.evaluate(masked_document, chunks, quality_config)
 
         return masked_document, chunks, quality_result
-    

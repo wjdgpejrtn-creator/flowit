@@ -347,4 +347,3 @@ def test_all_supported_mime_types(mime_type, mock_document, mock_quality_result)
 
     assert document is not None
     mock_parser.parse.assert_called_once()
-    
