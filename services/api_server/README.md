@@ -83,7 +83,7 @@ class TopologicalScheduler:
 ```
 Upstream (이 서비스가 의존 — Use Case 호출):
   ├── auth (REQ-002)           → AuthenticateUseCase, PermissionResolver
-  ├── ai_agent (REQ-004)       → ComposeWorkflowUseCase, ContinueConversationUseCase
+  ├── ai_agent (REQ-004)       → Orchestrator Modal app (HTTP 어댑터 OrchestratorClient 경유, in-process import 금지)
   ├── doc_parser (REQ-006)     → ParseDocumentUseCase, ParsingPipeline
   ├── nodes_graph (REQ-003)    → ValidateGraphUseCase, SearchNodesUseCase
   ├── toolset (REQ-005)        → ListToolsUseCase
