@@ -11,11 +11,14 @@ from nodes_graph.domain.catalog.trigger.webhook_trigger import WebhookTriggerInp
 
 def test_catalog_count():
     defs = get_all_node_definitions()
-    # 28 domain (data 14 + control 8 + trigger 6) + 10 external:
+    # 28 domain (data 14 + control 8 + trigger 6) + 18 external:
     #   - 기타 2: http_request, pdf_generate
     #   - Communication 4: slack_post_message, gmail_send, outlook_send, teams_post_message
     #   - Document 4: google_drive_read, google_sheets_read, google_docs_write, onedrive_read
-    assert len(defs) == 38
+    #   - Data 3: postgresql_query, mysql_query, bigquery_query
+    #   - AI/ML 2: openai_chat, anthropic_chat
+    #   - Productivity 3: notion_create_page, google_calendar_create_event, linear_create_issue
+    assert len(defs) == 46
 
 
 def test_catalog_unique_node_ids():
