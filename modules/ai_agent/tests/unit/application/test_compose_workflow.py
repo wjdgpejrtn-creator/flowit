@@ -8,7 +8,7 @@ from common_schemas import DraftSpec, SlotFillingState, WorkflowSchema
 from common_schemas.exceptions import AuthorizationError, ValidationError
 from common_schemas.transport import AgentNodeFrame, ResultFrame, SessionFrame, SSEFrame
 
-from ai_agent.application.use_cases import ComposeWorkflowUseCase
+from ai_agent.application.agents.workflow_composer import ComposeWorkflowUseCase
 from ai_agent.domain.ports import AgentMemoryRepository, NodeRegistry, WorkflowRepository
 from ai_agent.domain.services import (
     DrafterService,
@@ -116,7 +116,7 @@ class TestComposeWorkflowUseCase:
 class TestSaveMemoryUseCase:
     @pytest.mark.asyncio
     async def test_saves_non_ephemeral_entries(self):
-        from ai_agent.application.use_cases import SaveMemoryUseCase
+        from ai_agent.application.agents.personalization import SaveMemoryUseCase
         from ai_agent.domain.entities import MemoryEntry
         repo = AsyncMock(spec=AgentMemoryRepository)
         repo.save = AsyncMock()
@@ -131,7 +131,7 @@ class TestSaveMemoryUseCase:
 
     @pytest.mark.asyncio
     async def test_skips_ephemeral_entries(self):
-        from ai_agent.application.use_cases import SaveMemoryUseCase
+        from ai_agent.application.agents.personalization import SaveMemoryUseCase
         from ai_agent.domain.entities import MemoryEntry
         repo = AsyncMock(spec=AgentMemoryRepository)
         repo.save = AsyncMock()

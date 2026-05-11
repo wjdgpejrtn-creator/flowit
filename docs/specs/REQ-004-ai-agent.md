@@ -204,7 +204,7 @@ from nodes_graph.domain.services import GraphValidator
 | 소비자 | import 대상 |
 |--------|-------------|
 | `modules/storage/` | `ai_agent.domain.ports.AgentMemoryRepository` (구현을 위해) |
-| `services/api_server/` | `ai_agent.application.use_cases.ComposeWorkflowUseCase` (DI 조립) |
+| `services/api_server/` | `ai_agent.application.agents.workflow_composer.ComposeWorkflowUseCase` (DI 조립) — Sprint 3 멀티 에이전트 구조 반영 |
 | `services/execution_engine/` | (간접 — HandoffPayload를 통해 workflow_id 전달) |
 
 ---

@@ -20,9 +20,12 @@ from ai_agent.domain.services import (
 from ai_agent.domain.entities import MemoryEntry, ConversationMessage
 from ai_agent.domain.value_objects import TurnLimit, QualityThreshold
 from ai_agent.domain.ports import LLMPort, AgentMemoryRepository, WorkflowRepository, NodeRegistry
-from ai_agent.application.use_cases import (
-    ComposeWorkflowUseCase, ContinueConversationUseCase, SaveMemoryUseCase,
+from ai_agent.application.agents.workflow_composer import (
+    ComposeWorkflowUseCase, ContinueConversationUseCase,
 )
+from ai_agent.application.agents.personalization import SaveMemoryUseCase
+# Sprint 3: 멀티 에이전트 구조로 전환됨. orchestrator/workflow_composer/skills_builder/personalization
+# 각 sub-agent는 별도 Modal app으로 배포. 상세: docs/specs/plan/sprint-3.md
 ```
 
 ## common_schemas에서 import하는 타입

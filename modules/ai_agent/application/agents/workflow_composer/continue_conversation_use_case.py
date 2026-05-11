@@ -5,8 +5,8 @@ from uuid import UUID, uuid4
 
 from common_schemas.transport import AgentNodeFrame, ResultFrame, SessionFrame, SSEFrame
 
-from ...domain.ports.agent_memory_repository import AgentMemoryRepository
-from ...domain.ports.llm_port import LLMPort
+from ....domain.ports.agent_memory_repository import AgentMemoryRepository
+from ....domain.ports.llm_port import LLMPort
 
 
 class ContinueConversationUseCase:

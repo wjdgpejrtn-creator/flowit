@@ -5,7 +5,7 @@ import pytest
 
 from common_schemas.transport import AgentNodeFrame, ResultFrame, SessionFrame
 
-from ai_agent.application.use_cases import ContinueConversationUseCase
+from ai_agent.application.agents.workflow_composer import ContinueConversationUseCase
 from ai_agent.domain.entities import MemoryEntry
 from ai_agent.domain.ports import AgentMemoryRepository, LLMPort
 
