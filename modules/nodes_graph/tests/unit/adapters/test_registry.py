@@ -14,7 +14,7 @@ from nodes_graph.adapters.catalog.registry import (
 
 def test_discover_returns_full_catalog():
     nodes = discover_node_definitions()
-    assert len(nodes) == 46
+    assert len(nodes) == 41
 
 
 def test_discover_returns_unique_node_ids():
@@ -32,9 +32,9 @@ def test_discover_returns_unique_node_types():
 @pytest.mark.asyncio
 async def test_discover_and_register_registers_all_nodes(node_repo, embedder):
     count = await discover_and_register(node_repo, embedder)
-    assert count == 46
+    assert count == 41
     stored = await node_repo.list_all()
-    assert len(stored) == 46
+    assert len(stored) == 41
 
 
 @pytest.mark.asyncio
@@ -53,4 +53,4 @@ async def test_discover_and_register_idempotent(node_repo, embedder):
     await discover_and_register(node_repo, embedder)
     await discover_and_register(node_repo, embedder)
     stored = await node_repo.list_all()
-    assert len(stored) == 46
+    assert len(stored) == 41

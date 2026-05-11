@@ -39,7 +39,7 @@ class BigqueryQueryNode(BaseNode[BigqueryQueryInput, BigqueryQueryOutput]):
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="BigQuery 쿼리",
-        category="데이터 소스",
+        category="integration",
         risk_level=RiskLevel.HIGH,
         is_mvp=True,
     )
@@ -58,7 +58,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="BigQuery 쿼리",
-        category="데이터 소스",
+        category="integration",
         version="1.0.0",
         input_schema={
             "type": "object",

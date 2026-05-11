@@ -36,7 +36,7 @@ class SlackPostMessageNode(BaseNode[SlackPostMessageInput, SlackPostMessageOutpu
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="Slack 메시지 전송",
-        category="커뮤니케이션",
+        category="action",
         risk_level=RiskLevel.HIGH,
         is_mvp=True,
     )
@@ -55,7 +55,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="Slack 메시지 전송",
-        category="커뮤니케이션",
+        category="action",
         version="1.0.0",
         input_schema={
             "type": "object",

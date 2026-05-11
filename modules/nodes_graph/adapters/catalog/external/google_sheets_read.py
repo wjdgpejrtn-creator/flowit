@@ -36,7 +36,7 @@ class GoogleSheetsReadNode(BaseNode[GoogleSheetsReadInput, GoogleSheetsReadOutpu
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="Google Sheets 읽기",
-        category="데이터 소스",
+        category="integration",
         risk_level=RiskLevel.MEDIUM,
         is_mvp=True,
     )
@@ -55,7 +55,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="Google Sheets 읽기",
-        category="데이터 소스",
+        category="integration",
         version="1.0.0",
         input_schema={
             "type": "object",

@@ -40,7 +40,7 @@ class GoogleDocsWriteNode(BaseNode[GoogleDocsWriteInput, GoogleDocsWriteOutput])
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="Google Docs 작성",
-        category="문서 생성",
+        category="output",
         risk_level=RiskLevel.HIGH,
         is_mvp=True,
     )
@@ -59,7 +59,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="Google Docs 작성",
-        category="문서 생성",
+        category="output",
         version="1.0.0",
         input_schema={
             "type": "object",

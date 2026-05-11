@@ -40,7 +40,7 @@ class AnthropicChatNode(BaseNode[AnthropicChatInput, AnthropicChatOutput]):
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="Anthropic Chat",
-        category="AI / LLM",
+        category="ai",
         risk_level=RiskLevel.MEDIUM,
         is_mvp=True,
     )
@@ -59,7 +59,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="Anthropic Chat",
-        category="AI / LLM",
+        category="ai",
         version="1.0.0",
         input_schema={
             "type": "object",

@@ -1,7 +1,9 @@
-"""Document 카테고리 외부 노드 4종 unit test.
+"""Document 카테고리 외부 노드 unit test.
 
-5/13 plan §4.2 박아름 산출물: Drive/Sheets/Docs/OneDrive 4종 NodeDefinition + BaseNode.
-process()는 Sprint 3 v1에서 NotImplementedError stub.
+Sprint 3 1주차 박아름 작업: Google Drive/Sheets/Docs 3종.
+Microsoft OneDrive는 데모 후속 개발로 보류 — 5/11 조장 결정.
+process()는 NotImplementedError stub.
+category: read는 integration, write는 output (DB CHECK 영문 8종 매핑).
 """
 from __future__ import annotations
 
@@ -23,11 +25,6 @@ from nodes_graph.adapters.catalog.external.google_sheets_read import (
     GoogleSheetsReadNode,
     get_node_definition as sheets_read_def,
 )
-from nodes_graph.adapters.catalog.external.onedrive_read import (
-    OneDriveReadInput,
-    OneDriveReadNode,
-    get_node_definition as onedrive_read_def,
-)
 
 
 # ----------------------------------------------------------------------
@@ -38,7 +35,7 @@ from nodes_graph.adapters.catalog.external.onedrive_read import (
 def test_drive_read_definition_fields():
     d = drive_read_def()
     assert d.node_type == "google_drive_read"
-    assert d.category == "데이터 소스"
+    assert d.category == "integration"
     assert d.risk_level == RiskLevel.MEDIUM
     assert d.required_connections == ["google"]
     assert d.service_type == "google_workspace"
@@ -59,7 +56,7 @@ async def test_drive_read_process_raises_not_implemented():
 def test_sheets_read_definition_fields():
     d = sheets_read_def()
     assert d.node_type == "google_sheets_read"
-    assert d.category == "데이터 소스"
+    assert d.category == "integration"
     assert d.risk_level == RiskLevel.MEDIUM
     assert d.required_connections == ["google"]
     assert d.service_type == "google_workspace"
@@ -80,7 +77,7 @@ async def test_sheets_read_process_raises_not_implemented():
 def test_docs_write_definition_fields():
     d = docs_write_def()
     assert d.node_type == "google_docs_write"
-    assert d.category == "문서 생성"
+    assert d.category == "output"
     assert d.risk_level == RiskLevel.HIGH
     assert d.required_connections == ["google"]
     assert d.service_type == "google_workspace"
@@ -94,41 +91,19 @@ async def test_docs_write_process_raises_not_implemented():
 
 
 # ----------------------------------------------------------------------
-# OneDrive Read
-# ----------------------------------------------------------------------
-
-
-def test_onedrive_read_definition_fields():
-    d = onedrive_read_def()
-    assert d.node_type == "onedrive_read"
-    assert d.category == "데이터 소스"
-    assert d.risk_level == RiskLevel.MEDIUM
-    assert d.required_connections == ["microsoft"]
-    assert d.service_type == "microsoft_365"
-
-
-@pytest.mark.asyncio
-async def test_onedrive_read_process_raises_not_implemented():
-    node = OneDriveReadNode()
-    with pytest.raises(NotImplementedError, match="toolset connector"):
-        await node.process(OneDriveReadInput(item_id="abc"))
-
-
-# ----------------------------------------------------------------------
 # Cross-checks
 # ----------------------------------------------------------------------
 
 
 def test_all_document_nodes_have_unique_ids():
-    ids = {drive_read_def().node_id, sheets_read_def().node_id, docs_write_def().node_id, onedrive_read_def().node_id}
-    assert len(ids) == 4
+    ids = {drive_read_def().node_id, sheets_read_def().node_id, docs_write_def().node_id}
+    assert len(ids) == 3
 
 
 def test_read_vs_write_risk_levels():
     """읽기 노드는 MEDIUM, 쓰기 노드는 HIGH (설계 노트 §1.2 표준)."""
     assert drive_read_def().risk_level == RiskLevel.MEDIUM
     assert sheets_read_def().risk_level == RiskLevel.MEDIUM
-    assert onedrive_read_def().risk_level == RiskLevel.MEDIUM
     assert docs_write_def().risk_level == RiskLevel.HIGH
 
 
@@ -137,9 +112,3 @@ def test_google_workspace_nodes_share_connection_namespace():
     for d in (drive_read_def(), sheets_read_def(), docs_write_def()):
         assert d.required_connections == ["google"]
         assert d.service_type == "google_workspace"
-
-
-def test_microsoft_365_nodes_share_connection_namespace():
-    """OneDrive/Outlook/Teams가 모두 ["microsoft"] 통합 connection 사용."""
-    assert onedrive_read_def().required_connections == ["microsoft"]
-    assert onedrive_read_def().service_type == "microsoft_365"

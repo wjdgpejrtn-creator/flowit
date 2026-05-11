@@ -1,11 +1,11 @@
-"""Data + AI/ML + Productivity 카테고리 외부 노드 8종 unit test.
+"""Data + AI/ML + Productivity 카테고리 외부 노드 unit test.
 
-5/14 plan §4.2 박아름 산출물:
-- Data 3종: PostgreSQL, MySQL, BigQuery
-- AI/ML 2종: OpenAI, Anthropic
-- Productivity 3종: Notion, Google Calendar, Linear
+Sprint 3 1주차 박아름 작업:
+- Data 3종: PostgreSQL, MySQL, BigQuery (integration)
+- AI/ML 1종: Anthropic (ai). OpenAI는 데모 후속 개발 보류 — 5/11 조장 결정
+- Productivity 2종: Google Calendar, Linear (integration). Notion은 데모 후속 보류
 
-process()는 Sprint 3 v1에서 NotImplementedError stub.
+process()는 NotImplementedError stub. category는 DB CHECK 영문 8종 매핑.
 """
 from __future__ import annotations
 
@@ -37,16 +37,6 @@ from nodes_graph.adapters.catalog.external.mysql_query import (
     MysqlQueryNode,
     get_node_definition as mysql_query_def,
 )
-from nodes_graph.adapters.catalog.external.notion_create_page import (
-    NotionCreatePageInput,
-    NotionCreatePageNode,
-    get_node_definition as notion_create_def,
-)
-from nodes_graph.adapters.catalog.external.openai_chat import (
-    OpenaiChatInput,
-    OpenaiChatNode,
-    get_node_definition as openai_chat_def,
-)
 from nodes_graph.adapters.catalog.external.postgresql_query import (
     PostgresqlQueryInput,
     PostgresqlQueryNode,
@@ -62,7 +52,7 @@ from nodes_graph.adapters.catalog.external.postgresql_query import (
 def test_postgresql_query_definition_fields():
     d = postgresql_query_def()
     assert d.node_type == "postgresql_query"
-    assert d.category == "데이터 소스"
+    assert d.category == "integration"
     assert d.risk_level == RiskLevel.HIGH
     assert d.required_connections == ["postgresql"]
     assert d.service_type == "postgresql"
@@ -78,7 +68,7 @@ async def test_postgresql_query_process_raises_not_implemented():
 def test_mysql_query_definition_fields():
     d = mysql_query_def()
     assert d.node_type == "mysql_query"
-    assert d.category == "데이터 소스"
+    assert d.category == "integration"
     assert d.risk_level == RiskLevel.HIGH
     assert d.required_connections == ["mysql"]
     assert d.service_type == "mysql"
@@ -94,7 +84,7 @@ async def test_mysql_query_process_raises_not_implemented():
 def test_bigquery_query_definition_fields():
     d = bigquery_query_def()
     assert d.node_type == "bigquery_query"
-    assert d.category == "데이터 소스"
+    assert d.category == "integration"
     assert d.risk_level == RiskLevel.HIGH
     assert d.required_connections == ["google"]
     assert d.service_type == "google_workspace"
@@ -108,30 +98,14 @@ async def test_bigquery_query_process_raises_not_implemented():
 
 
 # ----------------------------------------------------------------------
-# AI/ML — OpenAI / Anthropic
+# AI/ML — Anthropic only (OpenAI 보류)
 # ----------------------------------------------------------------------
-
-
-def test_openai_chat_definition_fields():
-    d = openai_chat_def()
-    assert d.node_type == "openai_chat"
-    assert d.category == "AI / LLM"
-    assert d.risk_level == RiskLevel.MEDIUM
-    assert d.required_connections == ["openai"]
-    assert d.service_type == "openai"
-
-
-@pytest.mark.asyncio
-async def test_openai_chat_process_raises_not_implemented():
-    node = OpenaiChatNode()
-    with pytest.raises(NotImplementedError):
-        await node.process(OpenaiChatInput(model="gpt-4o-mini", messages=[{"role": "user", "content": "hi"}]))
 
 
 def test_anthropic_chat_definition_fields():
     d = anthropic_chat_def()
     assert d.node_type == "anthropic_chat"
-    assert d.category == "AI / LLM"
+    assert d.category == "ai"
     assert d.risk_level == RiskLevel.MEDIUM
     assert d.required_connections == ["anthropic"]
     assert d.service_type == "anthropic"
@@ -148,30 +122,14 @@ async def test_anthropic_chat_process_raises_not_implemented():
 
 
 # ----------------------------------------------------------------------
-# Productivity — Notion / Google Calendar / Linear
+# Productivity — Google Calendar / Linear (Notion 보류)
 # ----------------------------------------------------------------------
-
-
-def test_notion_create_page_definition_fields():
-    d = notion_create_def()
-    assert d.node_type == "notion_create_page"
-    assert d.category == "외부 API 연동"
-    assert d.risk_level == RiskLevel.HIGH
-    assert d.required_connections == ["notion"]
-    assert d.service_type == "notion"
-
-
-@pytest.mark.asyncio
-async def test_notion_create_page_process_raises_not_implemented():
-    node = NotionCreatePageNode()
-    with pytest.raises(NotImplementedError):
-        await node.process(NotionCreatePageInput(parent_id="db_id"))
 
 
 def test_google_calendar_create_event_definition_fields():
     d = gcal_create_def()
     assert d.node_type == "google_calendar_create_event"
-    assert d.category == "외부 API 연동"
+    assert d.category == "integration"
     assert d.risk_level == RiskLevel.HIGH
     assert d.required_connections == ["google"]
     assert d.service_type == "google_workspace"
@@ -192,7 +150,7 @@ async def test_google_calendar_create_event_process_raises_not_implemented():
 def test_linear_create_issue_definition_fields():
     d = linear_create_def()
     assert d.node_type == "linear_create_issue"
-    assert d.category == "외부 API 연동"
+    assert d.category == "integration"
     assert d.risk_level == RiskLevel.HIGH
     assert d.required_connections == ["linear"]
     assert d.service_type == "linear"
@@ -210,13 +168,13 @@ async def test_linear_create_issue_process_raises_not_implemented():
 # ----------------------------------------------------------------------
 
 
-def test_all_eight_nodes_have_unique_ids():
+def test_all_six_nodes_have_unique_ids():
     ids = {
         postgresql_query_def().node_id, mysql_query_def().node_id, bigquery_query_def().node_id,
-        openai_chat_def().node_id, anthropic_chat_def().node_id,
-        notion_create_def().node_id, gcal_create_def().node_id, linear_create_def().node_id,
+        anthropic_chat_def().node_id,
+        gcal_create_def().node_id, linear_create_def().node_id,
     }
-    assert len(ids) == 8
+    assert len(ids) == 6
 
 
 def test_db_nodes_share_risk_level_high():
@@ -225,7 +183,6 @@ def test_db_nodes_share_risk_level_high():
         assert d.risk_level == RiskLevel.HIGH
 
 
-def test_llm_nodes_share_risk_level_medium():
+def test_llm_node_risk_level_medium():
     """LLM 호출은 외부 호출이지만 자체 시스템 변경 X — MEDIUM."""
-    for d in (openai_chat_def(), anthropic_chat_def()):
-        assert d.risk_level == RiskLevel.MEDIUM
+    assert anthropic_chat_def().risk_level == RiskLevel.MEDIUM

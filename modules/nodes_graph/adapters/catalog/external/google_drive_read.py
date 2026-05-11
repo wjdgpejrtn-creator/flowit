@@ -35,7 +35,7 @@ class GoogleDriveReadNode(BaseNode[GoogleDriveReadInput, GoogleDriveReadOutput])
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="Google Drive 파일 읽기",
-        category="데이터 소스",
+        category="integration",
         risk_level=RiskLevel.MEDIUM,
         is_mvp=True,
     )
@@ -54,7 +54,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="Google Drive 파일 읽기",
-        category="데이터 소스",
+        category="integration",
         version="1.0.0",
         input_schema={
             "type": "object",

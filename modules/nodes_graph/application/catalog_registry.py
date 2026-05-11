@@ -10,14 +10,9 @@ from ..adapters.catalog.external.google_sheets_read import get_node_definition a
 from ..adapters.catalog.external.http_request import get_node_definition as _http_request
 from ..adapters.catalog.external.linear_create_issue import get_node_definition as _linear_create_issue
 from ..adapters.catalog.external.mysql_query import get_node_definition as _mysql_query
-from ..adapters.catalog.external.notion_create_page import get_node_definition as _notion_create_page
-from ..adapters.catalog.external.onedrive_read import get_node_definition as _onedrive_read
-from ..adapters.catalog.external.openai_chat import get_node_definition as _openai_chat
-from ..adapters.catalog.external.outlook_send import get_node_definition as _outlook_send
 from ..adapters.catalog.external.pdf_generate import get_node_definition as _pdf_generate
 from ..adapters.catalog.external.postgresql_query import get_node_definition as _postgresql_query
 from ..adapters.catalog.external.slack_post_message import get_node_definition as _slack_post_message
-from ..adapters.catalog.external.teams_post_message import get_node_definition as _teams_post_message
 from ..domain.catalog import get_domain_node_definitions
 from ..domain.entities.node_definition import NodeDefinition
 
@@ -25,14 +20,17 @@ from ..domain.entities.node_definition import NodeDefinition
 def get_all_node_definitions() -> list[NodeDefinition]:
     """카탈로그 전체 NodeDefinition. RegisterNodesUseCase에서 사용.
 
-    구성 (총 46종):
+    카테고리는 DB CHECK 영문 8종(trigger/action/condition/transform/ai/integration/utility/output)
+    안에서 지정. Microsoft(Outlook/Teams/OneDrive) / Notion / OpenAI는 데모 후속 개발로 보류.
+
+    구성 (총 41종):
         - domain/catalog/: 28종 (data 14 + control 8 + trigger 6)
-        - adapters/catalog/external/ 기타 2종: http_request, pdf_generate
-        - adapters/catalog/external/ Communication 4종: slack_post_message, gmail_send, outlook_send, teams_post_message
-        - adapters/catalog/external/ Document 4종: google_drive_read, google_sheets_read, google_docs_write, onedrive_read
-        - adapters/catalog/external/ Data 3종: postgresql_query, mysql_query, bigquery_query
-        - adapters/catalog/external/ AI/ML 2종: openai_chat, anthropic_chat
-        - adapters/catalog/external/ Productivity 3종: notion_create_page, google_calendar_create_event, linear_create_issue
+        - adapters/catalog/external/ 기타 2종: http_request(integration), pdf_generate(output)
+        - adapters/catalog/external/ Communication 2종: slack_post_message, gmail_send (action)
+        - adapters/catalog/external/ Document 3종: google_drive_read, google_sheets_read (integration), google_docs_write (output)
+        - adapters/catalog/external/ Data 3종: postgresql_query, mysql_query, bigquery_query (integration)
+        - adapters/catalog/external/ AI/ML 1종: anthropic_chat (ai)
+        - adapters/catalog/external/ Productivity 2종: google_calendar_create_event, linear_create_issue (integration)
     """
     return [
         *get_domain_node_definitions(),
@@ -40,18 +38,13 @@ def get_all_node_definitions() -> list[NodeDefinition]:
         _pdf_generate(),
         _slack_post_message(),
         _gmail_send(),
-        _outlook_send(),
-        _teams_post_message(),
         _google_drive_read(),
         _google_sheets_read(),
         _google_docs_write(),
-        _onedrive_read(),
         _postgresql_query(),
         _mysql_query(),
         _bigquery_query(),
-        _openai_chat(),
         _anthropic_chat(),
-        _notion_create_page(),
         _google_calendar_create_event(),
         _linear_create_issue(),
     ]
