@@ -41,7 +41,7 @@ Modal workspace: workflow-automation (VPC 내부 통신만)
 ├── app: orchestrator                ← 신정혜 (LangGraph supervisor)
 ├── app: agent-composer              ← 신정혜
 ├── app: agent-skills-builder        ← 박아름
-└── app: agent-personalization       ← 햄햄
+└── app: agent-personalization       ← 햄햄(이가원)
 ```
 
 각 멤버는 본인 에이전트 코드 수정 후 `modal deploy` 자율 실행. 다른 멤버 영향 없음.
@@ -174,7 +174,7 @@ common_schemas.agent_protocol  ─┐
 [병렬]
   신정혜: composer/orchestrator adapter + LangGraph
   박아름: skills_builder adapter + nodes_graph 카탈로그
-  햄햄:    personalization adapter + GCS + toolset connectors
+  햄햄(이가원):    personalization adapter + GCS + toolset connectors
   황대원: storage Repository + api_server composition
   김진형: doc_parser SSOT 이관
 
