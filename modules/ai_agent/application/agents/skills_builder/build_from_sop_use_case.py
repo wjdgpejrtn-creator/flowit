@@ -60,7 +60,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import UUID, uuid5
 
-from common_schemas import DocumentBlock
+from common_schemas import DocumentBlock, MemoryEntry
 from common_schemas.enums import RiskLevel
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame, SSEFrame
 from nodes_graph.domain.entities.node_definition import NodeDefinition
@@ -68,7 +68,6 @@ from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRepository
 from pydantic import BaseModel, ConfigDict, Field
 
-from ....domain.entities.memory_entry import MemoryEntry
 from ....domain.entities.skill_node import SkillNode
 from ....domain.ports.llm_port import LLMPort
 

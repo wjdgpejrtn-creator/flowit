@@ -22,7 +22,8 @@ from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
     _ExtractedSkillNode,
     _ExtractedSkillNodeList,
 )
-from ai_agent.domain.entities.memory_entry import MemoryEntry
+from common_schemas import MemoryEntry
+
 from ai_agent.domain.ports.llm_port import LLMPort
 
 
