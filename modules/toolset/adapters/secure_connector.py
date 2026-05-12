@@ -4,7 +4,6 @@ import json
 
 import httpx
 
-from auth.domain.services import CredentialInjectionService
 from common_schemas.security import PlaintextCredential
 
 from ..domain.ports.secure_connector_port import SecureConnectorPort
@@ -15,11 +14,9 @@ class SecureConnectorAdapter(SecureConnectorPort):
     """httpx 기반 SecureConnectorPort 구현체.
 
     credential.value를 Authorization Bearer 헤더로 주입한다.
+    복호화(inject)는 호출자(ExecuteToolUseCase) 책임 — 어댑터는 PlaintextCredential을 받아 transport만 수행.
     kwargs: method, headers, body, params, timeout
     """
-
-    def __init__(self, credential_injection_svc: CredentialInjectionService) -> None:
-        self._credential_svc = credential_injection_svc
 
     async def connect(
         self,
