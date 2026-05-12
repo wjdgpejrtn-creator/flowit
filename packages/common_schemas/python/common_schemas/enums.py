@@ -7,6 +7,7 @@ class AgentMode(str, Enum):
     EDIT = "edit"
     GENERAL = "general"
     SECURITY = "security"
+    SKILL_BUILDER = "skill_builder"
 
 
 class ExecutionStatus(str, Enum):

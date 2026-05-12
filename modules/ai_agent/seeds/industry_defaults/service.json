@@ -1,0 +1,142 @@
+{
+  "industry_code": "service",
+  "industry_name": "서비스",
+  "description": "서비스업 표준 자동화 — 예약·노쇼·후기·멤버십·응대 통계",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "service_booking_confirmation",
+      "name": "예약 확정 메일",
+      "category": "action",
+      "description": "고객이 예약 완료 후 확정 메일 자동 발송 (예약 정보 + QR 코드 포함)",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "booking_id": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"},
+          "customer_name": {"type": "string"},
+          "booking_datetime": {"type": "string", "format": "date-time"},
+          "service_name": {"type": "string"},
+          "location": {"type": "string"}
+        },
+        "required": ["booking_id", "customer_email", "booking_datetime", "service_name"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "email_message_id": {"type": "string"},
+          "sent_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "service_no_show_reminder",
+      "name": "노쇼 리마인드",
+      "category": "action",
+      "description": "예약 시점 N시간 전 자동 리마인드 메시지 발송 (응답 없을 시 노쇼 처리)",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "booking_id": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"},
+          "reminder_hours_before": {"type": "integer", "default": 24, "minimum": 1},
+          "booking_datetime": {"type": "string", "format": "date-time"},
+          "cancel_link": {"type": "string"}
+        },
+        "required": ["booking_id", "customer_email", "booking_datetime"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "reminder_sent_at": {"type": "string", "format": "date-time"},
+          "customer_responded": {"type": "boolean"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "service_review_request",
+      "name": "후기 요청",
+      "category": "action",
+      "description": "서비스 이용 완료 후 일정 시간 경과 시 후기 작성 요청 메일 발송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "booking_id": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"},
+          "review_url": {"type": "string"},
+          "delay_hours": {"type": "integer", "default": 24}
+        },
+        "required": ["booking_id", "customer_email", "review_url"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "email_message_id": {"type": "string"},
+          "sent_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "service_membership_renewal_notice",
+      "name": "멤버십 갱신 안내",
+      "category": "action",
+      "description": "멤버십 만료 30/7/1일 전 갱신 안내 메일 자동 발송 (다단계 캠페인)",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "member_id": {"type": "string"},
+          "member_email": {"type": "string", "format": "email"},
+          "expiry_date": {"type": "string", "format": "date"},
+          "renewal_url": {"type": "string"},
+          "stage": {"type": "string", "enum": ["30d", "7d", "1d"]}
+        },
+        "required": ["member_id", "member_email", "expiry_date", "stage"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "email_message_id": {"type": "string"},
+          "renewed": {"type": "boolean"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "service_response_stats_report",
+      "name": "응대 통계",
+      "category": "output",
+      "description": "주간 고객 응대 통계 (응대 시간·만족도·재방문율) 시트 집계 후 슬랙 공유",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "period_start": {"type": "string", "format": "date"},
+          "period_end": {"type": "string", "format": "date"},
+          "spreadsheet_id": {"type": "string"},
+          "report_channel": {"type": "string"}
+        },
+        "required": ["period_start", "period_end", "spreadsheet_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "summary": {"type": "object"},
+          "shared_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Low",
+      "required_connections": ["google", "slack"],
+      "service_type": "google_workspace"
+    }
+  ]
+}

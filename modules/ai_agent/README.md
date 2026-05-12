@@ -17,7 +17,8 @@ pip install -e "modules/ai_agent[dev]"
 from ai_agent.domain.services import (
     IntentAnalyzerService, DrafterService, QAEvaluatorService, SlotFillingService,
 )
-from ai_agent.domain.entities import MemoryEntry, ConversationMessage
+from common_schemas import MemoryEntry  # Sprint 3 SSOT — common_schemas로 이관
+from ai_agent.domain.entities import ConversationMessage, SkillNode
 from ai_agent.domain.value_objects import TurnLimit, QualityThreshold
 from ai_agent.domain.ports import LLMPort, AgentMemoryRepository, WorkflowRepository, NodeRegistry
 from ai_agent.application.agents.workflow_composer import (
@@ -32,17 +33,19 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 
 | 클래스 | import 경로 | 용도 |
 |--------|-------------|------|
-| `AgentState` | `common_schemas.agent` | LangGraph StateGraph state 타입 |
+| `AgentState` | `common_schemas.agent` | LangGraph StateGraph state 타입 (`personal_memory: list[MemoryEntry]` 포함) |
 | `DraftSpec` | `common_schemas.agent` | Consultant 초안 사양 |
-| `IntentResult` | `common_schemas.agent` | IntentAnalyzerService 출력 |
+| `IntentResult` | `common_schemas.agent` | IntentAnalyzerService 출력 (intent ∈ {clarify, draft, refine, propose, build_skill}) |
 | `SlotFillingState` | `common_schemas.agent` | 슬롯 채움 상태 |
+| `MemoryEntry` | `common_schemas.agent` | Orchestrator ↔ sub-agent payload + RDB SSOT (Sprint 3 §2.4 이관) |
+| `AgentProtocolRequest` / `AgentProtocolResponse` | `common_schemas.agent_protocol` | Inter-agent HTTP 통신 계약 |
 | `WorkflowSchema` | `common_schemas.workflow` | 워크플로우 전체 스키마 |
 | `NodeInstance` | `common_schemas.workflow` | 워크플로우 내 노드 인스턴스 |
 | `NodeConfig` | `common_schemas.workflow` | 노드 정의/설정 |
 | `Edge`, `Position` | `common_schemas.workflow` | 노드 연결, 캔버스 좌표 |
 | `HandoffPayload` | `common_schemas.handoff` | REQ-007 전달 페이로드 |
 | `EvaluationResult` | `common_schemas.handoff` | QA 평가 결과 (score, pass_flag, reason, feedback) |
-| `AgentMode` | `common_schemas.enums` | 에이전트 모드 Enum |
+| `AgentMode` | `common_schemas.enums` | 에이전트 모드 Enum (Sprint 3 `SKILL_BUILDER` 추가) |
 | `ExecutionStatus` | `common_schemas.enums` | 실행 상태 Enum |
 | `SSEFrame` | `common_schemas.transport` | 스트리밍 프레임 |
 
@@ -52,7 +55,7 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 
 | 클래스 | 주요 필드 | 설명 |
 |--------|----------|------|
-| `MemoryEntry` | `user_id: UUID`, `memory_type: str`, `content: str`, `source_session_id: Optional[UUID]`, `metadata: dict[str, Any]`, `created_at: datetime` | 에이전트 대화 메모리 항목 |
+| `MemoryEntry` (re-export) | `entry_id: UUID`, `user_id: UUID`, `memory_type: Literal["preference","correction","workflow_pattern","summary"]`, `content: str`, `source_session_id: Optional[UUID]`, `metadata: dict[str, Any]`, `created_at: datetime` | `common_schemas.MemoryEntry`의 SSOT 재노출 — 신규 코드는 `from common_schemas import MemoryEntry` 사용 |
 | `ConversationMessage` | `role: Literal["user","assistant","system"]`, `content: str`, `timestamp: datetime`, `metadata: Optional[dict]` | 대화 메시지 (AgentState.messages 항목) |
 
 ### domain/value_objects

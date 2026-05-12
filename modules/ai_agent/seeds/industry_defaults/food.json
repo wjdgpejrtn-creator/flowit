@@ -1,0 +1,156 @@
+{
+  "industry_code": "food",
+  "industry_name": "음식점",
+  "description": "음식점 표준 자동화 — 예약·재료·메뉴·정산·단골 관리",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "food_reservation_alert",
+      "name": "예약 알림",
+      "category": "action",
+      "description": "고객 예약 발생 시 매장 매니저 슬랙 알림 + 고객에게 확정 메일",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "reservation_id": {"type": "string"},
+          "store_id": {"type": "string"},
+          "customer_name": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"},
+          "party_size": {"type": "integer", "minimum": 1},
+          "reservation_datetime": {"type": "string", "format": "date-time"},
+          "manager_channel": {"type": "string"}
+        },
+        "required": ["reservation_id", "store_id", "party_size", "reservation_datetime"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "slack_message_ts": {"type": "string"},
+          "confirmation_email_id": {"type": "string"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["slack", "google"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "food_ingredient_order",
+      "name": "재료 발주",
+      "category": "action",
+      "description": "재고 임계값 도달 시 거래 식자재 업체에 자동 발주 메일 발송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "ingredient_code": {"type": "string"},
+          "supplier_id": {"type": "string"},
+          "supplier_email": {"type": "string", "format": "email"},
+          "order_quantity": {"type": "number", "minimum": 0},
+          "unit": {"type": "string"},
+          "delivery_date": {"type": "string", "format": "date"}
+        },
+        "required": ["ingredient_code", "supplier_id", "supplier_email", "order_quantity", "delivery_date"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "order_id": {"type": "string"},
+          "email_message_id": {"type": "string"},
+          "submitted_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "food_menu_change_notice",
+      "name": "메뉴 변경 공지",
+      "category": "action",
+      "description": "메뉴/가격 변경 시 단골 고객 그룹에 메일 + 슬랙 채널 공지",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "store_id": {"type": "string"},
+          "effective_date": {"type": "string", "format": "date"},
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "menu_name": {"type": "string"},
+                "change_type": {"type": "string", "enum": ["new", "removed", "price_change"]},
+                "old_price": {"type": "number"},
+                "new_price": {"type": "number"}
+              }
+            }
+          },
+          "customer_emails": {"type": "array", "items": {"type": "string", "format": "email"}}
+        },
+        "required": ["store_id", "effective_date", "changes"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "emails_sent": {"type": "integer"},
+          "notice_pdf_url": {"type": "string"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "food_daily_revenue_settlement",
+      "name": "일매출 정산",
+      "category": "output",
+      "description": "영업 종료 후 일매출(메뉴별·결제수단별) 집계 → 시트 기록 + PDF 정산서",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "store_id": {"type": "string"},
+          "business_date": {"type": "string", "format": "date"},
+          "spreadsheet_id": {"type": "string"}
+        },
+        "required": ["store_id", "business_date", "spreadsheet_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "total_revenue": {"type": "number"},
+          "pdf_url": {"type": "string"},
+          "row_appended": {"type": "integer"}
+        }
+      },
+      "risk_level": "Low",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "food_regular_customer_coupon",
+      "name": "단골 쿠폰 발송",
+      "category": "action",
+      "description": "방문 빈도 N회 이상 단골 고객에게 쿠폰 코드를 이메일로 발송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "store_id": {"type": "string"},
+          "minimum_visits": {"type": "integer", "minimum": 1, "default": 5},
+          "coupon_template_id": {"type": "string"},
+          "discount_amount": {"type": "number"},
+          "expiry_date": {"type": "string", "format": "date"}
+        },
+        "required": ["store_id", "coupon_template_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "coupons_sent": {"type": "integer"},
+          "campaign_id": {"type": "string"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    }
+  ]
+}

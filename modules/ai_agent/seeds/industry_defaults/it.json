@@ -1,0 +1,151 @@
+{
+  "industry_code": "it",
+  "industry_name": "IT",
+  "description": "IT 조직 표준 자동화 — 배포·장애·코드리뷰·빌드·온콜",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "it_deploy_notification",
+      "name": "배포 알림",
+      "category": "action",
+      "description": "프로덕션 배포 시작/완료 시 슬랙 채널 알림 (커밋 SHA, 릴리즈 노트 링크 포함)",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "service_name": {"type": "string"},
+          "environment": {"type": "string", "enum": ["staging", "production"]},
+          "commit_sha": {"type": "string"},
+          "release_url": {"type": "string"},
+          "deployer": {"type": "string"},
+          "channel": {"type": "string"},
+          "phase": {"type": "string", "enum": ["started", "completed", "failed"]}
+        },
+        "required": ["service_name", "environment", "commit_sha", "phase"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "message_ts": {"type": "string"},
+          "notified_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["slack"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "it_incident_report",
+      "name": "장애 리포트",
+      "category": "action",
+      "description": "장애 감지 시 Linear 이슈 생성 + 슬랙 인시던트 채널 알림 + 온콜 호출",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "service_name": {"type": "string"},
+          "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+          "summary": {"type": "string"},
+          "detected_at": {"type": "string", "format": "date-time"},
+          "alert_metrics": {"type": "object"},
+          "team_id": {"type": "string"},
+          "incident_channel": {"type": "string"}
+        },
+        "required": ["service_name", "severity", "summary", "team_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "linear_issue_id": {"type": "string"},
+          "linear_issue_url": {"type": "string"},
+          "slack_thread_ts": {"type": "string"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["linear", "slack"],
+      "service_type": "linear"
+    },
+    {
+      "node_type": "it_pr_review_request",
+      "name": "PR 리뷰 요청",
+      "category": "action",
+      "description": "PR 오픈 시 코드 오너에게 슬랙 DM + Linear 태스크 링크 자동 멘션",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "repo": {"type": "string"},
+          "pr_number": {"type": "integer"},
+          "pr_url": {"type": "string"},
+          "author": {"type": "string"},
+          "code_owners": {"type": "array", "items": {"type": "string"}},
+          "linear_issue_id": {"type": "string"}
+        },
+        "required": ["repo", "pr_number", "pr_url", "author", "code_owners"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "dms_sent": {"type": "integer"},
+          "requested_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["slack"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "it_daily_build_status",
+      "name": "일일 빌드 상태",
+      "category": "output",
+      "description": "전일 CI 빌드 결과(성공률·소요시간·실패 PR) 집계 → 시트 기록 + 슬랙 공유",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "build_date": {"type": "string", "format": "date"},
+          "ci_source": {"type": "string", "enum": ["github_actions", "circleci", "jenkins"]},
+          "spreadsheet_id": {"type": "string"},
+          "report_channel": {"type": "string"}
+        },
+        "required": ["build_date", "ci_source"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "success_rate": {"type": "number"},
+          "avg_duration_seconds": {"type": "number"},
+          "failed_builds": {"type": "array"},
+          "shared_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Low",
+      "required_connections": ["slack", "google"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "it_oncall_handover",
+      "name": "온콜 인계",
+      "category": "action",
+      "description": "온콜 교대 시점에 인계 노트(미해결 인시던트·진행 알람) 작성 후 후임에게 슬랙 + Linear 노트로 전달",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "previous_oncall": {"type": "string"},
+          "next_oncall": {"type": "string"},
+          "handover_datetime": {"type": "string", "format": "date-time"},
+          "open_incidents": {"type": "array", "items": {"type": "string"}},
+          "active_alerts": {"type": "array", "items": {"type": "string"}},
+          "notes": {"type": "string"}
+        },
+        "required": ["previous_oncall", "next_oncall", "handover_datetime"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "handover_doc_url": {"type": "string"},
+          "slack_dm_ts": {"type": "string"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["slack"],
+      "service_type": "slack"
+    }
+  ]
+}
