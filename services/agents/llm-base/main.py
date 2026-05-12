@@ -31,11 +31,42 @@ default and chokes on UTF-8 sequences (see deployment README §흔한 실패).
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
 
 import modal
+from pydantic import BaseModel
+
+
+# Gemma 4 vision-mode chat-template leak. `enable_thinking=False` +
+# `reasoning_format=none` strip the <think> trace in text mode, but the vision
+# branch of the peg-gemma4 chat template still emits a leading channel/role
+# tag pair (e.g. `<|channel>thought<|channel|>` or `<|channel|>thought
+# <|message|>`) that bleeds into `content`. Pattern + rationale ported from
+# auto_workflow_demo/AI_Agent/app/backends/llamacpp_gemma.py (validated
+# 2026-05-06 in vision smoke). Match only at the very start so real content
+# containing angle brackets stays intact.
+_CHANNEL_LEAK_PREFIX_RE = re.compile(
+    r"^(?:<\|?[A-Za-z_]+\|?>[A-Za-z_\s]*<\|?[A-Za-z_]+\|?>)+\s*",
+)
+
+
+def _strip_channel_leak(text: str) -> str:
+    return _CHANNEL_LEAK_PREFIX_RE.sub("", text, count=1)
+
+
+# FastAPI body models must live at module scope. Defining them inside the
+# `fastapi()` closure trips FastAPI 0.115+ / Pydantic 2.13's ForwardRef
+# resolver and the route raises 500 PydanticUserError at request time.
+class EmbedReq(BaseModel):
+    text: str
+
+
+class EmbedBatchReq(BaseModel):
+    texts: list[str]
+
 
 APP_NAME = "llm-base"
 MODEL_REPO = "unsloth/gemma-4-26B-A4B-it-GGUF"
@@ -139,6 +170,13 @@ class LLMBase:
                     "`modal run services/agents/llm-base/main.py::download_model` first."
                 )
 
+        # `--reasoning-format none` disables llama.cpp's reasoning extraction —
+        # otherwise the peg-gemma4 chat template routes the entire response to
+        # `reasoning_content` and `content` ends up empty, which silently
+        # defeats JSON grammar enforcement (response_format only constrains
+        # `content`). With `none`, all output lands in `content` and the
+        # grammar-level JSON constraint binds correctly. Supported in
+        # llama.cpp b8800+ (we ship b8967).
         cmd = [
             "/usr/local/bin/llama-server",
             "--model", MODEL_PATH,
@@ -147,6 +185,7 @@ class LLMBase:
             "--port", str(LLAMA_SERVER_PORT),
             "--n-gpu-layers", os.environ.get("N_GPU_LAYERS", "999"),
             "--ctx-size", os.environ.get("CTX_SIZE", DEFAULT_CTX_SIZE),
+            "--reasoning-format", "none",
         ]
         self._proc = subprocess.Popen(cmd)
 
@@ -202,10 +241,20 @@ class LLMBase:
 
         kwargs:
             max_tokens (int, default 512)
-            temperature (float, default 0.7)
+            temperature (float, default 0.1). Gemma 4 instruction-tuned weights
+                run a strong internal "thinking" pass via the peg-gemma4 chat
+                template. At the upstream default of 0.7 the thinking section
+                tends to consume the entire output budget and the visible
+                answer ends up empty. We default to 0.1 (validated against
+                Gemma 4 26B-A4B in the auto_workflow_demo harness) which
+                keeps thinking short and lets the final answer land in
+                `content`. JSON mode (`format="json"`) overrides to 0.0.
             format ("json"): enforce JSON output. Combined with `json_schema`
                 kwarg (or default {"type": "object"}), llama.cpp constrains
                 generation at the grammar level — output is always parseable.
+                Note: Gemma 4 was trained on JSON-shaped documents, not XML,
+                so structured prompts/payloads should be JSON (callers'
+                responsibility) — passing XML elicits frequent drift.
             json_schema (dict): JSON schema for structured output (used when
                 format="json"). Sub-agent generate_structured passes
                 `schema.model_json_schema()` here.
@@ -231,17 +280,33 @@ class LLMBase:
             messages.append({"role": "system", "content": system})
         messages.append(user_msg)
 
+        # Default temperature 0.1 (not the OpenAI 0.7) suppresses Gemma 4's
+        # internal thinking pass; see docstring for the rationale.
+        is_json_mode = kwargs.get("format") == "json"
+        temperature = float(kwargs.get("temperature", 0.0 if is_json_mode else 0.1))
+
         body: dict[str, object] = {
             "model": "gemma",
             "messages": messages,
             "max_tokens": int(kwargs.get("max_tokens", 512)),
-            "temperature": float(kwargs.get("temperature", 0.7)),
+            "temperature": temperature,
+            # Kill Gemma 4's hidden reasoning trace. Without these, the chat-
+            # template parser strips <think>...</think> from `content` but
+            # the model still spends 1500-3700 tokens generating it (prior
+            # project's policy_extract smoke 2026-05-06: 76s wall, 3832
+            # generated tokens, 165 visible). For structured JSON tasks
+            # reasoning produces zero value and breaks grammar enforcement.
+            # We set both knobs so whichever the running llama-server build
+            # understands wins; the other is ignored. Matches the validated
+            # auto_workflow_demo configuration.
+            "chat_template_kwargs": {"enable_thinking": False},
+            "reasoning_format": "none",
         }
 
         # JSON 강제 — llama.cpp grammar-level constraint. If the caller
         # didn't pass an explicit schema we fall back to {"type":"object"}
         # which guarantees parseable JSON without constraining the shape.
-        if kwargs.get("format") == "json":
+        if is_json_mode:
             body["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
@@ -257,27 +322,23 @@ class LLMBase:
         )
         r.raise_for_status()
         body_json = r.json()
-        content = (
-            body_json.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-        )
-        return {"generated_text": content}
+        # With enable_thinking=False + reasoning_format=none the visible answer
+        # lands on `content`. We keep `reasoning_content` as a defensive
+        # fallback in case a future llama.cpp build silently ignores both
+        # knobs. Vision-mode responses additionally carry a leading channel-
+        # tag prefix that the chat-template parser leaves in place — strip it
+        # before returning.
+        message = body_json.get("choices", [{}])[0].get("message", {})
+        raw = message.get("content") or message.get("reasoning_content") or ""
+        return {"generated_text": _strip_channel_leak(raw)}
 
     # --- Embedding ASGI (EmbeddingPort contract) --------------------------
     @modal.asgi_app()
     def fastapi(self):
         import httpx
-        from fastapi import FastAPI, HTTPException
-        from pydantic import BaseModel
+        from fastapi import Body, FastAPI, HTTPException
 
         api = FastAPI(title="llm-base", version="1.0")
-
-        class EmbedReq(BaseModel):
-            text: str
-
-        class EmbedBatchReq(BaseModel):
-            texts: list[str]
 
         @api.get("/v1/health")
         def health() -> dict[str, object]:
@@ -318,13 +379,16 @@ class LLMBase:
                 "model_embed": "bge-m3",
             }
 
+        # Body(...) must be explicit on FastAPI 0.115+ when the BaseModel
+        # subclass is defined inside the route closure — without it FastAPI
+        # treats the param as a query string and returns 422.
         @api.post("/v1/embed")
-        def embed(req: EmbedReq) -> dict[str, list[float]]:
+        def embed(req: EmbedReq = Body(...)) -> dict[str, list[float]]:
             vec = self._bge.encode([req.text], normalize_embeddings=True)
             return {"embedding": vec[0].tolist()}
 
         @api.post("/v1/embed_batch")
-        def embed_batch(req: EmbedBatchReq) -> dict[str, list[list[float]]]:
+        def embed_batch(req: EmbedBatchReq = Body(...)) -> dict[str, list[list[float]]]:
             vecs = self._bge.encode(req.texts, normalize_embeddings=True)
             return {"embeddings": [v.tolist() for v in vecs]}
 
