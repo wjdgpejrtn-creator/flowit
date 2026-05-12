@@ -8,9 +8,13 @@ openpyxl 기반 Excel 파서
     - 시트별 테이블 블록 변환
     - SheetMeta 생성 (시트명, 행/열 수)
     - read_only=True 모드 (대용량 파일 대응)
+    - styles.xml count 속성 호환성 문제 자동 복구
 """
 from __future__ import annotations
 
+import io
+import re
+import zipfile
 from uuid import uuid4
 
 import openpyxl
@@ -65,7 +69,7 @@ class XlsxParser(ParserPort):
             RuntimeError: 파일 손상 (E0202), 텍스트 추출 실패 (E0203)
         """
         try:
-            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            wb = self._load_workbook_safe(file_path)
         except Exception as e:
             raise RuntimeError(f"E0202: XLSX 파일 읽기 실패 — {e}") from e
 
@@ -134,6 +138,52 @@ class XlsxParser(ParserPort):
     # ──────────────────────────────────────────
     # Private
     # ──────────────────────────────────────────
+
+    def _load_workbook_safe(
+        self, file_path: str
+    ) -> openpyxl.Workbook:
+        """XLSX 로딩 — styles.xml count 속성 호환성 문제 자동 복구.
+
+        일부 XLSX 파일의 styles.xml에 openpyxl이 인식하지 못하는
+        count 속성이 포함된 경우(CellStyle.__init__() got an unexpected
+        keyword argument 'count'), 해당 속성을 제거한 뒤 재시도한다.
+        데이터 셀 값에는 영향 없음.
+
+        Args:
+            file_path: XLSX 파일 경로
+
+        Returns:
+            openpyxl.Workbook
+
+        Raises:
+            Exception: 복구 후에도 로딩 실패 시 원본 예외 전파
+        """
+        try:
+            return openpyxl.load_workbook(
+                file_path, read_only=True, data_only=True
+            )
+        except Exception:
+            # styles.xml 에서 count 속성 제거 후 재시도
+            with open(file_path, "rb") as f:
+                raw = f.read()
+
+            fixed_buf = io.BytesIO()
+            with zipfile.ZipFile(io.BytesIO(raw), "r") as zin:
+                with zipfile.ZipFile(
+                    fixed_buf, "w", zipfile.ZIP_DEFLATED
+                ) as zout:
+                    for item in zin.namelist():
+                        if item == "xl/styles.xml":
+                            xml = zin.read(item).decode("utf-8")
+                            xml = re.sub(r'\s+count="\d+"', "", xml)
+                            zout.writestr(item, xml)
+                        else:
+                            zout.writestr(item, zin.read(item))
+
+            fixed_buf.seek(0)
+            return openpyxl.load_workbook(
+                fixed_buf, read_only=True, data_only=True
+            )
 
     def _extract_rows(self, ws: openpyxl.worksheet.worksheet.Worksheet) -> list[list[str]]:
         """워크시트에서 행 데이터 추출.
