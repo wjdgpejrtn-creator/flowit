@@ -237,7 +237,7 @@ Thumbs.db
 *.pem
 *.key
 credentials.json
-.claude/settings.local.json
+.claude/
 
 # Temp schema copies (SSOT: database/schemas/)
 scripts/schema_v2/
