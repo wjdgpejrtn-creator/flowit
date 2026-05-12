@@ -7,8 +7,10 @@ import httpx
 
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
 
-# BGE-M3 단일 문장 임베딩 기준 여유 있게 설정
 _DEFAULT_TIMEOUT = 30.0
+# BGE-M3 서버는 1024차원 출력. Matryoshka 특성상 상위 768차원만 잘라도 품질 유지.
+# pgvector 컬럼 정의와 반드시 일치해야 함 (vector(768)).
+_EMBEDDING_DIM = 768
 
 
 class ModalEmbeddingAdapter(EmbedderPort):
@@ -40,7 +42,7 @@ class ModalEmbeddingAdapter(EmbedderPort):
             json={"text": text},
         )
         response.raise_for_status()
-        return response.json()["embedding"]
+        return response.json()["embedding"][:_EMBEDDING_DIM]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         response = await self._client.post(
@@ -48,7 +50,7 @@ class ModalEmbeddingAdapter(EmbedderPort):
             json={"texts": texts},
         )
         response.raise_for_status()
-        return response.json()["embeddings"]
+        return [e[:_EMBEDDING_DIM] for e in response.json()["embeddings"]]
 
     async def aclose(self) -> None:
         await self._client.aclose()
