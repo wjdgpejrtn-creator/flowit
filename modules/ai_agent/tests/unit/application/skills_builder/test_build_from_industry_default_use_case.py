@@ -2,12 +2,14 @@
 
 REQ-004 spec §2.2: 산업 default seed → NodeDefinition upsert.
 LLM 비의존이라 단위 테스트 가능 (NodeDefinitionRepository mock + Fake Embedder).
+
+활성 산업: ecommerce (2026-05-12 조장 합의)
+비활성: manufacturing/service/wholesale_retail/food/it (seed 파일 보존, 호출 막힘)
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -59,18 +61,17 @@ class _FakeEmbedder(EmbedderPort):
         return [[0.1] * 768 for _ in texts]
 
 
-# 실제 seed 디렉토리 (production data 사용)
 _SEEDS_DIR = Path(__file__).resolve().parents[4] / "seeds" / "industry_defaults"
 
 
 # ----------------------------------------------------------------------
-# 각 산업 정상 실행
+# 활성 산업 (ecommerce) 정상 실행
 # ----------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("industry_code", ["manufacturing", "service", "wholesale_retail", "food", "it"])
-async def test_execute_each_industry_upserts_all_skill_nodes(industry_code: str):
+@pytest.mark.parametrize("industry_code", ["ecommerce"])
+async def test_execute_active_industry_upserts_all_skill_nodes(industry_code: str):
     repo = _InMemoryRepo()
     embedder = _FakeEmbedder()
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder)
@@ -95,6 +96,45 @@ async def test_execute_each_industry_upserts_all_skill_nodes(industry_code: str)
 
 
 # ----------------------------------------------------------------------
+# 비활성 산업 (deprecated 5종) — E_INDUSTRY_DEACTIVATED
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "industry_code",
+    ["manufacturing", "service", "wholesale_retail", "food", "it"],
+)
+async def test_deprecated_industries_yield_deactivated_error(industry_code: str):
+    """Sprint 3 v1 베타 5종은 비활성. 호출 시 E_INDUSTRY_DEACTIVATED. seed 파일은 유지."""
+    repo = _InMemoryRepo()
+    embedder = _FakeEmbedder()
+    use_case = BuildFromIndustryDefaultUseCase(repo, embedder)
+
+    frames = [f async for f in use_case.execute(uuid4(), industry_code)]
+
+    assert len(frames) == 1
+    assert isinstance(frames[0], ErrorFrame)
+    assert frames[0].code == "E_INDUSTRY_DEACTIVATED"
+    assert industry_code in frames[0].message
+    assert "ecommerce" in frames[0].message  # 활성 산업 안내
+    # repo에 upsert 없음
+    assert len(repo.store) == 0
+    # embedder 호출 없음
+    assert len(embedder.calls) == 0
+
+
+@pytest.mark.parametrize(
+    "industry_code",
+    ["manufacturing", "service", "wholesale_retail", "food", "it"],
+)
+def test_deprecated_seed_files_still_exist_on_disk(industry_code: str):
+    """비활성 산업 seed JSON은 삭제하지 않음 (히스토리/복원용)."""
+    path = _SEEDS_DIR / f"{industry_code}.json"
+    assert path.exists(), f"비활성 산업 seed 파일도 보존되어야 함: {path}"
+
+
+# ----------------------------------------------------------------------
 # 등록된 NodeDefinition 필드 검증
 # ----------------------------------------------------------------------
 
@@ -105,22 +145,22 @@ async def test_upserted_nodes_have_correct_fields():
     embedder = _FakeEmbedder()
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder)
 
-    _ = [f async for f in use_case.execute(uuid4(), "manufacturing")]
+    _ = [f async for f in use_case.execute(uuid4(), "ecommerce")]
 
     for node_def in repo.store.values():
-        assert node_def.node_type.startswith("manufacturing_")
+        assert node_def.node_type.startswith("ecommerce_")
         assert node_def.category in {"trigger", "action", "condition", "transform", "ai", "integration", "utility", "output"}
         assert node_def.risk_level in (RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.RESTRICTED)
-        assert node_def.is_mvp is False  # 산업 default = MVP 아님
+        assert node_def.is_mvp is False
         assert isinstance(node_def.required_connections, list)
         assert node_def.embedding is not None
-        assert len(node_def.embedding) == 768  # BGE-M3 차원
+        assert len(node_def.embedding) == 768
         assert node_def.input_schema.get("type") == "object"
         assert node_def.output_schema.get("type") == "object"
 
 
 # ----------------------------------------------------------------------
-# Idempotency (같은 input은 같은 node_id 생성 → upsert 덮어쓰기)
+# Idempotency
 # ----------------------------------------------------------------------
 
 
@@ -130,22 +170,23 @@ async def test_execute_twice_is_idempotent():
     embedder = _FakeEmbedder()
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder)
 
-    _ = [f async for f in use_case.execute(uuid4(), "it")]
+    _ = [f async for f in use_case.execute(uuid4(), "ecommerce")]
     count_after_first = len(repo.store)
 
-    _ = [f async for f in use_case.execute(uuid4(), "it")]
+    _ = [f async for f in use_case.execute(uuid4(), "ecommerce")]
     count_after_second = len(repo.store)
 
     assert count_after_first == count_after_second, "uuid5 deterministic — 2회 호출 후에도 노드 수 동일"
 
 
 # ----------------------------------------------------------------------
-# 에러 처리
+# 에러 처리 — 미지원 / 파일 누락 / JSON 파싱 / 항목 검증
 # ----------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_unsupported_industry_yields_error_frame():
+    """deprecated도 아닌 완전 미등록 코드 → E_INDUSTRY_NOT_SUPPORTED."""
     repo = _InMemoryRepo()
     embedder = _FakeEmbedder()
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder)
@@ -162,10 +203,10 @@ async def test_unsupported_industry_yields_error_frame():
 async def test_missing_seed_file_yields_error_frame(tmp_path: Path):
     repo = _InMemoryRepo()
     embedder = _FakeEmbedder()
-    # 비어있는 seeds 디렉토리 사용
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder, seeds_dir=tmp_path)
 
-    frames = [f async for f in use_case.execute(uuid4(), "manufacturing")]
+    # 활성 산업이라도 파일 없으면 E_SEED_NOT_FOUND
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
 
     assert len(frames) == 1
     assert isinstance(frames[0], ErrorFrame)
@@ -176,11 +217,10 @@ async def test_missing_seed_file_yields_error_frame(tmp_path: Path):
 async def test_invalid_json_yields_error_frame(tmp_path: Path):
     repo = _InMemoryRepo()
     embedder = _FakeEmbedder()
-    # 깨진 JSON 파일 생성
-    (tmp_path / "manufacturing.json").write_text("{invalid json", encoding="utf-8")
+    (tmp_path / "ecommerce.json").write_text("{invalid json", encoding="utf-8")
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder, seeds_dir=tmp_path)
 
-    frames = [f async for f in use_case.execute(uuid4(), "manufacturing")]
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
 
     assert isinstance(frames[0], ErrorFrame)
     assert frames[0].code == "E_SEED_INVALID_JSON"
@@ -190,32 +230,30 @@ async def test_invalid_json_yields_error_frame(tmp_path: Path):
 async def test_seed_entry_missing_field_yields_error_frame(tmp_path: Path):
     repo = _InMemoryRepo()
     embedder = _FakeEmbedder()
-    # 필수 필드 누락 entry
     seed = {
-        "industry_code": "manufacturing",
-        "industry_name": "제조",
+        "industry_code": "ecommerce",
+        "industry_name": "이커머스",
         "skill_nodes": [
             {
-                "node_type": "manufacturing_test",
+                "node_type": "ecommerce_test",
                 "name": "테스트",
                 # description, inputs, outputs, risk_level 누락
                 "category": "action",
             }
         ],
     }
-    (tmp_path / "manufacturing.json").write_text(json.dumps(seed), encoding="utf-8")
+    (tmp_path / "ecommerce.json").write_text(json.dumps(seed), encoding="utf-8")
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder, seeds_dir=tmp_path)
 
-    frames = [f async for f in use_case.execute(uuid4(), "manufacturing")]
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
 
-    # load 프레임 1개 + 에러 프레임 1개 (구현에 따라 다를 수 있음)
     error_frames = [f for f in frames if isinstance(f, ErrorFrame)]
     assert error_frames, "필수 필드 누락 시 ErrorFrame 발생해야 함"
     assert error_frames[0].code == "E_SEED_ENTRY_INVALID"
 
 
 # ----------------------------------------------------------------------
-# 진행 프레임 (upsert별)
+# 진행 프레임 + Embedder 호출
 # ----------------------------------------------------------------------
 
 
@@ -225,15 +263,10 @@ async def test_progress_frames_emitted_per_skill_node():
     embedder = _FakeEmbedder()
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder)
 
-    frames = [f async for f in use_case.execute(uuid4(), "food")]
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
 
     upsert_frames = [f for f in frames if isinstance(f, AgentNodeFrame) and "upsert" in f.agent_node_name]
-    assert len(upsert_frames) >= 5  # food.json은 5개 SkillNode
-
-
-# ----------------------------------------------------------------------
-# Embedder 호출 확인
-# ----------------------------------------------------------------------
+    assert len(upsert_frames) >= 5  # ecommerce.json은 5개 SkillNode
 
 
 @pytest.mark.asyncio
@@ -242,10 +275,8 @@ async def test_embedder_called_with_description():
     embedder = _FakeEmbedder()
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder)
 
-    _ = [f async for f in use_case.execute(uuid4(), "service")]
+    _ = [f async for f in use_case.execute(uuid4(), "ecommerce")]
 
-    # 각 SkillNode description으로 embedder 호출
     assert len(embedder.calls) == len(repo.store)
-    # 호출된 텍스트가 비어있지 않음
     for text in embedder.calls:
         assert text

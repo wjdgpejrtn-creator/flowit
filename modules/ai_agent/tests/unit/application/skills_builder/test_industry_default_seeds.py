@@ -15,7 +15,7 @@ import pytest
 
 SEEDS_DIR = Path(__file__).resolve().parents[4] / "seeds" / "industry_defaults"
 
-EXPECTED_INDUSTRIES = {"manufacturing", "service", "wholesale_retail", "food", "it"}
+EXPECTED_INDUSTRIES = {"manufacturing", "service", "wholesale_retail", "food", "it", "ecommerce"}
 
 # DB node_definitions.category CHECK 8종 (database/schemas/009_node_definitions.sql)
 ALLOWED_CATEGORIES = {"trigger", "action", "condition", "transform", "ai", "integration", "utility", "output"}
@@ -147,10 +147,11 @@ def test_all_node_types_unique_across_industries():
 
 
 def test_total_skill_node_count():
-    """5종 산업 × 5개 SkillNode = 25개 (최소). plan §4.2 25~35 범위 안."""
+    """6종 산업 (manufacturing/service/wholesale_retail/food/it 비활성 + ecommerce 활성)
+    × 5개 SkillNode = 30개. seed 파일은 활성·비활성 무관하게 보존됨."""
     seeds = _load_all_seeds()
     total = sum(len(data["skill_nodes"]) for data in seeds.values())
-    assert 25 <= total <= 35, f"전체 SkillNode 수 {total} — plan 범위(25~35) 벗어남"
+    assert 30 <= total <= 42, f"전체 SkillNode 수 {total} — 예상 범위(30~42) 벗어남"
 
 
 # ----------------------------------------------------------------------
