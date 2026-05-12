@@ -40,6 +40,14 @@ def get_fixtures(ext: str) -> list[str]:
     return [f.name for f in sorted(FIXTURES.glob(f"*.{ext}"))]
 
 
+def print_block_summary(filename: str, blocks, include_heading: bool = False) -> None:
+    """블록 요약 출력 공통 함수."""
+    print(f"\n{filename} - 블록 수: {len(blocks)}")
+    if include_heading:
+        print(f"heading 수: {sum(1 for b in blocks if b.block_type == 'heading')}")
+    print(f"table 수: {sum(1 for b in blocks if b.block_type == 'table')}")
+
+
 # ──────────────────────────────────────────
 # PDF
 # ──────────────────────────────────────────
@@ -53,7 +61,7 @@ def test_pdf_parser(filename):
     file_meta = make_file_meta(file_path)
 
     is_scanned = parser.is_scanned_pdf(str(file_path))
-    print(f"\n{filename} — 스캔PDF: {is_scanned}")
+    print(f"\n{filename} - 스캔PDF: {is_scanned}")
 
     if is_scanned:
         with pytest.raises(ValueError, match="E0212"):
@@ -61,9 +69,7 @@ def test_pdf_parser(filename):
         return
 
     result = parser.parse(str(file_path), file_meta)
-    print(f"블록 수: {len(result.blocks)}")
-    print(f"heading 수: {sum(1 for b in result.blocks if b.block_type == 'heading')}")
-    print(f"table 수: {sum(1 for b in result.blocks if b.block_type == 'table')}")
+    print_block_summary(filename, result.blocks, include_heading=True)
 
     assert result.document_id is not None
     assert len(result.blocks) > 0
@@ -82,8 +88,7 @@ def test_docx_parser(filename):
     file_meta = make_file_meta(file_path)
     result = parser.parse(str(file_path), file_meta)
 
-    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
-    print(f"heading 수: {sum(1 for b in result.blocks if b.block_type == 'heading')}")
+    print_block_summary(filename, result.blocks, include_heading=True)
 
     assert result.document_id is not None
     assert len(result.blocks) > 0
@@ -102,7 +107,8 @@ def test_xlsx_parser(filename):
     file_meta = make_file_meta(file_path)
     result = parser.parse(str(file_path), file_meta)
 
-    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+    print_block_summary(filename, result.blocks)
+
     assert result.document_id is not None
     assert len(result.blocks) > 0
     assert all(b.block_type == "table" for b in result.blocks)
@@ -121,7 +127,8 @@ def test_csv_parser(filename):
     file_meta = make_file_meta(file_path)
     result = parser.parse(str(file_path), file_meta)
 
-    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+    print_block_summary(filename, result.blocks)
+
     assert result.document_id is not None
     assert len(result.blocks) > 0
 
@@ -139,7 +146,8 @@ def test_pptx_parser(filename):
     file_meta = make_file_meta(file_path)
     result = parser.parse(str(file_path), file_meta)
 
-    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+    print_block_summary(filename, result.blocks)
+
     assert result.document_id is not None
     assert len(result.blocks) > 0
 
@@ -158,7 +166,7 @@ def test_hwp_parser(filename):
 
     try:
         result = parser.parse(str(file_path), file_meta)
-        print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+        print_block_summary(filename, result.blocks)
         assert result.document_id is not None
         assert len(result.blocks) > 0
     except RuntimeError as e:
@@ -180,7 +188,8 @@ def test_hwpx_parser(filename):
     file_meta = make_file_meta(file_path)
     result = parser.parse(str(file_path), file_meta)
 
-    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+    print_block_summary(filename, result.blocks)
+
     assert result.document_id is not None
     assert len(result.blocks) > 0
 
@@ -198,7 +207,8 @@ def test_markdown_parser(filename):
     file_meta = make_file_meta(file_path)
     result = parser.parse(str(file_path), file_meta)
 
-    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+    print_block_summary(filename, result.blocks)
+
     assert result.document_id is not None
     assert len(result.blocks) > 0
 
