@@ -38,7 +38,9 @@ from ....domain.entities.skill_node import SkillNode
 
 
 # uuid5 namespace for skills builder generated nodes (industry default).
-# 같은 industry_code + node_type 조합은 항상 같은 node_id 생성 (idempotent upsert).
+# node_id = uuid5(_NS, f"{industry_code}:{node_type}") — industry_code를 명시 결합해서
+# 산업 간 node_type 우연 충돌을 namespace 레벨에서 차단 (PR #42 리뷰 후속, 견고성).
+# 같은 (industry_code, node_type) 조합은 항상 같은 node_id 생성 → idempotent upsert.
 _SKILLS_BUILDER_NS = uuid5(UUID("00000000-0000-0000-0000-000000000000"), "workflow-automation.skills_builder")
 
 _DEFAULT_SEEDS_DIR = Path(__file__).resolve().parents[3] / "seeds" / "industry_defaults"
@@ -111,26 +113,62 @@ class BuildFromIndustryDefaultUseCase:
         yield AgentNodeFrame(agent_node_name="skills_builder.load_industry_default")
 
         # 3. 각 항목 처리
+        #
+        # 부분 실패 정책 (PR #42 리뷰 후속):
+        # - convert 실패 (seed JSON 항목 깨짐): 전체 중단 (E_SEED_ENTRY_INVALID).
+        #   seed 파일 자체가 broken이면 다음 항목도 동일 위험이라 fail-fast.
+        # - embed/upsert 실패 (런타임 외부 의존성 오류): 해당 노드만 격리,
+        #   다른 노드 계속 진행. ResultFrame.failed_node_types에 기록.
+        # - uuid5 deterministic이라 부분 실패 후 재실행 안전 (이미 upsert된 노드는
+        #   덮어쓰기 = idempotent. 실패 노드만 새로 시도).
         version = seed.get("version", "1.0.0")
         skill_nodes_data = seed.get("skill_nodes", [])
         upserted_node_types: list[str] = []
+        failed_node_types: list[dict] = []
 
         for entry in skill_nodes_data:
             try:
                 node_def = self._convert_entry_to_node_definition(entry, industry_code, version)
             except (KeyError, ValueError) as e:
+                # seed JSON 항목 자체가 깨짐 → 전체 중단
                 yield ErrorFrame(
                     code="E_SEED_ENTRY_INVALID",
                     message=f"seed 항목 변환 실패 ({entry.get('node_type', '?')}): {e}",
                 )
                 return
 
-            # description 임베딩
-            node_def.embedding = await self._embedder.embed(node_def.description)
+            # description 임베딩 (외부 의존성 — 격리 처리)
+            try:
+                node_def.embedding = await self._embedder.embed(node_def.description)
+            except Exception as e:
+                failed_node_types.append({
+                    "node_type": node_def.node_type,
+                    "stage": "embed",
+                    "error": str(e),
+                })
+                yield ErrorFrame(
+                    code="E_EMBEDDING_FAILED",
+                    message=f"임베딩 실패 ({node_def.node_type}): {e}",
+                )
+                continue
 
             yield AgentNodeFrame(agent_node_name=f"skills_builder.upsert.{node_def.node_type}")
 
-            await self._repo.upsert(node_def)
+            # upsert (외부 의존성 — 격리 처리)
+            try:
+                await self._repo.upsert(node_def)
+            except Exception as e:
+                failed_node_types.append({
+                    "node_type": node_def.node_type,
+                    "stage": "upsert",
+                    "error": str(e),
+                })
+                yield ErrorFrame(
+                    code="E_UPSERT_FAILED",
+                    message=f"upsert 실패 ({node_def.node_type}): {e}",
+                )
+                continue
+
             upserted_node_types.append(node_def.node_type)
 
         # 4. 결과 프레임
@@ -140,7 +178,9 @@ class BuildFromIndustryDefaultUseCase:
                 "industry_code": industry_code,
                 "industry_name": seed.get("industry_name", ""),
                 "upserted_count": len(upserted_node_types),
+                "failed_count": len(failed_node_types),
                 "node_types": upserted_node_types,
+                "failed_node_types": failed_node_types,
                 "user_id": str(user_id),
             },
         )
@@ -170,7 +210,7 @@ class BuildFromIndustryDefaultUseCase:
         # NodeDefinition 변환
         node_type = entry["node_type"]
         return NodeDefinition(
-            node_id=uuid5(_SKILLS_BUILDER_NS, node_type),
+            node_id=uuid5(_SKILLS_BUILDER_NS, f"{industry_code}:{node_type}"),
             node_type=node_type,
             name=entry["name"],
             category=entry["category"],

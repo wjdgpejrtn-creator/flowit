@@ -149,7 +149,7 @@ A2 부터는 **외부 시스템 연동(Modal, GCS, PostgreSQL, HTTP)**을 도입
 
 | 영역 | 결과물 | 담당 |
 |------|-------|------|
-| common_schemas 신규 | `agent_protocol.py` (AgentProtocolRequest/Response), `AgentMode.SKILL_BUILDER`, `IntentResult.intent` Literal `"build_skill"` 추가, `AgentState.personal_memory` 필드 | 황대원 |
+| common_schemas 신규 | ✅ 2026-05-12 — `agent_protocol.py`(AgentProtocolRequest/Response), `MemoryEntry` 이관(ai_agent→common_schemas), `AgentMode.SKILL_BUILDER`, `IntentResult.intent="build_skill"`, `AgentState.personal_memory: list[MemoryEntry]`. PR: `feature/req-012-agent-protocol` | 황대원 |
 | nodes_graph adapters | `catalog/` 36개 노드 구현체 + Plugin discovery + UPSERT | 박아름 |
 | ai_agent adapters (LLM) | `adapters/llm/modal_llm_adapter.py` + `modal_embedding_adapter.py` | 신정혜 |
 | ai_agent adapters (orchestrator/composer) | `adapters/langgraph/{supervisor_graph,composer_graph}.py` + `adapters/agent_clients/http_sub_agent_client.py` + `adapters/node_registry_adapter.py` | 신정혜 |
@@ -192,7 +192,7 @@ common_schemas.agent_protocol  ─┐
 | 일자 | 작업 | 산출물 |
 |------|------|--------|
 | 5/11(월) | Sprint 3 kickoff standup 진행 (15분) · cross-cutting interface sync 주관 (1.5h) — agent_protocol schema 확정 · Modal workspace 멤버 권한 추가 + GCP IAM | sync 의사록 PR (`docs/context/decisions.md`), Modal workspace 권한 |
-| 5/12(화) | common_schemas 신규 타입 PR — `agent_protocol.py` (AgentProtocolRequest/Response), `AgentMode.SKILL_BUILDER`, `IntentResult.intent` Literal에 `"build_skill"`, `AgentState.personal_memory: list[MemoryEntry]` · api_server `app/main.py` FastAPI 골격 (lifespan, settings, structured logging) | `feature/req-012-agent-protocol`, `feature/req-009-api-server-skeleton` |
+| 5/12(화) | ✅ common_schemas 신규 타입 PR — `agent_protocol.py` (AgentProtocolRequest/Response), `MemoryEntry` SSOT 이관(ai_agent→common_schemas, 호환 shim 유지), `AgentMode.SKILL_BUILDER`, `IntentResult.intent` Literal에 `"build_skill"`, `AgentState.personal_memory: list[MemoryEntry]` · api_server `app/main.py` FastAPI 골격 (lifespan, settings, structured logging) | `feature/req-012-agent-protocol`(완료), `feature/req-009-api-server-skeleton` |
 | 5/13(수) | api_server `app/dependencies/container.py` DI 컨테이너 (DependencyContainer 클래스) · 전역 에러 핸들러 (`infrastructure/error_handlers.py`) · `auth.adapters.middleware`를 활용한 JWT 미들웨어 통합 | `feature/req-009-api-server-skeleton` 연속 |
 | 5/14(목) | api_server `app/adapters/orchestrator_client.py` — HTTP 어댑터 (httpx AsyncClient, SSE 디코딩, `AgentProtocolRequest/Response` 직렬화, `ORCHESTRATOR_URL` env 사용) · `app/sse/sse_encoder.py` (SSEFrame → text/event-stream) | `feature/req-009-orchestrator-client` |
 | 5/15(금) | storage `Pg*Repository` 1차 (auth/nodes_graph 용) — `PgSessionRepository`, `PgOAuthRepository`, `PgNodeDefinitionRepository`. asyncpg + SQLAlchemy + 도메인 엔티티 ↔ ORM mapper | `feature/req-008-storage-repositories` |

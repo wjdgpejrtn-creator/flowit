@@ -1,4 +1,5 @@
-from .agent import AgentState, DraftSpec, IntentResult, SlotFillingState, UnresolvedNode
+from .agent import AgentState, DraftSpec, IntentResult, MemoryEntry, MemoryType, SlotFillingState, UnresolvedNode
+from .agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 from .document import (
     AnalysisResult,
     BBox,
@@ -66,8 +67,13 @@ __all__ = [
     "AgentState",
     "DraftSpec",
     "IntentResult",
+    "MemoryEntry",
+    "MemoryType",
     "SlotFillingState",
     "UnresolvedNode",
+    # agent_protocol (inter-agent HTTP contract)
+    "AgentProtocolRequest",
+    "AgentProtocolResponse",
     # transport
     "AgentNodeFrame",
     "AnySSEFrame",
