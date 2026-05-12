@@ -531,3 +531,86 @@ async def test_execute_without_personal_memory_works():
     result = frames[-1]
     assert isinstance(result, ResultFrame)
     assert result.payload["upserted_count"] == 1
+
+
+# ----------------------------------------------------------------------
+# 프롬프트 강화 — few-shot 예시 + 명시적 출력 스키마
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_prompt_includes_few_shot_example():
+    """LLM 응답 품질 향상을 위한 few-shot 예시 1건 포함 (action + condition 카테고리 다양성)."""
+    import json as _json
+
+    repo = _InMemoryRepo()
+    llm = _FakeLLM(structured_response=_ExtractedSkillNodeList(skill_nodes=[_make_extracted()]))
+    use_case = BuildFromSOPUseCase(repo, _FakeEmbedder(), llm)
+
+    _ = [f async for f in use_case.execute(uuid4(), _make_document())]
+
+    parsed = _json.loads(llm.received_prompts[0])
+    assert "few_shot_example" in parsed
+    example = parsed["few_shot_example"]
+    assert "input_sop_snippet" in example
+    assert "expected_output" in example
+    assert "skill_nodes" in example["expected_output"]
+
+    # 예시 SkillNode 2개 이상 (다양한 카테고리 시연)
+    example_nodes = example["expected_output"]["skill_nodes"]
+    assert len(example_nodes) >= 2
+    example_categories = {n["category"] for n in example_nodes}
+    assert len(example_categories) >= 2, "few-shot 예시는 카테고리 다양성 보여야 함"
+
+
+@pytest.mark.asyncio
+async def test_prompt_includes_explicit_output_schema():
+    """output_schema가 LLM grammar-level 강제와 호환되도록 완전 명세 포함."""
+    import json as _json
+
+    repo = _InMemoryRepo()
+    llm = _FakeLLM(structured_response=_ExtractedSkillNodeList(skill_nodes=[_make_extracted()]))
+    use_case = BuildFromSOPUseCase(repo, _FakeEmbedder(), llm)
+
+    _ = [f async for f in use_case.execute(uuid4(), _make_document())]
+
+    parsed = _json.loads(llm.received_prompts[0])
+    assert "output_schema" in parsed
+
+    schema = parsed["output_schema"]
+    assert schema["type"] == "object"
+    assert "skill_nodes" in schema["properties"]
+
+    # SkillNode items 스키마가 모든 필수 필드 명시
+    item_schema = schema["properties"]["skill_nodes"]["items"]
+    expected_fields = {"node_type", "name", "description", "category", "risk_level", "inputs", "outputs", "required_connections"}
+    assert set(item_schema["properties"].keys()) >= expected_fields, (
+        f"output_schema의 SkillNode 필드 누락: {expected_fields - set(item_schema['properties'].keys())}"
+    )
+
+    # category enum이 DB CHECK 8영문과 일치
+    assert set(item_schema["properties"]["category"]["enum"]) == {
+        "trigger", "action", "condition", "transform", "ai", "integration", "utility", "output",
+    }
+
+    # risk_level enum이 RiskLevel과 일치
+    assert set(item_schema["properties"]["risk_level"]["enum"]) == {"Low", "Medium", "High", "Restricted"}
+
+
+@pytest.mark.asyncio
+async def test_few_shot_example_categories_are_valid():
+    """few-shot 예시의 category는 DB CHECK 8영문 안에 있어야 함 (LLM이 잘못 학습 안 하도록)."""
+    import json as _json
+
+    repo = _InMemoryRepo()
+    llm = _FakeLLM(structured_response=_ExtractedSkillNodeList(skill_nodes=[_make_extracted()]))
+    use_case = BuildFromSOPUseCase(repo, _FakeEmbedder(), llm)
+
+    _ = [f async for f in use_case.execute(uuid4(), _make_document())]
+
+    parsed = _json.loads(llm.received_prompts[0])
+    allowed = {"trigger", "action", "condition", "transform", "ai", "integration", "utility", "output"}
+
+    for example_node in parsed["few_shot_example"]["expected_output"]["skill_nodes"]:
+        assert example_node["category"] in allowed
+        assert example_node["risk_level"] in {"Low", "Medium", "High", "Restricted"}

@@ -15,6 +15,43 @@ LLM 호출 부분은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`l
       → NodeDefinition 변환 (embedding 포함)
       → NodeDefinitionRepository.upsert()
       → SSE 프레임 yield
+
+──────────────────────────────────────────────────────────────────────────────
+5/16 본격 구현 시 wiring 가이드 (신정혜 ModalLLMAdapter 완성 후)
+──────────────────────────────────────────────────────────────────────────────
+
+1) LLMPort 구현체 (신정혜 작업):
+   ``modules/ai_agent/adapters/llm/modal_llm_adapter.py`` 의 ``ModalLLMAdapter``가
+   ``llm-base`` Modal app을 `modal.Cls.from_name("llm-base", "LLMBase")` RPC로 호출.
+   ``generate_structured(prompt, schema)`` 구현 시:
+       - ``format="json"`` + ``json_schema=schema.model_json_schema()`` 옵션 전달
+       - llm-base가 grammar-level constraint로 JSON 강제 (응답 100% parseable)
+
+2) EmbedderPort 구현체 (신정혜 작업):
+   ``modules/ai_agent/adapters/llm/modal_embedding_adapter.py``의 ``ModalEmbeddingAdapter``가
+   ``llm-base``의 ``POST /v1/embed`` HTTP endpoint 호출.
+
+3) Composition root (api_server 또는 운영 스크립트):
+   ```python
+   from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
+   from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
+   from storage.repositories import PgNodeDefinitionRepository  # 황대원 5/15
+
+   use_case = BuildFromSOPUseCase(
+       node_def_repo=PgNodeDefinitionRepository(...),
+       embedder=ModalEmbeddingAdapter(base_url=os.environ["EMBEDDING_BASE_URL"]),
+       llm=ModalLLMAdapter(),  # MODAL_TOKEN_ID/SECRET 환경변수 자동 사용
+   )
+   ```
+
+4) Modal app endpoint (박아름 5/17 plan):
+   ``services/agents/agent-skills-builder/main.py``에서 ``BuildFromSOPUseCase`` 또는
+   ``BuildFromIndustryDefaultUseCase`` 또는 ``BuildFromFunctionalDomainUseCase``를
+   라우팅 (AgentProtocolRequest.payload['source_type']로 분기).
+
+5) 프롬프트 튜닝 (실 LLM 응답 보면서):
+   ``_build_prompt``의 few-shot 예시 / instruction 문구는 첫 e2e 후 보강.
+   샘플 SOP 3종(PDF/DOCX/HWP)으로 응답 품질 측정.
 """
 from __future__ import annotations
 
@@ -240,9 +277,10 @@ class BuildFromSOPUseCase:
 
         구조:
             - 시스템 지시 (역할/규칙)
-            - personal_memory (JSON dump)
+            - personal_memory (JSON dump, 도메인 컨텍스트)
             - document blocks (JSON dump, text/heading/table 만 필터)
-            - 출력 스키마 명시 (_ExtractedSkillNodeList JSON)
+            - few-shot 예시 1건 (LLM 응답 품질 향상)
+            - 출력 스키마 명시 (_ExtractedSkillNodeList JSON schema)
         """
         # 1) document blocks 필터링 + JSON 변환
         relevant_blocks = [
@@ -254,13 +292,13 @@ class BuildFromSOPUseCase:
         # 2) personal_memory JSON 변환
         memory_json = [m.model_dump(mode="json") for m in personal_memory]
 
-        # 3) 프롬프트 조립 (JSON-only 명시)
+        # 3) 시스템 지시
         instruction = (
             "당신은 사내 업무 자동화 SOP 문서를 분석해 워크플로우 노드(SkillNode)를 추출하는 어시스턴트입니다. "
             "SOP 문서의 단계별 작업 중 외부 시스템 호출/조건 분기/데이터 변환이 들어가는 단위를 "
             "SkillNode로 정의해주세요.\n\n"
             "출력은 **반드시 JSON** 형식이며, XML/Markdown 사용 금지입니다. "
-            "각 SkillNode는 아래 필드를 포함:\n"
+            "각 SkillNode 필드:\n"
             "  - node_type: snake_case 식별자 (e.g. 'send_approval_email')\n"
             "  - name: 사람이 읽을 수 있는 한글 이름\n"
             "  - description: 노드 동작 설명 (한 문장)\n"
@@ -270,8 +308,92 @@ class BuildFromSOPUseCase:
             "  - outputs: JSON Schema\n"
             "  - required_connections: list[str] (e.g. ['slack', 'google'])\n"
             "  - service_type: str | null (e.g. 'slack', 'google_workspace')\n\n"
-            "사용자의 personal_memory와 작업 패턴을 참고해 도메인 맥락 반영."
+            "사용자의 personal_memory와 작업 패턴을 참고해 도메인 맥락 반영. "
+            "추출 결과가 없으면 빈 배열 반환."
         )
+
+        # 4) Few-shot 예시 (LLM 출력 품질 향상 — 형식·필드·카테고리 의도 명확화)
+        few_shot_example = {
+            "input_sop_snippet": "고객 환불 요청이 접수되면 1) 매니저에게 슬랙 알림 2) 환불 금액이 5만원 초과면 승인 대기 3) 승인 후 결제 취소 API 호출",
+            "expected_output": {
+                "skill_nodes": [
+                    {
+                        "node_type": "refund_request_slack_alert",
+                        "name": "환불 요청 매니저 알림",
+                        "description": "환불 요청 접수 시 매니저 슬랙 채널에 알림",
+                        "category": "action",
+                        "risk_level": "Medium",
+                        "inputs": {
+                            "type": "object",
+                            "properties": {
+                                "refund_id": {"type": "string"},
+                                "amount": {"type": "number"},
+                                "channel": {"type": "string"},
+                            },
+                            "required": ["refund_id", "amount"],
+                        },
+                        "outputs": {
+                            "type": "object",
+                            "properties": {"message_ts": {"type": "string"}},
+                        },
+                        "required_connections": ["slack"],
+                        "service_type": "slack",
+                    },
+                    {
+                        "node_type": "refund_amount_threshold_check",
+                        "name": "환불 금액 임계값 분기",
+                        "description": "환불 금액이 임계값 초과 시 승인 대기, 이하면 자동 진행",
+                        "category": "condition",
+                        "risk_level": "High",
+                        "inputs": {
+                            "type": "object",
+                            "properties": {
+                                "amount": {"type": "number"},
+                                "threshold": {"type": "number", "default": 50000},
+                            },
+                            "required": ["amount"],
+                        },
+                        "outputs": {
+                            "type": "object",
+                            "properties": {
+                                "requires_approval": {"type": "boolean"},
+                            },
+                        },
+                        "required_connections": [],
+                        "service_type": None,
+                    },
+                ],
+            },
+        }
+
+        # 5) 출력 스키마 (LLM이 따라야 할 JSON 구조 — grammar-level 강제와 정합)
+        output_schema = {
+            "type": "object",
+            "properties": {
+                "skill_nodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "node_type": {"type": "string"},
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "category": {"type": "string", "enum": sorted(_ALLOWED_CATEGORIES)},
+                            "risk_level": {"type": "string", "enum": ["Low", "Medium", "High", "Restricted"]},
+                            "inputs": {"type": "object"},
+                            "outputs": {"type": "object"},
+                            "required_connections": {"type": "array", "items": {"type": "string"}},
+                            "service_type": {"type": ["string", "null"]},
+                        },
+                        "required": [
+                            "node_type", "name", "description", "category",
+                            "risk_level", "inputs", "outputs", "required_connections",
+                        ],
+                    },
+                },
+            },
+            "required": ["skill_nodes"],
+        }
 
         payload = {
             "instruction": instruction,
@@ -280,13 +402,8 @@ class BuildFromSOPUseCase:
                 "file_name": document.file_meta.file_name,
                 "blocks": relevant_blocks,
             },
-            "output_format": {
-                "type": "object",
-                "properties": {
-                    "skill_nodes": {"type": "array", "items": {"type": "object"}},
-                },
-                "required": ["skill_nodes"],
-            },
+            "few_shot_example": few_shot_example,
+            "output_schema": output_schema,
         }
 
         return json.dumps(payload, ensure_ascii=False, indent=2)
