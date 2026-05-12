@@ -149,6 +149,9 @@ Downstream (이 모듈에 의존):
 |--------|------|------|
 | `MODAL_TOKEN_ID` | Y | Modal GPU 서비스 인증 ID |
 | `MODAL_TOKEN_SECRET` | Y | Modal GPU 서비스 인증 시크릿 |
+| `LLM_BASE_URL` | Y | Gemma 4 Modal endpoint URL |
+| `EMBEDDING_BASE_URL` | Y | BGE-M3 임베딩 Modal endpoint URL |
+| `SKILLS_BUILDER_URL` | Y | Skills Builder sub-agent Modal endpoint URL |
 | `LLM_MODEL_NAME` | N | 사용 모델명 (기본: gemma-4) |
 | `AGENT_MAX_TURNS` | N | 최대 턴 수 (기본: 25) |
 | `QA_PASS_THRESHOLD` | N | QA 통과 점수 (기본: 8) |
