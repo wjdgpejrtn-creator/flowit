@@ -12,21 +12,20 @@ from ....domain.exceptions import ToolExecutionError
 
 class SlackNotifyTool(BaseTool):
     name = "slack_notify"
-    description = "Slack 메시지 전송 (Webhook URL 기반, 비가역적)"
+    description = "Slack 메시지 전송 (Webhook URL은 credential로 주입, 비가역적)"
     version = "1.0.0"
     risk_level = RiskLevel.HIGH
 
     input_schema = {
         "type": "object",
         "properties": {
-            "webhook_url": {"type": "string"},
             "message": {"type": "string"},
             "channel": {"type": "string"},
             "username": {"type": "string"},
             "icon_emoji": {"type": "string"},
             "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 30, "default": 10},
         },
-        "required": ["webhook_url", "message"],
+        "required": ["message"],
     }
 
     output_schema = {
@@ -39,7 +38,14 @@ class SlackNotifyTool(BaseTool):
     }
 
     async def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
-        webhook_url = input_data["webhook_url"]
+        credential = kwargs.get("credential")
+        if credential is None or not credential.value:
+            raise ToolExecutionError(
+                message="SlackNotifyTool requires a credential whose value is the Slack incoming webhook URL",
+                code="TOOL_EXECUTION_ERROR",
+            )
+
+        webhook_url = credential.value
         timeout = input_data.get("timeout_seconds", 10)
 
         payload: dict[str, Any] = {"text": input_data["message"]}

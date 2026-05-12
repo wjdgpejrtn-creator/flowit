@@ -60,9 +60,14 @@ class EmailSendTool(BaseTool):
         msg["To"] = ", ".join(to_addrs)
         msg.attach(MIMEText(body, body_type))
 
-        username = credential.value if credential else None
-        password = None
-        if credential and ":" in credential.value:
+        username: str | None = None
+        password: str | None = None
+        if credential:
+            if ":" not in credential.value:
+                raise ToolExecutionError(
+                    message="Email credential must be 'username:password' format",
+                    code="TOOL_EXECUTION_ERROR",
+                )
             username, password = credential.value.split(":", 1)
 
         try:

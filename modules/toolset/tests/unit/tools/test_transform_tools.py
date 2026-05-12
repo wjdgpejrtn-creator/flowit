@@ -8,7 +8,7 @@ from toolset.adapters.tools.transform.text_template_tool import TextTemplateTool
 from toolset.domain.exceptions import ToolExecutionError
 
 
-# ── JsonTransformTool ─────────────────────────────────────────────────────────
+# ── JsonTransformTool (JMESPath) ──────────────────────────────────────────────
 
 class TestJsonTransformTool:
     @pytest.mark.asyncio
@@ -30,6 +30,19 @@ class TestJsonTransformTool:
         assert result["result"] == 2
 
     @pytest.mark.asyncio
+    async def test_wildcard_projection(self):
+        data = {"items": [{"id": 1}, {"id": 2}, {"id": 3}]}
+        result = await JsonTransformTool().execute({"data": data, "expression": "items[*].id"})
+        assert result["result"] == [1, 2, 3]
+        assert result["matched"] is True
+
+    @pytest.mark.asyncio
+    async def test_filter_expression(self):
+        data = {"items": [{"id": 1, "active": True}, {"id": 2, "active": False}]}
+        result = await JsonTransformTool().execute({"data": data, "expression": "items[?active].id"})
+        assert result["result"] == [1]
+
+    @pytest.mark.asyncio
     async def test_missing_path_returns_not_matched(self):
         result = await JsonTransformTool().execute({"data": {"a": 1}, "expression": "b.c"})
         assert result["matched"] is False
@@ -39,6 +52,11 @@ class TestJsonTransformTool:
     async def test_empty_expression_raises(self):
         with pytest.raises(ToolExecutionError):
             await JsonTransformTool().execute({"data": {}, "expression": "  "})
+
+    @pytest.mark.asyncio
+    async def test_invalid_jmespath_expression_raises(self):
+        with pytest.raises(ToolExecutionError):
+            await JsonTransformTool().execute({"data": {}, "expression": "[invalid@expr"})
 
 
 # ── TextTemplateTool ──────────────────────────────────────────────────────────
