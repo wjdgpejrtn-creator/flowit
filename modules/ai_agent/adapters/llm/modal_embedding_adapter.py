@@ -5,14 +5,17 @@ from typing import Any
 
 import httpx
 
-from ...domain.ports.embedding_port import EmbeddingPort
+from nodes_graph.domain.ports.embedder_port import EmbedderPort
 
 # BGE-M3 단일 문장 임베딩 기준 여유 있게 설정
 _DEFAULT_TIMEOUT = 30.0
 
 
-class ModalEmbeddingAdapter(EmbeddingPort):
-    """EmbeddingPort 구현 — Modal llm-base app의 BGE-M3 임베딩 엔드포인트 호출.
+class ModalEmbeddingAdapter(EmbedderPort):
+    """EmbedderPort 구현 — Modal llm-base app의 BGE-M3 임베딩 엔드포인트 호출.
+
+    SSOT: nodes_graph.domain.ports.EmbedderPort (REQ-003 spec line 372-391,
+    PR #30 머지 확정). ai_agent.EmbeddingPort는 폐기됨.
 
     엔드포인트 계약:
         POST {EMBEDDING_BASE_URL}/v1/embed

@@ -125,7 +125,9 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 
 | 어댑터 | 설명 |
 |--------|------|
-| `ModalLLMAdapter` | Modal L4 GPU 기반 LLM 호출 (Gemma 4 + BGE-M3). `LLMPort` 구현 |
+| `ModalLLMAdapter` | Modal L4 GPU 기반 LLM 호출 (Gemma 4). `LLMPort` 구현 |
+| `ModalEmbeddingAdapter` | Modal BGE-M3 임베딩 호출. `nodes_graph.EmbedderPort` 구현 (SSOT: REQ-003 PR #30) |
+| `HTTPSubAgentClient` | sub-agent VPC 내부 HTTP SSE 호출. `SubAgentClient` 구현 |
 | `NodeRegistryAdapter` | `nodes_graph`의 `NodeDefinitionRepository`를 감싸는 Facade. `NodeRegistry` 구현 |
 | `LangGraphOrchestrator` | LangGraph StateGraph 기반 내부 오케스트레이션 (13노드). 내부용, Port 아님 |
 
