@@ -11,18 +11,28 @@
 - [ ] Python 환경: `modal` 설치된 venv
 - [ ] Windows: `PYTHONUTF8=1` 환경 변수 필수 (modal CLI cp949 이슈)
 
-## 1. Modal Secrets 등록 (1회)
+## 1. Modal Secrets 등록 (1회 또는 토큰 갱신 시)
+
+시크릿은 리포 루트 `.env`에서 관리한다. 팀원 간 공유는 `.env` 본체를 1Password/Slack DM 같은 **안전 채널로 전달**하고, git에는 `.env.example`만 들어간다 (`.gitignore`로 본체 차단).
 
 ```bash
-# HuggingFace read token (rate-limit 회피)
-modal secret create huggingface-token HF_TOKEN=hf_xxx
+# 1. 템플릿 복사 후 본인이 받은 토큰으로 채움
+cp .env.example .env
+# .env 편집 — HF_TOKEN=hf_... 등
+
+# 2. .env 값을 Modal Secret으로 일괄 등록 (이미 있으면 --force로 덮어씀)
+python scripts/sync_modal_secrets.py
+
+# 또는 특정 시크릿만:
+python scripts/sync_modal_secrets.py huggingface-token
+
+# 시크릿 노출 없이 무엇이 실행될지 확인:
+python scripts/sync_modal_secrets.py --dry-run
 ```
 
-향후 LangSmith 트레이싱이 필요하면 별도로:
+스크립트는 표준 라이브러리만 사용 (python-dotenv 의존성 없음). 향후 LangSmith / GCS 등 추가 시 `scripts/sync_modal_secrets.py`의 `SECRET_MAPPINGS` 딕셔너리에 항목만 추가하면 됨.
 
-```bash
-modal secret create langsmith-api-key LANGCHAIN_API_KEY=ls_xxx
-```
+> ⚠️ Modal CLI 자체 인증(`modal token new`)은 별개 — 본 스크립트는 Modal Secret(컨테이너 런타임 시크릿)만 다룬다. CLI 인증은 각자 본인 토큰으로 1회 실행.
 
 ## 2. Modal Volume 모델 다운로드 (1회)
 
