@@ -1,0 +1,149 @@
+{
+  "domain_code": "hr",
+  "domain_name": "인사",
+  "description": "인사 자동화 — 온보딩·휴가·평가·기념일·퇴사",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "hr_onboarding_workflow",
+      "name": "신규 입사자 온보딩",
+      "category": "action",
+      "description": "신규 입사자 계정/권한 생성 + Slack 워크스페이스 초대 + 온보딩 자료 전송 + 멘토 매칭",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "employee_id": {"type": "string"},
+          "employee_email": {"type": "string", "format": "email"},
+          "department": {"type": "string"},
+          "manager_email": {"type": "string", "format": "email"},
+          "start_date": {"type": "string", "format": "date"},
+          "onboarding_doc_template_id": {"type": "string"}
+        },
+        "required": ["employee_id", "employee_email", "department", "manager_email", "start_date"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "account_created": {"type": "boolean"},
+          "slack_invite_sent": {"type": "boolean"},
+          "onboarding_doc_url": {"type": "string"},
+          "mentor_assigned": {"type": ["string", "null"]}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["slack", "google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "hr_pto_request",
+      "name": "휴가 신청 승인 워크플로우",
+      "category": "condition",
+      "description": "휴가 신청 → 잔여 일수 확인 → 매니저 승인 분기 → 캘린더 등록 + 팀 알림",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "employee_id": {"type": "string"},
+          "leave_type": {"type": "string", "enum": ["annual", "sick", "personal", "parental"]},
+          "start_date": {"type": "string", "format": "date"},
+          "end_date": {"type": "string", "format": "date"},
+          "reason": {"type": "string"},
+          "manager_email": {"type": "string", "format": "email"}
+        },
+        "required": ["employee_id", "leave_type", "start_date", "end_date", "manager_email"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "request_id": {"type": "string"},
+          "approval_status": {"type": "string", "enum": ["auto_approved", "pending", "approved", "rejected"]},
+          "remaining_days": {"type": "number"},
+          "calendar_event_id": {"type": ["string", "null"]}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "hr_review_reminder",
+      "name": "평가 시즌 알림",
+      "category": "action",
+      "description": "분기/반기/연간 평가 시즌에 대상자에게 자가평가/동료평가 자동 알림",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "review_cycle": {"type": "string", "enum": ["quarterly", "semi_annual", "annual"]},
+          "review_form_url": {"type": "string", "format": "uri"},
+          "deadline": {"type": "string", "format": "date"},
+          "target_employees": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["review_cycle", "review_form_url", "deadline"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "reminders_sent": {"type": "integer"},
+          "campaign_id": {"type": "string"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google", "slack"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "hr_anniversary_celebrate",
+      "name": "입사 기념일 축하",
+      "category": "action",
+      "description": "근속 N년 직원에게 자동 축하 메시지 발송 + 팀 채널 공유",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "employee_id": {"type": "string"},
+          "anniversary_years": {"type": "integer", "minimum": 1},
+          "team_channel": {"type": "string"},
+          "personal_message_template": {"type": "string"}
+        },
+        "required": ["employee_id", "anniversary_years", "team_channel"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "team_message_ts": {"type": "string"},
+          "dm_sent": {"type": "boolean"},
+          "celebrated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Low",
+      "required_connections": ["slack"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "hr_offboarding_workflow",
+      "name": "퇴사 처리 워크플로우",
+      "category": "action",
+      "description": "퇴사 예정자 권한 회수 일정 등록 + 자산 회수 알림 + Exit interview 예약",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "employee_id": {"type": "string"},
+          "last_working_day": {"type": "string", "format": "date"},
+          "manager_email": {"type": "string", "format": "email"},
+          "hr_lead_email": {"type": "string", "format": "email"},
+          "asset_list": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["employee_id", "last_working_day", "manager_email", "hr_lead_email"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "permission_revoke_scheduled_at": {"type": "string", "format": "date-time"},
+          "exit_interview_event_id": {"type": "string"},
+          "asset_recovery_tickets": {"type": "array", "items": {"type": "string"}}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    }
+  ]
+}

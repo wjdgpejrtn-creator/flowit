@@ -1,0 +1,144 @@
+{
+  "domain_code": "document_data",
+  "domain_name": "문서 & 데이터",
+  "description": "문서·데이터 처리 자동화 — OCR·양식 파싱·요약·번역·아카이브",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "document_data_ocr_extract",
+      "name": "OCR 텍스트 추출",
+      "category": "transform",
+      "description": "이미지/스캔 PDF에서 OCR로 텍스트 + bounding box 추출",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "document_url": {"type": "string", "format": "uri"},
+          "language_hints": {"type": "array", "items": {"type": "string"}, "default": ["ko", "en"]},
+          "include_bbox": {"type": "boolean", "default": true}
+        },
+        "required": ["document_url"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "extracted_text": {"type": "string"},
+          "blocks": {"type": "array", "items": {"type": "object"}},
+          "page_count": {"type": "integer"},
+          "confidence_avg": {"type": "number"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": [],
+      "service_type": null
+    },
+    {
+      "node_type": "document_data_form_parse",
+      "name": "양식 PDF 필드 파싱",
+      "category": "transform",
+      "description": "양식 PDF(계약서·신청서 등)에서 필드 → JSON 변환",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "pdf_url": {"type": "string", "format": "uri"},
+          "form_template_id": {"type": "string"},
+          "fields_to_extract": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["pdf_url", "form_template_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "extracted_fields": {"type": "object"},
+          "extraction_quality": {"type": "number"},
+          "missing_fields": {"type": "array", "items": {"type": "string"}}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": [],
+      "service_type": null
+    },
+    {
+      "node_type": "document_data_summary_generate",
+      "name": "AI 문서 요약",
+      "category": "ai",
+      "description": "긴 문서를 LLM으로 핵심 요약 + 키 포인트 추출 (JSON 강제 출력)",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "document_text": {"type": "string"},
+          "max_summary_length": {"type": "integer", "default": 500, "minimum": 100, "maximum": 5000},
+          "extract_key_points": {"type": "boolean", "default": true},
+          "model": {"type": "string", "default": "claude-haiku-4-5-20251001"}
+        },
+        "required": ["document_text"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "summary": {"type": "string"},
+          "key_points": {"type": "array", "items": {"type": "string"}},
+          "tokens_used": {"type": "integer"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["anthropic"],
+      "service_type": "anthropic"
+    },
+    {
+      "node_type": "document_data_translate",
+      "name": "다국어 번역",
+      "category": "ai",
+      "description": "문서 또는 텍스트 다국어 번역 (LLM 기반, 컨텍스트 유지)",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "source_text": {"type": "string"},
+          "source_lang": {"type": "string", "default": "auto"},
+          "target_lang": {"type": "string"},
+          "preserve_formatting": {"type": "boolean", "default": true},
+          "model": {"type": "string", "default": "claude-haiku-4-5-20251001"}
+        },
+        "required": ["source_text", "target_lang"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "translated_text": {"type": "string"},
+          "detected_source_lang": {"type": "string"},
+          "tokens_used": {"type": "integer"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["anthropic"],
+      "service_type": "anthropic"
+    },
+    {
+      "node_type": "document_data_archive_workflow",
+      "name": "문서 보관 워크플로우",
+      "category": "action",
+      "description": "문서 자동 분류 → 적절 폴더 보관 + 태깅 + 검색 인덱스 등록",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "document_url": {"type": "string", "format": "uri"},
+          "category_hint": {"type": ["string", "null"]},
+          "retention_policy": {"type": "string", "enum": ["1y", "3y", "5y", "7y", "permanent"]},
+          "drive_folder_id": {"type": "string"},
+          "auto_tags": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["document_url", "retention_policy", "drive_folder_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "archived_path": {"type": "string"},
+          "tags_applied": {"type": "array", "items": {"type": "string"}},
+          "expires_at": {"type": ["string", "null"], "format": "date"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    }
+  ]
+}
