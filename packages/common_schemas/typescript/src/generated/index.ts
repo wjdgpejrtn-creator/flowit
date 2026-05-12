@@ -8,6 +8,7 @@ export enum AgentMode {
   EDIT = "edit",
   GENERAL = "general",
   SECURITY = "security",
+  SKILL_BUILDER = "skill_builder",
 }
 
 export enum ExecutionStatus {
@@ -55,7 +56,7 @@ export interface DraftSpec {
 }
 
 export interface IntentResult {
-  intent: "clarify" | "draft" | "refine" | "propose";
+  intent: "clarify" | "draft" | "refine" | "propose" | "build_skill";
   confidence: number;
   analyzed_entities: Record<string, unknown>;
 }
@@ -109,6 +110,16 @@ export interface WorkflowSchema {
   created_via_session_id?: string | null;
 }
 
+export interface MemoryEntry {
+  entry_id: string;
+  user_id: string;
+  memory_type: "preference" | "correction" | "workflow_pattern" | "summary";
+  content: string;
+  metadata: Record<string, unknown>;
+  source_session_id?: string | null;
+  created_at: string;
+}
+
 export interface AgentState {
   session_id: string;
   user_id: string;
@@ -120,6 +131,61 @@ export interface AgentState {
   node_candidates: Array<NodeConfig>;
   workflow_draft?: WorkflowSchema | null;
   execution_status: ExecutionStatus;
+  personal_memory: Array<MemoryEntry>;
+}
+
+export interface AgentProtocolRequest {
+  session_id: string;
+  user_id: string;
+  state: AgentState;
+  personal_memory: Array<MemoryEntry>;
+  payload: Record<string, unknown>;
+  trace_id?: string | null;
+}
+
+export interface SessionFrame {
+  frame_type: "session";
+  session_id: string;
+  langgraph_thread_id: string;
+}
+
+export interface AgentNodeFrame {
+  frame_type: "agent_node";
+  agent_node_name: string;
+}
+
+export interface RationaleDeltaFrame {
+  frame_type: "rationale_delta";
+  delta: string;
+}
+
+export interface SlotFillQuestionFrame {
+  frame_type: "slot_fill_question";
+  question: string;
+  field_name: string;
+}
+
+export interface DraftSpecDeltaFrame {
+  frame_type: "draft_spec_delta";
+  delta: Record<string, unknown>;
+}
+
+export interface ResultFrame {
+  frame_type: "result";
+  intent: string;
+  payload: Record<string, unknown>;
+}
+
+export interface ErrorFrame {
+  frame_type: "error";
+  code: string;
+  message: string;
+}
+
+export interface AgentProtocolResponse {
+  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame>;
+  state_delta: Record<string, unknown>;
+  next_action: "continue" | "complete" | "error";
 }
 
 export interface AnalysisResult {
@@ -231,47 +297,8 @@ export interface PlaintextCredential {
   value: string;
 }
 
-export interface AgentNodeFrame {
-  frame_type: "agent_node";
-  agent_node_name: string;
-}
-
-export interface DraftSpecDeltaFrame {
-  frame_type: "draft_spec_delta";
-  delta: Record<string, unknown>;
-}
-
-export interface ErrorFrame {
-  frame_type: "error";
-  code: string;
-  message: string;
-}
-
-export interface RationaleDeltaFrame {
-  frame_type: "rationale_delta";
-  delta: string;
-}
-
-export interface ResultFrame {
-  frame_type: "result";
-  intent: string;
-  payload: Record<string, unknown>;
-}
-
 export interface SSEFrame {
   frame_type: string;
-}
-
-export interface SessionFrame {
-  frame_type: "session";
-  session_id: string;
-  langgraph_thread_id: string;
-}
-
-export interface SlotFillQuestionFrame {
-  frame_type: "slot_fill_question";
-  question: string;
-  field_name: string;
 }
 
 export interface ValidationErrorItem {
@@ -295,4 +322,4 @@ export interface NodeExecutionState {
   last_error?: string | null;
 }
 
-export type AnySSEFrame = AgentNodeFrame | DraftSpecDeltaFrame | ErrorFrame | RationaleDeltaFrame | ResultFrame | SessionFrame | SlotFillQuestionFrame;
+export type AnySSEFrame = SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame;
