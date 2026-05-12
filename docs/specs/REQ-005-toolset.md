@@ -140,7 +140,7 @@ class BaseTool(ABC):
 | High | 사람에게 직접 메시지 전송, 또는 임의 외부 시스템에 비가역적 변경 |
 | Restricted | 관리자 전용 시스템 조작 (현재 해당 없음) |
 
-#### 구체 Tool 구현체 (~15개 클래스)
+#### 구체 Tool 구현체 (14개 클래스)
 
 아래는 구현해야 할 구체 도구 목록이다. 모두 `BaseTool`을 상속한다.
 
@@ -158,11 +158,12 @@ class BaseTool(ABC):
 | **데이터 변환** | `DataMappingTool` | Low | 필드 매핑/리네이밍 |
 | **조건/제어** | `ConditionalTool` | Low | 조건 분기 (if/else 로직) |
 | **조건/제어** | `LoopTool` | Medium | 반복 실행 (배열 순회) |
-| **조건/제어** | `DelayTool` | Low | 대기/지연 (sleep) |
 | **알림** | `EmailSendTool` | High | 이메일 발송 |
 | **알림** | `SlackNotifyTool` | High | Slack 메시지 전송 (사람에게 직접, 비가역적) |
 
 > **구현 위치**: `adapters/tools/` 디렉토리에 카테고리별 서브폴더로 배치한다.
+>
+> **DelayTool 제외 사유**: `nodes_graph/domain/catalog/control/delay.py`와 기능 중복. 대기/지연은 nodes_graph 카탈로그 노드가 담당하며 toolset에는 구현하지 않는다.
 
 ---
 
@@ -174,6 +175,7 @@ class BaseTool(ABC):
 | RuntimeValidator 역할 | 모호 | "도구 실행 시점 I/O 스키마 검증"으로 명확화 | QAEvaluatorService(REQ-004)와 역할 중복 방지 |
 | NodeDef 참조 | 자체 타입 | `NodeConfig` (REQ-012 import) | 클래스명 통일 |
 | ErrorCode | 자체 정의 | REQ-012에서 import | 에러 코드 전역 통일 |
+| DelayTool | toolset 구현 | nodes_graph 카탈로그 노드로 대체 | `nodes_graph/domain/catalog/control/delay.py`와 기능 중복 — 14종으로 확정 |
 
 ---
 
@@ -295,8 +297,7 @@ modules/toolset/
 │       ├── control/
 │       │   ├── __init__.py
 │       │   ├── conditional_tool.py
-│       │   ├── loop_tool.py
-│       │   └── delay_tool.py
+│       │   └── loop_tool.py
 │       └── notification/
 │           ├── __init__.py
 │           ├── email_send_tool.py
