@@ -31,7 +31,7 @@ class JsonExtractNode(BaseNode[JsonExtractInput, JsonExtractOutput]):
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="JSON 값 추출",
-        category="데이터 처리",
+        category="transform",
         risk_level=RiskLevel.LOW,
         is_mvp=True,
     )
@@ -60,7 +60,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="JSON 값 추출",
-        category="데이터 처리",
+        category="transform",
         version="1.0.0",
         input_schema={
             "type": "object",

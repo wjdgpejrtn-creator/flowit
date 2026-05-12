@@ -61,7 +61,7 @@ class NodeDefinition:
     node_id: UUID
     node_type: str                          # e.g. "gmail_send", "slack_post", "llm_generate"
     name: str                               # 사람이 읽을 수 있는 이름
-    category: str                           # e.g. "데이터 소스", "AI / LLM", "트리거"
+    category: str                           # DB CHECK 영문 8종: "trigger"|"action"|"condition"|"transform"|"ai"|"integration"|"utility"|"output"
     version: str                            # semver e.g. "1.0.0"
     input_schema: dict[str, Any]            # JSON Schema
     output_schema: dict[str, Any]           # JSON Schema
@@ -476,18 +476,20 @@ modules/nodes_graph/
 
 ---
 
-## 노드 카탈로그 요약 (54종 MVP)
+## 노드 카탈로그 요약 (Sprint 3 1주차 박아름 작업분 — 41종)
+
+> 카테고리는 DB `node_definitions.category` CHECK 제약(영문 8종: `trigger`, `action`, `condition`, `transform`, `ai`, `integration`, `utility`, `output`)에 맞춤. Microsoft(Outlook/Teams/OneDrive), Notion, OpenAI는 데모 버전 후속 개발로 보류 (2026-05-11 조장 결정).
 
 | 카테고리 | MVP 종수 | 예시 node_type |
 |---------|:---:|------|
-| 데이터 소스 | 5 | `google_drive_read`, `google_sheets_read` |
-| 트리거 | 8 | `schedule_trigger`, `webhook_trigger`, `gmail_trigger` |
-| AI / LLM | 10 | `llm_generate`, `llm_summarize`, `embedding_create` |
-| 데이터 처리 | 14 | `json_transform`, `text_split`, `merge_data` |
-| 조건 / 제어 | 8 | `if_condition`, `switch_case`, `loop_for_each` |
-| 문서 생성 | 4 | `google_docs_write`, `pdf_generate` |
-| 커뮤니케이션 | 2 | `gmail_send`, `slack_post` |
-| 외부 API 연동 | 3 | `http_request`, `google_calendar_create` |
-| **합계** | **54** | |
+| `trigger` | 6 | `schedule_trigger`, `webhook_trigger`, `manual_trigger`, `event_trigger`, `api_poll_trigger`, `file_watch_trigger` |
+| `condition` | 8 | `if_condition`, `switch_case`, `loop_count`, `loop_list`, `retry`, `merge_branch`, `stop_workflow`, `delay` |
+| `transform` | 14 | `text_transform`, `json_extract`, `json_merge`, `csv_parse`, `csv_build`, `number_calc`, `date_format`, `list_filter`, `list_map`, `string_template`, `regex_extract`, `regex_replace`, `base64_encode`, `base64_decode` |
+| `ai` | 1 (+후속) | `anthropic_chat` (`openai_chat`는 데모 후속 보류) |
+| `integration` | 8 | `http_request`, `google_drive_read`, `google_sheets_read`, `postgresql_query`, `mysql_query`, `bigquery_query`, `google_calendar_create_event`, `linear_create_issue` |
+| `output` | 2 | `pdf_generate`, `google_docs_write` |
+| `action` | 2 (+후속) | `slack_post_message`, `gmail_send` (Microsoft `outlook_send`/`teams_post_message` 후속 보류) |
+| `utility` | 0 | (현재 박아름 카탈로그엔 utility 분류 없음) |
+| **합계** | **41** | (28 domain + 13 external) |
 
 각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다.

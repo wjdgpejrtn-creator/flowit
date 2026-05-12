@@ -33,7 +33,7 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="PDF 생성",
-        category="문서 생성",
+        category="output",
         risk_level=RiskLevel.LOW,
         is_mvp=True,
     )
@@ -67,7 +67,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="PDF 생성",
-        category="문서 생성",
+        category="output",
         version="1.0.0",
         input_schema={
             "type": "object",
