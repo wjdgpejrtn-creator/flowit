@@ -13,8 +13,11 @@ Layout:
   Populated once via `modal run main.py::download_model`.
 - `LLMBase`: @cls with @enter() boots llama-server subprocess + loads BGE-M3
   weights onto the same L4. Exposes:
-    * `generate()` as a Modal Cls method (RPC) for LLMPort
-    * `fastapi()` ASGI for /v1/embed, /v1/embed_batch, /v1/health (EmbeddingPort)
+    * `generate()` Modal Cls method (RPC) — text + vision (mmproj engages
+      when `images` kwarg is passed) + grammar-level JSON enforcement when
+      `format="json"`. Single OpenAI-compat code path via /v1/chat/completions.
+    * `fastapi()` ASGI for /v1/embed, /v1/embed_batch, /v1/health.
+      The health endpoint combines llama-server + BGE liveness; 503 on degrade.
 
 Deploy:
     PYTHONUTF8=1 modal deploy services/agents/llm-base/main.py
@@ -190,33 +193,82 @@ class LLMBase:
     # --- LLM RPC (LLMPort contract) ---------------------------------------
     @modal.method()
     def generate(self, prompt: str, **kwargs: object) -> dict[str, str]:
-        """Gemma 4 completion. Returns {"generated_text": str}.
+        """Gemma 4 completion (text + optional vision). Returns {"generated_text": str}.
+
+        Always routes through llama-server's OpenAI-compatible
+        /v1/chat/completions endpoint so the mmproj projector is engaged
+        whenever images are supplied — Gemma 4 is a vision model and we want
+        a single code path for both modalities.
 
         kwargs:
-            max_tokens (int, default 512) → llama.cpp n_predict
+            max_tokens (int, default 512)
             temperature (float, default 0.7)
-            format ("json"): enforce JSON output via llama.cpp json_schema mode
+            format ("json"): enforce JSON output. Combined with `json_schema`
+                kwarg (or default {"type": "object"}), llama.cpp constrains
+                generation at the grammar level — output is always parseable.
+            json_schema (dict): JSON schema for structured output (used when
+                format="json"). Sub-agent generate_structured passes
+                `schema.model_json_schema()` here.
+            images (list[str]): data URLs (e.g. "data:image/png;base64,...")
+                or http(s) URLs. Each becomes an image_url content block
+                in the user message — Gemma 4 multimodal path.
+            system (str): optional system prompt prepended as a system message.
         """
+        # Build OpenAI-compat messages. Image content blocks engage the mmproj
+        # projector; text-only path stays a simple string content.
+        images = kwargs.get("images") or []
+        if images:
+            content: list[dict[str, object]] = [{"type": "text", "text": prompt}]
+            for url in images:
+                content.append({"type": "image_url", "image_url": {"url": url}})
+            user_msg: dict[str, object] = {"role": "user", "content": content}
+        else:
+            user_msg = {"role": "user", "content": prompt}
+
+        messages: list[dict[str, object]] = []
+        system = kwargs.get("system")
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append(user_msg)
+
         body: dict[str, object] = {
-            "prompt": prompt,
-            "n_predict": int(kwargs.get("max_tokens", 512)),
+            "model": "gemma",
+            "messages": messages,
+            "max_tokens": int(kwargs.get("max_tokens", 512)),
             "temperature": float(kwargs.get("temperature", 0.7)),
         }
+
+        # JSON 강제 — llama.cpp grammar-level constraint. If the caller
+        # didn't pass an explicit schema we fall back to {"type":"object"}
+        # which guarantees parseable JSON without constraining the shape.
         if kwargs.get("format") == "json":
-            # llama.cpp's built-in JSON grammar — guarantees parseable JSON output
-            body["json_schema"] = {"type": "object"}
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "response",
+                    "schema": kwargs.get("json_schema") or {"type": "object"},
+                    "strict": True,
+                },
+            }
 
         r = self._http.post(
-            f"http://127.0.0.1:{LLAMA_SERVER_PORT}/completion",
+            f"http://127.0.0.1:{LLAMA_SERVER_PORT}/v1/chat/completions",
             json=body,
         )
         r.raise_for_status()
-        return {"generated_text": r.json().get("content", "")}
+        body_json = r.json()
+        content = (
+            body_json.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        return {"generated_text": content}
 
     # --- Embedding ASGI (EmbeddingPort contract) --------------------------
     @modal.asgi_app()
     def fastapi(self):
-        from fastapi import FastAPI
+        import httpx
+        from fastapi import FastAPI, HTTPException
         from pydantic import BaseModel
 
         api = FastAPI(title="llm-base", version="1.0")
@@ -228,8 +280,43 @@ class LLMBase:
             texts: list[str]
 
         @api.get("/v1/health")
-        def health() -> dict[str, str]:
-            return {"status": "ok", "model_llm": "gemma-4-26B-A4B", "model_embed": "bge-m3"}
+        def health() -> dict[str, object]:
+            """Combined health — both llama-server and BGE must be ready.
+
+            Sub-agents poll this to detect runtime degrade. Returns 200 only
+            when both subsystems answer; otherwise raises so the body returns
+            a 503 with the failing component named.
+            """
+            llm_ok = False
+            llm_err: str | None = None
+            try:
+                r = self._http.get(
+                    f"http://127.0.0.1:{LLAMA_SERVER_PORT}/health", timeout=2.0
+                )
+                llm_ok = r.status_code == 200
+                if not llm_ok:
+                    llm_err = f"llama-server returned {r.status_code}"
+            except httpx.HTTPError as exc:
+                llm_err = f"llama-server unreachable: {exc!r}"
+
+            embed_ok = self._bge is not None
+            embed_err = None if embed_ok else "BGE-M3 not loaded"
+
+            if not (llm_ok and embed_ok):
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "status": "degraded",
+                        "llm": {"ok": llm_ok, "error": llm_err},
+                        "embed": {"ok": embed_ok, "error": embed_err},
+                    },
+                )
+
+            return {
+                "status": "ok",
+                "model_llm": "gemma-4-26B-A4B (multimodal)",
+                "model_embed": "bge-m3",
+            }
 
         @api.post("/v1/embed")
         def embed(req: EmbedReq) -> dict[str, list[float]]:

@@ -47,18 +47,64 @@ PYTHONUTF8=1 modal deploy services/agents/llm-base/main.py
 
 ### 4.1 LLM — Modal RPC
 
+llama-server의 OpenAI-compatible `/v1/chat/completions`를 단일 경로로 사용합니다. text-only / 비전 / JSON 강제 모두 같은 RPC.
+
 ```python
 import modal
 
 cls = modal.Cls.from_name("llm-base", "LLMBase")
-result = await cls().generate.remote.aio(prompt="...", max_tokens=512, temperature=0.7)
+
+# (1) 기본 텍스트
+result = await cls().generate.remote.aio(
+    prompt="요약해줘: ...",
+    max_tokens=512,
+    temperature=0.7,
+)
 # → {"generated_text": "..."}
-```
 
-structured JSON 출력은 `format="json"` 추가:
+# (2) JSON 강제 — grammar-level constraint, 응답 무조건 parseable
+result = await cls().generate.remote.aio(
+    prompt="다음 문서에서 정책 카드를 추출:\n...",
+    format="json",
+    json_schema={
+        "type": "object",
+        "properties": {
+            "skills": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "condition": {"type": "string"},
+                        "action": {"type": "string"},
+                    },
+                    "required": ["id", "name", "condition", "action"],
+                },
+            },
+        },
+        "required": ["skills"],
+    },
+)
+# → {"generated_text": '{"skills":[{"id":"SK-001",...}]}'} — JSON parse 100% 성공
 
-```python
-result = await cls().generate.remote.aio(prompt="...", format="json")
+# (3) 비전 (Gemma 4 multimodal, mmproj projector 자동 engage)
+result = await cls().generate.remote.aio(
+    prompt="이 화면에서 사용자가 보고 있는 워크플로우 노드들을 나열해줘.",
+    images=["data:image/png;base64,iVBORw0KG..."],  # data URL or http(s) URL
+    max_tokens=512,
+)
+
+# (4) system prompt + 모든 옵션 조합
+result = await cls().generate.remote.aio(
+    prompt="...",
+    system="You are concise.",
+    images=[...],
+    format="json",
+    json_schema={...},
+    max_tokens=1024,
+    temperature=0.0,
+)
 ```
 
 > ⚠️ **PR #39 ModalLLMAdapter 후속 패치 필요**:
@@ -105,9 +151,10 @@ r = httpx.get(f"{base}/v1/health")
 ```bash
 URL="https://<workspace>--llm-base-llmbase-fastapi.modal.run"
 
-# health — 인증 불필요
+# health — 인증 불필요. llama-server + BGE 둘 다 살아있어야 200, 하나라도 죽으면 503
 curl -sS -m 300 "$URL/v1/health"
-# 기대: {"status":"ok","model_llm":"gemma-4-26B-A4B","model_embed":"bge-m3"}
+# 정상 기대: {"status":"ok","model_llm":"gemma-4-26B-A4B (multimodal)","model_embed":"bge-m3"}
+# 디그레이드: HTTP 503 + {"status":"degraded","llm":{"ok":false,"error":"..."},"embed":{...}}
 
 # embed
 curl -sS -m 300 -H "Content-Type: application/json" \
