@@ -65,6 +65,27 @@ DocumentBlock + personal_memory (list[MemoryEntry])
 
 **에러 코드 6종**: E_DOCUMENT_EMPTY / E_LLM_GENERATION_FAILED / E_LLM_RESPONSE_INVALID / E_NO_SKILLS_EXTRACTED / E_EMBEDDING_FAILED / E_UPSERT_FAILED.
 
+**[보강 — 5/12 추가 커밋 `9e4cbe3`]**
+
+LLM 응답 품질 향상 + 5/16 본격 구현 사전 가이드 작업:
+
+1. **프롬프트 빌더 강화**:
+   - few-shot 예시 1건 추가 (input SOP snippet + expected output 2개 SkillNode — action / condition 카테고리 다양성 시연)
+   - `output_format`(간단) → `output_schema`(완전 명세) 교체
+   - SkillNode 필수 필드 8종 + category enum (DB CHECK 8영문) + risk_level enum 명시
+   - llm-base의 grammar-level JSON 강제와 정합
+
+2. **wiring 가이드 docstring**:
+   - 5/16 본격 구현 시 5단계 절차 (LLMPort 구현 → EmbedderPort 구현 → Composition root 예시 → Modal app endpoint 라우팅 → 프롬프트 튜닝)
+   - 신정혜 어댑터 와이어링 코드 샘플 포함
+
+3. **신규 테스트 3건**:
+   - `test_prompt_includes_few_shot_example` — few-shot 2종 + 카테고리 다양성 검증
+   - `test_prompt_includes_explicit_output_schema` — SkillNode 필수 필드 + category/risk_level enum 정합
+   - `test_few_shot_example_categories_are_valid` — 예시 항목이 DB CHECK 8영문 내 유지
+
+PR #45 누적 테스트: 19 (16 + 3 신규).
+
 ### 2.3 PR #47 — alpha + beta 통합 (산업 + 직무 영역 baseline)
 
 박아름 브랜치 룰(REQ-004 새 sub-branch 만들지 말기) 적용으로 원래 분리 PR 계획을 한 PR로 통합.
@@ -164,13 +185,18 @@ DocumentBlock + personal_memory (list[MemoryEntry])
 
 | 모듈 | 테스트 수 |
 |------|---------|
-| ai_agent (전체) | **123 passed** |
-| └ skills_builder | 89 (seed validation 57 + use case 32) |
+| ai_agent (전체) | **113 passed** (PR #45 보강 후, PR #47 브랜치는 123) |
+| └ skills_builder (PR #45 보강 후) | 92 (seed validation 57 + use case 35) |
 | └ workflow_composer / personalization / orchestrator / domain | 34 |
 | nodes_graph (회귀) | 109 passed |
-| **합계** | **232 passed** |
+| **합계 (PR #47 머지 후)** | **232 passed** |
 
-회귀 0건.
+회귀 0건. 각 PR 브랜치 별 합산:
+- PR #44 브랜치: ai_agent 99 passed (followup 18)
+- PR #45 브랜치 (보강 후): ai_agent 113 passed (SOP 19)
+- PR #47 브랜치: ai_agent 123 passed (industry 18 + functional 14 + seed 57)
+
+브랜치 간 다 머지되면 통합 합산 약 130+ 가능 (중복 제외).
 
 ---
 
@@ -180,8 +206,10 @@ DocumentBlock + personal_memory (list[MemoryEntry])
 |--------|------|--------|
 | `feature/req-004-skills-builder-followup` | `3bb3c01` | refactor(skills_builder): PR #42 리뷰 후속 — uuid5 industry_code 결합 + 부분 실패 격리 정책 |
 | `feature/req-004-build-from-sop-skeleton` | `000ec72` | feat(skills_builder): BuildFromSOPUseCase skeleton (LLM 의존 분리, Mock 테스트) |
+| `feature/req-004-build-from-sop-skeleton` | `9e4cbe3` | feat(skills_builder): BuildFromSOPUseCase 프롬프트 강화 + wiring 가이드 |
 | `feature/req-004-skills-builder-ecommerce` | `41d02a2` | feat(skills_builder): e-commerce 산업 추가 + 기존 5종 비활성화 (alpha) |
 | `feature/req-004-skills-builder-ecommerce` | `c77ea33` | feat(skills_builder): 직무 영역 5종 baseline 추가 (beta, PR #47에 흡수) |
+| `feature/req-004-skills-builder-ecommerce` | `6ea0099` | docs(skills_builder): Sprint 3 1주차 2026-05-12 작업 보고서 추가 |
 
 ---
 
