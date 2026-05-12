@@ -1,10 +1,20 @@
 """Skills Builder — 산업 표준 default seed → NodeDefinition upsert.
 
 REQ-004 spec §2.2 BuildFromIndustryDefaultUseCase.
-Sprint 3 v1: seed 5개 산업 하드코딩. v2(Sprint 4+): LLM 자유 생성.
+
+활성 산업 (2026-05-12 조장 합의):
+  ecommerce — 데모 baseline. LG헬로비전 사내 자동화 시장 리서치 결과
+              직무 영역(CS/IT Ops/Document/HR/Marketing) 중심 + 산업은 e-commerce
+              한 축으로 baseline 구성.
+
+비활성 산업 (deprecated, 호출 막힘 / seed JSON 파일은 보존):
+  manufacturing / service / wholesale_retail / food / it
+  → Sprint 3 v1 베타로 작성된 5종. 데모 baseline에서는 제외.
+  → seed JSON 파일은 modules/ai_agent/seeds/industry_defaults/에 유지 (히스토리/복원용).
+  → execute() 호출 시 E_INDUSTRY_DEACTIVATED 에러 반환.
 
 flow:
-    industry_code (manufacturing/service/wholesale_retail/food/it)
+    industry_code (ecommerce only — active)
       → modules/ai_agent/seeds/industry_defaults/{code}.json 로드
       → 각 항목을 SkillNode로 검증
       → NodeDefinition으로 변환 (embedding 포함)
@@ -35,13 +45,17 @@ _SKILLS_BUILDER_NS = uuid5(UUID("00000000-0000-0000-0000-000000000000"), "workfl
 
 _DEFAULT_SEEDS_DIR = Path(__file__).resolve().parents[3] / "seeds" / "industry_defaults"
 
-_SUPPORTED_INDUSTRIES = {"manufacturing", "service", "wholesale_retail", "food", "it"}
+# 활성 산업 — 데모 baseline (2026-05-12 조장 합의)
+_ACTIVE_INDUSTRIES = {"ecommerce"}
+
+# 비활성 산업 — Sprint 3 v1 베타 5종. seed 파일 보존, 호출 막힘
+_DEPRECATED_INDUSTRIES = {"manufacturing", "service", "wholesale_retail", "food", "it"}
 
 
 class BuildFromIndustryDefaultUseCase:
     """산업 default seed → nodes_graph 카탈로그 upsert 일괄 처리.
 
-    Sprint 3 v1: 5개 산업 하드코딩 (manufacturing/service/wholesale_retail/food/it).
+    Sprint 3 baseline: ecommerce 1종 활성. 기존 5종은 deprecated.
     """
 
     def __init__(
@@ -60,11 +74,23 @@ class BuildFromIndustryDefaultUseCase:
         industry_code: str,
     ) -> AsyncGenerator[SSEFrame, None]:
         """seed JSON 로드 → SkillNode 검증 → NodeDefinition upsert."""
-        # 1. industry_code 검증
-        if industry_code not in _SUPPORTED_INDUSTRIES:
+        # 1. industry_code 검증 — 활성/비활성/미지원 3분기
+        if industry_code in _DEPRECATED_INDUSTRIES:
+            yield ErrorFrame(
+                code="E_INDUSTRY_DEACTIVATED",
+                message=(
+                    f"산업 코드 '{industry_code}'는 비활성화 상태입니다 (Sprint 3 v1 베타, "
+                    f"2026-05-12 조장 결정으로 데모 baseline에서 제외). "
+                    f"활성 산업: {sorted(_ACTIVE_INDUSTRIES)}. "
+                    f"seed JSON 파일은 modules/ai_agent/seeds/industry_defaults/에 보존됨"
+                ),
+            )
+            return
+
+        if industry_code not in _ACTIVE_INDUSTRIES:
             yield ErrorFrame(
                 code="E_INDUSTRY_NOT_SUPPORTED",
-                message=f"산업 코드 '{industry_code}'는 지원하지 않습니다. 가능: {sorted(_SUPPORTED_INDUSTRIES)}",
+                message=f"산업 코드 '{industry_code}'는 지원하지 않습니다. 활성: {sorted(_ACTIVE_INDUSTRIES)}",
             )
             return
 
