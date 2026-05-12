@@ -243,3 +243,103 @@ async def test_functional_it_ops_no_clash_with_legacy_it_industry():
         assert node_def.node_type.startswith("it_ops_")
         # 비활성 it 산업 prefix "it_" 와 명확히 구분
         assert not node_def.node_type.startswith("it_deploy")  # 비활성 it 산업 노드명 아님
+
+
+# ----------------------------------------------------------------------
+# 부분 실패 격리 정책 (PR #44 BuildFromIndustryDefaultUseCase 패턴 동일)
+# ----------------------------------------------------------------------
+
+
+class _FailingEmbedder(EmbedderPort):
+    """N번째 호출에서 실패 — embed 격리 정책 검증용."""
+
+    def __init__(self, fail_at: int = 2) -> None:
+        self.calls = 0
+        self.fail_at = fail_at
+
+    async def embed(self, text: str) -> list[float]:
+        self.calls += 1
+        if self.calls == self.fail_at:
+            raise RuntimeError(f"embed simulated failure at call #{self.calls}")
+        return [0.1] * 768
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [[0.1] * 768 for _ in texts]
+
+
+class _FailingRepo(NodeDefinitionRepository):
+    """N번째 upsert에서 실패 — upsert 격리 정책 검증용."""
+
+    def __init__(self, fail_at: int = 2) -> None:
+        self.store: dict[UUID, NodeDefinition] = {}
+        self.calls = 0
+        self.fail_at = fail_at
+
+    async def upsert(self, definition: NodeDefinition) -> NodeDefinition:
+        self.calls += 1
+        if self.calls == self.fail_at:
+            raise RuntimeError(f"upsert simulated failure at call #{self.calls}")
+        self.store[definition.node_id] = definition
+        return definition
+
+    async def list_all(self, mvp_only: bool = False) -> list[NodeDefinition]:
+        return list(self.store.values())
+
+    async def get_by_id(self, node_id: UUID) -> NodeDefinition | None:
+        return self.store.get(node_id)
+
+    async def search_by_embedding(self, query_embedding: list[float], limit: int = 10) -> list[NodeDefinition]:
+        return list(self.store.values())[:limit]
+
+
+@pytest.mark.asyncio
+async def test_embed_failure_isolates_single_node():
+    """embed 실패 → 해당 노드만 스킵, 나머지 계속, failed_node_types 기록."""
+    repo = _InMemoryRepo()
+    embedder = _FailingEmbedder(fail_at=2)  # 2번째 노드 embed 실패
+    use_case = BuildFromFunctionalDomainUseCase(repo, embedder)
+
+    frames = [f async for f in use_case.execute(uuid4(), "hr")]
+    result = frames[-1]
+
+    assert isinstance(result, ResultFrame)
+    assert result.payload["failed_count"] == 1
+    assert len(result.payload["failed_node_types"]) == 1
+    assert result.payload["failed_node_types"][0]["stage"] == "embed"
+    # 다른 노드는 정상 upsert (5종 중 1개 실패 → 최소 4개 성공)
+    assert result.payload["upserted_count"] >= 4
+
+    error_frames = [f for f in frames if isinstance(f, ErrorFrame)]
+    assert any(f.code == "E_EMBEDDING_FAILED" for f in error_frames)
+
+
+@pytest.mark.asyncio
+async def test_upsert_failure_isolates_single_node():
+    """upsert 실패 → 해당 노드만 스킵, 나머지 계속, failed_node_types 기록."""
+    repo = _FailingRepo(fail_at=3)  # 3번째 upsert 실패
+    use_case = BuildFromFunctionalDomainUseCase(repo, _FakeEmbedder())
+
+    frames = [f async for f in use_case.execute(uuid4(), "hr")]
+    result = frames[-1]
+
+    assert isinstance(result, ResultFrame)
+    assert result.payload["failed_count"] == 1
+    assert result.payload["failed_node_types"][0]["stage"] == "upsert"
+    assert result.payload["upserted_count"] >= 4
+
+    error_frames = [f for f in frames if isinstance(f, ErrorFrame)]
+    assert any(f.code == "E_UPSERT_FAILED" for f in error_frames)
+
+
+@pytest.mark.asyncio
+async def test_result_frame_has_failed_fields_in_normal_case():
+    """정상 케이스에도 failed_count + failed_node_types 필드 존재."""
+    repo = _InMemoryRepo()
+    use_case = BuildFromFunctionalDomainUseCase(repo, _FakeEmbedder())
+
+    frames = [f async for f in use_case.execute(uuid4(), "marketing")]
+    result = frames[-1]
+
+    assert isinstance(result, ResultFrame)
+    assert result.payload["failed_count"] == 0
+    assert result.payload["failed_node_types"] == []
