@@ -38,7 +38,7 @@ class HttpRequestNode(BaseNode[HttpRequestInput, HttpRequestOutput]):
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="HTTP 요청",
-        category="외부 API 연동",
+        category="integration",
         risk_level=RiskLevel.HIGH,
         is_mvp=True,
     )
@@ -71,7 +71,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="HTTP 요청",
-        category="외부 API 연동",
+        category="integration",
         version="1.0.0",
         input_schema={
             "type": "object",

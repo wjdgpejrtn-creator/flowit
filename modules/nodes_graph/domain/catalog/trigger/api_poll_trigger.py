@@ -34,7 +34,7 @@ class ApiPollTriggerNode(BaseNode[ApiPollTriggerInput, ApiPollTriggerOutput]):
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="API 폴링 트리거",
-        category="트리거",
+        category="trigger",
         risk_level=RiskLevel.LOW,
         is_mvp=True,
     )
@@ -60,7 +60,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="API 폴링 트리거",
-        category="트리거",
+        category="trigger",
         version="1.0.0",
         input_schema={
             "type": "object",

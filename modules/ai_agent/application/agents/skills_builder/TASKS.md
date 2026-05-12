@@ -18,10 +18,10 @@ nodes_graph의 NodeDefinition으로 변환 → 사용자 워크스페이스의 s
 
 - [ ] `BuildFromSOPUseCase.execute()` 구현
   - DocumentBlock 입력 → LLM으로 단계별 작업 추출 → NodeDefinition 변환
-  - nodes_graph.NodeDefinitionRepository.save() 호출
+  - nodes_graph.NodeDefinitionRepository.upsert() 호출
 - [ ] `BuildFromIndustryDefaultUseCase.execute()` 구현
   - IndustryCode (제조/서비스/도소매/음식점/IT) → seed에서 NodeDefinition 로드
-- [ ] 산업 default seed 5개 작성 (`database/seeds/industry_defaults/`)
+- [ ] 산업 default seed 5개 작성 (`modules/ai_agent/seeds/industry_defaults/`)
   - 각 산업당 핵심 워크플로우 노드 5~10개
 - [ ] Modal app 작성 (`adapters/modal/skills_builder_app.py`)
 - [ ] Modal 배포

@@ -34,7 +34,7 @@ class IfConditionNode(BaseNode[IfConditionInput, IfConditionOutput]):
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="조건 분기",
-        category="조건 / 제어",
+        category="condition",
         risk_level=RiskLevel.LOW,
         is_mvp=True,
     )
@@ -79,7 +79,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="조건 분기",
-        category="조건 / 제어",
+        category="condition",
         version="1.0.0",
         input_schema={
             "type": "object",

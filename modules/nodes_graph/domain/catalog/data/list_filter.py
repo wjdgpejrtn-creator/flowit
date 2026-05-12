@@ -33,7 +33,7 @@ class ListFilterNode(BaseNode[ListFilterInput, ListFilterOutput]):
     metadata = NodeMetadata(
         node_id=_NODE_ID,
         name="리스트 필터",
-        category="데이터 처리",
+        category="transform",
         risk_level=RiskLevel.LOW,
         is_mvp=True,
     )
@@ -75,7 +75,7 @@ def get_node_definition() -> NodeDefinition:
         node_id=_NODE_ID,
         node_type=_NODE_TYPE,
         name="리스트 필터",
-        category="데이터 처리",
+        category="transform",
         version="1.0.0",
         input_schema={
             "type": "object",
