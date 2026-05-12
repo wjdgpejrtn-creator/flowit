@@ -14,48 +14,44 @@ from common_schemas.document import FileMeta
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures"
 
+SUFFIX_TO_MIME = {
+    ".pdf":  "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".csv":  "text/csv",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".hwp":  "application/x-hwp",
+    ".hwpx": "application/hwp+zip",
+    ".md":   "text/markdown",
+}
 
-# ──────────────────────────────────────────
-# FileMeta 픽스처
-# ──────────────────────────────────────────
 
 def make_file_meta(file_path: Path) -> FileMeta:
-    suffix_to_mime = {
-        ".pdf":  "application/pdf",
-        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    }
     return FileMeta(
         file_name=file_path.name,
         file_type=file_path.suffix.lstrip("."),
-        mime_type=suffix_to_mime[file_path.suffix],
+        mime_type=SUFFIX_TO_MIME[file_path.suffix.lower()],
         file_size=file_path.stat().st_size,
     )
 
 
+def get_fixtures(ext: str) -> list[str]:
+    """fixtures 폴더에서 확장자별 파일 자동 수집."""
+    return [f.name for f in sorted(FIXTURES.glob(f"*.{ext}"))]
+
+
 # ──────────────────────────────────────────
-# PDF 파서 테스트
+# PDF
 # ──────────────────────────────────────────
 
-@pytest.mark.parametrize("filename", [
-    "sample1.pdf",
-    "sample2.pdf",
-    "sample3.pdf",
-    "sample4.pdf",
-    "sample5.pdf",
-])
+@pytest.mark.parametrize("filename", get_fixtures("pdf"))
 def test_pdf_parser(filename):
-    """PDF 파서 — 실제 파일 파싱 및 블록 추출 확인."""
     from doc_parser.adapters.parsers.pdf_parser import PdfParser
 
     file_path = FIXTURES / filename
-    if not file_path.exists():
-        pytest.skip(f"{filename} 없음")
-
     parser = PdfParser()
     file_meta = make_file_meta(file_path)
 
-    # 스캔 PDF 여부 먼저 확인
     is_scanned = parser.is_scanned_pdf(str(file_path))
     print(f"\n{filename} — 스캔PDF: {is_scanned}")
 
@@ -65,7 +61,6 @@ def test_pdf_parser(filename):
         return
 
     result = parser.parse(str(file_path), file_meta)
-
     print(f"블록 수: {len(result.blocks)}")
     print(f"heading 수: {sum(1 for b in result.blocks if b.block_type == 'heading')}")
     print(f"table 수: {sum(1 for b in result.blocks if b.block_type == 'table')}")
@@ -75,22 +70,19 @@ def test_pdf_parser(filename):
 
 
 # ──────────────────────────────────────────
-# DOCX 파서 테스트
+# DOCX
 # ──────────────────────────────────────────
 
-def test_docx_parser():
-    """DOCX 파서 — 실제 파일 파싱 및 블록 추출 확인."""
+@pytest.mark.parametrize("filename", get_fixtures("docx"))
+def test_docx_parser(filename):
     from doc_parser.adapters.parsers.docx_parser import DocxParser
 
-    file_path = FIXTURES / "sample.docx"
-    if not file_path.exists():
-        pytest.skip("sample.docx 없음")
-
+    file_path = FIXTURES / filename
     parser = DocxParser()
     file_meta = make_file_meta(file_path)
     result = parser.parse(str(file_path), file_meta)
 
-    print(f"\nsample.docx — 블록 수: {len(result.blocks)}")
+    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
     print(f"heading 수: {sum(1 for b in result.blocks if b.block_type == 'heading')}")
 
     assert result.document_id is not None
@@ -98,35 +90,124 @@ def test_docx_parser():
 
 
 # ──────────────────────────────────────────
-# XLSX 파서 테스트
+# XLSX
 # ──────────────────────────────────────────
 
-def test_xlsx_parser():
-    """XLSX 파서 — 실제 파일 파싱 및 테이블 블록 확인."""
+@pytest.mark.parametrize("filename", get_fixtures("xlsx"))
+def test_xlsx_parser(filename):
     from doc_parser.adapters.parsers.xlsx_parser import XlsxParser
 
-    file_path = FIXTURES / "sample.xlsx"
-    if not file_path.exists():
-        pytest.skip("sample.xlsx 없음")
-
+    file_path = FIXTURES / filename
     parser = XlsxParser()
     file_meta = make_file_meta(file_path)
     result = parser.parse(str(file_path), file_meta)
 
-    print(f"\nsample.xlsx — 블록 수: {len(result.blocks)}")
-    print(f"시트 수: {len(result.file_meta.sheet_meta or [])}")
-
+    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
     assert result.document_id is not None
     assert len(result.blocks) > 0
     assert all(b.block_type == "table" for b in result.blocks)
 
 
 # ──────────────────────────────────────────
-# PII 마스킹 통합 테스트
+# CSV
+# ──────────────────────────────────────────
+
+@pytest.mark.parametrize("filename", get_fixtures("csv"))
+def test_csv_parser(filename):
+    from doc_parser.adapters.parsers.csv_parser import CsvParser
+
+    file_path = FIXTURES / filename
+    parser = CsvParser()
+    file_meta = make_file_meta(file_path)
+    result = parser.parse(str(file_path), file_meta)
+
+    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+    assert result.document_id is not None
+    assert len(result.blocks) > 0
+
+
+# ──────────────────────────────────────────
+# PPTX
+# ──────────────────────────────────────────
+
+@pytest.mark.parametrize("filename", get_fixtures("pptx"))
+def test_pptx_parser(filename):
+    from doc_parser.adapters.parsers.pptx_parser import PptxParser
+
+    file_path = FIXTURES / filename
+    parser = PptxParser()
+    file_meta = make_file_meta(file_path)
+    result = parser.parse(str(file_path), file_meta)
+
+    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+    assert result.document_id is not None
+    assert len(result.blocks) > 0
+
+
+# ──────────────────────────────────────────
+# HWP
+# ──────────────────────────────────────────
+
+@pytest.mark.parametrize("filename", get_fixtures("hwp"))
+def test_hwp_parser(filename):
+    from doc_parser.adapters.parsers.hwp_parser import HwpParser
+
+    file_path = FIXTURES / filename
+    parser = HwpParser()
+    file_meta = make_file_meta(file_path)
+
+    try:
+        result = parser.parse(str(file_path), file_meta)
+        print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+        assert result.document_id is not None
+        assert len(result.blocks) > 0
+    except RuntimeError as e:
+        if "E0205" in str(e):
+            pytest.skip(f"HWP 제한: {e}")
+        raise
+
+
+# ──────────────────────────────────────────
+# HWPX
+# ──────────────────────────────────────────
+
+@pytest.mark.parametrize("filename", get_fixtures("hwpx"))
+def test_hwpx_parser(filename):
+    from doc_parser.adapters.parsers.hwpx_parser import HwpxParser
+
+    file_path = FIXTURES / filename
+    parser = HwpxParser()
+    file_meta = make_file_meta(file_path)
+    result = parser.parse(str(file_path), file_meta)
+
+    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+    assert result.document_id is not None
+    assert len(result.blocks) > 0
+
+
+# ──────────────────────────────────────────
+# Markdown
+# ──────────────────────────────────────────
+
+@pytest.mark.parametrize("filename", get_fixtures("md"))
+def test_markdown_parser(filename):
+    from doc_parser.adapters.parsers.markdown_parser import MarkdownParser
+
+    file_path = FIXTURES / filename
+    parser = MarkdownParser()
+    file_meta = make_file_meta(file_path)
+    result = parser.parse(str(file_path), file_meta)
+
+    print(f"\n{filename} — 블록 수: {len(result.blocks)}")
+    assert result.document_id is not None
+    assert len(result.blocks) > 0
+
+
+# ──────────────────────────────────────────
+# PII 마스킹
 # ──────────────────────────────────────────
 
 def test_pii_masking_on_real_pdf():
-    """실제 PDF 파싱 후 PII 마스킹 적용."""
     from doc_parser.adapters.parsers.pdf_parser import PdfParser
     from doc_parser.domain.services.pii_masking import PIIMaskingService
 
