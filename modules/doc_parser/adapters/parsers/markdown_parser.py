@@ -39,7 +39,7 @@ class MarkdownParser(ParserPort):
     MIME_TYPE = "text/markdown"
 
     def __init__(self) -> None:
-        self._md = MarkdownIt()
+        self._md = MarkdownIt().enable("table")
 
     def parse(
         self,
@@ -143,6 +143,31 @@ class MarkdownParser(ParserPort):
                         block_type="code",
                         content=content,
                         page=page_num,
+                        source_ref=SourceRef(page=page_num, block_index=block_index),
+                    ))
+                    block_index += 1
+
+            # table
+            if token.type == "table_open":
+                rows = []
+                while i < len(tokens) and tokens[i].type != "table_close":
+                    if tokens[i].type == "tr_open":
+                        cells = []
+                        i += 1
+                        while i < len(tokens) and tokens[i].type != "tr_close":
+                            if tokens[i].type == "inline":
+                                cells.append(tokens[i].content.strip())
+                            i += 1
+                        if cells:
+                            rows.append(cells)
+                    i += 1
+                if rows:
+                    blocks.append(ContentBlock(
+                        block_id=uuid4(),
+                        block_type="table",
+                        content=None,
+                        page=page_num,
+                        table=rows,
                         source_ref=SourceRef(page=page_num, block_index=block_index),
                     ))
                     block_index += 1
