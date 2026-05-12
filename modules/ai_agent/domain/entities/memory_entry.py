@@ -1,23 +1,11 @@
+"""MemoryEntry는 common_schemas의 SSOT를 재노출만 한다.
+
+REQ-004 spec §1: ``from common_schemas import MemoryEntry``가 정식 경로.
+ai_agent.domain.entities 경로는 기존 코드 호환성을 위해 유지하지만 신규 코드는
+common_schemas에서 직접 import할 것.
+"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Literal, Optional
-from uuid import UUID, uuid4
+from common_schemas import MemoryEntry, MemoryType
 
-from common_schemas.types import UtcDatetime
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class MemoryEntry(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    entry_id: UUID = Field(default_factory=uuid4)
-    user_id: UUID
-    memory_type: Literal["preference", "correction", "workflow_pattern", "summary"]
-    content: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    source_session_id: Optional[UUID] = None
-    created_at: UtcDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-    def is_ephemeral(self) -> bool:
-        return not self.content.strip()
+__all__ = ["MemoryEntry", "MemoryType"]

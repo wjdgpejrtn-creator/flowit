@@ -5,6 +5,15 @@ import pytest
 from ai_agent.domain.entities import ConversationMessage, MemoryEntry
 
 
+class TestMemoryEntrySSOT:
+    """MemoryEntry는 common_schemas의 SSOT를 재노출만 한다."""
+
+    def test_is_common_schemas_class(self):
+        from common_schemas import MemoryEntry as CSMemoryEntry
+
+        assert MemoryEntry is CSMemoryEntry
+
+
 class TestMemoryEntry:
     def test_create_without_session(self):
         entry = MemoryEntry(
