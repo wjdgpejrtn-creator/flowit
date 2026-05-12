@@ -3,7 +3,6 @@ from .api.http_request_tool import HttpRequestTool
 from .api.rest_api_tool import RestApiTool
 from .api.webhook_tool import WebhookTool
 from .control.conditional_tool import ConditionalTool
-from .control.delay_tool import DelayTool
 from .control.loop_tool import LoopTool
 from .file.file_read_tool import FileReadTool
 from .file.file_transform_tool import FileTransformTool
@@ -27,7 +26,6 @@ __all__ = [
     "DataMappingTool",
     "ConditionalTool",
     "LoopTool",
-    "DelayTool",
     "EmailSendTool",
     "SlackNotifyTool",
 ]

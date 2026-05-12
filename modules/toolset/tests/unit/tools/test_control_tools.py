@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import patch
-
 import pytest
 
 from toolset.adapters.tools.control.conditional_tool import ConditionalTool
-from toolset.adapters.tools.control.delay_tool import DelayTool
 from toolset.adapters.tools.control.loop_tool import LoopTool
 from toolset.domain.exceptions import ToolExecutionError
 
@@ -89,29 +85,3 @@ class TestLoopTool:
         with pytest.raises(ToolExecutionError):
             await LoopTool().execute({"items": "not a list"})
 
-
-# ── DelayTool ─────────────────────────────────────────────────────────────────
-
-class TestDelayTool:
-    @pytest.mark.asyncio
-    async def test_delay_calls_sleep(self):
-        with patch("asyncio.sleep") as mock_sleep:
-            mock_sleep.return_value = None
-            result = await DelayTool().execute({"seconds": 2})
-
-        mock_sleep.assert_called_once_with(2)
-        assert result["delayed_seconds"] == 2
-        assert result["completed"] is True
-
-    @pytest.mark.asyncio
-    async def test_zero_delay(self):
-        with patch("asyncio.sleep") as mock_sleep:
-            mock_sleep.return_value = None
-            result = await DelayTool().execute({"seconds": 0})
-
-        assert result["completed"] is True
-
-    @pytest.mark.asyncio
-    async def test_exceeds_max_raises(self):
-        with pytest.raises(ToolExecutionError):
-            await DelayTool().execute({"seconds": 301})

@@ -12,7 +12,7 @@ from ....domain.exceptions import ToolExecutionError
 
 
 class HttpRequestTool(BaseTool):
-    name = "http_request"
+    name = "http_request_tool"
     description = "범용 HTTP 요청 (임의 URL, 모든 메서드, 비가역적)"
     version = "1.0.0"
     risk_level = RiskLevel.HIGH
