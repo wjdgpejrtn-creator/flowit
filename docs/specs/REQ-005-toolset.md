@@ -54,7 +54,7 @@
 | 포트(ABC) | 설명 | 주요 메서드 | Adapter 구현 위치 |
 |-----------|------|-------------|-------------------|
 | `ToolRegistry` | 등록된 도구 목록 관리 | `get(tool_name: str) -> BaseTool`, `list_all() -> list[ToolMetadata]`, `list_by_category(category: str) -> list[ToolMetadata]` | `adapters/tool_registry_adapter.py` |
-| `SecureConnectorPort` | 외부 API 호출 시 인증 주입 | `connect(endpoint: str, credentials: PlaintextCredential, **kwargs) -> httpx.Response` | `adapters/secure_connector.py` |
+| `SecureConnectorPort` | 외부 API 호출 시 인증 주입 | `connect(endpoint: str, credentials: PlaintextCredential, **kwargs) -> ConnectorResponse` | `adapters/secure_connector.py` |
 | `ToolExecutionRepository` | 실행 이력 저장 | `save(record: ToolExecutionRecord) -> None`, `find_by_tool(tool_name: str, limit: int) -> list[ToolExecutionRecord]` | `modules/storage/repositories/` |
 
 ---

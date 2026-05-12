@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..adapters.catalog.external.anthropic_chat import get_node_definition as _anthropic_chat
+from ..adapters.catalog.tools.toolset_nodes import get_node_definitions as _toolset_node_definitions
 from ..adapters.catalog.external.bigquery_query import get_node_definition as _bigquery_query
 from ..adapters.catalog.external.gmail_send import get_node_definition as _gmail_send
 from ..adapters.catalog.external.google_calendar_create_event import get_node_definition as _google_calendar_create_event
@@ -23,7 +24,7 @@ def get_all_node_definitions() -> list[NodeDefinition]:
     카테고리는 DB CHECK 영문 8종(trigger/action/condition/transform/ai/integration/utility/output)
     안에서 지정. Microsoft(Outlook/Teams/OneDrive) / Notion / OpenAI는 데모 후속 개발로 보류.
 
-    구성 (총 41종):
+    구성 (총 55종):
         - domain/catalog/: 28종 (data 14 + control 8 + trigger 6)
         - adapters/catalog/external/ 기타 2종: http_request(integration), pdf_generate(output)
         - adapters/catalog/external/ Communication 2종: slack_post_message, gmail_send (action)
@@ -31,9 +32,11 @@ def get_all_node_definitions() -> list[NodeDefinition]:
         - adapters/catalog/external/ Data 3종: postgresql_query, mysql_query, bigquery_query (integration)
         - adapters/catalog/external/ AI/ML 1종: anthropic_chat (ai)
         - adapters/catalog/external/ Productivity 2종: google_calendar_create_event, linear_create_issue (integration)
+        - adapters/catalog/tools/ REQ-005 toolset 14종: api 4 + file 3 + transform 4 + control 2 + notification 2
     """
     return [
         *get_domain_node_definitions(),
+        *_toolset_node_definitions(),
         _http_request(),
         _pdf_generate(),
         _slack_post_message(),
