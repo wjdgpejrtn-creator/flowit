@@ -6,10 +6,11 @@ from typing import Any, TypeVar
 
 import httpx
 import modal
+from pydantic import BaseModel
 
 from ...domain.ports.llm_port import LLMPort
 
-T = TypeVar("T")
+T = TypeVar("T", bound=BaseModel)
 
 # Modal cold start < 60s + P95 inference < 8s → 90s total
 _DEFAULT_TIMEOUT = 90.0
@@ -44,7 +45,7 @@ class ModalLLMAdapter(LLMPort):
         return result["generated_text"]
 
     async def generate_structured(self, prompt: str, schema: type[T]) -> T:
-        schema_json = schema.model_json_schema()  # type: ignore[attr-defined]
+        schema_json = schema.model_json_schema()
         augmented = (
             f"{prompt}\n\n"
             "아래 JSON 스키마에 맞는 JSON 객체만 반환하세요. "
@@ -52,10 +53,12 @@ class ModalLLMAdapter(LLMPort):
             f"{json.dumps(schema_json, ensure_ascii=False)}"
         )
         result: dict[str, Any] = await self._modal_fn().remote.aio(
-            prompt=augmented, format="json"
+            prompt=augmented,
+            format="json",
+            json_schema=schema_json,
         )
         raw: str = result["generated_text"]
-        return schema.model_validate_json(raw)  # type: ignore[attr-defined]
+        return schema.model_validate_json(raw)
 
     async def aclose(self) -> None:
         await self._client.aclose()
