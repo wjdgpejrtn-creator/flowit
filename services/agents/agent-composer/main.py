@@ -62,16 +62,15 @@ class AgentComposer:
         sa_path.write_text(sa_payload, encoding="utf-8")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
 
-        # Connector는 async 컨텍스트(uvicorn 루프)에서 lazy 초기화
-        # boot()는 sync이므로 여기서 Connector() 생성 시 루프 불일치 발생
+        # AsyncConnector: 별도 스레드 루프 없음 → ConnectorLoopError 없음
+        # Connector(sync)는 내부에 별도 스레드+루프를 생성해 루프 불일치 유발
         self._connector = None
 
         async def getconn():
-            from google.cloud.sql.connector import Connector, IPTypes
+            from google.cloud.sql.connector import AsyncConnector, IPTypes
             if self._connector is None:
-                # 첫 호출 시 uvicorn 이벤트 루프에서 초기화 → 루프 일치
-                self._connector = Connector()
-            return await self._connector.connect_async(
+                self._connector = AsyncConnector()
+            return await self._connector.connect(
                 os.environ["CLOUD_SQL_INSTANCE"],
                 "asyncpg",
                 user=os.environ["DB_IAM_USER"],
@@ -124,7 +123,7 @@ class AgentComposer:
         if getattr(self, "_engine", None):
             asyncio.run(self._engine.dispose())
         if getattr(self, "_connector", None):
-            asyncio.run(self._connector.close_async())
+            asyncio.run(self._connector.close())
 
     @modal.asgi_app()
     def fastapi(self):
