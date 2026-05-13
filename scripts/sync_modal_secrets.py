@@ -27,11 +27,33 @@ DEFAULT_ENV_FILE = REPO_ROOT / ".env"
 # Maps Modal Secret name → list of (env_var_in_dotenv, key_inside_modal_secret).
 # Modal lets a single Secret hold multiple env vars; we keep one var per
 # Secret here for clarity. Add new entries as new sub-agents need them.
+# Sub-agent Modal apps connect to Cloud SQL via IAM authentication
+# (cloud-sql-python-connector). Each sub-agent gets two Modal Secrets:
+#   1. agent-<name>-secret   — app-specific config (LLM/Embedding URL + DB target)
+#   2. cloudsql-iam-sa       — shared GCP service-account JSON (one-time, by 조장)
+#
+# Adding a new sub-agent: append "agent-<name>-secret" with the same 5 keys.
+# The GCP SA JSON is intentionally NOT routed through .env — it's a multiline
+# secret that would smear the dotenv parser and leak via terminal history.
 SECRET_MAPPINGS: dict[str, list[tuple[str, str]]] = {
     "huggingface-token": [("HF_TOKEN", "HF_TOKEN")],
-    # Future:
+    "agent-skills-builder-secret": [
+        ("LLM_BASE_URL", "LLM_BASE_URL"),
+        ("EMBEDDING_BASE_URL", "EMBEDDING_BASE_URL"),
+        ("CLOUD_SQL_INSTANCE", "CLOUD_SQL_INSTANCE"),
+        ("DB_IAM_USER", "DB_IAM_USER"),
+        ("DB_NAME", "DB_NAME"),
+    ],
+    # Future sub-agents (uncomment + customize when their Modal app lands):
+    # "agent-personalization-secret": [
+    #     ("LLM_BASE_URL", "LLM_BASE_URL"),
+    #     ("EMBEDDING_BASE_URL", "EMBEDDING_BASE_URL"),
+    #     ("CLOUD_SQL_INSTANCE", "CLOUD_SQL_INSTANCE"),
+    #     ("DB_IAM_USER", "DB_IAM_USER"),
+    #     ("DB_NAME", "DB_NAME"),
+    #     ("GCS_PERSONAL_BUCKET", "GCS_PERSONAL_BUCKET"),
+    # ],
     # "langsmith-api-key": [("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY")],
-    # "gcs-personal-creds": [("GCS_SA_KEY_JSON", "GOOGLE_APPLICATION_CREDENTIALS_JSON")],
 }
 
 
@@ -74,7 +96,17 @@ def sync_secret(
     missing: list[str] = []
     for env_var, modal_key in mappings:
         value = env.get(env_var, "").strip()
-        if not value or value.startswith(("hf_xxx", "ak-xxx", "as-xxx", "ls__xxx")):
+        if not value or value.startswith(
+            (
+                "hf_xxx",
+                "ak-xxx",
+                "as-xxx",
+                "ls__xxx",
+                "https://your-",
+                "<PROJECT_ID>",
+                "<YOUR_EMAIL>",
+            )
+        ):
             missing.append(env_var)
             continue
         kv_args.append(f"{modal_key}={value}")
