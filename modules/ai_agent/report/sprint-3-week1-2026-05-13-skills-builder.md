@@ -37,6 +37,16 @@
 | `1c49f22` | docs(skills_builder): 2026-05-13 보고서에 integration 테스트 17건 + main.py 리팩터링 반영 | 5/13 |
 | `7cbbf4d` | feat(skills_builder): Cloud SQL IAM Connector 패턴으로 main.py 전환 + Modal Secret 매핑 추가 | 5/13 |
 | `97284de` | Merge remote-tracking branch 'origin/development' (PR #53 가이드/매핑 흡수, conflict 해결) | 5/13 |
+| `99df606` | docs(skills_builder): 2026-05-13 보고서에 IAM Connector 전환 + Modal deploy + health 차단 반영 | 5/13 |
+| `c0d9927` | fix(skills_builder): main.py Connector loop 패턴 디버깅 시도 5건 정리 (gitignore SA JSON 패턴 포함) | 5/13 |
+
+**별건 OPEN PR — PR #55 (`feature/req-003-catalog-test-sync` → `development`)**:
+
+| Hash | 메시지 |
+|------|--------|
+| `8759c56` | test(nodes_graph): toolset 14종 카탈로그 연결 후 회귀 4건 정리 (41 → 55) |
+| `aa64f1d` | docs(req-003): 노드 카탈로그 요약 41 → 55 갱신 + toolset 14종 분류 명시 |
+| `4238fa0` | **Merge pull request #55** (development에 머지 완료, sub-branch 삭제) |
 
 ---
 
@@ -223,6 +233,105 @@ google.auth.exceptions.DefaultCredentialsError:
 
 박아름 룰(`feedback_conventions.md` 79-84) "rebase 대신 `git merge origin/development`" 표준 패턴 적용. 5/12 박아름 commit `80098c0`과 동일 방식. force push 0건. development 무손상.
 
+### 3.12 별건 PR #55 — nodes_graph 회귀 hotfix (MERGED `4238fa0`)
+
+별도 sub-branch `feature/req-003-catalog-test-sync`로 진행한 단발성 hotfix. 박아름 영역 `pytest modules/nodes_graph/tests`에서 회귀 4건 발견 (햄햄 commit `59f0e26 feat(toolset+nodes_graph)` 후속 정리 누락):
+
+| 영역 | 5/13 시작 | PR #55 머지 후 |
+|------|----------|---------------|
+| code (`catalog_registry.py` + `toolset_nodes.py`) | 55종 (햄햄 commit) | 55종 |
+| test (`test_catalog.py` + `test_registry.py`) | 41종 (FAIL 4건) | 55종 (`8759c56`) |
+| spec (`REQ-003 §"노드 카탈로그 요약"`) | 41종 | **55종 (`aa64f1d` — toolset 14종 분류 명시)** |
+
+→ 3종 SSOT 정합 회복. 머지 commit `4238fa0` (development에 fast-forward). sub-branch local + remote 모두 삭제 완료 (`feedback_branch_strategy.md` 룰).
+
+박아름 자체 리뷰 3 기준 (spec/의존성/clean arch) 모두 ✅. 자체 리뷰 코멘트 PR #55 등록: https://github.com/billionaireahreum/Workflow_Automation/pull/55#issuecomment-4437783673
+
+### 3.13 cloudsql-iam-sa Modal Secret 재등록 (조장 SA JSON 공유 + 박아름 처리)
+
+5/13 조장 답신: "agent마다 자기 secret 생성 / Secret이 손상된 거면 그냥 아름님이 다시 발급받으면 됩니다". 박아름 GCP IAM 권한 점검:
+
+```
+gcloud iam service-accounts list / keys create
+→ PERMISSION_DENIED (<TEAM_MEMBER_1>@example.com — iam.serviceAccounts.list/keys.create 둘 다 거부)
+```
+
+박아름 권한 없음 확인 후 조장이 GCP SA JSON key 직접 공유 (`<GCP_PROJECT_ID>-d2aaaaa099fd.json`).
+
+**사용자 직접 보안 룰 지시** (박아름 적용):
+- SA JSON 파일 Read tool로 열람 X (스크립트 런타임 로드만 — `feedback_env_file.md` 룰 확장 적용)
+- 환경 변수 long-term 등록 X (process-scope도 회피)
+- `.gitignore`에 SA key 파일 패턴 추가 (`workflowauto-*.json` + `*-sa-key.json` + `gcp-sa-*.json` + `modal-sa-key.json`)
+- 사용 후 즉시 변수 정리
+
+**modal secret create 패턴 함정** (가이드 §1.3 원인 확정):
+
+| 시도 | 결과 |
+|------|------|
+| PowerShell `& modal secret create cloudsql-iam-sa "KEY=$saJson"` (-Raw 받은 multi-line) | JSON 내부 큰따옴표 escape 실패 → `line 1 column 2: Expecting property name` 에러 |
+| PowerShell + Get-Content `-Raw` + Python -c minify pipe | 같은 newline 분리 문제 |
+| **Python subprocess + JSON minify (single-line)** | ✅ **통과** |
+
+해결 패턴 (commit `c0d9927` 보안 메모에 명시):
+
+```python
+import json, subprocess
+data = json.load(open("<GCP_PROJECT_ID>-d2aaaaa099fd.json"))
+single_line = json.dumps(data, separators=(",", ":"))  # private_key 안의 \n escape 보존
+subprocess.run(["modal", "secret", "create", "cloudsql-iam-sa",
+                f"GOOGLE_APPLICATION_CREDENTIALS_JSON={single_line}", "--force"])
+```
+
+임시 스크립트 `_register_modal_secret.py` 사용 후 즉시 삭제 (gitignore 룰 + 보안). Secret 등록 OK 확인.
+
+### 3.14 ConnectorLoopError 디버깅 5건 (모두 실패, 박아름 한계 도달)
+
+Modal Secret 재등록 후 `/v1/health` 호출 시 새 에러:
+
+```
+google.cloud.sql.connector.exceptions.ConnectorLoopError:
+  Running event loop does not match 'connector._loop'.
+  Connector.connect_async() must be called from the event loop
+  the Connector was initialized with.
+```
+
+박아름 디버깅 시도 5건 모두 동일 에러 (commit `c0d9927`로 보존):
+
+| # | 패턴 | 결과 |
+|---|------|------|
+| 1 | 가이드 §3.2 — sync boot()에서 `Connector()` + `create_async_engine` (`7cbbf4d` 패턴) | ConnectorLoopError |
+| 2 | FastAPI `@on_event("startup")` async에서 `Connector(loop=loop)` | ConnectorLoopError |
+| 3 | request handler 내부 lazy init + `asyncio.Lock` | ConnectorLoopError |
+| 4 | connection-per-request SQLAlchemy (매번 새 Connector+engine+dispose) | ConnectorLoopError |
+| 5 | asyncpg direct + `Connector(refresh_strategy="lazy")` (loop 인자 없이) | ConnectorLoopError |
+
+→ **`Connector()` 자체가 modal asgi_app calling loop와 다른 loop를 잡음**. modal docs / Cloud SQL Connector 라이브러리 내부 동작 호환성 이슈로 추정. 가이드 §3.2가 modal asgi_app 환경에서 작동 안 함을 확정.
+
+### 3.15 근본 차단 — 신정혜 sub-agent main.py git push 누락 (사용자 진단)
+
+사용자 진단: "신정혜가 그 작업한 거 PR 안 올려서 우리꺼에 머지 안 된 거 같아"
+
+확인 결과:
+
+| 항목 | 상태 |
+|------|------|
+| `modal app list` — orchestrator / agent-composer / agent-personalization | ✅ 3개 모두 dhwang0803에 deploy됨 |
+| `services/agents/{orchestrator,agent-composer,agent-personalization}/main.py` | ❌ git에 없음 (development에 push 안 됨) |
+| 박아름이 정혜님 통과 패턴 참조 | ❌ 코드 없으니 불가 |
+
+→ **박아름 자체 디버깅 한계 + 신정혜 push 대기**. 카톡 발송 예정 (사용자 결정 따라).
+
+### 3.16 박아름 현재 main.py 상태 (commit `c0d9927`)
+
+디버깅 5건 누적 + 마지막 시도 보존:
+
+- `boot()`: ADC env 설정 + 어댑터 wiring만, DB lazy 초기화
+- `_make_db_resources()` / `_cleanup_db_resources()`: connection-per-request helper (5번 패턴)
+- `/v1/health`: asyncpg direct (Connector + connect_async + fetchval)
+- `/v1/agent/route` → `_stream` 내부에서 request-scoped DB resources
+- `@modal.exit()` shutdown(): no-op (ASGI lifespan으로 dispose 위임)
+- **deploy 가능 / `/v1/health`는 ConnectorLoopError 그대로** — 신정혜 패턴 도착 후 적용 예정
+
 ---
 
 ## 4. 테스트
@@ -257,15 +366,15 @@ google.auth.exceptions.DefaultCredentialsError:
 
 ## 6. PR #51 Test plan 현황
 
-| # | 항목 | 5/13 오전 | 5/13 저녁 |
-|---|------|----------|----------|
-| 1 | 격리 정책 단위 테스트 (B) | ✅ 117/117 passed | ✅ 134/134 passed (integration 17건 추가) |
-| 2 | Modal 배포 사전 검증 | ❌ URL/Secret 부재 | ⚠️ **부분 진행** — deploy 성공 / `/v1/health` 차단 |
-| 3 | 실 endpoint e2e (`HTTPSubAgentClient` → `/v1/agent/route` SSE) | ❌ Orchestrator 미배포 | ❌ Orchestrator 배포 완료(URL 확인) / agent-skills-builder /v1/health 차단으로 e2e 대기 |
+| # | 항목 | 5/13 오전 | 5/13 저녁 | 5/13 야간 |
+|---|------|----------|----------|----------|
+| 1 | 격리 정책 단위 테스트 (B) | ✅ 117/117 | ✅ 134/134 (integration +17) | ✅ 134/134 |
+| 2 | Modal 배포 사전 검증 | ❌ URL/Secret 부재 | ⚠️ deploy 성공 / health 차단 | ⚠️ Secret 재등록 OK / **health ConnectorLoopError** |
+| 3 | 실 endpoint e2e | ❌ Orchestrator 미배포 | ❌ Orchestrator OK / health 차단 | ❌ Test plan #2 미통과로 대기 |
 
-**#2 잔여 차단**: `cloudsql-iam-sa` Modal Secret의 `GOOGLE_APPLICATION_CREDENTIALS_JSON` 값이 유효한 JSON 아님 → 조장 5/13 17:00경 재등록 후 `/v1/health` 재호출로 통과 예상.
+**#2 잔여 차단**: 박아름 main.py가 modal asgi_app 환경의 `ConnectorLoopError`로 인해 health 통과 못 함. 박아름 디버깅 5건 모두 실패. **신정혜 sub-agent push 대기** (그들 통과 패턴 참조 필요).
 
-**머지 방침**: 위 2)·3) 모두 통과시킨 후 조장(`@dhwang0803`)께 일괄 리뷰 요청.
+**머지 방침**: 신정혜 패턴 도착 → 박아름 적용 → #2·#3 모두 통과 후 조장(`@dhwang0803`)께 일괄 리뷰 요청.
 
 ---
 
@@ -284,23 +393,19 @@ PR #51 자체 리뷰(5/12)에서 권장한 후속 항목 중 미처리:
 
 PR #51 자체 리뷰 후속 권장 3건(`setup_modal_token.py` push / README / integration test) + main.py IAM 전환까지 모두 처리. 박아름 측 즉시 가능 작업 0건.
 
-### 7.2 5/13 17:00 조장 수정 후 박아름 작업
+### 7.2 신정혜 sub-agent push 대기 (5/13 야간 진단)
+
+박아름 자체 진행 0건. 신정혜님이 `services/agents/{orchestrator,agent-composer,agent-personalization}/main.py`를 git development에 push해야 박아름이 Cloud SQL Connector 통과 패턴 참조 가능. 사용자 결정 따라 카톡 발송 예정.
 
 | 작업 | 차단 해소 시 진입 |
 |------|---------------|
-| `/v1/health` 재호출 (`db: "iam-connected"` 확인) | 조장 `cloudsql-iam-sa` 재등록 후 즉시 |
-| PR #51 Test plan #2 체크 | health 통과 후 즉시 |
-| Orchestrator endpoint 통한 e2e 호출 (HTTPSubAgentClient → /v1/agent/route SSE) | health 통과 후 즉시 |
-| PR #51 Test plan #3 체크 | e2e 통과 후 즉시 |
+| 신정혜 sub-agent main.py 흡수 (`git merge origin/development`) | 신정혜 push 후 즉시 |
+| 통과 패턴 분석 + 박아름 main.py 적용 | 흡수 후 즉시 |
+| `modal deploy` redeploy + `/v1/health` 재호출 | 패턴 적용 후 즉시 |
+| Test plan #2 체크 | health 통과 후 즉시 |
+| Orchestrator endpoint 통한 e2e (HTTPSubAgentClient → /v1/agent/route SSE) | health 통과 후 즉시 |
+| Test plan #3 체크 | e2e 통과 후 즉시 |
 | 조장 일괄 리뷰 요청 (PR #51) | #2 + #3 모두 통과 후 |
-
-### 7.2 신정혜 대기 작업 (URL 받으면 즉시 가능)
-
-| 작업 | 차단 해소 시 진입 |
-|------|---------------|
-| `agent-skills-builder-secret` Modal Secret 등록 | LLM/EMBED URL 도착 → `modal secret create ... LLM_BASE_URL=... EMBEDDING_BASE_URL=... DATABASE_URL=...` |
-| `modal deploy services/agents/agent-skills-builder/main.py` 재시도 | Secret 등록 후 즉시 |
-| Test plan #3 e2e 검증 | Orchestrator 배포 후 즉시 |
 
 ---
 
@@ -308,9 +413,15 @@ PR #51 자체 리뷰 후속 권장 3건(`setup_modal_token.py` push / README / i
 
 | 결정 | 사유 |
 |------|------|
-| PR #51 머지 보류 회수 | 박아름 측 차단 0건 확정. mergeable CLEAN |
+| PR #51 머지 보류 회수 | 박아름 측 차단 0건 확정 (5/13 오후 시점). mergeable CLEAN |
 | 일괄 리뷰 방침 | Test plan #2·#3 모두 통과 후 한 번에 조장 리뷰 요청. 부분 통과 시점 리뷰 분산 회피 |
 | `.env` Cloud SQL 3종 변수 박아름 로컬 복원 | Drive 배포본은 갱신 시 사라질 가능성 — 박아름 로컬에서 직접 유지 |
+| PR #55 (nodes_graph 회귀 hotfix) 별도 sub-branch 진행 | PR #51과 다른 영역(`modules/nodes_graph/` vs `modules/ai_agent/`). 단발성 hotfix는 `feedback_branch_strategy.md` 룰대로 sub-branch + 머지 후 삭제 |
+| REQ-003 spec 갱신 PR #55에 흡수 | 햄햄 commit `59f0e26` 후속 정리 → spec ↔ code ↔ test 3종 SSOT 정합. PR #55 scope 동일 |
+| SA JSON key 보안 룰 (사용자 직접 지시 5/13) | Read tool X / env 등록 X / gitignore 즉시 추가 / 임시 스크립트 즉시 삭제. `feedback_env_file.md` 룰 확장 적용 |
+| Python subprocess + JSON minify로 Modal Secret 등록 | PowerShell `& modal secret create KEY=$value` 패턴이 multi-line JSON 처리 못 함 (가이드 §1.3 함정). Python subprocess + `json.dumps(separators=(",", ":"))` minify로 통과 |
+| Connector 디버깅 5건 commit으로 보존 (`c0d9927`) | 디버깅 history 남겨 신정혜 패턴 도착 시 비교 가능. force push 0건 |
+| 신정혜 sub-agent push 대기 (자체 디버깅 중단) | 박아름 디버깅 5건 모두 같은 ConnectorLoopError. 시간 낭비 회피 위해 신정혜 통과 패턴 도착 후 진입 |
 
 ---
 
