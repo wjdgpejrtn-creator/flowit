@@ -256,7 +256,7 @@ gcloud iam service-accounts list / keys create
 → PERMISSION_DENIED (<TEAM_MEMBER_1>@example.com — iam.serviceAccounts.list/keys.create 둘 다 거부)
 ```
 
-박아름 권한 없음 확인 후 조장이 GCP SA JSON key 직접 공유 (`<GCP_PROJECT_ID>-d2aaaaa099fd.json`).
+박아름 권한 없음 확인 후 조장이 GCP SA JSON key 직접 공유 (`workflowauto-*.json`).
 
 **사용자 직접 보안 룰 지시** (박아름 적용):
 - SA JSON 파일 Read tool로 열람 X (스크립트 런타임 로드만 — `feedback_env_file.md` 룰 확장 적용)
@@ -276,7 +276,7 @@ gcloud iam service-accounts list / keys create
 
 ```python
 import json, subprocess
-data = json.load(open("<GCP_PROJECT_ID>-d2aaaaa099fd.json"))
+data = json.load(open("workflowauto-*.json"))
 single_line = json.dumps(data, separators=(",", ":"))  # private_key 안의 \n escape 보존
 subprocess.run(["modal", "secret", "create", "cloudsql-iam-sa",
                 f"GOOGLE_APPLICATION_CREDENTIALS_JSON={single_line}", "--force"])
