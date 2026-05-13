@@ -363,11 +363,11 @@ class _FailingRepo(NodeDefinitionRepository):
 async def test_embedder_failure_isolated_other_nodes_continue():
     """embed 실패 시 해당 노드만 격리되고 나머지는 계속 처리됨."""
     repo = _InMemoryRepo()
-    # manufacturing.json의 "출고 알림" description 일부 문구로 실패 유도
-    embedder = _FailingEmbedder(fail_on_substring="출고 확정")
+    # ecommerce.json의 "환불 승인 워크플로우" description 일부 문구로 실패 유도
+    embedder = _FailingEmbedder(fail_on_substring="환불 요청")
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder)
 
-    frames = [f async for f in use_case.execute(uuid4(), "manufacturing")]
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
 
     result = frames[-1]
     assert isinstance(result, ResultFrame)
@@ -375,7 +375,7 @@ async def test_embedder_failure_isolated_other_nodes_continue():
     assert result.payload["upserted_count"] == 4
     assert result.payload["failed_count"] == 1
     assert result.payload["failed_node_types"][0]["stage"] == "embed"
-    assert "manufacturing_shipment_notify" in result.payload["failed_node_types"][0]["node_type"]
+    assert result.payload["failed_node_types"][0]["node_type"] == "ecommerce_refund_approval"
 
     # ErrorFrame이 진행 중간에 yield됨 (해당 노드만)
     error_frames = [f for f in frames if isinstance(f, ErrorFrame)]
@@ -389,18 +389,18 @@ async def test_embedder_failure_isolated_other_nodes_continue():
 @pytest.mark.asyncio
 async def test_upsert_failure_isolated_other_nodes_continue():
     """upsert 실패 시 해당 노드만 격리되고 나머지는 계속 처리됨."""
-    repo = _FailingRepo(fail_on_node_type="it_pr_review_request")
+    repo = _FailingRepo(fail_on_node_type="ecommerce_refund_approval")
     embedder = _FakeEmbedder()
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder)
 
-    frames = [f async for f in use_case.execute(uuid4(), "it")]
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
 
     result = frames[-1]
     assert isinstance(result, ResultFrame)
     assert result.payload["upserted_count"] == 4
     assert result.payload["failed_count"] == 1
     assert result.payload["failed_node_types"][0]["stage"] == "upsert"
-    assert result.payload["failed_node_types"][0]["node_type"] == "it_pr_review_request"
+    assert result.payload["failed_node_types"][0]["node_type"] == "ecommerce_refund_approval"
 
     error_frames = [f for f in frames if isinstance(f, ErrorFrame)]
     assert len(error_frames) == 1
@@ -409,7 +409,7 @@ async def test_upsert_failure_isolated_other_nodes_continue():
     # repo에는 실패 노드 없음
     assert len(repo.store) == 4
     stored_types = {n.node_type for n in repo.store.values()}
-    assert "it_pr_review_request" not in stored_types
+    assert "ecommerce_refund_approval" not in stored_types
 
 
 @pytest.mark.asyncio
@@ -419,7 +419,7 @@ async def test_result_frame_includes_failed_fields_on_full_success():
     embedder = _FakeEmbedder()
     use_case = BuildFromIndustryDefaultUseCase(repo, embedder)
 
-    frames = [f async for f in use_case.execute(uuid4(), "food")]
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
 
     result = frames[-1]
     assert isinstance(result, ResultFrame)
@@ -433,16 +433,16 @@ async def test_result_frame_includes_failed_fields_on_full_success():
 async def test_partial_failure_idempotent_recovery():
     """부분 실패 후 재실행하면 실패했던 노드만 새로 upsert 시도 (uuid5 deterministic)."""
     # 1차: upsert 실패
-    failing_repo = _FailingRepo(fail_on_node_type="it_pr_review_request")
+    failing_repo = _FailingRepo(fail_on_node_type="ecommerce_refund_approval")
     embedder = _FakeEmbedder()
     use_case_1 = BuildFromIndustryDefaultUseCase(failing_repo, embedder)
-    _ = [f async for f in use_case_1.execute(uuid4(), "it")]
+    _ = [f async for f in use_case_1.execute(uuid4(), "ecommerce")]
     assert len(failing_repo.store) == 4
 
     # 2차: 정상 repo로 재실행 — 동일한 node_id로 5종 모두 등록됨
     normal_repo = _InMemoryRepo()
     use_case_2 = BuildFromIndustryDefaultUseCase(normal_repo, embedder)
-    _ = [f async for f in use_case_2.execute(uuid4(), "it")]
+    _ = [f async for f in use_case_2.execute(uuid4(), "ecommerce")]
     assert len(normal_repo.store) == 5
 
     # 두 repo에서 동일하게 등록된 4개 노드는 같은 node_id (uuid5 deterministic)
