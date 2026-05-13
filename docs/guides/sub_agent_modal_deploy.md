@@ -157,7 +157,7 @@ python scripts/sync_modal_secrets.py agent-skills-builder-secret
 
 ```python
 image = (
-    modal.Image.debian_slim(python_version="3.11")
+    modal.Image.debian_slim(python_version="3.12")
     .pip_install(
         "fastapi>=0.115",
         "httpx>=0.27",
