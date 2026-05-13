@@ -104,7 +104,7 @@ class AgentComposer:
         node_repo = PgNodeDefinitionRepository(self._session_factory)
         workflow_repo = PgWorkflowRepository(self._session_factory)
         node_registry = NodeRegistryAdapter(node_repo, embedder)
-        graph_validator = GraphValidator()
+        graph_validator = GraphValidator(node_repo)
 
         self._graph = LangGraphOrchestrator(
             intent_analyzer=IntentAnalyzerService(llm),
