@@ -137,19 +137,16 @@ class SkillsBuilderAgent:
 
     @modal.enter()
     def boot(self) -> None:
-        """어댑터 + Cloud SQL IAM Connector + session factory wiring.
+        """sync 초기화 — ADC 환경변수 + 어댑터 wiring.
 
-        매 cold start에 한 번 실행. session_factory는 함수 단위로 새 session 생성
-        (요청마다 격리). 어댑터와 connector는 worker 생애주기 동안 유지.
-
-        DB 접속: cloud-sql-python-connector + enable_iam_auth=True (가이드
-        sub_agent_modal_deploy.md §3.2 표준). DSN 패턴 금지.
+        Cloud SQL Connector는 첫 request handler 호출 시 lazy 생성해야 함 —
+        modal asgi_app에서 boot()/lifespan startup의 loop가 request handler
+        loop와 분리되어 있어 그 시점에 만들면 ConnectorLoopError 발생.
+        가이드 §3.2 sync boot() 패턴은 modal asgi_app 환경엔 맞지 않음.
         """
+        import asyncio
         import tempfile
         from pathlib import Path
-
-        from google.cloud.sql.connector import Connector, IPTypes
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
@@ -160,11 +157,29 @@ class SkillsBuilderAgent:
         sa_path.write_text(sa_payload, encoding="utf-8")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
 
-        # 2) Cloud SQL Python Connector — IAM 인증 (비밀번호 없음)
-        self._connector = Connector()
+        # 2) 어댑터 wiring (RPC LLM + HTTP embedding) — async 의존 없음
+        self._llm = ModalLLMAdapter()
+        self._embedder = ModalEmbeddingAdapter()
+
+    @staticmethod
+    async def _make_db_resources() -> Any:
+        """매 호출 시 새 Connector + engine + session_factory 생성.
+
+        Modal asgi_app은 request마다 별도 event loop를 사용해 인스턴스 단위
+        Connector 캐시가 불가능(`ConnectorLoopError`). 매 request마다 새로
+        만들고 dispose 책임은 caller에 위임. dispose 비용은 cold start 후엔
+        밀리초 단위.
+        """
+        import asyncio
+
+        from google.cloud.sql.connector import Connector, IPTypes
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        loop = asyncio.get_running_loop()
+        connector = Connector(loop=loop, refresh_strategy="lazy")
 
         async def _getconn():
-            return await self._connector.connect_async(
+            return await connector.connect_async(
                 os.environ["CLOUD_SQL_INSTANCE"],
                 "asyncpg",
                 user=os.environ["DB_IAM_USER"],
@@ -173,29 +188,34 @@ class SkillsBuilderAgent:
                 ip_type=IPTypes.PUBLIC,
             )
 
-        self._engine = create_async_engine(
+        engine = create_async_engine(
             "postgresql+asyncpg://",
             async_creator=_getconn,
             pool_pre_ping=True,
         )
-        self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        return connector, engine, session_factory
 
-        # 3) 어댑터 wiring (RPC LLM + HTTP embedding)
-        self._llm = ModalLLMAdapter()  # MODAL_TOKEN_ID/SECRET + LLM_BASE_URL 환경변수 자동 사용
-        self._embedder = ModalEmbeddingAdapter()  # EMBEDDING_BASE_URL 환경변수 자동 사용
+    @staticmethod
+    async def _cleanup_db_resources(connector: Any, engine: Any) -> None:
+        if engine is not None:
+            await engine.dispose()
+        if connector is not None:
+            await connector.close_async()
 
     @modal.exit()
     def shutdown(self) -> None:
-        """async engine + connector 정리 (sync 컨텍스트에서 호출)."""
-        import asyncio
+        """ASGI shutdown event가 async dispose를 처리하므로 여기선 no-op.
 
-        if getattr(self, "_engine", None):
-            asyncio.run(self._engine.dispose())
-        if getattr(self, "_connector", None):
-            asyncio.run(self._connector.close_async())
+        modal 일부 환경에서 @modal.exit()이 호출 안 될 수 있으므로 ASGI lifespan
+        shutdown event에 dispose 로직을 둠.
+        """
+        pass
 
     @modal.asgi_app()
     def fastapi(self):
+        import asyncio
+
         from fastapi import Body, FastAPI, HTTPException
         from fastapi.responses import StreamingResponse
 
@@ -205,19 +225,46 @@ class SkillsBuilderAgent:
 
         @api.get("/v1/health")
         async def health() -> dict[str, Any]:
-            """어댑터 + Cloud SQL IAM 연결 헬스체크 (가이드 §3.3 패턴)."""
-            from sqlalchemy import text
+            """어댑터 + Cloud SQL IAM 연결 헬스체크 (asyncpg direct — SQLAlchemy 우회).
+
+            SQLAlchemy `create_async_engine + async_creator` 패턴이 modal
+            asgi_app 환경에서 ConnectorLoopError 발생(SQLAlchemy greenlet 래핑이
+            loop 처리 충돌). 박아름 `scripts/_test_db.py`가 검증한 asyncpg
+            direct 패턴 적용.
+            """
+            import asyncio
+
+            from google.cloud.sql.connector import Connector, IPTypes
 
             errors: dict[str, str] = {}
             db_status: str = "iam-connected"
 
-            # Cloud SQL IAM 연결 확인 — engine.connect() + SELECT 1
+            connector = None
             try:
-                async with self._engine.connect() as conn:
-                    await conn.execute(text("SELECT 1"))
+                # Modal asgi_app: loop 인자 전달 시 ConnectorLoopError 발생.
+                # 인자 없이 호출하면 Connector가 background thread에서 자체
+                # event loop 관리 → calling loop와 무관하게 connect_async 처리.
+                connector = Connector(refresh_strategy="lazy")
+                conn = await connector.connect_async(
+                    os.environ["CLOUD_SQL_INSTANCE"],
+                    "asyncpg",
+                    user=os.environ["DB_IAM_USER"],
+                    db=os.environ["DB_NAME"],
+                    enable_iam_auth=True,
+                    ip_type=IPTypes.PUBLIC,
+                )
+                try:
+                    row = await conn.fetchval("SELECT 1")
+                    if row != 1:
+                        raise RuntimeError(f"SELECT 1 returned {row!r}")
+                finally:
+                    await conn.close()
             except Exception as exc:
                 db_status = "error"
                 errors["db"] = repr(exc)
+            finally:
+                if connector is not None:
+                    await connector.close_async()
 
             # 임베딩 endpoint base_url 설정 여부만 확인 (호출 X — endpoint 계약은 별도)
             try:
@@ -238,7 +285,7 @@ class SkillsBuilderAgent:
 
             HTTPSubAgentClient.send()와 짝을 이루는 endpoint. 응답은 SSE 텍스트
             스트림 ("data: <json>\\n\\n"). 각 SSEFrame을 AgentProtocolResponse로
-            래핑해서 직렬화.
+            래핑해서 직렬화. DB resources는 _stream 내부에서 request-scoped.
             """
             return StreamingResponse(
                 self._stream(req),
@@ -278,46 +325,51 @@ class SkillsBuilderAgent:
         payload = req.payload or {}
         source_type = payload.get("source_type")
 
-        # 요청 단위 session — use case 실행 동안 살아있어야 함
-        async with self._session_factory() as session:
-            repo = PgNodeDefinitionRepository(session)
+        # request-scoped DB resources (Modal asgi_app은 매 request 별 event loop)
+        connector, engine, session_factory = await self._make_db_resources()
 
-            if source_type == "industry_default":
-                use_case = BuildFromIndustryDefaultUseCase(repo, self._embedder)
-                stream = use_case.execute(req.user_id, payload["industry_code"])
-            elif source_type == "functional_domain":
-                use_case = BuildFromFunctionalDomainUseCase(repo, self._embedder)
-                stream = use_case.execute(req.user_id, payload["domain_code"])
-            elif source_type == "sop":
-                use_case = BuildFromSOPUseCase(repo, self._embedder, self._llm)
-                document = DocumentBlock.model_validate(payload["document"])
-                stream = use_case.execute(req.user_id, document, req.personal_memory)
-            else:
-                yield _sse_bytes(
-                    AgentProtocolResponse(
-                        frames=[],
-                        state_delta={
-                            "error": "E_SOURCE_TYPE_UNSUPPORTED",
-                            "source_type": source_type,
-                        },
-                        next_action="error",
-                    )
-                )
-                return
+        try:
+            async with session_factory() as session:
+                repo = PgNodeDefinitionRepository(session)
 
-            try:
-                async for frame in stream:
+                if source_type == "industry_default":
+                    use_case = BuildFromIndustryDefaultUseCase(repo, self._embedder)
+                    stream = use_case.execute(req.user_id, payload["industry_code"])
+                elif source_type == "functional_domain":
+                    use_case = BuildFromFunctionalDomainUseCase(repo, self._embedder)
+                    stream = use_case.execute(req.user_id, payload["domain_code"])
+                elif source_type == "sop":
+                    use_case = BuildFromSOPUseCase(repo, self._embedder, self._llm)
+                    document = DocumentBlock.model_validate(payload["document"])
+                    stream = use_case.execute(req.user_id, document, req.personal_memory)
+                else:
                     yield _sse_bytes(
                         AgentProtocolResponse(
-                            frames=[frame],
-                            state_delta={},
-                            next_action=_classify_next_action(frame),
+                            frames=[],
+                            state_delta={
+                                "error": "E_SOURCE_TYPE_UNSUPPORTED",
+                                "source_type": source_type,
+                            },
+                            next_action="error",
                         )
                     )
+                    return
 
-                # use case 정상 종료 — repo.upsert()로 발생한 변경 commit
-                await session.commit()
-            except Exception:
-                # use case 내부 예외 → rollback (격리 정책으로 잡히지 않은 케이스)
-                await session.rollback()
-                raise
+                try:
+                    async for frame in stream:
+                        yield _sse_bytes(
+                            AgentProtocolResponse(
+                                frames=[frame],
+                                state_delta={},
+                                next_action=_classify_next_action(frame),
+                            )
+                        )
+
+                    # use case 정상 종료 — repo.upsert()로 발생한 변경 commit
+                    await session.commit()
+                except Exception:
+                    # use case 내부 예외 → rollback (격리 정책으로 잡히지 않은 케이스)
+                    await session.rollback()
+                    raise
+        finally:
+            await self._cleanup_db_resources(connector, engine)
