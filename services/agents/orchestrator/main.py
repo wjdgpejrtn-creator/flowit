@@ -28,9 +28,9 @@ image = (
         "langgraph>=0.2",
         "modal>=0.73",
     )
+    .env({"PYTHONPATH": "/app/modules:/app/common_schemas_src"})
     .add_local_dir("modules", remote_path="/app/modules")
     .add_local_dir("packages/common_schemas/python", remote_path="/app/common_schemas_src")
-    .env({"PYTHONPATH": "/app/modules:/app/common_schemas_src"})
 )
 
 app = modal.App("orchestrator")
