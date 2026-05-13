@@ -34,6 +34,9 @@
 | `41c075d` | test(skills_builder): industry_default 격리 정책 테스트 ecommerce로 마이그레이션 | 5/13 |
 | `4a09242` | docs(skills_builder): Sprint 3 1주차 2026-05-13 작업 보고서 추가 | 5/13 |
 | `69bc7b8` | test(skills_builder): agent-skills-builder Modal app composition root integration test 17건 | 5/13 |
+| `1c49f22` | docs(skills_builder): 2026-05-13 보고서에 integration 테스트 17건 + main.py 리팩터링 반영 | 5/13 |
+| `7cbbf4d` | feat(skills_builder): Cloud SQL IAM Connector 패턴으로 main.py 전환 + Modal Secret 매핑 추가 | 5/13 |
+| `97284de` | Merge remote-tracking branch 'origin/development' (PR #53 가이드/매핑 흡수, conflict 해결) | 5/13 |
 
 ---
 
@@ -140,6 +143,86 @@ PR #51 자체 리뷰(5/12)가 권장한 "SSE 직렬화 + 라우팅 분기 단위
 - `services/agents/agent-skills-builder/main.py`는 agent 디렉터리 이름에 하이픈이 있어 일반 `import` 불가 → `importlib.util.spec_from_file_location`로 동적 로드.
 - `AgentState`는 6 필수 필드(session_id/user_id/messages/turn_count/mode/execution_status) → inline 헬퍼 `_make_agent_state(session_id, user_id)`로 Skills Builder 호출 패턴(`mode=SKILL_BUILDER` + `RUNNING`) 생성. 박아름 컨벤션(conftest 미사용) 준수.
 
+### 3.8 신정혜 URL 수령 + 객관적 점검 (저녁)
+
+신정혜님 카톡으로 Modal endpoint URL 2개 + Orchestrator URL 1개 수령:
+
+```
+LLM_BASE_URL=https://<WORKSPACE>--llm-base.modal.run
+EMBEDDING_BASE_URL=https://<WORKSPACE>--llm-base.modal.run
+Orchestrator: https://<WORKSPACE>--orchestrator.modal.run
+```
+
+박아름 객관적 점검:
+
+| 항목 | 결과 |
+|------|------|
+| Modal URL 패턴 정합 | ✅ `<workspace>--<app>-<class>-<method>.modal.run` 표준 |
+| llm-base `/v1/health` | ✅ HTTP 200 (45s — GPU cold start, 신정혜 안내 정합) |
+| orchestrator `/v1/health` | ✅ HTTP 200 (5s) |
+| `ModalEmbeddingAdapter` 호출 경로 | ✅ `EMBEDDING_BASE_URL/v1/embed` HTTP REST |
+| `ModalLLMAdapter` 호출 경로 | ✅ Modal `Cls.from_name("llm-base", "LLMBase").generate.remote.aio()` RPC |
+
+### 3.9 Cloud SQL IAM Connector 패턴 전환 + Modal deploy (commit `7cbbf4d`)
+
+박아름 5/13 오전 main.py 패턴(`os.environ["DATABASE_URL"]` + DSN)이 가이드 `docs/guides/sub_agent_modal_deploy.md` §5 함정 표 첫 항목("옛 DSN 패턴 코드 잔재")에 해당 → 가이드 §3.2 IAM Connector 패턴으로 전환.
+
+**가이드 §3.2 표준 적용**:
+
+- image에 `cloud-sql-python-connector[asyncpg]>=1.12` 추가 (enable_iam_auth=True 지원 라이브러리)
+- Modal Secret 마운트 2개:
+  - `agent-skills-builder-secret` (박아름 등록 — 5키): LLM_BASE_URL + EMBEDDING_BASE_URL + CLOUD_SQL_INSTANCE + DB_IAM_USER (공용 SA) + DB_NAME
+  - `cloudsql-iam-sa` (조장 1회 등록 — 1키): GOOGLE_APPLICATION_CREDENTIALS_JSON
+- `boot()` — IAM Connector 패턴: GOOGLE_APPLICATION_CREDENTIALS_JSON → 임시 파일 + ADC 환경변수 + `Connector + connect_async + enable_iam_auth=True + IPTypes.PUBLIC + create_async_engine("postgresql+asyncpg://", async_creator=...)`
+- `shutdown()` — `asyncio.run(engine.dispose())` + `connector.close_async()` (sync 컨텍스트)
+- `/v1/health` — DB ping ("iam-connected") + 503 분기 (가이드 §3.3 패턴)
+
+**.env 갱신**: `LLM_BASE_URL` + `EMBEDDING_BASE_URL` 신규 추가 + `DB_IAM_USER`를 박아름 개인 이메일 → 공용 SA(`<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com`)로 변경. 박아름 로컬 dev (`scripts/_test_db.py`)는 다음 실행 시 `$env:DB_IAM_USER` 임시 override 필요.
+
+**`scripts/sync_modal_secrets.py`**: `agent-skills-builder-secret` 매핑 추가. 단 development의 PR #53(`d2443a3 chore(infra): sub-agent Modal 배포 셀프 서비스 가이드 + IAM 인증 매핑`)에 이미 동일 매핑이 있어서 development merge로 자연 통합 (commit `97284de`).
+
+**Modal Secret 등록**: `python scripts/sync_modal_secrets.py agent-skills-builder-secret` → 1/1 synced OK.
+
+**Modal deploy 시도 1 (실패)** — modal SDK `env()` 호출 순서 함정:
+
+```
+An image tried to run a build step after using `image.add_local_*` to include local files.
+```
+
+가이드 §3.1 image 정의 그대로 사용 시 `add_local_*` 이후 `.env()` 호출이 build step으로 분류되어 실패. 가이드보다 modal SDK가 더 엄격해진 상태. 해결: `.env({"PYTHONPATH": ...})`을 `.pip_install(...)` 직후로 옮기고 `.add_local_dir`를 마지막에 배치.
+
+**Modal deploy 시도 2 (성공)**: ✓ App deployed in 7.348s. endpoint:
+
+```
+https://<WORKSPACE>--skills-builder.modal.run
+```
+
+### 3.10 `/v1/health` 차단 발견 — `cloudsql-iam-sa` Secret JSON 손상
+
+```
+curl https://<WORKSPACE>--skills-builder.modal.run/v1/health
+→ HTTP 000 in 120.014s (timeout)
+```
+
+`modal app logs agent-skills-builder`:
+
+```
+google.auth.exceptions.DefaultCredentialsError:
+  ('File /tmp/gcp-sa.json is not a valid json file.',
+   JSONDecodeError('Expecting value: line 1 column 1 (char 0)'))
+@ main.py:164  self._connector = Connector()
+```
+
+**원인 추정**: 조장이 가이드 §1.3 PowerShell 패턴으로 `cloudsql-iam-sa` 등록 시 multi-line JSON의 newline이 명령 인자 경계로 해석되어 첫 줄만 Secret에 저장됐을 가능성. 다른 sub-agent(orchestrator/composer/personalization)는 동일 Secret을 쓰는데 헬스체크 통과 — 일관성 미스. 박아름 카톡으로 사실 공유 → **조장이 5/13 17:00경 `cloudsql-iam-sa` Secret 재등록 예정**.
+
+### 3.11 development merge — PR #53 흡수 (commit `97284de`)
+
+`sync_modal_secrets.py` 매핑 추가 commit `7cbbf4d` push 후 PR #51이 `CONFLICTING`로 바뀜. 원인: development에 PR #53(`d2443a3`)이 머지되어 동일 파일을 다른 텍스트로 수정.
+
+`git merge origin/development` 실행 → conflict 2건 모두 origin/development 측 채택(코멘트 + agent-personalization-secret 미사용 매핑까지 포함) → merge commit `97284de`. PR #51 mergeable **CLEAN** 복귀.
+
+박아름 룰(`feedback_conventions.md` 79-84) "rebase 대신 `git merge origin/development`" 표준 패턴 적용. 5/12 박아름 commit `80098c0`과 동일 방식. force push 0건. development 무손상.
+
 ---
 
 ## 4. 테스트
@@ -174,11 +257,13 @@ PR #51 자체 리뷰(5/12)가 권장한 "SSE 직렬화 + 라우팅 분기 단위
 
 ## 6. PR #51 Test plan 현황
 
-| # | 항목 | 상태 | 차단 |
-|---|------|------|------|
-| 1 | 격리 정책 단위 테스트 (B) | ✅ 117/117 passed | — |
-| 2 | Modal 배포 사전 검증 | ❌ 차단 | `LLM_BASE_URL` + `EMBEDDING_BASE_URL` (신정혜 대기) — `DATABASE_URL`은 박아름 확보 완료 |
-| 3 | 실 endpoint e2e (`HTTPSubAgentClient` → `/v1/agent/route` SSE) | ❌ 차단 | Orchestrator Modal app dhwang0803 deploy (신정혜 대기) |
+| # | 항목 | 5/13 오전 | 5/13 저녁 |
+|---|------|----------|----------|
+| 1 | 격리 정책 단위 테스트 (B) | ✅ 117/117 passed | ✅ 134/134 passed (integration 17건 추가) |
+| 2 | Modal 배포 사전 검증 | ❌ URL/Secret 부재 | ⚠️ **부분 진행** — deploy 성공 / `/v1/health` 차단 |
+| 3 | 실 endpoint e2e (`HTTPSubAgentClient` → `/v1/agent/route` SSE) | ❌ Orchestrator 미배포 | ❌ Orchestrator 배포 완료(URL 확인) / agent-skills-builder /v1/health 차단으로 e2e 대기 |
+
+**#2 잔여 차단**: `cloudsql-iam-sa` Modal Secret의 `GOOGLE_APPLICATION_CREDENTIALS_JSON` 값이 유효한 JSON 아님 → 조장 5/13 17:00경 재등록 후 `/v1/health` 재호출로 통과 예상.
 
 **머지 방침**: 위 2)·3) 모두 통과시킨 후 조장(`@dhwang0803`)께 일괄 리뷰 요청.
 
@@ -194,7 +279,20 @@ PR #51 자체 리뷰(5/12)에서 권장한 후속 항목 중 미처리:
 |------|-------|------|
 | ~~A. `tests/integration/test_agent_skills_builder.py` 작성~~ | — | ✅ **완료** (commit `69bc7b8`, 17/17 passed) |
 | ~~B. `services/agents/agent-skills-builder/Dockerfile`~~ | — | ✅ 불필요 — main.py 확인 결과 `modal.Image.debian_slim()` API로 image 정의 (53-77라인), Dockerfile 패턴 아님 |
-| C. PR #51 추가 후속 — 추가 권장 항목 없음 | — | PR #51 자체 리뷰 후속 권장 3건 모두 처리 완료 (`setup_modal_token.py` push / README / integration test) |
+| ~~C. main.py IAM Connector 패턴 전환~~ | — | ✅ **완료** (commit `7cbbf4d`, deploy 성공) |
+| D. PR #55 (nodes_graph 회귀 hotfix) | — | OPEN, 조장 리뷰 + 머지 대기 (단발성, 즉시 가능) |
+
+PR #51 자체 리뷰 후속 권장 3건(`setup_modal_token.py` push / README / integration test) + main.py IAM 전환까지 모두 처리. 박아름 측 즉시 가능 작업 0건.
+
+### 7.2 5/13 17:00 조장 수정 후 박아름 작업
+
+| 작업 | 차단 해소 시 진입 |
+|------|---------------|
+| `/v1/health` 재호출 (`db: "iam-connected"` 확인) | 조장 `cloudsql-iam-sa` 재등록 후 즉시 |
+| PR #51 Test plan #2 체크 | health 통과 후 즉시 |
+| Orchestrator endpoint 통한 e2e 호출 (HTTPSubAgentClient → /v1/agent/route SSE) | health 통과 후 즉시 |
+| PR #51 Test plan #3 체크 | e2e 통과 후 즉시 |
+| 조장 일괄 리뷰 요청 (PR #51) | #2 + #3 모두 통과 후 |
 
 ### 7.2 신정혜 대기 작업 (URL 받으면 즉시 가능)
 
