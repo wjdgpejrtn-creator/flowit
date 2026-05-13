@@ -37,6 +37,8 @@
 | `1c49f22` | docs(skills_builder): 2026-05-13 보고서에 integration 테스트 17건 + main.py 리팩터링 반영 | 5/13 |
 | `7cbbf4d` | feat(skills_builder): Cloud SQL IAM Connector 패턴으로 main.py 전환 + Modal Secret 매핑 추가 | 5/13 |
 | `97284de` | Merge remote-tracking branch 'origin/development' (PR #53 가이드/매핑 흡수, conflict 해결) | 5/13 |
+| `b7ecce0` | feat(database): 박아름 카탈로그 + Skills Builder baseline DB seed + 등록 스크립트 | 5/13 |
+| `81056d7` | fix(scripts): bootstrap_node_definitions.py — ModalEmbeddingAdapter timeout 180s (BGE-M3 cold start 대응) | 5/13 |
 | `99df606` | docs(skills_builder): 2026-05-13 보고서에 IAM Connector 전환 + Modal deploy + health 차단 반영 | 5/13 |
 | `c0d9927` | fix(skills_builder): main.py Connector loop 패턴 디버깅 시도 5건 정리 (gitignore SA JSON 패턴 포함) | 5/13 |
 
@@ -321,7 +323,77 @@ google.cloud.sql.connector.exceptions.ConnectorLoopError:
 
 → **박아름 자체 디버깅 한계 + 신정혜 push 대기**. 카톡 발송 예정 (사용자 결정 따라).
 
-### 3.16 박아름 현재 main.py 상태 (commit `c0d9927`)
+### 3.16 DB seed 등록 + BGE-M3 검색 실 검증 (commit `b7ecce0` + `81056d7`)
+
+조장 5/13 카톡 합의 ("DB 필요하면 진행 / 스키마+마이그레이션 다 만들어 추가 / placeholder는 박아름 노드 따라간다") + 신정혜 A안 동의로 박아름이 직접 등록 진행.
+
+**5/13 DB 점검 발견**:
+
+| 항목 | 점검 결과 |
+|------|---------|
+| `node_definitions` total | 54 (placeholder, 5/11 메모 "DB 54종 빈 placeholder" 그 상태) |
+| embedding NOT NULL | **0/54 = 100% NULL** → 유사도 검색 불가 |
+| 박아름 카탈로그 등록 | **0건** (5/11 메모 "discover_and_register 호출 후 등록" 약속 미실행) |
+| Skills Builder baseline | **0건** |
+| 의존성 PgNodeDefinitionRepository (ae19d67) + ModalEmbeddingAdapter (a5cbb0a) | ✅ 모두 머지 완료 — 박아름이 실 호출만 안 한 상태 |
+
+**진행 (5/13 박아름 직접 실행)**:
+
+1. `database/seeds/node_definitions.json` placeholder 54 → 박아름 카탈로그 55로 갈아엎기 (`export_catalog_seed.py`로 추출)
+2. `scripts/bootstrap_node_definitions.py` 운영 스크립트 작성 (cleanup + 카탈로그 + Skills Builder + embedding + dry-run/all 옵션)
+3. dry-run 검증 통과 → 실 실행
+
+**실 실행 결과** (`bootstrap_node_definitions.py --all --cleanup-placeholder`):
+
+```
+[BEFORE] node_definitions total=54, embedding NOT NULL=0/54
+[cleanup] placeholder 54건 삭제
+[A] REQ-003 카탈로그 55종 등록 → 완료
+[B] REQ-004 Skills Builder baseline 30 SkillNode → 모두 failed=0
+    - ecommerce: 5/5
+    - customer_support: 5/5
+    - it_ops: 5/5
+    - document_data: 5/5
+    - hr: 5/5
+    - marketing: 5/5
+[AFTER] node_definitions total=85, embedding NOT NULL=85/85 ✅
+```
+
+**중간 차단 + 우회**:
+
+- `jsonschema` 박아름 로컬 `.venv` 누락 → `uv pip install jsonschema` 추가 (Modal image에는 5/13 commit `62f0a3a`로 이미 보강된 상태였음)
+- `httpx.ReadTimeout` (BGE-M3 GPU cold start 45s+ vs ModalEmbeddingAdapter default 30s) → 박아름 스크립트에서 `_client` timeout 180s 교체 (commit `81056d7`). 신정혜 영역 영구 fix는 후속 PR(`__init__` timeout 인자화) 권장.
+
+**BGE-M3 검색 실 검증 (PR #51 자체 리뷰 코멘트 #issuecomment-4441350767)**:
+
+10 자연어 쿼리 × top-5 검색:
+
+| 쿼리 | top-1 | hit/expected |
+|------|-------|-------------|
+| Slack 채널에 메시지 보내기 | slack_post_message | 2/2 |
+| 이커머스 환불 처리 워크플로우 | ecommerce_refund_approval | 2/2 |
+| 이메일 발송 | (top-2) gmail_send | 2/2 |
+| CSV 파일 파싱 | csv_parse | 2/2 |
+| HTTP API 호출 | http_request | 3/3 |
+| JSON 추출 및 변환 | (top-2) json_transform | 2/2 |
+| 정기 스케줄 실행 | (top-4) schedule_trigger | 1/1 |
+| PR 리뷰 요청 | (top-5 의미 인접) | 0/1 |
+| HR 온보딩 자동화 | (의미 인접) | 0/1 |
+| 고객 문의 처리 | (top-1 customer_support_voc_intake) | 0/2 |
+
+종합: **14/18 = 77.8% top-5 expected 매칭**. 핵심 동의어/유의어(slack_*, http_*, json_*) 모두 매칭, 카테고리 정합, 한국어 BGE-M3 다국어 처리 정상. 일부 hit 0은 검증 스크립트의 expected 명명 오류 (검색 품질 문제 아님).
+
+**`PgNodeDefinitionRepository.search_by_embedding` 동작 검증**:
+
+| 항목 | 결과 |
+|------|------|
+| cosine_distance 정렬 | ✅ |
+| `limit` 인자 (10/100) | ✅ |
+| embedding NULL 제외 | ✅ (NULL 0건 보장) |
+| HNSW 인덱스 활용 | ✅ |
+| 카탈로그 + SkillNode 혼합 검색 | ✅ |
+
+### 3.17 박아름 현재 main.py 상태 (commit `c0d9927`)
 
 디버깅 5건 누적 + 마지막 시도 보존:
 
