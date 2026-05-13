@@ -62,15 +62,16 @@ class AgentComposer:
         sa_path.write_text(sa_payload, encoding="utf-8")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
 
-        # AsyncConnector: 별도 스레드 루프 없음 → ConnectorLoopError 없음
-        # Connector(sync)는 내부에 별도 스레드+루프를 생성해 루프 불일치 유발
+        # Connector를 getconn() 안에서 lazy 초기화 + 명시적 loop 바인딩
+        # storage/orm/session_factory.py 동일 패턴 — ConnectorLoopError 해결
         self._connector = None
 
         async def getconn():
-            from google.cloud.sql.connector import AsyncConnector, IPTypes
+            import asyncio
+            from google.cloud.sql.connector import Connector, IPTypes
             if self._connector is None:
-                self._connector = AsyncConnector()
-            return await self._connector.connect(
+                self._connector = Connector(loop=asyncio.get_running_loop())
+            return await self._connector.connect_async(
                 os.environ["CLOUD_SQL_INSTANCE"],
                 "asyncpg",
                 user=os.environ["DB_IAM_USER"],
@@ -123,7 +124,7 @@ class AgentComposer:
         if getattr(self, "_engine", None):
             asyncio.run(self._engine.dispose())
         if getattr(self, "_connector", None):
-            asyncio.run(self._connector.close())
+            asyncio.run(self._connector.close_async())
 
     @modal.asgi_app()
     def fastapi(self):
