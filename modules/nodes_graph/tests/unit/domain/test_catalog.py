@@ -11,14 +11,16 @@ from nodes_graph.domain.catalog.trigger.webhook_trigger import WebhookTriggerInp
 
 def test_catalog_count():
     defs = get_all_node_definitions()
-    # 28 domain (data 14 + control 8 + trigger 6) + 13 external:
+    # 28 domain (data 14 + control 8 + trigger 6) + 13 external + 14 toolset:
+    #   external (13):
     #   - 기타 2: http_request, pdf_generate
     #   - Communication 2: slack_post_message, gmail_send (Microsoft 보류)
     #   - Document 3: google_drive_read, google_sheets_read, google_docs_write (OneDrive 보류)
     #   - Data 3: postgresql_query, mysql_query, bigquery_query
     #   - AI/ML 1: anthropic_chat (OpenAI 보류)
     #   - Productivity 2: google_calendar_create_event, linear_create_issue (Notion 보류)
-    assert len(defs) == 41
+    #   toolset (14): 햄햄 commit `59f0e26`로 toolset 14종 tool 노드를 카탈로그에 연결
+    assert len(defs) == 55
 
 
 def test_catalog_unique_node_ids():
