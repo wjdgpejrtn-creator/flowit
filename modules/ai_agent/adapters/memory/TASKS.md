@@ -12,7 +12,7 @@
 - [ ] google-cloud-storage 클라이언트 의존성 추가 (pyproject.toml)
 - [ ] 4개 메서드 구현 (load_index, load_file, save_file, delete_file)
 - [ ] MEMORY.md frontmatter 파싱 (python-frontmatter 라이브러리 권장)
-- [ ] 환경변수: `GCS_PERSONAL_MEMORY_BUCKET` (Secret Manager 주입)
+- [ ] 환경변수: `GCS_PERSONAL_BUCKET` (Modal Secret `agent-personalization-secret`로 주입 — spec REQ-004 §5.270 SSOT)
 - [ ] integration test (storage 모듈의 GCS 테스트 패턴 참조)
 
 ## 참조
