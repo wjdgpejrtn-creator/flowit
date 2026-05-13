@@ -51,12 +51,9 @@ class AgentComposer:
 
     @modal.enter()
     def boot(self) -> None:
-        import json
         import os
         import tempfile
         from pathlib import Path
-
-        from google.cloud.sql.connector import Connector, IPTypes
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
         # GCP SA JSON → 임시 파일 → ADC 환경변수
@@ -65,10 +62,15 @@ class AgentComposer:
         sa_path.write_text(sa_payload, encoding="utf-8")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
 
-        # Cloud SQL IAM 인증 — 비밀번호 없음
-        self._connector = Connector()
+        # Connector는 async 컨텍스트(uvicorn 루프)에서 lazy 초기화
+        # boot()는 sync이므로 여기서 Connector() 생성 시 루프 불일치 발생
+        self._connector = None
 
         async def getconn():
+            from google.cloud.sql.connector import Connector, IPTypes
+            if self._connector is None:
+                # 첫 호출 시 uvicorn 이벤트 루프에서 초기화 → 루프 일치
+                self._connector = Connector()
             return await self._connector.connect_async(
                 os.environ["CLOUD_SQL_INSTANCE"],
                 "asyncpg",
