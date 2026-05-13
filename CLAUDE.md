@@ -232,7 +232,7 @@ modules/{module_name}/
 
 ## 컨벤션
 
-- Python >= 3.11, Ruff lint (`line-length=120`)
+- Python >= 3.12, Ruff lint (`line-length=120`)
 - 타입 힌트 필수 (모든 함수 시그니처에 타입 명시)
 - 테스트: `pytest` + `pytest-asyncio`
 - 파일명: `snake_case`
