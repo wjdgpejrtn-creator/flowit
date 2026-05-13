@@ -185,6 +185,23 @@ async def _cleanup_placeholder(session) -> int:
     return deleted
 
 
+async def _make_embedder():
+    """ModalEmbeddingAdapter — BGE-M3 GPU cold start 대응 timeout 180s.
+
+    신정혜 영역 ModalEmbeddingAdapter는 default timeout 30s인데 BGE-M3 cold
+    start가 45s+라 박아름 운영 스크립트에서 client만 교체. 영구 수정은
+    신정혜 후속 PR (default → 인자화).
+    """
+    import httpx
+
+    from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
+
+    embedder = ModalEmbeddingAdapter()
+    await embedder._client.aclose()
+    embedder._client = httpx.AsyncClient(timeout=180.0)
+    return embedder
+
+
 async def _register_catalog(session_factory, dry_run: bool) -> int:
     """REQ-003 카탈로그 55종 등록 (discover_and_register)."""
     from nodes_graph.adapters.catalog.registry import (
@@ -197,12 +214,11 @@ async def _register_catalog(session_factory, dry_run: bool) -> int:
         print(f"  [dry-run] 카탈로그 discover: {len(nodes)}종")
         return len(nodes)
 
-    from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
     from storage.repositories.pg_node_definition_repository import (
         PgNodeDefinitionRepository,
     )
 
-    embedder = ModalEmbeddingAdapter()
+    embedder = await _make_embedder()
     try:
         async with session_factory() as session:
             repo = PgNodeDefinitionRepository(session)
@@ -223,7 +239,6 @@ async def _register_skills_baseline(session_factory, dry_run: bool) -> int:
         print(f"  [dry-run] Skills Builder baseline: 30 SkillNode (1 industry × 5 + 5 functional × 5)")
         return 30
 
-    from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
     from ai_agent.application.agents.skills_builder.build_from_functional_domain_use_case import (
         BuildFromFunctionalDomainUseCase,
     )
@@ -236,7 +251,7 @@ async def _register_skills_baseline(session_factory, dry_run: bool) -> int:
     )
 
     total_upserted = 0
-    embedder = ModalEmbeddingAdapter()
+    embedder = await _make_embedder()
     try:
         # 산업 활성 1종
         async with session_factory() as session:
