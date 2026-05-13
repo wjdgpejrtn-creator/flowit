@@ -42,12 +42,41 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 
 import modal
 
 
 APP_NAME = "agent-skills-builder"
+
+
+# ----------------------------------------------------------------------
+# Pure helpers (modal runtime-free — integration 테스트에서 단독 호출)
+# ----------------------------------------------------------------------
+
+
+def _classify_next_action(frame: Any) -> Literal["continue", "complete", "error"]:
+    """SSEFrame → AgentProtocolResponse.next_action 매핑.
+
+    ResultFrame은 use case 정상 종료, ErrorFrame은 오류, 나머지(AgentNodeFrame
+    등 진행 프레임)는 "continue". AgentProtocolResponse Literal 세 값 spec와 정합.
+    """
+    from common_schemas.transport import ErrorFrame, ResultFrame
+
+    if isinstance(frame, ResultFrame):
+        return "complete"
+    if isinstance(frame, ErrorFrame):
+        return "error"
+    return "continue"
+
+
+def _sse_bytes(response: Any) -> bytes:
+    """AgentProtocolResponse → SSE 데이터 라인 (UTF-8 bytes).
+
+    SSE 포맷: 'data: <json>\\n\\n'
+    """
+    body = response.model_dump_json()
+    return f"data: {body}\n\n".encode("utf-8")
 
 
 image = (
@@ -216,7 +245,7 @@ class SkillsBuilderAgent:
                 document = DocumentBlock.model_validate(payload["document"])
                 stream = use_case.execute(req.user_id, document, req.personal_memory)
             else:
-                yield self._sse_bytes(
+                yield _sse_bytes(
                     AgentProtocolResponse(
                         frames=[],
                         state_delta={
@@ -230,18 +259,11 @@ class SkillsBuilderAgent:
 
             try:
                 async for frame in stream:
-                    if isinstance(frame, ResultFrame):
-                        next_action = "complete"
-                    elif isinstance(frame, ErrorFrame):
-                        next_action = "error"
-                    else:
-                        next_action = "continue"
-
-                    yield self._sse_bytes(
+                    yield _sse_bytes(
                         AgentProtocolResponse(
                             frames=[frame],
                             state_delta={},
-                            next_action=next_action,
+                            next_action=_classify_next_action(frame),
                         )
                     )
 
@@ -251,12 +273,3 @@ class SkillsBuilderAgent:
                 # use case 내부 예외 → rollback (격리 정책으로 잡히지 않은 케이스)
                 await session.rollback()
                 raise
-
-    @staticmethod
-    def _sse_bytes(response: Any) -> bytes:
-        """AgentProtocolResponse → SSE 데이터 라인 (UTF-8 bytes).
-
-        SSE 포맷: 'data: <json>\\n\\n'
-        """
-        body = response.model_dump_json()
-        return f"data: {body}\n\n".encode("utf-8")
