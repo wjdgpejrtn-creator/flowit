@@ -29,6 +29,7 @@ image = (
         "langgraph>=0.2",
         "modal>=0.73",
         "protobuf>=4.25",
+        "jsonschema>=4.0",
     )
     .env({"PYTHONPATH": "/app/modules:/app/common_schemas_src"})
     .add_local_dir("modules", remote_path="/app/modules")
