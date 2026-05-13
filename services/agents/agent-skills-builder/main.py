@@ -102,6 +102,11 @@ image = (
         "pgvector>=0.3",
         # Cloud SQL IAM 인증 — google-cloud-sql-connector 만이 enable_iam_auth=True 지원
         "cloud-sql-python-connector[asyncpg]>=1.12",
+        # Transitive: storage.mappers → toolset.runtime_validator → import jsonschema.
+        # 박아름 use case가 toolset 직접 사용 안 하지만 storage import 체인으로 끌려옴.
+        "jsonschema>=4.0",
+        # 가이드 §5 함정 표 — protobuf 버전 핀 (cloud-sql-python-connector 호환)
+        "protobuf>=4.25",
     )
     # PYTHONPATH는 add_local_* 이전에 (build step) — modal SDK가 add_local_* 이후
     # build step을 거부하므로 add_local_dir 호출 전에 .env() 처리 필요.
