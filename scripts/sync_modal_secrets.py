@@ -27,9 +27,20 @@ DEFAULT_ENV_FILE = REPO_ROOT / ".env"
 # Maps Modal Secret name → list of (env_var_in_dotenv, key_inside_modal_secret).
 # Modal lets a single Secret hold multiple env vars; we keep one var per
 # Secret here for clarity. Add new entries as new sub-agents need them.
+# Sub-agent Modal apps connect to Cloud SQL via IAM authentication
+# (cloud-sql-python-connector). Each sub-agent gets two Modal Secrets:
+#   1. agent-<name>-secret   — app-specific config (LLM/Embedding URL + DB target)
+#   2. cloudsql-iam-sa       — shared GCP service-account JSON (one-time, by 조장)
 SECRET_MAPPINGS: dict[str, list[tuple[str, str]]] = {
     "huggingface-token": [("HF_TOKEN", "HF_TOKEN")],
-    # Future:
+    "agent-skills-builder-secret": [
+        ("LLM_BASE_URL", "LLM_BASE_URL"),
+        ("EMBEDDING_BASE_URL", "EMBEDDING_BASE_URL"),
+        ("CLOUD_SQL_INSTANCE", "CLOUD_SQL_INSTANCE"),
+        ("DB_IAM_USER", "DB_IAM_USER"),
+        ("DB_NAME", "DB_NAME"),
+    ],
+    # Future sub-agents (uncomment + customize when their Modal app lands):
     # "langsmith-api-key": [("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY")],
     # "gcs-personal-creds": [("GCS_SA_KEY_JSON", "GOOGLE_APPLICATION_CREDENTIALS_JSON")],
 }

@@ -26,11 +26,20 @@ routing:
 deploy:
     PYTHONUTF8=1 modal deploy services/agents/agent-skills-builder/main.py
 
-환경 변수 (Modal Secret):
-    MODAL_TOKEN_ID / MODAL_TOKEN_SECRET  — Modal RPC 인증 (ModalLLMAdapter 사용)
-    LLM_BASE_URL                          — llm-base ASGI base URL (예: https://...modal.run)
-    EMBEDDING_BASE_URL                    — llm-base BGE-M3 endpoint base URL (보통 LLM_BASE_URL과 동일)
-    DATABASE_URL                          — PostgreSQL DSN (postgresql+asyncpg://...)
+환경 변수 (Modal Secret 2개 마운트):
+
+    agent-skills-builder-secret (sub-agent 담당자 박아름이 등록 — 5 키):
+        LLM_BASE_URL                          llm-base ASGI base URL (예: https://...modal.run)
+        EMBEDDING_BASE_URL                    BGE-M3 ASGI base URL (보통 LLM_BASE_URL과 동일)
+        CLOUD_SQL_INSTANCE                    "<PROJECT>:<REGION>:<INSTANCE>" 형식
+        DB_IAM_USER                           공용 SA 풀 이메일 (cloudsql-iam-modal@...)
+        DB_NAME                               workflow_automation
+
+    cloudsql-iam-sa (조장 1회 등록 — 1 키, 공용):
+        GOOGLE_APPLICATION_CREDENTIALS_JSON   공용 GCP SA JSON key (cloud-sql-python-connector 인증용)
+
+DB 접속: cloud-sql-python-connector + enable_iam_auth=True (DSN 패턴 금지 — 가이드
+sub_agent_modal_deploy.md §3.2 + §5 참조).
 
 박아름 룰:
 - `BuildFromSOPUseCase` 실 endpoint 호출은 `llm-base`의 cls method 패턴 hotfix 필요
@@ -91,29 +100,34 @@ image = (
         "sqlalchemy[asyncio]>=2.0",
         "asyncpg>=0.30",
         "pgvector>=0.3",
+        # Cloud SQL IAM 인증 — google-cloud-sql-connector 만이 enable_iam_auth=True 지원
+        "cloud-sql-python-connector[asyncpg]>=1.12",
     )
-    # 모노레포 소스 마운트 (Modal worker의 PYTHONPATH에 추가됨)
-    .add_local_dir("packages/common_schemas/python", "/repo/packages/common_schemas/python")
-    .add_local_dir("modules/ai_agent", "/repo/modules/ai_agent")
-    .add_local_dir("modules/nodes_graph", "/repo/modules/nodes_graph")
-    .add_local_dir("modules/storage", "/repo/modules/storage")
+    # PYTHONPATH는 add_local_* 이전에 (build step) — modal SDK가 add_local_* 이후
+    # build step을 거부하므로 add_local_dir 호출 전에 .env() 처리 필요.
     .env({
         "PYTHONPATH": ":".join([
             "/repo/packages/common_schemas/python",
             "/repo/modules",
         ]),
     })
+    # 모노레포 소스 마운트 (Modal worker의 PYTHONPATH에 추가됨) — 마지막에 배치
+    .add_local_dir("packages/common_schemas/python", "/repo/packages/common_schemas/python")
+    .add_local_dir("modules/ai_agent", "/repo/modules/ai_agent")
+    .add_local_dir("modules/nodes_graph", "/repo/modules/nodes_graph")
+    .add_local_dir("modules/storage", "/repo/modules/storage")
 )
 
 
-modal_secret = modal.Secret.from_name("agent-skills-builder-secret")
+app_secret = modal.Secret.from_name("agent-skills-builder-secret")
+gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
 
 app = modal.App(APP_NAME)
 
 
 @app.cls(
     image=image,
-    secrets=[modal_secret],
+    secrets=[app_secret, gcp_secret],
     timeout=600,
     scaledown_window=300,
 )
@@ -123,30 +137,62 @@ class SkillsBuilderAgent:
 
     @modal.enter()
     def boot(self) -> None:
-        """어댑터 + repo + use case wiring.
+        """어댑터 + Cloud SQL IAM Connector + session factory wiring.
 
         매 cold start에 한 번 실행. session_factory는 함수 단위로 새 session 생성
-        (요청마다 격리). 어댑터는 worker 생애주기 동안 유지.
+        (요청마다 격리). 어댑터와 connector는 worker 생애주기 동안 유지.
+
+        DB 접속: cloud-sql-python-connector + enable_iam_auth=True (가이드
+        sub_agent_modal_deploy.md §3.2 표준). DSN 패턴 금지.
         """
+        import tempfile
+        from pathlib import Path
+
+        from google.cloud.sql.connector import Connector, IPTypes
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
 
-        # --- 어댑터 ---
+        # 1) GCP SA JSON을 임시 파일로 풀고 ADC 환경변수 지정
+        sa_payload = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+        sa_path = Path(tempfile.gettempdir()) / "gcp-sa.json"
+        sa_path.write_text(sa_payload, encoding="utf-8")
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
+
+        # 2) Cloud SQL Python Connector — IAM 인증 (비밀번호 없음)
+        self._connector = Connector()
+
+        async def _getconn():
+            return await self._connector.connect_async(
+                os.environ["CLOUD_SQL_INSTANCE"],
+                "asyncpg",
+                user=os.environ["DB_IAM_USER"],
+                db=os.environ["DB_NAME"],
+                enable_iam_auth=True,
+                ip_type=IPTypes.PUBLIC,
+            )
+
+        self._engine = create_async_engine(
+            "postgresql+asyncpg://",
+            async_creator=_getconn,
+            pool_pre_ping=True,
+        )
+        self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
+
+        # 3) 어댑터 wiring (RPC LLM + HTTP embedding)
         self._llm = ModalLLMAdapter()  # MODAL_TOKEN_ID/SECRET + LLM_BASE_URL 환경변수 자동 사용
         self._embedder = ModalEmbeddingAdapter()  # EMBEDDING_BASE_URL 환경변수 자동 사용
 
-        # --- DB engine + session factory ---
-        database_url = os.environ["DATABASE_URL"]
-        self._engine = create_async_engine(database_url, pool_pre_ping=True)
-        self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
-
     @modal.exit()
     def shutdown(self) -> None:
+        """async engine + connector 정리 (sync 컨텍스트에서 호출)."""
+        import asyncio
+
         if getattr(self, "_engine", None):
-            # async dispose 필요 — sync 컨텍스트에서 호출이라 sync_engine.dispose() 패턴
-            self._engine.sync_engine.dispose()
+            asyncio.run(self._engine.dispose())
+        if getattr(self, "_connector", None):
+            asyncio.run(self._connector.close_async())
 
     @modal.asgi_app()
     def fastapi(self):
@@ -159,20 +205,22 @@ class SkillsBuilderAgent:
 
         @api.get("/v1/health")
         async def health() -> dict[str, Any]:
-            """어댑터 + DB 연결 헬스체크."""
-            errors: dict[str, str] = {}
+            """어댑터 + Cloud SQL IAM 연결 헬스체크 (가이드 §3.3 패턴)."""
+            from sqlalchemy import text
 
-            # DB 연결 확인 — session 짧게 열어서 SELECT 1
+            errors: dict[str, str] = {}
+            db_status: str = "iam-connected"
+
+            # Cloud SQL IAM 연결 확인 — engine.connect() + SELECT 1
             try:
-                async with self._session_factory() as session:
-                    await session.execute(__import__("sqlalchemy").text("SELECT 1"))
+                async with self._engine.connect() as conn:
+                    await conn.execute(text("SELECT 1"))
             except Exception as exc:
+                db_status = "error"
                 errors["db"] = repr(exc)
 
-            # 임베딩 endpoint 확인 (선택)
+            # 임베딩 endpoint base_url 설정 여부만 확인 (호출 X — endpoint 계약은 별도)
             try:
-                # ModalEmbeddingAdapter._client으로 health 호출하기엔 endpoint 계약 미정
-                # → 본 단계에서는 base_url 설정 여부만 확인
                 _ = self._embedder._base_url
             except Exception as exc:
                 errors["embedder"] = repr(exc)
@@ -182,7 +230,7 @@ class SkillsBuilderAgent:
                     status_code=503,
                     detail={"status": "degraded", "errors": errors},
                 )
-            return {"status": "ok", "app": APP_NAME}
+            return {"status": "ok", "app": APP_NAME, "db": db_status}
 
         @api.post("/v1/agent/route")
         async def route(req: AgentProtocolRequest = Body(...)) -> StreamingResponse:
