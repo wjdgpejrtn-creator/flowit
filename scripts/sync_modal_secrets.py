@@ -37,6 +37,15 @@ DEFAULT_ENV_FILE = REPO_ROOT / ".env"
 # secret that would smear the dotenv parser and leak via terminal history.
 SECRET_MAPPINGS: dict[str, list[tuple[str, str]]] = {
     "huggingface-token": [("HF_TOKEN", "HF_TOKEN")],
+    # agent-composer (신정혜 — Workflow Composer Modal app)
+    "agent-composer-secret": [
+        ("LLM_BASE_URL", "LLM_BASE_URL"),
+        ("EMBEDDING_BASE_URL", "EMBEDDING_BASE_URL"),
+        ("CLOUD_SQL_INSTANCE", "CLOUD_SQL_INSTANCE"),
+        ("DB_IAM_USER", "DB_IAM_USER"),
+        ("DB_NAME", "DB_NAME"),
+    ],
+    # agent-skills-builder (박아름 — Skills Builder Modal app)
     "agent-skills-builder-secret": [
         ("LLM_BASE_URL", "LLM_BASE_URL"),
         ("EMBEDDING_BASE_URL", "EMBEDDING_BASE_URL"),
@@ -44,16 +53,22 @@ SECRET_MAPPINGS: dict[str, list[tuple[str, str]]] = {
         ("DB_IAM_USER", "DB_IAM_USER"),
         ("DB_NAME", "DB_NAME"),
     ],
+    # agent-personalization (햄햄 — Personalization Modal app)
     "agent-personalization-secret": [
         ("LLM_BASE_URL", "LLM_BASE_URL"),
         ("EMBEDDING_BASE_URL", "EMBEDDING_BASE_URL"),
         ("CLOUD_SQL_INSTANCE", "CLOUD_SQL_INSTANCE"),
         ("DB_IAM_USER", "DB_IAM_USER"),
         ("DB_NAME", "DB_NAME"),
-        # GCS bucket holds per-user MEMORY.md + frontmatter files (REQ-004 §6,
-        # Claude Code memory.md pattern). SA needs roles/storage.objectAdmin on
-        # this bucket — see docs/guides/sub_agent_modal_deploy.md §1.4.
         ("GCS_PERSONAL_BUCKET", "GCS_PERSONAL_BUCKET"),
+    ],
+    # agent-orchestrator (신정혜 — Main Orchestrator Modal app)
+    "agent-orchestrator-secret": [
+        ("LLM_BASE_URL", "LLM_BASE_URL"),
+        ("EMBEDDING_BASE_URL", "EMBEDDING_BASE_URL"),
+        ("COMPOSER_URL", "COMPOSER_URL"),
+        ("SKILLS_BUILDER_URL", "SKILLS_BUILDER_URL"),
+        ("PERSONALIZATION_URL", "PERSONALIZATION_URL"),
     ],
     # Future:
     # "langsmith-api-key": [("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY")],
