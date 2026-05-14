@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_by   TEXT         NOT NULL DEFAULT CURRENT_USER,
     bootstrapped BOOLEAN      NOT NULL DEFAULT FALSE
 );
+
+COMMENT ON TABLE schema_migrations IS 'Test fixture — same schema as production tracking table';
 """
 
 _REQUIRED_ENV = ("CLOUD_SQL_INSTANCE", "DB_IAM_USER", "DB_NAME")
@@ -147,7 +149,13 @@ async def _migrations_rows(engine, schema: str) -> list[tuple[str, bool]]:
 
 @pytest.mark.asyncio
 async def test_fresh_apply(iam_engine, isolated_schema, schemas_dir):
-    _write(schemas_dir, "001_widgets.sql", "CREATE TABLE widgets (id SERIAL PRIMARY KEY);")
+    # 001은 multi-statement (CREATE + COMMENT) — asyncpg prepare 우회 검증
+    _write(
+        schemas_dir,
+        "001_widgets.sql",
+        "CREATE TABLE widgets (id SERIAL PRIMARY KEY);\n"
+        "COMMENT ON TABLE widgets IS 'multi-statement test';",
+    )
     _write(schemas_dir, "002_gadgets.sql", "CREATE TABLE gadgets (id SERIAL PRIMARY KEY);")
 
     runner = MigrationRunner(iam_engine, schemas_dir=schemas_dir, schema_name=isolated_schema)

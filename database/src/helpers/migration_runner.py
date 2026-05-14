@@ -131,7 +131,7 @@ class MigrationRunner:
         if dry_run:
             return
         sql = tracking_path.read_text(encoding="utf-8")
-        await conn.execute(text(sql))
+        await _exec_multi_statement(conn, sql)
 
     async def _existing_tables(self, conn: AsyncConnection) -> set[str]:
         rows = (
@@ -185,7 +185,7 @@ class MigrationRunner:
             return MigrationStep(sql_path.name, MigrationOutcome.BACKFILLED, sha, declared)
 
         if not dry_run:
-            await conn.execute(text(content))
+            await _exec_multi_statement(conn, content)
             await self._record(conn, sql_path.name, sha, bootstrapped=False)
         return MigrationStep(sql_path.name, MigrationOutcome.APPLIED, sha, declared)
 
@@ -214,7 +214,7 @@ class MigrationRunner:
         content = filepath.read_text(encoding="utf-8")
         async with self._engine.begin() as conn:
             await self._set_search_path(conn)
-            await conn.execute(text(content))
+            await _exec_multi_statement(conn, content)
 
 
 def _parse_declared_tables(sql_text: str) -> list[str]:
@@ -224,3 +224,19 @@ def _parse_declared_tables(sql_text: str) -> list[str]:
         if table not in declared:
             declared.append(table)
     return declared
+
+
+async def _exec_multi_statement(conn: AsyncConnection, sql: str) -> None:
+    """Execute SQL containing multiple ``;``-separated statements.
+
+    asyncpg's ``prepare()`` (used by SQLAlchemy ``text()``) only accepts a
+    single statement, so multi-statement DDL (`CREATE TABLE ...; COMMENT ON
+    TABLE ...;` and similar) fails with `cannot insert multiple commands into
+    a prepared statement`. Falling through to asyncpg's ``Connection.execute``
+    uses the simple-query protocol which has no such limitation. The transaction
+    started by ``conn.begin()`` is preserved because the raw asyncpg connection
+    is the same underlying object SQLAlchemy is managing.
+    """
+    raw = await conn.get_raw_connection()
+    asyncpg_conn = raw.driver_connection
+    await asyncpg_conn.execute(sql)
