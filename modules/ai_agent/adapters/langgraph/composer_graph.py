@@ -212,7 +212,7 @@ class LangGraphOrchestrator:
         if spec is None:
             return {"error": "DraftSpec 없음"}
         try:
-            workflow = await self._drafter.draft(spec, state["node_candidates"])
+            workflow = await self._drafter.draft(spec, state["node_candidates"], owner_user_id=state["user_id"])
         except Exception as exc:
             return {"error": f"drafter 실패: {exc}"}
         return {
