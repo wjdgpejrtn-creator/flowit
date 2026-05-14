@@ -12,6 +12,10 @@ Applies `database/schemas/*.sql` files to the database, tracking each via the
 
 Hash mismatch (file changed after being applied) raises `MigrationError` — the
 file must be split into a new migration rather than edited in place.
+
+Schema isolation: pass ``schema_name`` to run inside an alternate PostgreSQL
+schema (search_path scoped). Used by tests to operate in a throwaway
+``test_migration_<random>`` schema without touching ``public``.
 """
 from __future__ import annotations
 
@@ -30,6 +34,10 @@ _CREATE_TABLE_RE = re.compile(
     r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\"?\w+\"?\.)?\"?(\w+)\"?",
     re.IGNORECASE,
 )
+
+# PostgreSQL identifier validator — schema_name must be a simple lowercase
+# identifier to be safely embedded in `SET search_path` (no quoting / escaping).
+_VALID_SCHEMA_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
 class MigrationError(RuntimeError):
@@ -55,9 +63,15 @@ class MigrationRunner:
         self,
         engine: AsyncEngine,
         schemas_dir: Path | None = None,
+        schema_name: str = "public",
     ) -> None:
+        if not _VALID_SCHEMA_RE.match(schema_name):
+            raise ValueError(
+                f"Invalid schema_name {schema_name!r}: must match {_VALID_SCHEMA_RE.pattern}"
+            )
         self._engine = engine
         self._schemas_dir = schemas_dir or Path(__file__).parents[2] / "schemas"
+        self._schema_name = schema_name
 
     async def run_schemas(self, *, dry_run: bool = False) -> list[MigrationStep]:
         """Apply all *.sql files, returning the outcome of each step.
@@ -78,8 +92,9 @@ class MigrationRunner:
 
         steps: list[MigrationStep] = []
         async with self._engine.begin() as conn:
+            await self._set_search_path(conn)
             await self._ensure_tracking_table(conn, tracking_path, dry_run=dry_run)
-            existing_tables = await self._existing_public_tables(conn)
+            existing_tables = await self._existing_tables(conn)
             applied_records = await self._load_applied(conn)
 
             for sql_path in sql_files:
@@ -98,6 +113,10 @@ class MigrationRunner:
 
         return steps
 
+    async def _set_search_path(self, conn: AsyncConnection) -> None:
+        # schema_name은 init에서 _VALID_SCHEMA_RE로 검증됨 → f-string 안전
+        await conn.execute(text(f'SET search_path TO "{self._schema_name}", public'))
+
     async def status(self) -> list[MigrationStep]:
         """Read-only view of what run_schemas() would do, without any side effects."""
         return await self.run_schemas(dry_run=True)
@@ -114,13 +133,14 @@ class MigrationRunner:
         sql = tracking_path.read_text(encoding="utf-8")
         await conn.execute(text(sql))
 
-    async def _existing_public_tables(self, conn: AsyncConnection) -> set[str]:
+    async def _existing_tables(self, conn: AsyncConnection) -> set[str]:
         rows = (
             await conn.execute(
                 text(
                     "SELECT table_name FROM information_schema.tables "
-                    "WHERE table_schema='public' AND table_type='BASE TABLE'"
-                )
+                    "WHERE table_schema = :schema AND table_type='BASE TABLE'"
+                ),
+                {"schema": self._schema_name},
             )
         ).all()
         return {row.table_name for row in rows}
@@ -193,6 +213,7 @@ class MigrationRunner:
 
         content = filepath.read_text(encoding="utf-8")
         async with self._engine.begin() as conn:
+            await self._set_search_path(conn)
             await conn.execute(text(content))
 
 
