@@ -7,7 +7,7 @@ import httpx
 
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
 
-_DEFAULT_TIMEOUT = 180.0  # BGE-M3 cold start 최대 45s + 여유분
+_DEFAULT_TIMEOUT = 180.0  # BGE-M3 cold start 최대 45s + 여유분 (신정혜 PR #56 9d50311b 동기화)
 # BGE-M3 서버는 1024차원 출력. Matryoshka 특성상 상위 768차원만 잘라도 품질 유지.
 # pgvector 컬럼 정의와 반드시 일치해야 함 (vector(768)).
 _EMBEDDING_DIM = 768

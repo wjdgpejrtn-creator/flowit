@@ -244,6 +244,8 @@ credentials.json
 
 # Temp schema copies (SSOT: database/schemas/)
 scripts/schema_v2/
+# 각자 자기 로컬 sync_modal_secrets.py에 두고 commit 금지.
+scripts/sync_modal_secrets.py
 
 # Class diagrams (임시 취합용, 원본은 각 담당자 로컬/Drive 보관)
 class_diagram/
