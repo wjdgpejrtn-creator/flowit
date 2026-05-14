@@ -752,39 +752,40 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 ---
 
-## 7. 박아름 액션 아이템 (압축판, 우선순위순)
+## 7. 박아름 액션 아이템 (압축판, 우선순위순) — 5/14 야간 결정 반전 반영
 
-### ✅ 완료 (5/14 후반)
+> ⚠️ **결정 반전 (5/14 야간)**: §6 상단 박스 참조. Tier 1 4개 신설 결정 폐기 → gemma_chat 1개 신설 + anthropic_chat 보존. 본 §7도 그에 맞춰 갱신.
+
+### ✅ 완료 (5/14 후반 + 야간)
 1. **DB 권한 검증 e2e** — 조장 GRANT 처리 후 재실행 → `upserted_count=4, failed_count=1` (customer_support 1건 cold start fail)
 2. **timeout 30→180s 선반영** (commit `157c261`, 신정혜 PR #56 `9d50311b` 동기화)
 3. **timeout 180s 적용 e2e 재실행** (it_ops 5종) → `upserted_count=5, failed_count=0` ✅ **Test plan #3 완전 통과**
+4. **결정 #2 반전** — Tier 1 4개 → gemma_chat 1개 (시스템 본질 정합: Composer가 prompt 동적 생성)
+5. **anthropic_chat 보존** — development에 그대로 (제거 안 함, 옵션 1)
+6. **gemma_chat.py 신설** — `modules/nodes_graph/adapters/catalog/external/gemma_chat.py` (PR #68 commit `8c68c7c`, 90 lines)
+7. **단위 테스트 신설** — `modules/nodes_graph/tests/unit/adapters/test_gemma_chat.py` (8 contract 테스트)
+8. **`.gitignore` SA JSON 패턴 7줄 보강** — 메인 브랜치 5/9 stale → development 동기 (PR #68 포함)
+9. **REQ-003 spec 갱신** — AI 카테고리 1 → 2 (anthropic_chat + gemma_chat), 합계 55 → 56 (commit `0112444`)
+10. **`database/seeds/node_definitions.json` 갱신** — gemma_chat row 추가 (총 56 노드, commit `0112444`)
+11. **PR #68 생성** — base=development, head=feature/req-003-nodes-graph: https://github.com/billionaireahreum/Workflow_Automation/pull/68
+12. **PR #68 충돌 해결** — development merge (commit `9459852`) → mergeable=MERGEABLE/CLEAN 복귀
+13. **5/14 보고서 §9 + verification §6 결정 반전 박스 + 메모리 갱신** — 의사결정 흐름 영구 보존
 
-### 🟡 단기 (이번 commit 묶음 — Tier 1 4개 신설)
-3. `modules/nodes_graph/adapters/catalog/external/anthropic_chat.py` **완전 제거**
-4. `gemma_summarize.py` 신규 (요약)
-5. `gemma_classify.py` 신규 (분류) ⭐
-6. `gemma_extract.py` 신규 (정보 추출)
-7. `gemma_document_generate.py` 신규 (문서 생성)
-8. `modules/nodes_graph/adapters/catalog/registry.py` import 갱신
-9. REQ-003 spec line 490 갱신 (AI 카테고리 1 → 4)
-10. `database/seeds/node_definitions.json` 갱신
-11. 단위 테스트 신규/갱신
-12. bootstrap 재실행 (`--cleanup-placeholder --all` → 카탈로그 58 row)
-13. commit + push (PR #51 추가 commit)
+### 🟡 단기 (PR #68 머지 후 진행)
+- **bootstrap 재실행** (`--cleanup-placeholder --all` → 카탈로그 56 row 등록, gemma_chat 포함)
+- **bootstrap_node_definitions.py 임시 timeout 180s 코드 제거** — 정혜 PR #56 `9d50311b` 본질 해결됨 + development merge로 메인 브랜치 흡수 완료 (commit `9459852`)
+- **`modules/nodes_graph/adapters/catalog/registry.py` 확인** — gemma_chat이 Plugin discovery로 자동 검출되는지 확인. 미등록 시 registry.py에 import 추가
 
-### 🟢 PR #56 머지 후
-- bootstrap_node_definitions.py 임시 timeout 180s 교체 코드 제거
-
-### 🔵 PR #51 머지 후 별도 docs PR
-- CLAUDE.md line 172 + REQ-004 spec line 95/437 stale 정정 (embedder_port nodes_graph SSOT)
-- (선택) REQ-004 §2.2에 Skills Builder 책임 경계 "옵션 A 확정" 명시
+### 🔵 PR #51 머지 완료 후 별도 docs PR (지금 진행 가능)
+- **CLAUDE.md line 172 + REQ-004 spec line 95/437 stale 정정** — embedder_port nodes_graph SSOT 정합 (박아름이 햄햄에게 약속한 후속 docs PR)
+- **(선택) REQ-004 spec §2.2 Skills Builder 책임 경계 "옵션 A 확정" 명시**
 
 ### ⏸️ 박아름 영역 외부 (대기 / 위임)
-- **toolset connector** (햄햄 REQ-005): Gemma 4 호출 경로 추가 — Tier 1 4개 실제 LLM 호출 wiring
+- **toolset connector** (햄햄 REQ-005): Gemma 4 호출 경로 추가 — **gemma_chat 1개 wiring** (Tier 1 4개 → 1개로 갱신)
 - **execution_engine** (조장 REQ-007): `ToolsetExecutor.execute_tool` 실제 구현
-- PR #56 머지 (신정혜 또는 조장 권한)
-- 신정혜 SSOT 갱신 PR 머지 (health path + SSE dual 명시)
+- PR #68 머지 (조장 권한)
 - 햄햄 PR #54 머지 (agent_memory 마이그레이션 트리거)
+- 신정혜 SSOT 갱신 PR 머지 (health path + SSE dual 명시 — commit `3a8715c7` 일부 반영)
 
 ---
 
