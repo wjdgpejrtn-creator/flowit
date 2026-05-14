@@ -9,7 +9,7 @@ class ToolExecutionMapper:
     @staticmethod
     def to_domain(orm: ToolExecutionModel) -> ToolExecutionRecord:
         return ToolExecutionRecord(
-            execution_id=orm.tool_execution_id,
+            execution_id=orm.execution_id,
             tool_name=orm.tool_name,
             input_data=orm.input_data,
             output_data=orm.output_data,
@@ -22,7 +22,7 @@ class ToolExecutionMapper:
     @staticmethod
     def to_orm(entity: ToolExecutionRecord) -> ToolExecutionModel:
         return ToolExecutionModel(
-            tool_execution_id=entity.execution_id,
+            execution_id=entity.execution_id,
             tool_name=entity.tool_name,
             input_data=entity.input_data,
             output_data=entity.output_data,

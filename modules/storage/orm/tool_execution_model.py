@@ -20,8 +20,10 @@ class ToolExecutionModel(Base):
         ),
     )
 
-    tool_execution_id: Mapped[uuid.UUID] = mapped_column(
-        pg.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    # 속성명은 도메인 entity(toolset.ToolExecutionRecord.execution_id)와 일치,
+    # DB 컬럼명은 schema(016_storage_execution_quality.sql:tool_execution_id)와 일치.
+    execution_id: Mapped[uuid.UUID] = mapped_column(
+        "tool_execution_id", pg.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     tool_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     input_data: Mapped[dict[str, Any]] = mapped_column(pg.JSONB, nullable=False)
