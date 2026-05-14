@@ -13,7 +13,7 @@ $$ LANGUAGE plpgsql;
 -- ============================================================
 -- departments
 -- ============================================================
-CREATE TABLE departments (
+CREATE TABLE IF NOT EXISTS departments (
     department_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(100) NOT NULL UNIQUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -22,7 +22,7 @@ CREATE TABLE departments (
 -- ============================================================
 -- users
 -- ============================================================
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     user_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email           VARCHAR(255) NOT NULL UNIQUE,
     name            VARCHAR(100) NOT NULL,
@@ -35,17 +35,17 @@ CREATE TABLE users (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TRIGGER set_users_updated_at
+CREATE OR REPLACE TRIGGER set_users_updated_at
     BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_department_id ON users(department_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_department_id ON users(department_id);
 
 -- ============================================================
 -- workflows  (Spec: WorkflowSchema + DB ownership)
 -- ============================================================
-CREATE TABLE workflows (
+CREATE TABLE IF NOT EXISTS workflows (
     workflow_id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id                 UUID NOT NULL REFERENCES users(user_id),
     name                    VARCHAR(200) NOT NULL,
@@ -63,18 +63,18 @@ CREATE TABLE workflows (
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TRIGGER set_workflows_updated_at
+CREATE OR REPLACE TRIGGER set_workflows_updated_at
     BEFORE UPDATE ON workflows
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
-CREATE INDEX idx_workflows_user_id ON workflows(user_id);
-CREATE INDEX idx_workflows_scope ON workflows(scope);
-CREATE INDEX idx_workflows_is_draft ON workflows(is_draft) WHERE is_draft = TRUE;
+CREATE INDEX IF NOT EXISTS idx_workflows_user_id ON workflows(user_id);
+CREATE INDEX IF NOT EXISTS idx_workflows_scope ON workflows(scope);
+CREATE INDEX IF NOT EXISTS idx_workflows_is_draft ON workflows(is_draft) WHERE is_draft = TRUE;
 
 -- ============================================================
 -- executions  (Spec: ExecutionResult + ExecutionContext.user_id)
 -- ============================================================
-CREATE TABLE executions (
+CREATE TABLE IF NOT EXISTS executions (
     execution_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workflow_id     UUID NOT NULL REFERENCES workflows(workflow_id),
     user_id         UUID NOT NULL REFERENCES users(user_id),
@@ -86,6 +86,6 @@ CREATE TABLE executions (
     completed_at    TIMESTAMPTZ
 );
 
-CREATE INDEX idx_executions_workflow_id ON executions(workflow_id);
-CREATE INDEX idx_executions_user_id ON executions(user_id);
-CREATE INDEX idx_executions_status ON executions(status);
+CREATE INDEX IF NOT EXISTS idx_executions_workflow_id ON executions(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_executions_user_id ON executions(user_id);
+CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status);
