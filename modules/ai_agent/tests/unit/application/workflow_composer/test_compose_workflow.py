@@ -29,7 +29,7 @@ def _mock_drafter():
     svc = AsyncMock(spec=DrafterService)
     svc.draft = AsyncMock(return_value=WorkflowSchema(
         workflow_id=uuid4(), name="Test", scope="private",
-        is_draft=True, nodes=[], connections=[],
+        is_draft=True, nodes=[], connections=[], owner_user_id=uuid4(),
     ))
     return svc
 
