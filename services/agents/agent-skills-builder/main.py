@@ -88,6 +88,24 @@ def _sse_bytes(response: Any) -> bytes:
     return f"data: {body}\n\n".encode("utf-8")
 
 
+def _done_frame_bytes() -> bytes:
+    """SSE 스트림 종결 시그널 — frames=[], next_action='complete'.
+
+    2026-05-14 결정: dual 종결 패턴 채택 (agent-composer/orchestrator와 통일).
+    모든 종결 path(정상 종료 / use case 내부 예외 / unsupported source_type)에서
+    마지막 frame으로 발송. frontend는 이 frame을 받으면 스트림 종료로 간주한다.
+    """
+    from common_schemas.agent_protocol import AgentProtocolResponse
+
+    return _sse_bytes(
+        AgentProtocolResponse(
+            frames=[],
+            state_delta={},
+            next_action="complete",
+        )
+    )
+
+
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install(
@@ -358,6 +376,7 @@ class SkillsBuilderAgent:
                             next_action="error",
                         )
                     )
+                    yield _done_frame_bytes()  # 2026-05-14: dual 종결 패턴
                     return
 
                 try:
@@ -372,9 +391,19 @@ class SkillsBuilderAgent:
 
                     # use case 정상 종료 — repo.upsert()로 발생한 변경 commit
                     await session.commit()
-                except Exception:
-                    # use case 내부 예외 → rollback (격리 정책으로 잡히지 않은 케이스)
+                    yield _done_frame_bytes()  # 2026-05-14: dual 종결 패턴
+                except Exception as exc:
+                    # use case 내부 예외 → rollback + ErrorFrame + done frame
+                    # (2026-05-14: dual 종결 패턴 — raise 대신 명시 발송으로 contract 보장)
                     await session.rollback()
-                    raise
+                    yield _sse_bytes(
+                        AgentProtocolResponse(
+                            frames=[ErrorFrame(code="E_INTERNAL", message=str(exc))],
+                            state_delta={},
+                            next_action="error",
+                        )
+                    )
+                    yield _done_frame_bytes()
+                    return
         finally:
             await self._cleanup_db_resources(connector, engine)

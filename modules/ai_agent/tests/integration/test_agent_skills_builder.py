@@ -148,6 +148,44 @@ def test_sse_bytes_handles_progress_frame():
 
 
 # ======================================================================
+# _done_frame_bytes — dual 종결 패턴 종료 시그널 (2026-05-14 결정)
+# ======================================================================
+
+
+def test_done_frame_bytes_emits_complete_terminator():
+    """종료 시그널: frames=[], state_delta={}, next_action='complete'.
+
+    dual 종결 패턴(2026-05-14)에서 모든 종결 path가 마지막 frame으로 발송하는
+    contract. frontend는 이 frame을 받으면 스트림 종료로 간주.
+    """
+    raw = agent_main._done_frame_bytes()
+    json_body = raw.decode("utf-8")[len("data: "):-len("\n\n")]
+    parsed = json.loads(json_body)
+    assert parsed["next_action"] == "complete"
+    assert parsed["frames"] == []
+    assert parsed["state_delta"] == {}
+
+
+def test_done_frame_bytes_follows_sse_data_line_format():
+    """SSE 포맷: 'data: <json>\\n\\n'."""
+    raw = agent_main._done_frame_bytes().decode("utf-8")
+    assert raw.startswith("data: ")
+    assert raw.endswith("\n\n")
+
+
+def test_done_frame_bytes_independent_of_business_payload():
+    """매 호출이 동일한 종료 시그널을 발생시켜야 한다 (정상/에러 종결 무관).
+
+    종료 시그널의 의미는 "스트림 끝"이므로 비즈니스 결과(성공/실패)와 분리되어야
+    한다. ResultFrame/ErrorFrame은 결과 정보 전달용으로 _stream의 yield 흐름에서
+    별도 처리. _done_frame_bytes는 항상 동일한 빈 종결 frame을 반환.
+    """
+    a = agent_main._done_frame_bytes()
+    b = agent_main._done_frame_bytes()
+    assert a == b
+
+
+# ======================================================================
 # AgentProtocolRequest payload 시그니처 — source_type별
 # ======================================================================
 
