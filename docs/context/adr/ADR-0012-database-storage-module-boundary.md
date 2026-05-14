@@ -8,7 +8,8 @@
 ## Revision History
 
 - **v1 (2026-05-14, PR #62)**: 초안 — `database/`가 ORM/Repository/object storage를 흡수, `modules/storage/`는 Skills Marketplace 전용으로 축소. PR-2a 사전 점검에서 cross-module import 변경 + CLAUDE.md 5지점 수정 + PR #54 영향이 이득 대비 큰 것으로 판명되어 v2로 재작성.
-- **v2 (2026-05-14, PR #63)**: 현재 — `database/`는 SQL only(원래 의도 복원), `modules/storage/`는 영속화 인프라 그대로 유지, `modules/skills_marketplace/` 신규 모듈로 도메인 분리. import 경로 변경 0건 + PR #54 무영향.
+- **v2 (2026-05-14, PR #63)**: `database/`는 SQL only(원래 의도 복원), `modules/storage/`는 영속화 인프라 그대로 유지, `modules/skills_marketplace/` 신규 모듈로 도메인 분리. import 경로 변경 0건 + PR #54 무영향.
+- **v3 (2026-05-14, 본 PR)**: 현재 — PR-2a 작업 중 9쌍 Repository 일괄 분석에서 `database/src/repositories/`(BaseRepository CRUD 패턴, admin/batch/seed 용도)와 `modules/storage/repositories/`(Port-Adapter 패턴, sub-agent 도메인 호출)가 **의도적으로 다른 책임을 가진 두 패턴**임이 확인됨. v2의 follow-up 표 PR-2b/c "중복 통합/이전" 항목은 잘못된 가정이라 폐기. 두 패턴 공존 명시.
 
 > 한나절 내 v1 → v2 재작성 결정은 ADR 위계 약화 우려가 있으나, 외부 referer가 모두 본 PR에서 어차피 갱신되는 시점이라 supersede 별 ADR 분리 대신 본문 갱신으로 정리. 변경 이력은 본 섹션 + git log/blame 으로 보존.
 
@@ -39,16 +40,29 @@ PR #54(`ai_agent.PersonalSkill`)는 그대로 유지하고 **`skills_marketplace
 - `skills_marketplace`는 신규 모듈이라 이름 결정 자유도 높음.
 - 구체 이름은 `skills_marketplace` 구현 시점(PR-2d)에 옵션 제시 후 결정.
 
-### database/src/* 처리
+### database/src/* 와 modules/storage/repositories/ 처리 (v3 갱신)
 
-현재 `database/src/`에 있는 27 ORM, 19 Repository, helpers, seeds 스크립트는 **modules/storage로 통째 이전**한다. follow-up:
+**`database/src/repositories/`와 `modules/storage/repositories/`는 의도된 두 패턴 공존**으로 인정:
+
+| 모듈 | 패턴 | 책임 | 호출자 |
+|---|---|---|---|
+| `database/src/repositories/` | **BaseRepository CRUD 편의** | ORM 직접 입출력, 자체 클래스 (ABC 무관), `upsert`/`list_by_*` 등 일반 CRUD + 도메인별 특수 메서드 | admin / batch / seed 스크립트 |
+| `modules/storage/repositories/` | **Port-Adapter** | 도메인 entity 입출력, 다른 모듈의 ABC(`auth/ai_agent/nodes_graph/toolset`)를 구현 | sub-agent / use case / composition root |
+
+9쌍 Repository 일괄 분석(2026-05-14, PR-2a 작업 중)에서 메서드 시그니처/입출력 타입/사용 컨텍스트가 다름이 확인됨. 같은 테이블을 다루지만 인터페이스가 다른 두 책임이라 단순 통합 부적합.
+
+ORM(`database/src/models/`와 `modules/storage/orm/`)도 두 패턴이 각각 자기 Base에 등록되어 별도 SQLAlchemy 객체. 같은 테이블을 다루지만 충돌 없이 공존 가능 (다른 metadata).
+
+follow-up (v3 정리):
 
 | 단계 | 작업 | 의존 |
 |---|---|---|
-| **PR-2a** | `database/src/models/` ↔ `modules/storage/orm/` 9개 중복 ORM을 staging schema와 reconcile + `modules/storage/orm/`을 SSOT로 통일. `database/src/models/`의 중복분은 통째 제거 (외부 import 0건 확인됨) | 본 ADR 머지 |
-| **PR-2b** | `database/src/repositories/` ↔ `modules/storage/repositories/` 8개 중복 Repository 통합 + Mapper 정리 | PR-2a |
-| **PR-2c** | `database/src/` 잔여(`helpers/`, `scripts/seed.py`, `models/`/`repositories/`의 database 전용 17개 ORM + 10개 Repo) → `modules/storage/`로 이전. `database/src/protocols.py`(REQ-002 BaseCipher)는 위치 협의(modules/auth 또는 modules/storage) | PR-2b |
-| **PR-2d** | `modules/skills_marketplace/` 신규 모듈 + 3계층 도메인 entity/use cases + `skills_marketplace.PersonalSkill` 이름 옵션 결정 + Skill 관련 코드(`database/schemas/005`/`013`은 그대로 유지) `modules/storage`에서 분리 | PR-2c |
+| **PR-2a** ✓ | `modules/storage/orm/` 9개 ORM을 staging schema와 1:1 정합화 + 도메인 entity와 속성명 일치(`mapped_column("db_col", ...)`로 분리) + Phase 2 mapper/repo fix. **머지 완료 (PR #64, 2026-05-14)** | — |
+| ~~PR-2b: 중복 Repository 통합~~ | **폐기** — 두 패턴 의도된 책임 공존 | — |
+| ~~PR-2c: database/src 통째 이전~~ | **폐기** — 두 패턴 의도된 책임 공존 | — |
+| **PR-2a-3** (재배치) | `WorkflowSchema`/`ExecutionResult` `user_id` 누락 fix + 16+ 사용처 + `execution_mapper`/`skill_mapper` 임시 dataclass → 정식 entity import. PR #64 known issue #1 + #3 해소 | 본 ADR 머지 |
+| **PR-2a-4** (재배치) | `services/execution_engine/src/adapters/postgres_*_repo.py` 검증 — 3중 중복으로 의심됐으나 두 패턴 공존 가정 하에 재분석 필요 | PR-2a-3 |
+| **PR-2d** | `modules/skills_marketplace/` 신규 모듈 + 3계층 도메인 entity/use cases + `skills_marketplace.PersonalSkill` 이름 옵션 결정 + Skill 관련 코드 `modules/storage`에서 분리 | PR-2a-3 |
 | **PR-2e** | 3계층 schema 마이그레이션 (`personal_skills`/`team_skills`/`company_skills` 테이블 분리) + ORM/Repository 추가 | PR-2d, spec 확정 후 |
 
 ## Consequences
@@ -63,7 +77,8 @@ PR #54(`ai_agent.PersonalSkill`)는 그대로 유지하고 **`skills_marketplace
 ### Negative / Trade-offs
 - **storage가 약간 "잡탕" 유지** — RDB Repo + object storage adapter + 자체 도메인. "영속화 인프라" 단일 책임으로 묶이긴 하나 도메인 객체(StorageObject) + 인프라 Adapter가 한 모듈에 공존.
 - **skills_marketplace REQ 번호 미정** — REQ-008에 sub-domain으로 두거나 REQ-013 신설. 본 ADR은 모듈 위치만 결정, spec 번호는 PR-2d 시점에 결정.
-- **본 ADR 한나절 내 v1 → v2 재작성** — Revision History 섹션으로 변경 이력 보존.
+- **본 ADR 한나절 내 v1 → v2 → v3 갱신** — Revision History 섹션으로 변경 이력 보존.
+- **ORM/Repository 두 패턴 공존** (v3) — 같은 테이블을 다루는 두 SQLAlchemy 정의가 각자 Base에 register됨. SQLAlchemy 입장에선 충돌 없으나, 신규 작성자는 `database/src/`(BaseRepository 편의) vs `modules/storage/`(Port-Adapter) 어느 쪽에 코드를 둘지 가이드 필요. CLAUDE.md/clean_architecture.md에 책임 명시 추가 권장 (별도 docs PR).
 
 ### Follow-ups
 - 본 ADR과 동일 PR: REQ-001/REQ-008 spec 헤더 갱신, clean_architecture.md §8.1 갱신, CLAUDE.md skills_marketplace 등록.
@@ -86,3 +101,4 @@ PR #54(`ai_agent.PersonalSkill`)는 그대로 유지하고 **`skills_marketplace
 - PR #54 (Personalization Agent): `ai_agent.PersonalSkill` 영향 없음 — 본 ADR 결정으로 보전
 - PR #62: 본 ADR v1 머지
 - PR #63: 본 ADR v2 갱신 (force push)
+- PR #64: PR-2a 머지 (Phase 1 ORM 정합 + Phase 2 mapper/repo fix). PR-2a 작업 중 9쌍 Repository 일괄 분석 결과로 v3 갱신 트리거.
