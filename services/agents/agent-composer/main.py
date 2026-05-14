@@ -137,19 +137,17 @@ class AgentComposer:
 
         @api.get("/v1/health")
         async def health() -> dict[str, object]:
+            import logging
             from sqlalchemy import text
+            logger = logging.getLogger(__name__)
             try:
                 async with self._engine.connect() as conn:
                     await conn.execute(text("SELECT 1"))
-                db_ok = True
-                db_err = None
             except Exception as exc:
-                db_ok = False
-                db_err = repr(exc)
-            if not db_ok:
+                logger.warning("db unreachable: %s", repr(exc))
                 raise HTTPException(
                     status_code=503,
-                    detail={"db": {"ok": False, "error": "database unreachable"}},
+                    detail={"db": "unreachable"},
                 )
             return {"status": "ok", "db": "iam-connected"}
 
