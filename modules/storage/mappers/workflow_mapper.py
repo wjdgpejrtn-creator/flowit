@@ -10,6 +10,7 @@ class WorkflowMapper:
     def to_domain(orm: WorkflowModel) -> WorkflowSchema:
         return WorkflowSchema(
             workflow_id=orm.workflow_id,
+            owner_user_id=orm.user_id,  # ORM은 NOT NULL, domain은 Optional
             name=orm.name,
             description=orm.description,
             scope=orm.scope,
@@ -24,8 +25,16 @@ class WorkflowMapper:
 
     @staticmethod
     def to_orm(entity: WorkflowSchema) -> WorkflowModel:
+        # DB schema는 NOT NULL이라 owner_user_id 없으면 INSERT 불가 — 명시적 ValueError로 전환.
+        if entity.owner_user_id is None:
+            raise ValueError(
+                "WorkflowSchema.owner_user_id is required for DB persistence "
+                "(workflows.user_id NOT NULL). Set owner_user_id in the use case "
+                "before calling Repository.save()."
+            )
         return WorkflowModel(
             workflow_id=entity.workflow_id,
+            user_id=entity.owner_user_id,
             name=entity.name,
             description=entity.description,
             scope=entity.scope,
