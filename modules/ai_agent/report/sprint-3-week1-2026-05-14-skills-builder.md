@@ -434,12 +434,65 @@ modal-sa-key.json
 
 | 결과 | 상태 |
 |---|---|
-| PR #51 누적 24 commits → Test plan #1·#2·#3 모두 통과 | ✅ |
-| PR #56 신정혜 머지 + 박아름 APPROVE | ✅ |
-| PR #68 생성 (gemma_chat 1개 + .gitignore 보강) | ✅ (CONFLICTING — 박아름 결정 대기) |
+| PR #51 누적 24 commits → Test plan #1·#2·#3 모두 통과 | ✅ MERGED |
+| PR #56 신정혜 머지 + 박아름 APPROVE | ✅ MERGED |
+| PR #68 4 commits (gemma_chat + spec+seed+registry) | ✅ MERGEABLE/CLEAN |
+| PR #68 충돌 해결 (development merge `9459852`) | ✅ |
+| PR #68 self 3축 리뷰 + Test plan 4/4 + bootstrap 결과 게시 | ✅ |
 | 메모리 갱신 (`project_sprint_3_day2_handoff.md` + `MEMORY.md`) | ✅ |
-| verification 보고서 결정 반전 박스 추가 | ✅ |
-| 5/14 보고서 §9 추가 | ✅ |
+| verification 보고서 §6 결정 반전 박스 + §7 단기 액션 완료 마킹 | ✅ |
+| 5/14 보고서 §9 추가 + §9.8 bootstrap 결과 | ✅ |
+| **DB 카탈로그 실 등록** — `node_definitions` 85→86, embedding 86/86 | ✅ |
+
+### 9.8 bootstrap 실 실행 (5/14 야간 추가)
+
+박아름 5/13 패턴 추적 (PR #68 머지 전 박아름 영역 단독 진행).
+
+**인증 진단 흐름**:
+- 시도 1 (잘못된 패턴): `GOOGLE_APPLICATION_CREDENTIALS_JSON` 환경 변수에 JSON content (Modal Secret 전용) → `InvalidAuthorizationSpecificationError`
+- 박아름 짚음: "이전 5/12/13 실행한 코드처럼 해" → bootstrap 스크립트 + 5/13 보고서 line 188 분석으로 표준 GCP ADC 패턴 확인
+- 시도 2 (정합 패턴): `$env:GOOGLE_APPLICATION_CREDENTIALS = "<SA JSON 파일 경로>"` (표준 ADC) → 인증 통과
+
+**1차 bootstrap (미등록 발견)**:
+```
+[BEFORE] total=85
+[A] REQ-003 카탈로그 55종 등록 (gemma_chat 빠짐)
+[AFTER] total=85  ← 변화 없음
+```
+원인: `catalog_registry.py` `get_all_node_definitions()`에 gemma_chat import + return 미등록 (Plugin discovery는 자동 스캔 X, 명시적 등록 패턴)
+
+**해소 — PR #68 commit `fbc9365`**:
+```python
+from ..adapters.catalog.external.gemma_chat import get_node_definition as _gemma_chat
+...
+return [
+    ...
+    _anthropic_chat(),
+    _gemma_chat(),  # 추가
+    ...
+]
+```
++ docstring `AI/ML 1종 → 2종`, `총 55종 → 56종` 갱신
+
+**2차 bootstrap (정합)**:
+```
+[BEFORE] total=85
+박아름 카탈로그+SkillNode node_type set: 86건
+[A] REQ-003 카탈로그 56종 등록 ✅ (gemma_chat 포함)
+[B] REQ-004 Skills Builder 30 SkillNode 등록 ✅
+[AFTER] total=86, embedding NOT NULL=86/86 ✅
+```
+
+→ DB 카탈로그에 gemma_chat row + BGE-M3 embedding 실제 등록 완료. Composer가 자연어 검색 시 gemma_chat 검색 가능 상태.
+
+### 9.9 PR #68 최종 commits
+
+| # | commit | 내용 |
+|---|---|---|
+| 1 | `8c68c7c` | gemma_chat.py 신설 + .gitignore SA JSON 보강 |
+| 2 | `9459852` | development merge (충돌 해결) |
+| 3 | `0112444` | REQ-003 spec + seed JSON 갱신 |
+| 4 | `fbc9365` | catalog_registry.py에 gemma_chat 등록 (Plugin discovery) |
 
 ---
 

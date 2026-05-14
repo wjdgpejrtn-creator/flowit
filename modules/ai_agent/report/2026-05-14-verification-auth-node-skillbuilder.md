@@ -771,10 +771,17 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 12. **PR #68 충돌 해결** — development merge (commit `9459852`) → mergeable=MERGEABLE/CLEAN 복귀
 13. **5/14 보고서 §9 + verification §6 결정 반전 박스 + 메모리 갱신** — 의사결정 흐름 영구 보존
 
-### 🟡 단기 (PR #68 머지 후 진행)
-- **bootstrap 재실행** (`--cleanup-placeholder --all` → 카탈로그 56 row 등록, gemma_chat 포함)
-- **bootstrap_node_definitions.py 임시 timeout 180s 코드 제거** — 정혜 PR #56 `9d50311b` 본질 해결됨 + development merge로 메인 브랜치 흡수 완료 (commit `9459852`)
-- **`modules/nodes_graph/adapters/catalog/registry.py` 확인** — gemma_chat이 Plugin discovery로 자동 검출되는지 확인. 미등록 시 registry.py에 import 추가
+### ✅ 단기 (5/14 야간 모두 완료)
+- ✅ **bootstrap 실 실행** (PR #68 머지 전 박아름 단독 진행, --cleanup-placeholder --all 2회 실행). 1차 미등록 발견 → registry 갱신 후 2차 정합. 결과: BEFORE=85 → AFTER=86, embedding 86/86 (gemma_chat BGE-M3 포함)
+- ✅ **`modules/nodes_graph/application/catalog_registry.py` 갱신** (PR #68 commit `fbc9365`) — Plugin discovery는 디렉터리 자동 스캔 아님, **명시적 import + return 패턴** 확인 (박아름 5/12 카탈로그 패턴 정합)
+- ⏳ **bootstrap_node_definitions.py 임시 timeout 180s 코드 제거** — 정혜 PR #56 `9d50311b` 본질 해결 + development merge로 메인 브랜치 흡수 완료 (commit `9459852`). 다만 bootstrap 내부 임시 패치 라인 cleanup 선택 (동작 무관)
+
+### 🔍 5/14 야간 인증 진단 (박아름 직관 정확)
+
+- 시도 1 (실패): `GOOGLE_APPLICATION_CREDENTIALS_JSON` 환경 변수 (Modal Secret 전용 패턴) → `InvalidAuthorizationSpecificationError` 반복
+- 박아름 짚음: "이전 5/12/13 실행한 코드처럼 해" → bootstrap 스크립트 분석 결과 표준 GCP ADC 패턴 (`GOOGLE_APPLICATION_CREDENTIALS=<file path>`) 확인
+- 박아름 5/13 보고서 line 188 명시: Modal app boot()이 JSON content → 임시 파일 + 표준 ADC 변수 등록. 로컬은 변환 단계 없이 직접 파일 경로
+- 시도 2 (성공): `$env:GOOGLE_APPLICATION_CREDENTIALS = "<SA JSON 파일 경로>"` → 인증 통과 → bootstrap 정상 실행
 
 ### 🔵 PR #51 머지 완료 후 별도 docs PR (지금 진행 가능)
 - **CLAUDE.md line 172 + REQ-004 spec line 95/437 stale 정정** — embedder_port nodes_graph SSOT 정합 (박아름이 햄햄에게 약속한 후속 docs PR)
