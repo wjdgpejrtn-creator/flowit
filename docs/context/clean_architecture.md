@@ -855,23 +855,32 @@ services/frontend/
 
 ### 8.1 database/ (REQ-001)
 
-순수 SQL 계층. Python 코드 의존 없음.
+**모든 영속화 인프라**(ADR-0012). RDB(PostgreSQL) + object storage(GCS/ClamAV) + ORM/Repository/Mapper. 도메인 의존 없는 framework-level 계층.
 
 ```
 database/
-├── schemas/                            # DDL (15개 SQL 파일)
+├── schemas/                            # DDL (000 추적 + 16 도메인, ADR-0011)
+│   ├── 000_migration_tracking.sql     # schema_migrations 추적 테이블
 │   ├── 001_core.sql                   # users, workflows, executions
 │   ├── ...
-│   └── 015_node_logs_extended.sql
-├── migrations/                         # Alembic
-│   ├── alembic.ini
-│   ├── env.py
-│   └── versions/
+│   └── 016_storage_execution_quality.sql
 ├── seeds/                              # 초기 데이터
-│   └── node_definitions.sql           # 54종 노드 정의
-├── scripts/                            # DB 유틸리티
-└── tests/                              # SQL 테스트 (pgTAP 등)
+│   └── node_definitions.sql
+├── scripts/                            # DB 유틸리티 (migrate, diagnose, seed, validate)
+├── src/
+│   ├── models/                         # SQLAlchemy ORM (SSOT)
+│   ├── repositories/                   # 다른 모듈 Port 구현체 (PgSessionRepository 등)
+│   ├── mappers/                        # ORM ↔ 도메인 변환
+│   ├── adapters/                       # object storage (GCSAdapter, ClamAVAdapter)
+│   ├── helpers/                        # MigrationRunner, CipherProtocol, SessionManager
+│   ├── engine.py                       # AsyncEngine 팩토리
+│   └── protocols.py                    # BaseCipher Protocol (ADR-0004)
+└── tests/
 ```
+
+> **변경 이력**:
+> - ADR-0011 (2026-05-14): Alembic 미도입 — raw SQL + `schema_migrations` 추적
+> - ADR-0012 (2026-05-14): object storage + RDB Repository 책임 흡수 (이전엔 REQ-008 소관)
 
 ### 8.2 infra/ (REQ-011)
 
