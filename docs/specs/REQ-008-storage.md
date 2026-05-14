@@ -1,20 +1,19 @@
 # REQ-008 Storage — 구현 명세
 
-> **ADR-0012로 책임 축소** (2026-05-14): 본 모듈은 **Skills Marketplace 도메인
-> 전용**으로 재정의된다. 기존의 object storage 어댑터(GCS/ClamAV) + RDB
-> Repository 구현체(`PgSessionRepository`, `PgWorkflowRepository` 등)는 모두
-> REQ-001(database)로 이전한다. 향후 모듈 디렉토리도 `modules/skills_marketplace/`
-> 로 rename 예정. 본 spec의 §13-62는 ADR-0012 머지 후 REQ-001 spec에 흡수되며,
-> 본 spec은 §64-72(Marketplace 하위 도메인)만 남기고 **3계층 lifecycle**
-> (personal → team → company 승격) 모델로 확장된다. 자세한 결정 배경은
+> **ADR-0012 (2026-05-14)**: 본 모듈은 기존 명시된 대로 **영속화 인프라**(RDB
+> ORM/Repository/Mapper + object storage 어댑터 + 자체 도메인 `StorageObject`
+> 등)를 그대로 담당한다. Skills Marketplace 하위 도메인(§64-72)만 신규
+> `modules/skills_marketplace/`로 분리된다 (별도 spec 후속 작성, REQ-013
+> 후보). 자세한 결정 배경은
 > `docs/context/adr/ADR-0012-database-storage-module-boundary.md`.
 >
-> **TODO (PR-2d 시점에 본 spec 전면 재작성)**:
-> - 3계층 도메인 엔티티: `PersonalSkill`, `TeamSkill`, `CompanySkill`
-> - 승격 Use Cases: `PromoteToTeamSkillUseCase`, `PromoteToCompanySkillUseCase`
-> - 단일 `skills` 테이블에서 3계층(`personal_skills`/`team_skills`/`company_skills`)
->   분리 마이그레이션
-> - `ai_agent.PersonalSkill`(PR #54) 이름 충돌 해소 (PR #54 측 rename)
+> **분리 작업 (PR-2d 시점)**:
+> - §64-72(Marketplace 하위 도메인)을 `modules/skills_marketplace/`로 이전.
+> - 3계층 도메인 엔티티(`PersonalSkill`/`TeamSkill`/`CompanySkill`) + 승격
+>   Use Cases(`PromoteToTeamSkillUseCase`, `PromoteToCompanySkillUseCase`) 신설.
+> - 단일 `skills` 테이블에서 3계층 분리 마이그레이션.
+> - `ai_agent.PersonalSkill`(PR #54) 이름 충돌은 `skills_marketplace` 측이 다른
+>   이름 채택으로 해소 (구현 시 옵션 결정).
 
 ## common_schemas에서 import할 클래스
 

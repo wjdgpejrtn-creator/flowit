@@ -10,7 +10,7 @@
 
 | 담당자 | 담당 REQ | 모듈/서비스 | Sprint 3 sub-agent 분장 |
 |--------|----------|------------|------------------------|
-| 황대원 (조장) | REQ-001, 007, 008, 009, 010, 011, 012 | database, execution_engine, storage, api_server, frontend, infra, common_schemas | — |
+| 황대원 (조장) | REQ-001, 007, 008, 009, 010, 011, 012, **(REQ-013 후보)** | database, execution_engine, storage, **skills_marketplace** (ADR-0012 신설), api_server, frontend, infra, common_schemas | — |
 | 박아름 (리포 오너) | REQ-002, 003 | auth, nodes_graph | **Skills Builder Agent** |
 | 신정혜 | REQ-004 | ai_agent | **Main Orchestrator + Workflow Composer + LLM base** |
 | 햄햄 (이가원) | REQ-005 | toolset | **Personalization Agent** |
@@ -69,7 +69,9 @@ modules/*/domain/          ← common_schemas + 자기 도메인만 import
 modules/*/application/     ← domain/* + common_schemas (Port 인터페이스만)
         ↑ import
 modules/*/adapters/        ← domain/ports + 외부 라이브러리
-modules/storage/           ← 다른 모듈의 Port ABC 구현
+modules/storage/           ← 영속화 인프라 — 다른 모듈의 Port ABC 구현 + ORM/object storage
+modules/skills_marketplace/ ← Skills Marketplace 도메인 (3계층 personal/team/company, ADR-0012)
+database/                  ← 순수 SQL 계층 — DDL · 마이그레이션 · seeds (Python 코드 없음, ADR-0012)
         ↑ import
 services/api_server/       ← 모든 modules/* 조립 (Composition Root)
 services/execution_engine/ ← 모든 modules/* 조립
@@ -107,6 +109,7 @@ services/frontend/         ← common_schemas/typescript 타입만
 | toolset | `modules/toolset/README.md` |
 | doc_parser | `modules/doc_parser/README.md` |
 | storage | `modules/storage/README.md` |
+| skills_marketplace | `modules/skills_marketplace/README.md` (ADR-0012, PR-2d 시점에 신설) |
 | api_server | `services/api_server/README.md` |
 | execution_engine | `services/execution_engine/README.md` |
 | frontend | `services/frontend/README.md` |
@@ -137,6 +140,9 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 | storage | auth의 `domain/ports` | `from auth.domain.ports import SessionRepository` (ABC 구현을 위해) |
 | storage | nodes_graph의 `domain/ports` | `from nodes_graph.domain.ports import NodeDefinitionRepository` |
 | storage | ai_agent의 `domain/ports` | `from ai_agent.domain.ports import AgentMemoryRepository` |
+| skills_marketplace | storage의 `domain/ports/SkillRepository` (ABC) | `from storage.domain.ports import SkillRepository` (구현은 storage가, 호출은 skills_marketplace가) |
+| skills_marketplace | nodes_graph의 `domain/ports` | `from nodes_graph.domain.ports import NodeDefinitionRepository` (스킬 ↔ 노드 카탈로그 연결) |
+| ai_agent | skills_marketplace의 `application/use_cases` | `from skills_marketplace.application.use_cases import SearchSkillsUseCase` (Composer가 노드 후보 검토 시) |
 | execution_engine | toolset의 `application/use_cases` | `from toolset.application.use_cases import ExecuteToolUseCase` |
 | execution_engine | nodes_graph의 `domain/services` | `from nodes_graph.domain.services import GraphValidator` |
 
