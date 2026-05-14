@@ -118,12 +118,26 @@ IAM 사용자에게 데이터베이스 테이블 접근 권한을 부여한다.
 postgres 비밀번호로 접속하여 실행:
 
 ```sql
--- 각 IAM 사용자에게 권한 부여 (@ 앞부분만 사용, .com 제거)
+-- 각 IAM 사용자에게 권한 부여 (이메일 전체 사용)
 GRANT ALL PRIVILEGES ON DATABASE workflow_automation TO "dhwang0803@gmail.com";
+GRANT CREATE ON DATABASE workflow_automation TO "dhwang0803@gmail.com";   -- 신규 schema 생성용 (테스트 격리 등)
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "dhwang0803@gmail.com";
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO "dhwang0803@gmail.com";
 
 -- 나머지 팀원도 동일하게 실행
+```
+
+> **`GRANT CREATE ON DATABASE`를 별도로 명시하는 이유**: PG 16 + Cloud SQL IAM
+> 사용자 조합에서 `ALL PRIVILEGES ON DATABASE`만으로는 실제 schema 생성 권한이
+> 누락되는 케이스가 확인됨 (2026-05-14). MigrationRunner 격리 테스트나 임시
+> schema가 필요한 작업이 `permission denied for database` 에러로 막히면
+> 이 GRANT를 먼저 점검할 것.
+
+검증:
+
+```sql
+SELECT has_database_privilege('<email>@gmail.com', 'workflow_automation', 'CREATE');
+-- → t (true)가 나와야 함
 ```
 
 ---

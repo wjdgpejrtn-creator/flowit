@@ -44,7 +44,8 @@ from src.helpers.migration_runner import (  # noqa: E402
     MigrationRunner,
 )
 
-pytestmark = pytest.mark.asyncio
+# Module-level pytestmark는 sync 테스트에도 asyncio mark를 붙여 warning을 발생시킴.
+# 각 async 테스트에 명시적 데코레이터를 둬서 sync 테스트와 분리.
 
 _TRACKING_SQL = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -144,6 +145,7 @@ async def _migrations_rows(engine, schema: str) -> list[tuple[str, bool]]:
     return [(r.filename, r.bootstrapped) for r in rows]
 
 
+@pytest.mark.asyncio
 async def test_fresh_apply(iam_engine, isolated_schema, schemas_dir):
     _write(schemas_dir, "001_widgets.sql", "CREATE TABLE widgets (id SERIAL PRIMARY KEY);")
     _write(schemas_dir, "002_gadgets.sql", "CREATE TABLE gadgets (id SERIAL PRIMARY KEY);")
@@ -164,6 +166,7 @@ async def test_fresh_apply(iam_engine, isolated_schema, schemas_dir):
     ]
 
 
+@pytest.mark.asyncio
 async def test_skip_on_rerun(iam_engine, isolated_schema, schemas_dir):
     _write(schemas_dir, "001_widgets.sql", "CREATE TABLE widgets (id SERIAL PRIMARY KEY);")
     runner = MigrationRunner(iam_engine, schemas_dir=schemas_dir, schema_name=isolated_schema)
@@ -174,6 +177,7 @@ async def test_skip_on_rerun(iam_engine, isolated_schema, schemas_dir):
     assert steps[0].outcome is MigrationOutcome.SKIPPED
 
 
+@pytest.mark.asyncio
 async def test_bootstrap_backfill(iam_engine, isolated_schema, schemas_dir):
     _write(schemas_dir, "001_widgets.sql", "CREATE TABLE widgets (id SERIAL PRIMARY KEY);")
 
@@ -192,6 +196,7 @@ async def test_bootstrap_backfill(iam_engine, isolated_schema, schemas_dir):
     ]
 
 
+@pytest.mark.asyncio
 async def test_hash_mismatch_fails_loud(iam_engine, isolated_schema, schemas_dir):
     f = _write(schemas_dir, "001_widgets.sql", "CREATE TABLE widgets (id SERIAL PRIMARY KEY);")
     runner = MigrationRunner(iam_engine, schemas_dir=schemas_dir, schema_name=isolated_schema)
@@ -206,6 +211,7 @@ async def test_hash_mismatch_fails_loud(iam_engine, isolated_schema, schemas_dir
         await runner.run_schemas()
 
 
+@pytest.mark.asyncio
 async def test_dry_run_has_no_side_effects(iam_engine, isolated_schema, schemas_dir):
     _write(schemas_dir, "001_widgets.sql", "CREATE TABLE widgets (id SERIAL PRIMARY KEY);")
 
