@@ -122,22 +122,29 @@ postgres 비밀번호로 접속하여 실행:
 GRANT ALL PRIVILEGES ON DATABASE workflow_automation TO "dhwang0803@gmail.com";
 GRANT CREATE ON DATABASE workflow_automation TO "dhwang0803@gmail.com";   -- 신규 schema 생성용 (테스트 격리 등)
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "dhwang0803@gmail.com";
+GRANT CREATE ON SCHEMA public TO "dhwang0803@gmail.com";                  -- public schema 안에 새 테이블 생성용 (마이그레이션 등)
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO "dhwang0803@gmail.com";
 
 -- 나머지 팀원도 동일하게 실행
 ```
 
-> **`GRANT CREATE ON DATABASE`를 별도로 명시하는 이유**: PG 16 + Cloud SQL IAM
-> 사용자 조합에서 `ALL PRIVILEGES ON DATABASE`만으로는 실제 schema 생성 권한이
-> 누락되는 케이스가 확인됨 (2026-05-14). MigrationRunner 격리 테스트나 임시
-> schema가 필요한 작업이 `permission denied for database` 에러로 막히면
-> 이 GRANT를 먼저 점검할 것.
+> **PG 16 + Cloud SQL IAM에서 별도로 명시해야 하는 두 GRANT**:
+>
+> | GRANT | 부여 권한 | 누락 시 에러 |
+> |---|---|---|
+> | `GRANT CREATE ON DATABASE workflow_automation` | 새 PostgreSQL schema 생성 (`CREATE SCHEMA "test_mig_xxx"`) | `permission denied for database workflow_automation` (테스트 격리에서) |
+> | `GRANT CREATE ON SCHEMA public` | public schema 안에 새 테이블/객체 생성 (`CREATE TABLE schema_migrations`) | `permission denied for schema public` (마이그레이션 첫 적용에서) |
+>
+> PG 15+에서 `public` schema의 CREATE 권한이 PUBLIC role에서 박탈된 게 후자의 원인.
+> `ALL PRIVILEGES ON ALL TABLES`은 기존 테이블 read/write만 부여 — 새 테이블 생성은 별개.
 
 검증:
 
 ```sql
-SELECT has_database_privilege('<email>@gmail.com', 'workflow_automation', 'CREATE');
--- → t (true)가 나와야 함
+SELECT
+    has_database_privilege('<email>@gmail.com', 'workflow_automation', 'CREATE') AS db_create,
+    has_schema_privilege('<email>@gmail.com', 'public', 'CREATE') AS schema_create;
+-- 둘 다 t (true)가 나와야 함
 ```
 
 ---
