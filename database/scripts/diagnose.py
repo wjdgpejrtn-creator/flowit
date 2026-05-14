@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from google.cloud.sql.connector import Connector, IPTypes
+    from google.cloud.sql.connector import IPTypes, create_async_connector
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
 except ImportError as exc:
@@ -124,7 +124,9 @@ async def _diagnose() -> DiagnosisResult:
         )
         return result
 
-    connector = Connector()
+    # create_async_connector()는 현재 running loop를 자동으로 잡아 ConnectorLoopError 회피.
+    # Connector() 직접 생성 시 SQLAlchemy 풀의 async_creator 콜백 loop 와 mismatch 발생.
+    connector = await create_async_connector()
 
     async def getconn():
         return await connector.connect_async(
