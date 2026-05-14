@@ -22,7 +22,7 @@ class PgToolExecutionRepository(ToolExecutionRepository):
     async def find_by_tool(self, tool_name: str, limit: int = 100) -> list[ToolExecutionRecord]:
         stmt = (
             select(ToolExecutionModel)
-            .where(ToolExecutionModel.tool_id == tool_name)
+            .where(ToolExecutionModel.tool_name == tool_name)
             .order_by(ToolExecutionModel.executed_at.desc())
             .limit(limit)
         )
