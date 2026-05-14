@@ -440,9 +440,65 @@ class AnthropicChatInput:
 
 ---
 
-## 6. LLM 노드 풀세트 결정 — anthropic_chat 완전 제거 + Gemma 4 기반 Tier 1 4개 신설 (5/14 박아름 결정)
+## 6. LLM 노드 풀세트 결정 — gemma_chat 1개 신설 + anthropic_chat 보존 (5/14 야간 박아름 결정 반전)
 
-### 6.1 배경 — Gemma 4 정책과 anthropic_chat의 모순
+> ## 🔄 결정 반전 알림 (5/14 야간 — 본 섹션 §6.2~§6.8 내용보다 우선)
+>
+> 본 섹션은 원래 "Tier 1 4개 신설 + anthropic_chat 완전 제거" (옵션 B+)로 작성됐으나, 5/14 야간 박아름이 시스템 본질 재점검 후 **gemma_chat 1개 + anthropic_chat 보존**으로 결정 반전. 의사결정 흐름 보존을 위해 원 내용(§6.2~§6.8)은 그대로 두고 본 박스를 상위 결정으로 둠.
+>
+> ### 최종 결정 (5/14 야간)
+> - **gemma_chat 1개만 신설** (`modules/nodes_graph/adapters/catalog/external/gemma_chat.py`)
+> - **anthropic_chat 보존** (development 머지된 상태 그대로, 제거 안 함)
+> - **Tier 1 4개 결정 폐기** (§6.2.2 표 + §6.3 4개 spec 무효)
+>
+> ### 반전 근거 — 박아름 시스템 본질 정합
+> - 박아름 시스템 = Composer (REQ-004 AI 에이전트)가 사용자 자연어 → 워크플로우 자동 생성 + **prompt 동적 생성**
+> - 노드 책임 = "받은 prompt로 LLM 추론 1회" — 요약/분류/추출 판단은 **Composer 책임**
+> - n8n 패턴(정적 prompt 박힌 용도별 노드)은 박아름 시스템에 매핑 안 됨 (n8n은 사람이 노드 선택 / 박아름은 AI 자동)
+> - REQ-004 `LLMPort` 추상화도 1개 (도메인 특화 port 0건), Skills Builder `generate_structured(prompt, schema)` generic 패턴
+> - anthropic_chat 1개 패턴과 카탈로그 일관성 (외부 LLM 1 + 시스템 LLM 1)
+>
+> ### gemma_chat 노드 사양 (PR #68 commit `8c68c7c` 적용)
+> | 필드 | 값 |
+> |---|---|
+> | `node_type` | `gemma_chat` |
+> | `name` | "Gemma Chat" |
+> | `category` | `ai` |
+> | `risk_level` | `LOW` |
+> | `required_connections` | `[]` (시스템 LLM, 자격증명 불필요) |
+> | `service_type` | `"gemma"` |
+> | `is_mvp` | `True` |
+> | 입력 | `prompt` (필수, Composer 동적 생성) + `response_format`("text"\|"json"\|"markdown") + `max_tokens` + `temperature` + `system` (선택) |
+> | 출력 | `content` + `finish_reason` + `usage` |
+> | `process()` | `NotImplementedError` → REQ-004 `ModalLLMAdapter` 위임 |
+>
+> ### 카탈로그 변화 (반전 후)
+> - 추가: `gemma_chat` (1건)
+> - 제거: 0건 (anthropic_chat 보존)
+> - 최종 카탈로그: 55 + 1 = **56 노드**
+>
+> ### 작업 완료 상태 (5/14 야간)
+> - ✅ `gemma_chat.py` 작성 (메인 브랜치 `feature/req-003-nodes-graph` 직접 commit `8c68c7c`)
+> - ✅ `test_gemma_chat.py` 8 contract 테스트 (`tests/unit/adapters/`)
+> - ✅ `.gitignore` SA JSON 패턴 7줄 보강 (메인 브랜치 5/9 stale에 development 동기)
+> - ✅ PR #68 생성 (base=development, head=feature/req-003-nodes-graph): https://github.com/billionaireahreum/Workflow_Automation/pull/68
+> - ⏸️ DB 카탈로그 갱신 (bootstrap 재실행) — PR #68 머지 후
+> - ⏸️ REQ-003 spec line 490 갱신 — 별도 docs PR (박아름 5/11 anthropic_chat 시점 spec 미갱신 패턴 정합)
+>
+> ### Tier 1 4개 결정 폐기 이유 (의사결정 흐름 보존)
+> - n8n 패턴 분석가 답변(4개 또는 5개 권장)이 정당하긴 하나 — **n8n은 사람이 노드 선택하는 UX**라 용도별 분리가 도움
+> - **박아름 시스템은 AI 자동 라우팅** — Composer가 prompt 동적 생성하므로 노드 분리 효과 약함
+> - 4개로 가면 `anthropic_chat` 1개와 카탈로그 비일관 (LLM별 노드 개수 정책 충돌)
+> - 박아름 시스템 본질 = "prompt가 모든 의도를 담는다, 노드는 LLM 추론 실행기"
+>
+> ### 5/14 야간 부수 진행
+> - 옵션 X (sub-branch `feature/req-003-gemma-nodes` 생성 + cherry-pick 8개) 잠시 진행 후 rollback → 박아름 5/12 룰(REQ별 메인 브랜치 누적) 재확인
+> - sub-branch 안전 삭제 (commits 0)
+> - 메인 브랜치 5/9 stale (`3ed7c51`)에 직접 commit → PR #68
+>
+> ---
+
+### 6.1 배경 — Gemma 4 정책과 anthropic_chat의 모순 (원래 분석, 5/14 오후)
 
 5번 섹션 후 박아름 본인이 짚은 추가 모순:
 - Sprint 3 plan + REQ-004 spec: **LLM = Gemma 4 (Modal llm-base, 신정혜 영역)**
@@ -679,17 +735,17 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 | **3. Skill Builder**               | ✅**책임 경계 확정 (옵션 A, 5/14 박아름 결정)** | Skills Builder = 스킬 생성 전용 (입력 → 추출 → DB upsert → 끝). 워크플로우 생성은 Composer 영역. 옵션 B(확장)는 Sprint 4 이연. **추가 작업 0건** |
 | **4. 카탈로그 AI 노드 (LLM 호출)** | ⚠️**메타데이터만 / 실행 wiring 차단**   | `anthropic_chat` 1건 활성, `process()` NotImplementedError. REQ-005 toolset + REQ-007 execution_engine 미완성. anthropic/openai/Gemma 4 어디에도 연결 0건 |
 | **5. anthropic_chat 역할**         | ✅**명확 — 범용 LLM wrapper**            | "문서 작성 전용" 노드 아님. 요약/보고서/이메일 등 의미는 prompt에서 결정. Composer가 사용자 의도 분석해서 anthropic_chat + prompt로 워크플로우 자동 생성        |
-| **6. LLM 노드 풀세트 (Gemma 4)**   | ✅**결정 완료 — 옵션 B+ 채택 (5/14 박아름 결정)** | anthropic_chat 완전 제거 + Gemma 4 기반 Tier 1 4개 신설 (gemma_summarize/classify/extract/document_generate). 박아름 SkillNode 30종 실 매핑. Sprint 3 LLM 정책 일관성. 실행 wiring은 toolset/execution_engine 영역 후속 |
+| **6. LLM 노드 풀세트 (Gemma 4)**   | ✅**5/14 야간 결정 반전 — gemma_chat 1개 신설 + anthropic_chat 보존 (PR #68)** | 시스템 본질 정합 (Composer가 prompt 동적 생성 → 노드는 LLM 추론 실행기 1개로 충분). anthropic_chat 1개 패턴과 카탈로그 일관성. Tier 1 4개 결정 폐기. PR #68: https://github.com/billionaireahreum/Workflow_Automation/pull/68 |
 
 ### 박아름이 조장에게 요청할 결정 사항
 
 **~~(A) Skill Builder 책임 경계 (3번 영역)~~** — ✅ 5/14 박아름 본인 결정으로 옵션 A 채택, 추가 협의 불필요. 메모리 박힘.
 
-**~~(B) 카탈로그 AI 노드 실행 wiring (4번 영역)~~** — ✅ 5/14 박아름 본인 결정으로 옵션 2(Gemma 4 단일 백엔드) 채택. **anthropic_chat 완전 제거 + Tier 1 4개 신설** (6번 섹션 참조). 메모리 박힘.
+**~~(B) 카탈로그 AI 노드 실행 wiring (4번 영역)~~** — ✅ 5/14 박아름 본인 결정으로 옵션 2(Gemma 4 단일 백엔드) 채택. 5/14 야간 반전 결정: **gemma_chat 1개 신설 + anthropic_chat 보존** (6번 섹션 상단 반전 박스 참조, PR #68). 메모리 박힘.
 
-**(C) Tier 1 4개 노드 실행 wiring (6번 영역, 향후 작업)**:
+**(C) gemma_chat 1개 실행 wiring (6번 영역, 향후 작업)**:
 
-- 박아름 메타데이터 정의 완료 후 — process()는 NotImplementedError 패턴 유지 (의존성 방향 위반 회피)
+- 박아름 메타데이터 정의 완료 (PR #68 commit `8c68c7c`) — `process()`는 NotImplementedError 패턴 유지 (의존성 방향 위반 회피, anthropic_chat 동일 패턴)
 - **toolset connector (햄햄 REQ-005)**: Gemma 4 호출 경로 추가 (ai_agent.LLMPort 활용)
 - **execution_engine (조장 REQ-007)**: `ToolsetExecutor.execute_tool` 실제 구현
 - → 박아름 영역 메타데이터 commit 후 햄햄·조장에게 wiring 요청
