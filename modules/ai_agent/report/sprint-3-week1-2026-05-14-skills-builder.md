@@ -243,6 +243,114 @@ PR #51 후속 commit으로 push 예정이지만, PR #56 머지 후 Connector 패
 
 ---
 
+## 8. 5/14 후반 진행 (조장 검증 + 본질 차단 해소)
+
+### 8.1 조장 검증 요청 3 영역 + 박아름 자체 추가 2 영역
+
+조장이 박아름에게 검증 요청한 3 영역(auth / node / skill_builder) + 박아름이 자체 점검으로 추가한 2 영역(LLM 호출 흐름 + Gemma 4 정책 모순)을 통합 보고서로 정리.
+
+**산출물**: `modules/ai_agent/report/2026-05-14-verification-auth-node-skillbuilder.md` (768라인, 7 섹션 + 종합 결론)
+
+| 영역 | 결과 | 핵심 |
+|------|------|------|
+| 1. Auth | ⚠️ 백엔드 100% / e2e flow 70% | REQ-009 api_server + REQ-010 frontend 후속 필요 |
+| 2. Node | ✅ 자세히 고려됨 | document/adapter/운영 3단계 + uuid5 + BGE-M3 77.8% |
+| 3. Skill Builder | ✅ **책임 경계 확정 (옵션 A, 5/14 박아름 결정)** | "스킬 생성 전용" (입력 → 추출 → DB upsert → 끝) |
+| 4. AI 노드 실행 | ⚠️ 메타데이터만 / 실행 wiring 차단 | toolset + execution_engine 영역 |
+| 5. anthropic_chat 역할 | ✅ 명확 (범용 LLM wrapper) | "문서 작성 전용" 아님, prompt에서 의미 결정 |
+| 6. LLM 노드 풀세트 (Gemma 4) | ✅ **결정 완료 (옵션 B+, 5/14)** | anthropic_chat 완전 제거 + Tier 1 4개 신설 (Sprint 3 후속 작업으로 분리) |
+
+### 8.2 박아름 5/14 결정 2건 (메모리 영구 박힘)
+
+**결정 #1 — Skills Builder 책임 경계 (옵션 A)**:
+- **"Skills Builder = 스킬 생성 전용"** — 입력(SOP/산업/직무) → SkillNode 추출 → DB upsert → 끝
+- 워크플로우(WorkflowSchema) 생성 안 함 (Composer 영역)
+- 메모리: `project_skills_builder_customization_v2.md` 5/14 갱신
+
+**결정 #2 — LLM 노드 풀세트 (옵션 B+)**:
+- anthropic_chat 완전 제거 + Gemma 4 기반 Tier 1 4개 신설 (`gemma_summarize / gemma_classify / gemma_extract / gemma_document_generate`)
+- 박아름 SkillNode 30종 실 매핑 기반 (분류 7~10건, 추출/요약/생성 5~7건씩)
+- Sprint 3 LLM 정책(Gemma 4 단일 백엔드) 일관성 회복
+- Sprint 3 후속 작업으로 분리 (이번 PR #51 scope 외)
+
+### 8.3 본질 차단 해소 — Test plan #3 완전 통과
+
+#### Connector async 패턴 적용 (commit `f789fbd`)
+
+신정혜 PR #56 commit `6390a43` 패턴(Connector lazy + loop 명시 바인딩)을 박아름 main.py에 적용. ConnectorLoopError 해소.
+
+코드 변경 (+105/-131):
+- `boot()` instance-scoped engine + session_factory 미리 생성, `getconn()` lazy 초기화 + `Connector(loop=asyncio.get_running_loop())` 명시 바인딩
+- `_make_db_resources/_cleanup_db_resources` static helper 제거
+- `shutdown()`에 `self._engine.dispose()` + `self._connector.close_async()`
+- `/v1/health` `self._engine` 사용 + `logger.warning` 마스킹 (Should-fix #1, #2 cleanup)
+- `_stream` `async with self._session_factory()` 직접 사용
+- `route` `dict[str, Any]` + `model_validate` (ForwardRef 회피)
+- image `modules` 디렉토리 통째 마운트 (transitive import 해결)
+- stale docstring 2곳 새 패턴 설명으로
+
+#### Modal redeploy + 검증
+
+- `modal deploy` 성공
+- `GET /v1/health` → 200 + `db: iam-connected` ✅ **Test plan #2 통과**
+- `POST /v1/agent/route` SSE 스트리밍 → 200 + 12243 chars + dual 종결 패턴 작동 확인 ✅
+
+#### DB 권한 차단 발견 → 조장 GRANT 처리 → 해소
+
+박아름 5/14 카톡으로 조장에게 `cloudsql-iam-modal` SA에 `node_definitions` 테이블 GRANT 요청 (가이드 §1.3 SQL 그대로). 조장 처리 완료.
+
+**e2e 재실행 결과** (functional_domain customer_support):
+- 이전 (권한 없음): `upserted_count=0, failed_count=5` (모두 InsufficientPrivilegeError)
+- 권한 부여 후: `upserted_count=4, failed_count=1` (1건 cold start timeout)
+
+#### timeout 30→180s 선반영 (commit `157c261`)
+
+박아름 PR #51 브랜치는 development merge 안 한 상태라 정혜님 PR #56 commit `9d50311b`의 `_DEFAULT_TIMEOUT=180s` 변경을 받지 못한 상태. 30s timeout이 BGE-M3 cold start(45s+) 초과로 첫 호출 실패.
+
+- 박아름이 `modules/ai_agent/adapters/llm/modal_embedding_adapter.py` 1줄 변경 (`_DEFAULT_TIMEOUT = 30.0 → 180.0`)
+- 신정혜 commit과 동일 값이라 PR #56 머지 시 git 자동 merge 예상
+- commit 메시지에 "신정혜 PR #56 9d50311b 동기화" 명시
+
+**e2e 재실행 결과** (functional_domain it_ops, timeout 180s 적용):
+- `upserted_count=5, failed_count=0` ✅ **5/5 완벽 성공**
+- failed_node_types: `[]` (빈 배열)
+- → **Test plan #3 완전 통과**
+
+### 8.4 5/14 후반 commit 누적
+
+| commit | 내용 |
+|--------|------|
+| `e9c48b7` | feat(skills_builder): SSE dual 종결 패턴 적용 + 5/14 진척 보고서 |
+| `f789fbd` | feat(skills_builder): Connector async 패턴 + Should-fix 2건 cleanup + image transitive import |
+| `157c261` | fix(ai_agent): _DEFAULT_TIMEOUT 30→180s 선반영 (신정혜 PR #56 9d50311b 동기화) |
+
+**PR #51 누적**: 24 commits (5/12: 4 / 5/13: 17 / 5/14: 3)
+
+### 8.5 박아름 영역 Test plan 최종 상태
+
+| Test plan | 결과 |
+|---|---|
+| #1 격리 정책 단위 테스트 3건 | ✅ 통과 (commit `eaaeb52`) |
+| #2 `/v1/health` 200 | ✅ 통과 (Connector async 패턴 적용 후) |
+| #3 Orchestrator e2e SSE 스트리밍 | ✅ **완전 통과 (5/5 upsert, failed=0)** |
+| 단위 테스트 137 통과 (skills_builder) | ✅ 0.94s |
+| ai_agent 전체 테스트 171 통과 | ✅ 1.24s |
+
+→ **박아름 PR #51 일괄 리뷰 요청 시점 도달.**
+
+### 8.6 외부 의존 사안 처리 결과
+
+| 사안 | 처리 결과 |
+|------|----------|
+| 신정혜 PR #56 review fix (5/13 박아름 보강 5건) | ✅ #2/#3/#4 commit `9d50311b` 반영, 박아름 APPROVE |
+| 신정혜 PR #56 SSOT 갱신 (health path GET + SSE dual) | ✅ commit `3a8715c7` 반영, 박아름 자체 3축 재점검 PASS |
+| 햄햄 PR #54 (embedder_port shim) | ✅ #4 보류 결정으로 박아름 후속 docs PR 약속 |
+| 조장 SSOT 결정 3건 | ✅ 5/14 모두 결정 완료 (health GET / SSE dual / embedder_port nodes_graph 유지) |
+| 조장 GRANT 부여 (`cloudsql-iam-modal` SA) | ✅ 5/14 처리 완료 |
+| 조장 WorkflowSchema `owner_user_id` 추가 (PR #66) | ✅ Optional 채택 — 박아름 영역 영향 0건 (박아름 5/14 카톡 영향 평가 정확 검증됨) |
+
+---
+
 ## 9. 참조
 
 - spec: `docs/specs/REQ-004-ai-agent.md` §2.1, §3.1, §4
