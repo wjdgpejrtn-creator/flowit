@@ -50,21 +50,28 @@ python -m pytest database/tests/test_migration_runner.py -v
 
 ## 2. staging 적용
 
-PR 머지 후 staging Cloud SQL에 반영:
+PR 머지 후 staging Cloud SQL에 반영. **IAM 인증이 표준 흐름** (cloud-sql-setup.md §7과 동일 변수):
 
 ```powershell
-$env:PYTHONUTF8     = "1"
-$env:DATABASE_URL   = "postgresql+asyncpg://<...>"   # 또는 conftest.py의 IAM 패턴
-python -m database.scripts.migrate --status   # dry-run, 적용 예정 표시
+$env:CLOUD_SQL_INSTANCE = "<GCP_PROJECT_ID>:<REGION>:<INSTANCE>"
+$env:DB_IAM_USER        = "<본인>@gmail.com"
+$env:DB_NAME            = "workflow_automation"
+$env:PYTHONUTF8         = "1"
+python -m database.scripts.migrate --status   # 예측 표시
 python -m database.scripts.migrate            # 실제 적용
+```
+
+`DATABASE_URL`도 fallback으로 지원 (legacy / Cloud SQL Auth Proxy 등):
+
+```powershell
+$env:DATABASE_URL = "postgresql+asyncpg://user:pwd@host:5432/db"
+python -m database.scripts.migrate
 ```
 
 각 파일별로 출력:
 - `[APPLY ]` — 신규 파일, SQL 실행 + 추적 기록.
 - `[SKIP  ]` — 이미 적용 + hash 일치, no-op.
 - `[BACK  ]` — 추적 기록 없는데 declared 테이블이 이미 존재 → 실행 없이 mark.
-
-> `DATABASE_URL` 패턴이 IAM 인증에 직접 대응하지 않는 것은 ADR-0011 follow-up. 현재는 `migrate.py` 호출 시 환경에 따라 짠다.
 
 ---
 

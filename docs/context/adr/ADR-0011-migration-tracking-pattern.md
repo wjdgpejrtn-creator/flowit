@@ -41,7 +41,6 @@ raw SQL 흐름을 유지하면서 다음 4 요소를 도입한다:
 ### Follow-ups
 - [PR-2] ORM SSOT 통합 — `database/src/models/` ↔ `modules/storage/orm/` 중복 정리 (이 ADR과 독립).
 - [향후] CI에서 `migrate.py --status` 자동 실행으로 staging drift 감지.
-- [향후] 16개 schema 파일에 `IF NOT EXISTS` 보강 — fresh apply 시 두 번째 실행 안전성 (PR-1에 함께 포함).
 - staging `schema_migrations` 테이블 적용 + bootstrap 검증은 PR-1 머지 직후 조장이 1회 수행. 결과는 [[staging_db_state]] 갱신.
 
 ## Alternatives Considered
