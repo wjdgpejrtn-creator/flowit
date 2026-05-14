@@ -105,6 +105,12 @@ class OrchestratorAgent:
                         next_action="error",
                     )
                     yield f"data: {err.model_dump_json()}\n\n"
+                    done = AgentProtocolResponse(
+                        frames=[],
+                        state_delta={},
+                        next_action="complete",
+                    )
+                    yield f"data: {done.model_dump_json()}\n\n"
                     return
                 done = AgentProtocolResponse(
                     frames=[],

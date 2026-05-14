@@ -149,7 +149,7 @@ class AgentComposer:
             if not db_ok:
                 raise HTTPException(
                     status_code=503,
-                    detail={"db": {"ok": False, "error": db_err}},
+                    detail={"db": {"ok": False, "error": "database unreachable"}},
                 )
             return {"status": "ok", "db": "iam-connected"}
 
@@ -176,6 +176,12 @@ class AgentComposer:
                         next_action="error",
                     )
                     yield f"data: {err.model_dump_json()}\n\n"
+                    done = AgentProtocolResponse(
+                        frames=[],
+                        state_delta={},
+                        next_action="complete",
+                    )
+                    yield f"data: {done.model_dump_json()}\n\n"
                     return
                 done = AgentProtocolResponse(
                     frames=[],
