@@ -1,10 +1,10 @@
 # REQ-001 Database — 구현 명세
 
-> **ADR-0012로 책임 확장** (2026-05-14): 본 모듈은 RDB(PostgreSQL)뿐만 아니라
-> object storage(GCS, ClamAV) + ORM/Repository/Mapper까지 **모든 영속화 인프라**를
-> 담당한다. 기존 REQ-008(storage)의 object storage·Repository 책임이 본 spec으로
-> 이전되며, REQ-008은 Skills Marketplace 도메인 전용으로 축소된다. 자세한 결정
-> 배경은 `docs/context/adr/ADR-0012-database-storage-module-boundary.md`.
+> **ADR-0012 (2026-05-14)**: 본 모듈은 `clean_architecture.md §8.1`의 원래
+> 의도대로 **순수 SQL 계층**을 유지한다. ORM/Repository/Mapper/object storage
+> 어댑터는 모두 `modules/storage`가 담당하며, Skills Marketplace 도메인은
+> 신규 `modules/skills_marketplace/`로 분리된다. 자세한 결정 배경은
+> `docs/context/adr/ADR-0012-database-storage-module-boundary.md`.
 
 ## common_schemas에서 import할 클래스
 
