@@ -147,6 +147,48 @@ SELECT
 -- 둘 다 t (true)가 나와야 함
 ```
 
+> **DB context 주의**: `GRANT ON SCHEMA public`은 **DB-scoped**. SQL Studio에서 GRANT 실행 시 상단 DB selector가 `workflow_automation`인지 먼저 확인. 다른 DB(`postgres` 등)에 적용하면 효력 없음. 현재 DB는 `SELECT current_database();`로 검증.
+
+### 4-1. 공유 ownership role — `workflow_admin`
+
+`GRANT`만으로는 SELECT/INSERT/UPDATE/DELETE는 가능하지만 **`ALTER TABLE`(스키마 변경)은 테이블 owner만 가능**. 마이그레이션 파일이 ALTER를 포함하면 IAM 사용자는 `must be owner of table ...`로 막힌다. 팀 전체가 ALTER 가능하게 하려면 **공유 role을 owner로 두고 모든 IAM 사용자를 그 role의 멤버**로 등록한다.
+
+postgres superuser로 1회 실행 (`gcloud sql connect workflow-dev --user=postgres --database=workflow_automation`):
+
+```sql
+-- 1. 공유 role 생성 + 팀원 멤버십
+CREATE ROLE workflow_admin NOLOGIN;
+GRANT workflow_admin TO "dhwang0803@gmail.com";
+GRANT workflow_admin TO "<팀원2>@gmail.com";
+-- ... 모든 팀원
+
+-- 2. 기존 모든 테이블 ownership을 workflow_admin으로 이전
+DO $$
+DECLARE tbl text;
+BEGIN
+    FOR tbl IN SELECT tablename FROM pg_tables WHERE schemaname='public'
+    LOOP
+        EXECUTE format('ALTER TABLE public.%I OWNER TO workflow_admin', tbl);
+    END LOOP;
+END $$;
+
+-- 3. workflow_admin 자체에 schema/db 권한
+GRANT CREATE ON DATABASE workflow_automation TO workflow_admin;
+GRANT CREATE, USAGE ON SCHEMA public TO workflow_admin;
+```
+
+검증:
+
+```sql
+SELECT tablename, tableowner FROM pg_tables WHERE schemaname='public' LIMIT 5;
+-- tableowner가 모두 workflow_admin 이어야
+```
+
+PG 16 기본 INHERIT 모드라 IAM 사용자가 `workflow_admin` 멤버이면 자동으로 ALTER 권한 상속. `SET ROLE` 명시 불필요.
+
+> **새 팀원 합류 시**: superuser psql에서 `GRANT workflow_admin TO "<email>@gmail.com";` 한 줄.
+> **새 테이블이 IAM 사용자 직접 생성 시 owner는 본인 IAM**이 됨. 다른 팀원도 ALTER 가능하게 하려면 추가 `ALTER TABLE x OWNER TO workflow_admin` 필요. 마이그레이션을 통해 만든 테이블은 자동 처리하는 follow-up이 ADR-0011에 적힘.
+
 ---
 
 ## 5단계: 확장 활성화

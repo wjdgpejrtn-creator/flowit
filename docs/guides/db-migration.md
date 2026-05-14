@@ -122,6 +122,9 @@ python -m database.scripts.diagnose
 | `GRANT ALL PRIVILEGES ON DATABASE` | 모든 팀원 | DB 내부 (postgres superuser로 1회) | 기존 테이블 SELECT 실패 |
 | `GRANT CREATE ON DATABASE` | 모든 팀원 | DB 내부 | `permission denied for database` — 테스트 격리 schema 생성 시 |
 | `GRANT CREATE ON SCHEMA public` | 모든 팀원 | DB 내부 | `permission denied for schema public` — 마이그레이션 첫 적용 시 |
+| `GRANT workflow_admin TO <email>` | 모든 팀원 | DB 내부 — `cloud-sql-setup.md §4-1` | `must be owner of table ...` — ALTER 마이그레이션 적용 시 |
+
+> **DB context 함정**: `GRANT ON SCHEMA public`은 DB-scoped. SQL Studio에서 GRANT 시 상단 selector가 `workflow_automation`인지 `SELECT current_database();`로 먼저 확인. 다른 DB에 적용하면 효력 없음.
 
 자세한 설정은 `docs/guides/cloud-sql-setup.md` §4.
 

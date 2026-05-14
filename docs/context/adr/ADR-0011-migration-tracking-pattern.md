@@ -41,7 +41,18 @@ raw SQL 흐름을 유지하면서 다음 4 요소를 도입한다:
 ### Follow-ups
 - [PR-2] ORM SSOT 통합 — `database/src/models/` ↔ `modules/storage/orm/` 중복 정리 (이 ADR과 독립).
 - [향후] CI에서 `migrate.py --status` 자동 실행으로 staging drift 감지.
-- staging `schema_migrations` 테이블 적용 + bootstrap 검증은 PR-1 머지 직후 조장이 1회 수행. 결과는 [[staging_db_state]] 갱신.
+- [향후] `MigrationRunner`가 새 테이블 생성 시 자동으로 `workflow_admin` ownership 적용 — 현재는 IAM 사용자 직접 만든 테이블의 owner가 본인이라 다른 팀원이 ALTER 못 함. SET ROLE workflow_admin 또는 EVENT TRIGGER 패턴.
+- [향후] `MigrationRunner`에 ALTER-only 파일(declared 테이블 0개) 자동 backfill 휴리스틱. 현재는 매 staging 적용 시 한 번씩 [APPLY]로 실행됨 (멱등 가정 필요).
+- staging `schema_migrations` 테이블 적용 + bootstrap 검증은 PR-1 머지 직후 조장이 1회 수행 — **2026-05-14 완료** ([[staging_db_state]] 참조).
+
+### 운영 정책 (2026-05-14 staging 적용에서 확정)
+
+PR-1을 staging에 처음 적용하며 PG 16 + Cloud SQL IAM 환경의 4가지 권한 함정이 순차 발견됐다. 모두 `cloud-sql-setup.md §4`/`§4-1`에 정리:
+
+1. `GRANT CREATE ON DATABASE` — 신규 schema 생성 (테스트 격리)
+2. `GRANT CREATE ON SCHEMA public` — public 안 새 테이블 생성 (마이그레이션)
+3. **GRANT은 DB-scoped** — SQL Studio에서 default DB(`postgres`) 컨텍스트로 GRANT하면 `workflow_automation`엔 효력 없음
+4. **`workflow_admin` 공유 ownership role** — IAM 사용자가 ALTER하려면 테이블 owner거나 owner role의 INHERIT 멤버여야 함
 
 ## Alternatives Considered
 
