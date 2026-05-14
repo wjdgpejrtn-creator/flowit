@@ -1,0 +1,177 @@
+{
+  "industry_code": "ecommerce",
+  "industry_name": "이커머스",
+  "description": "이커머스 표준 자동화 — 주문·재고·리뷰·환불·이탈 회복",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "ecommerce_cart_abandonment_recovery",
+      "name": "장바구니 이탈 회복 메일",
+      "category": "action",
+      "description": "장바구니 이탈 N시간 후 자동 회복 메일 발송 (할인 코드 포함, 캠페인 추적)",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "cart_id": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"},
+          "abandoned_at": {"type": "string", "format": "date-time"},
+          "delay_hours": {"type": "integer", "default": 4, "minimum": 1, "maximum": 168},
+          "discount_code": {"type": ["string", "null"]},
+          "cart_items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "product_id": {"type": "string"},
+                "name": {"type": "string"},
+                "quantity": {"type": "integer", "minimum": 1},
+                "price": {"type": "number", "minimum": 0}
+              }
+            }
+          }
+        },
+        "required": ["cart_id", "customer_email", "abandoned_at"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "email_message_id": {"type": "string"},
+          "sent_at": {"type": "string", "format": "date-time"},
+          "campaign_id": {"type": "string"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "ecommerce_order_status_notify",
+      "name": "주문 상태 알림",
+      "category": "action",
+      "description": "주문 상태 변경(결제 완료/배송 시작/도착/취소) 시 고객 메일 + 매니저 슬랙 채널 알림",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "order_id": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"},
+          "status": {"type": "string", "enum": ["paid", "shipped", "delivered", "cancelled", "refunded"]},
+          "tracking_number": {"type": ["string", "null"]},
+          "carrier": {"type": ["string", "null"]},
+          "manager_channel": {"type": "string"},
+          "estimated_arrival": {"type": ["string", "null"], "format": "date"}
+        },
+        "required": ["order_id", "customer_email", "status"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "customer_email_id": {"type": "string"},
+          "slack_message_ts": {"type": "string"},
+          "notified_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["slack", "google"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "ecommerce_inventory_sync",
+      "name": "마켓플레이스 재고 동기화",
+      "category": "action",
+      "description": "외부 마켓플레이스(쿠팡/네이버/11번가/Smart Store 등) API와 재고 수량 일괄 동기화",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "marketplace": {"type": "string", "enum": ["coupang", "naver", "11st", "smart_store", "custom"]},
+          "marketplace_endpoint": {"type": "string", "format": "uri"},
+          "products": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {"type": "string"},
+                "external_id": {"type": "string"},
+                "quantity": {"type": "integer", "minimum": 0}
+              },
+              "required": ["sku", "quantity"]
+            },
+            "minItems": 1
+          },
+          "dry_run": {"type": "boolean", "default": false}
+        },
+        "required": ["marketplace", "marketplace_endpoint", "products"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "synced_count": {"type": "integer"},
+          "failed_skus": {"type": "array", "items": {"type": "string"}},
+          "synced_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": [],
+      "service_type": null
+    },
+    {
+      "node_type": "ecommerce_review_collection",
+      "name": "구매 후 리뷰 요청",
+      "category": "action",
+      "description": "배송 완료 N일 후 자동 리뷰 작성 요청 메일 발송 (인센티브 코드 포함, 한 번만 발송)",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "order_id": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"},
+          "delivered_at": {"type": "string", "format": "date-time"},
+          "delay_days": {"type": "integer", "default": 3, "minimum": 1, "maximum": 30},
+          "review_url": {"type": "string", "format": "uri"},
+          "incentive_code": {"type": ["string", "null"]}
+        },
+        "required": ["order_id", "customer_email", "delivered_at", "review_url"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "email_message_id": {"type": "string"},
+          "sent_at": {"type": "string", "format": "date-time"},
+          "already_sent": {"type": "boolean"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "ecommerce_refund_approval",
+      "name": "환불 승인 워크플로우",
+      "category": "condition",
+      "description": "환불 요청 시 금액·사유 기준 자동/수동 승인 분기. 임계값 이하 자동, 초과 시 매니저 슬랙 승인 대기",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "refund_request_id": {"type": "string"},
+          "order_id": {"type": "string"},
+          "amount": {"type": "number", "minimum": 0},
+          "reason": {"type": "string", "enum": ["defective", "wrong_item", "size", "change_of_mind", "other"]},
+          "auto_approve_threshold": {"type": "number", "default": 50000, "minimum": 0},
+          "approval_channel": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"}
+        },
+        "required": ["refund_request_id", "order_id", "amount", "reason"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "approval_status": {"type": "string", "enum": ["auto_approved", "pending_manual", "rejected"]},
+          "approver_id": {"type": ["string", "null"]},
+          "decided_at": {"type": "string", "format": "date-time"},
+          "customer_notified": {"type": "boolean"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["slack", "google"],
+      "service_type": "slack"
+    }
+  ]
+}

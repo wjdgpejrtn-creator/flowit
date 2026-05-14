@@ -1,0 +1,152 @@
+{
+  "domain_code": "customer_support",
+  "domain_name": "고객 지원",
+  "description": "고객 응대 자동화 — VOC 접수·챗봇 1차·CSAT·KB 검색·SLA",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "customer_support_voc_intake",
+      "name": "VOC 접수",
+      "category": "action",
+      "description": "이메일/채팅/웹폼으로 들어온 고객 문의를 티켓 시스템에 등록하고 매니저 슬랙 채널에 알림",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "source": {"type": "string", "enum": ["email", "chat", "webform", "phone"]},
+          "customer_id": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"},
+          "subject": {"type": "string"},
+          "content": {"type": "string"},
+          "priority": {"type": "string", "enum": ["low", "medium", "high", "urgent"], "default": "medium"},
+          "ticket_system_url": {"type": "string", "format": "uri"},
+          "manager_channel": {"type": "string"}
+        },
+        "required": ["source", "customer_id", "subject", "content"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "ticket_id": {"type": "string"},
+          "ticket_url": {"type": "string"},
+          "slack_message_ts": {"type": "string"},
+          "created_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["slack"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "customer_support_chatbot_route",
+      "name": "AI 챗봇 1차 응대 + 휴먼 에스컬레이션",
+      "category": "ai",
+      "description": "AI 챗봇이 1차 응대 후 신뢰도 임계값 이하면 휴먼 상담원에게 자동 에스컬레이션",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "customer_question": {"type": "string"},
+          "session_id": {"type": "string"},
+          "kb_url": {"type": "string", "format": "uri"},
+          "confidence_threshold": {"type": "number", "default": 0.75, "minimum": 0, "maximum": 1},
+          "escalation_channel": {"type": "string"}
+        },
+        "required": ["customer_question", "session_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "ai_answer": {"type": "string"},
+          "confidence": {"type": "number"},
+          "escalated": {"type": "boolean"},
+          "escalation_ticket_id": {"type": ["string", "null"]}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["anthropic"],
+      "service_type": "anthropic"
+    },
+    {
+      "node_type": "customer_support_csat_survey",
+      "name": "응대 종료 후 CSAT 설문",
+      "category": "action",
+      "description": "응대 완료 N분 후 고객에게 CSAT 만족도 설문 메일 자동 발송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "ticket_id": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"},
+          "agent_id": {"type": "string"},
+          "resolved_at": {"type": "string", "format": "date-time"},
+          "delay_minutes": {"type": "integer", "default": 30, "minimum": 1},
+          "survey_url": {"type": "string", "format": "uri"}
+        },
+        "required": ["ticket_id", "customer_email", "resolved_at", "survey_url"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "email_message_id": {"type": "string"},
+          "scheduled_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "customer_support_kb_search",
+      "name": "지식베이스 검색 + LLM 답변 추천",
+      "category": "ai",
+      "description": "고객 질문을 임베딩으로 KB 검색 + 검색 결과를 LLM에 넣어 답변 초안 생성",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string"},
+          "kb_collection": {"type": "string"},
+          "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
+          "model": {"type": "string", "default": "claude-sonnet-4-6"}
+        },
+        "required": ["query", "kb_collection"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "matched_articles": {"type": "array", "items": {"type": "object"}},
+          "answer_draft": {"type": "string"},
+          "citations": {"type": "array", "items": {"type": "string"}}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["anthropic"],
+      "service_type": "anthropic"
+    },
+    {
+      "node_type": "customer_support_sla_breach_alert",
+      "name": "SLA 위반 임박/위반 알림",
+      "category": "action",
+      "description": "응답 SLA 시간 임박/위반 시 담당자·매니저에게 슬랙 알림 + 우선순위 자동 상향",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "ticket_id": {"type": "string"},
+          "sla_deadline": {"type": "string", "format": "date-time"},
+          "minutes_before_breach": {"type": "integer", "default": 30, "minimum": 0},
+          "assignee_slack_id": {"type": "string"},
+          "manager_channel": {"type": "string"}
+        },
+        "required": ["ticket_id", "sla_deadline"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "alert_sent": {"type": "boolean"},
+          "alert_at": {"type": "string", "format": "date-time"},
+          "priority_escalated": {"type": "boolean"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["slack"],
+      "service_type": "slack"
+    }
+  ]
+}

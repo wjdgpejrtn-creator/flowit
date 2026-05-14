@@ -25,7 +25,7 @@ def _mock_llm(score: float) -> LLMPort:
 def _empty_workflow() -> WorkflowSchema:
     return WorkflowSchema(
         workflow_id=uuid4(), name="Test", scope="private",
-        is_draft=True, nodes=[], connections=[],
+        is_draft=True, nodes=[], connections=[], owner_user_id=uuid4(),
     )
 
 

@@ -19,6 +19,11 @@
 | `SourceRef` | `common_schemas.document` | 블록의 출처 참조 (page, section, bbox, sheet_name 등) |
 | `BBox` | `common_schemas.document` | 블록 위치 좌표 (x1, y1, x2, y2) |
 | `SheetMeta` | `common_schemas.document` | Excel 시트 메타정보 (sheet_name, row_count, col_count) |
+| `Chunk` | `common_schemas.document` | 청킹 결과 엔티티 (SSOT 승격 확정, PR #34) |
+| `ChunkingStrategy` | `common_schemas.document` | 청킹 전략 설정 VO (SSOT 승격 확정, PR #34) |
+| `QualityGateResult` | `common_schemas.document` | 파서 품질 게이트 판정 결과 (SSOT 승격 확정, PR #34) |
+| `QualityMetrics` | `common_schemas.document` | 파서 출력 품질 수치 메트릭 (SSOT 승격 확정, PR #34) |
+| `WarningInfo` | `common_schemas.document` | 파싱 경고 정보 (SSOT 승격 확정, PR #34) |
 
 ### import 예시
 
@@ -31,6 +36,11 @@ from common_schemas import (
     SourceRef,
     BBox,
     SheetMeta,
+    Chunk,
+    ChunkingStrategy,
+    QualityGateResult,
+    QualityMetrics,
+    WarningInfo,
 )
 ```
 
@@ -44,22 +54,21 @@ from common_schemas import (
 
 | 클래스 | 필드 | 설명 |
 |--------|------|------|
-| `Chunk` | `block: ContentBlock`, `importance_score: Optional[float]`, `embedding: Optional[list[float]]`, `chunk_index: int`, `parent_document_id: UUID` | 청킹 결과 엔티티. `importance_score`는 REQ-004 IntentAnalyzer가 나중에 채우므로 Optional |
-| `QualityGateResult` | `quality_status: Literal["success", "warning", "manual_correction_required", "failed"]`, `metrics: QualityMetrics`, `warnings: list[str]`, `error_codes: list[str]`, `decision_reason: str` | 파서 품질 게이트 판정 결과. `AnalysisResult`(REQ-012)와는 별개 타입 |
-| `QualityMetrics` | `text_length: int`, `korean_ratio: float`, `broken_char_ratio: float`, `blocks_per_page: float`, `heading_ratio: float`, `valid_table_ratio: float`, `structural_chunk_ratio: float`, `warning_count: int` | 파서 출력 품질 수치/통과 여부 메트릭 |
-| `QualityConfig` | `min_text_length: int`, `min_text_per_page: int`, `korean_ratio_warn: float`, `broken_char_warn: float`, `blocks_per_page_warn: float`, `max_parser_warnings: int`, `min_heading_ratio: float`, `min_valid_table_ratio: float`, `min_structural_chunk_ratio: float`, `warn_threshold_count: int` | `config/parser_quality.yaml`에서 로드하는 설정 VO |
-| `ChunkingStrategy` | `max_tokens: int`, `overlap_tokens: int`, `token_estimator_mode: Literal["tiktoken", "char_estimate"]` | 청킹 전략 설정 VO |
-| `PIIMaskRule` | `pattern: str`, `replacement: str`, `label: str` | PII 마스킹 규칙 정의 |
+| `QualityConfig` | `min_text_length: int`, `min_text_per_page: int`, `korean_ratio_warn: float`, `broken_char_warn: float`, `blocks_per_page_warn: float`, `max_parser_warnings: int`, `min_heading_ratio: float`, `min_valid_table_ratio: float`, `min_structural_chunk_ratio: float`, `warn_threshold_count: int` | `config/parser_quality.yaml`에서 로드하는 설정 VO (모듈 내부 유지) |
+| `PIIMaskRule` | `pattern: str`, `replacement: str`, `label: str` | PII 마스킹 규칙 정의 (모듈 내부 유지) |
+| `ElapsedDetail` | `parse_ms: float`, `normalize_ms: float`, `pii_ms: float`, `chunk_ms: float`, `quality_ms: float` | 파이프라인 단계별 처리 시간 (모듈 내부 유지) |
+
+> **SSOT 주의**: `Chunk`, `ChunkingStrategy`, `QualityGateResult`, `QualityMetrics`, `WarningInfo`는 PR #34에서 `common_schemas/document.py` SSOT 승격이 확정되었다. 위 import 테이블 참조. 모듈 내 재정의 금지.
 
 #### domain/services
 
 | 서비스 클래스 | 메서드 | 설명 |
 |-------------|--------|------|
-| `ChunkingService` | `chunk(document: DocumentBlock, strategy: ChunkingStrategy) -> list[Chunk]` | 문서를 의미 단위로 분할. 4단계 우선순위(구조적/물리적/토큰/표 특수처리) 적용 |
-| `QualityGate` | `evaluate(document: DocumentBlock, config: QualityConfig) -> QualityGateResult` | 파싱 품질 검증. 설정 기반 임계값으로 status 판정 |
-| `PIIMaskingService` | `mask(blocks: list[ContentBlock], rules: list[PIIMaskRule]) -> list[ContentBlock]` | PII 단방향 마스킹. 정규화 이후/청킹 이전 수행 |
-| `NormalizationService` | `normalize(blocks: list[ContentBlock]) -> list[ContentBlock]` | 기본 텍스트 정규화 (공백/특수문자/인코딩 정리) |
-| `ParserFactory` | `get(file_type: str) -> ParserPort`, `register(parser: ParserPort) -> None` | MIME 타입 기반 파서 선택 팩토리 |
+| `ChunkingService` | `chunk(document: DocumentBlock, strategy: Optional[ChunkingStrategy] = None) -> list[Chunk]` | 문서를 의미 단위로 분할. 4단계 우선순위(구조적/물리적/토큰/표 특수처리) 적용 |
+| `QualityGate` | `evaluate(document: DocumentBlock, chunks: list[Chunk]) -> QualityGateResult` | 파싱 품질 검증. 임계값은 `config/parser_quality.yaml`에서 로드 |
+| `PIIMaskingService` | `mask_document(document: DocumentBlock) -> tuple[DocumentBlock, list[WarningInfo]]` | PII 단방향 마스킹. 정규화 이후/청킹 이전 수행 |
+| `NormalizationService` | `normalize_document(document: DocumentBlock) -> DocumentBlock` | 기본 텍스트 정규화 (공백/특수문자/인코딩 정리) |
+| `ParserFactory` | `get(mime_type: str) -> ParserPort`, `supports(mime_type: str) -> bool` | MIME 타입 기반 파서 선택 팩토리 |
 
 #### domain/ports (ABC 인터페이스)
 
@@ -84,7 +93,7 @@ from common_schemas import (
 
 ### Infrastructure/Adapter Layer (`adapters/`)
 
-#### adapters/parsers -- 7종 파서 구현체
+#### adapters/parsers -- 8종 파서 구현체
 
 | 파서 클래스 | 지원 MIME 타입 | 주요 라이브러리 |
 |------------|--------------|----------------|
@@ -135,7 +144,9 @@ modules/doc_parser
 │   └── modules/storage           (DocumentRepository가 파싱 결과 영속화 — REQ-001)
 │
 ├── depended by ────────────────────────────────────────────────────────────
-│   ├── modules/ai_agent          (REQ-004: 문서 기반 워크플로우 생성 시 청크 조회)
+│   ├── modules/ai_agent — Workflow Composer (REQ-004: 문서 기반 워크플로우 생성 시 청크 조회)
+│   ├── modules/ai_agent — Skills Builder   (REQ-004: BuildFromSOPUseCase가 DocumentBlock 소비
+│   │                                        → SkillNode 추출 → NodeDefinitionRepository.upsert)
 │   ├── services/api_server       (문서 업로드 엔드포인트에서 ParseDocumentUseCase 호출)
 │   └── services/execution_engine (워크플로우 노드로 파서 호출 시)
 │
@@ -171,8 +182,9 @@ modules/doc_parser/
 │   ├── __init__.py
 │   ├── entities/
 │   │   ├── __init__.py
-│   │   ├── chunk.py              ← Chunk
-│   │   ├── quality.py            ← QualityGateResult, QualityMetrics, QualityConfig
+│   │   ├── chunk.py              ← Chunk, ChunkingStrategy (common_schemas SSOT import 후 re-export)
+│   │   ├── quality.py            ← QualityGateResult, QualityMetrics (SSOT), QualityConfig (내부)
+│   │   ├── warning.py            ← WarningInfo (SSOT), ElapsedDetail (내부)
 │   │   └── pii.py                ← PIIMaskRule
 │   ├── services/
 │   │   ├── __init__.py

@@ -6,7 +6,7 @@
 -- ============================================================
 -- node_results (Spec: NodeResult entity from REQ-007)
 -- ============================================================
-CREATE TABLE node_results (
+CREATE TABLE IF NOT EXISTS node_results (
     node_result_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     execution_id    UUID NOT NULL REFERENCES executions(execution_id) ON DELETE CASCADE,
     node_instance_id UUID NOT NULL,
@@ -19,12 +19,12 @@ CREATE TABLE node_results (
     error           TEXT
 );
 
-CREATE INDEX idx_node_results_execution_id ON node_results(execution_id);
+CREATE INDEX IF NOT EXISTS idx_node_results_execution_id ON node_results(execution_id);
 
 -- ============================================================
 -- tool_executions (Spec: ToolExecutionRecord from REQ-005)
 -- ============================================================
-CREATE TABLE tool_executions (
+CREATE TABLE IF NOT EXISTS tool_executions (
     tool_execution_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tool_name       VARCHAR(100) NOT NULL,
     input_data      JSONB NOT NULL,
@@ -36,13 +36,13 @@ CREATE TABLE tool_executions (
     executed_at     TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX idx_tool_executions_tool_name ON tool_executions(tool_name);
-CREATE INDEX idx_tool_executions_executed_at ON tool_executions(executed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_executions_tool_name ON tool_executions(tool_name);
+CREATE INDEX IF NOT EXISTS idx_tool_executions_executed_at ON tool_executions(executed_at DESC);
 
 -- ============================================================
 -- storage_objects (Spec: StorageObject from REQ-008)
 -- ============================================================
-CREATE TABLE storage_objects (
+CREATE TABLE IF NOT EXISTS storage_objects (
     object_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     bucket          VARCHAR(100) NOT NULL,
     key             VARCHAR(500) NOT NULL UNIQUE,
@@ -54,13 +54,13 @@ CREATE TABLE storage_objects (
     expires_at      TIMESTAMPTZ
 );
 
-CREATE INDEX idx_storage_objects_owner_id ON storage_objects(owner_id);
-CREATE INDEX idx_storage_objects_bucket ON storage_objects(bucket);
+CREATE INDEX IF NOT EXISTS idx_storage_objects_owner_id ON storage_objects(owner_id);
+CREATE INDEX IF NOT EXISTS idx_storage_objects_bucket ON storage_objects(bucket);
 
 -- ============================================================
 -- quality_gate_logs (Spec: QualityGateResult from REQ-006)
 -- ============================================================
-CREATE TABLE quality_gate_logs (
+CREATE TABLE IF NOT EXISTS quality_gate_logs (
     log_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id     UUID NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
     quality_status  VARCHAR(30) NOT NULL,
@@ -70,4 +70,4 @@ CREATE TABLE quality_gate_logs (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_quality_gate_logs_document_id ON quality_gate_logs(document_id);
+CREATE INDEX IF NOT EXISTS idx_quality_gate_logs_document_id ON quality_gate_logs(document_id);

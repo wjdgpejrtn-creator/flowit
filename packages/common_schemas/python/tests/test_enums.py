@@ -8,9 +8,10 @@ class TestAgentMode:
         assert AgentMode.EDIT == "edit"
         assert AgentMode.GENERAL == "general"
         assert AgentMode.SECURITY == "security"
+        assert AgentMode.SKILL_BUILDER == "skill_builder"
 
     def test_member_count(self):
-        assert len(AgentMode) == 5
+        assert len(AgentMode) == 6
 
 
 class TestExecutionStatus:

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from common_schemas import DocumentBlock
 
 from ..mappers.document_mapper import DocumentMapper
-from ..orm.document_model import ChunkModel, DocumentModel, QualityLogModel
+from ..orm.document_model import DocumentChunkModel, DocumentModel, QualityLogModel
 
 
 class PgDocumentRepository:
@@ -29,7 +29,7 @@ class PgDocumentRepository:
 
     async def save_chunks(self, chunks: list[dict[str, Any]]) -> None:
         for chunk in chunks:
-            model = ChunkModel(
+            model = DocumentChunkModel(
                 chunk_id=uuid4(),
                 parent_document_id=chunk["parent_document_id"],
                 chunk_index=chunk["chunk_index"],

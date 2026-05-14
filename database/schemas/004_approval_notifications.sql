@@ -1,7 +1,7 @@
 -- 004_approval_notifications.sql
 -- Workflow/skill approval requests and user notifications
 
-CREATE TABLE approvals (
+CREATE TABLE IF NOT EXISTS approvals (
     approval_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workflow_id     UUID REFERENCES workflows(workflow_id),
     skill_id        UUID,
@@ -14,11 +14,11 @@ CREATE TABLE approvals (
     resolved_at     TIMESTAMPTZ
 );
 
-CREATE INDEX idx_approvals_requester_id ON approvals(requester_id);
-CREATE INDEX idx_approvals_approver_id ON approvals(approver_id);
-CREATE INDEX idx_approvals_status ON approvals(status) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_approvals_requester_id ON approvals(requester_id);
+CREATE INDEX IF NOT EXISTS idx_approvals_approver_id ON approvals(approver_id);
+CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status) WHERE status = 'pending';
 
-CREATE TABLE notifications (
+CREATE TABLE IF NOT EXISTS notifications (
     notification_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id         UUID NOT NULL REFERENCES users(user_id),
     type            VARCHAR(50) NOT NULL,
@@ -29,5 +29,5 @@ CREATE TABLE notifications (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_notifications_user_id_unread
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id_unread
     ON notifications(user_id, created_at DESC) WHERE is_read = FALSE;

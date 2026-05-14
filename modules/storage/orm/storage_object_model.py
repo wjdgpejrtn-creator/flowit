@@ -19,7 +19,11 @@ class StorageObjectModel(Base):
     key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", pg.JSONB, nullable=False, default=dict)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", pg.JSONB, nullable=False, server_default="'{}'::jsonb"
+    )
     owner_id: Mapped[Optional[uuid.UUID]] = mapped_column(pg.UUID(as_uuid=True), nullable=True, index=True)
-    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

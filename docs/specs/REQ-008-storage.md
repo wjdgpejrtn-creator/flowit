@@ -1,5 +1,20 @@
 # REQ-008 Storage — 구현 명세
 
+> **ADR-0012 (2026-05-14)**: 본 모듈은 기존 명시된 대로 **영속화 인프라**(RDB
+> ORM/Repository/Mapper + object storage 어댑터 + 자체 도메인 `StorageObject`
+> 등)를 그대로 담당한다. Skills Marketplace 하위 도메인(§64-72)만 신규
+> `modules/skills_marketplace/`로 분리된다 (별도 spec 후속 작성, REQ-013
+> 후보). 자세한 결정 배경은
+> `docs/context/adr/ADR-0012-database-storage-module-boundary.md`.
+>
+> **분리 작업 (PR-2d 시점)**:
+> - §64-72(Marketplace 하위 도메인)을 `modules/skills_marketplace/`로 이전.
+> - 3계층 도메인 엔티티(`PersonalSkill`/`TeamSkill`/`CompanySkill`) + 승격
+>   Use Cases(`PromoteToTeamSkillUseCase`, `PromoteToCompanySkillUseCase`) 신설.
+> - 단일 `skills` 테이블에서 3계층 분리 마이그레이션.
+> - `ai_agent.PersonalSkill`(PR #54) 이름 충돌은 `skills_marketplace` 측이 다른
+>   이름 채택으로 해소 (구현 시 옵션 결정).
+
 ## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
@@ -53,6 +68,8 @@
 | `PgOAuthRepository` | `auth/domain/ports/OAuthConnectionRepository` | `create(user_id, service, tokens) → OAuthConnection`, `get_by_credential_id(id)`, `get_active_for_user(user_id, service)`, `update_tokens(credential_id, tokens)`, `revoke(credential_id)` |
 | `PgNodeDefinitionRepository` | `nodes_graph/domain/ports/NodeDefinitionRepository` | `get_by_id(node_id) → Optional[NodeDefinition]`, `list_all(mvp_only) → list[NodeDefinition]`, `search_by_embedding(query, limit) → list[NodeDefinition]`, `upsert(definition) → NodeDefinition` |
 | `PgAgentMemoryRepository` | `ai_agent/domain/ports/AgentMemoryRepository` | `save(entry: MemoryEntry) → None`, `find_by_user(user_id, limit) → list[MemoryEntry]`, `find_by_session(session_id: UUID, limit: int) → list[MemoryEntry]` |
+
+> **ai_agent의 `PersonalMemoryStore`(REQ-004 §2.1, Sprint 3 신규)는 storage 모듈에서 구현하지 않는다.** GCS 파일(`gs://workflow-automation-personal/users/{user_id}/MEMORY.md`) 기반이라 RDB Repository 패턴과 다르며, 어댑터는 `modules/ai_agent/adapters/memory/gcs_memory_store.py`에 위치한다. storage 모듈의 `GCSAdapter`(파일 업로드/다운로드 범용 어댑터)와도 별개 — Personalization은 memory.md 포맷 파싱·인덱싱 책임을 직접 가진다.
 | `PgWorkflowRepository` | `execution_engine/domain/ports/` | `get(workflow_id: UUID) → WorkflowSchema`, `save(schema: WorkflowSchema) → UUID`, `get_node_config(node_id: UUID) → NodeConfig` |
 | `PgExecutionRepository` | `execution_engine/domain/ports/` | `save(result: ExecutionResult) → None`, `get(execution_id: UUID) → ExecutionResult`, `update_node_state(execution_id, state: NodeExecutionState) → None` |
 | `PgDocumentRepository` | `doc_parser/domain/ports/` | `save(document: DocumentBlock) → UUID`, `save_chunks(chunks: list[Chunk]) → None`, `save_quality_log(result, document_id) → None` |

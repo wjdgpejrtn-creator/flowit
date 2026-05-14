@@ -25,8 +25,10 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import UUID
 
+from auth.domain.services import CredentialInjectionService
 from common_schemas.exceptions import AuthorizationError
 from common_schemas.security import PermissionSource, PlaintextCredential
 
@@ -47,7 +49,7 @@ class ExecuteToolUseCase:
     1. ToolRegistry에서 도구 조회
     2. RiskAssessmentService.assess() — 권한/위험도 검사
     3. RuntimeValidator.validate_input() — 입력 스키마 검증
-    4. SecureConnectorPort.connect() — 자격증명 주입 HTTP 요청 (credential_id 있을 때만)
+    4. CredentialInjectionService.inject() — 자격증명 획득 (credential_id 있을 때만)
     5. BaseTool.execute() — 도구 실행
     6. RuntimeValidator.validate_output() — 출력 스키마 검증
     7. ToolExecutionRepository.save() — 실행 이력 저장
@@ -64,19 +66,22 @@ class ExecuteToolUseCase:
         validator: RuntimeValidator,
         risk_service: RiskAssessmentService,
         execution_repo: ToolExecutionRepository,
+        credential_injection_svc: CredentialInjectionService,
     ) -> None:
         self._registry = tool_registry
         self._connector = secure_connector
         self._validator = validator
         self._risk = risk_service
         self._repo = execution_repo
+        self._credential_svc = credential_injection_svc
 
     async def execute(
         self,
         tool_name: str,
         input_data: dict,
         context: PermissionSource,
-        credential_id: str | None = None,
+        credential_id: UUID | None = None,
+        node_id: UUID | None = None,
     ) -> dict:
         """
         도구를 실행하고 검증된 결과를 반환한다.
@@ -85,7 +90,8 @@ class ExecuteToolUseCase:
             tool_name: 실행할 도구 이름 (예: "google_drive")
             input_data: 도구 입력 파라미터 (raw dict, 검증 전)
             context: 요청자 권한 컨텍스트 (JWT에서 추출한 PermissionSource)
-            credential_id: OAuth 자격증명 ID. 인증 불필요 도구는 None.
+            credential_id: OAuth 자격증명 UUID. 인증 불필요 도구는 None.
+            node_id: 워크플로우 노드 UUID. credential 주입 시 필요.
 
         Returns:
             output_schema를 만족하는 결과 딕셔너리
@@ -106,18 +112,21 @@ class ExecuteToolUseCase:
         # 3. 입력 스키마 검증
         self._validator.validate_input(input_data, tool.input_schema)
 
-        # 4. Credential 획득 (credential_id 있을 때만)
-        # SecureConnectorPort.connect()는 tool.execute() 내부에서 직접 호출됨.
-        # use case는 PlaintextCredential을 CredentialInjectionService(auth)로 조회해 tool에 전달.
+        # 4. Credential 획득 (credential_id + node_id 있을 때만)
         credential: PlaintextCredential | None = None
         if credential_id is not None:
-            credential = await self._connector.connect(
-                endpoint="",  # credential 조회 전용 호출 시 빈 endpoint
-                credentials=PlaintextCredential(value=credential_id, credential_kind="lookup"),
-            )
-            # ⚠️ Phase 2 구현 시 확정 필요:
-            # auth.CredentialInjectionService.inject(credential_id, node_id) → PlaintextCredential
-            # 로 대체 예정 (SecureConnectorPort는 실제 HTTP 요청용)
+            if node_id is None:
+                raise CredentialError(
+                    message="credential_id requires node_id",
+                    code="E_CREDENTIAL_NODE_ID_MISSING",
+                )
+            try:
+                credential = await self._credential_svc.inject(credential_id, node_id)
+            except Exception as e:
+                raise CredentialError(
+                    message=f"Failed to acquire credential: {e}",
+                    code="E_CREDENTIAL_INJECTION_FAILED",
+                ) from e
 
         start_ms = time.monotonic()
         status = "failed"
@@ -133,7 +142,8 @@ class ExecuteToolUseCase:
             status = "success"
             return result
 
-        except (AuthorizationError, ToolExecutionError, CredentialError):
+        except (AuthorizationError, ToolExecutionError, CredentialError) as e:
+            error_msg = str(e)
             raise
 
         except Exception as e:
@@ -154,8 +164,10 @@ class ExecuteToolUseCase:
                     output_data=result if status == "success" else None,
                     status=status,
                     duration_ms=duration_ms,
-                    executed_at=datetime.utcnow(),
+                    executed_at=datetime.now(timezone.utc),
                     error_message=error_msg,
+                    node_id=node_id,
+                    user_id=context.user_id,
                 )
                 await self._repo.save(record)
             except Exception:
@@ -169,20 +181,22 @@ class ExecuteToolUseCase:
 ### 실행 흐름 다이어그램
 
 ```
-execute(tool_name, input_data, context, credential_id)
+execute(tool_name, input_data, context, credential_id, node_id)
 │
 ├─ registry.get(tool_name)                              → NotFoundError 가능
 ├─ risk_service.assess(tool, context)                   → AuthorizationError 가능
 ├─ validator.validate_input(input_data, schema)         → ValidationError 가능
-├─ [credential_id != None] credential 조회              → CredentialError 가능
+├─ [credential_id != None]
+│   ├─ [node_id == None] → CredentialError("credential_id requires node_id")
+│   └─ credential_svc.inject(credential_id, node_id)   → CredentialError 가능
 │
-├─ tool.execute(input_data, credential=..., connector=..) → ToolExecutionError 가능 (래핑)
+├─ tool.execute(input_data, credential=..., connector=..)          → ToolExecutionError 가능 (래핑)
 │   └─ tool 내부에서 connector.connect(endpoint, credential) 호출 → ConnectorResponse
-├─ validator.validate_output(result, schema)            → ValidationError 가능
+├─ validator.validate_output(result, schema)                       → ValidationError 가능
 │
 └─ [finally]
-    ├─ repo.save(record)                                ← best-effort (예외 무시)
-    └─ credential.wipe()                                ← 항상 실행
+    ├─ repo.save(record)                                           ← best-effort (예외 무시)
+    └─ credential.wipe()                                           ← 항상 실행
 ```
 
 ### 엣지 케이스
@@ -190,8 +204,9 @@ execute(tool_name, input_data, context, credential_id)
 | 케이스 | 처리 방식 |
 |--------|----------|
 | `credential_id=None` (webhook, delay 등) | credential 조회 건너뜀, `credential=None`으로 `execute()` 호출 |
+| `credential_id`만 있고 `node_id=None` | **명시적 `CredentialError` 발생** — 조용히 스킵하면 호출자 실수 시 디버깅 어려움 |
 | `tool.execute()`에서 비도메인 예외 | `ToolExecutionError`로 래핑 후 재발생 |
-| `connector.connect()` 실패 | `ToolExecutionError` 발생 — tool 내부에서 처리 |
+| `credential_svc.inject()` 실패 | `CredentialError` 발생 (예외 래핑) |
 | `validate_output()` 실패 | `ValidationError` 발생. credential은 이미 finally에서 wipe |
 | `repo.save()` 실패 | best-effort — 이력 저장 실패해도 결과는 그대로 반환 |
 
@@ -326,6 +341,7 @@ __all__ = ["ExecuteToolUseCase", "ListToolsUseCase", "ValidateToolConfigUseCase"
 ```python
 # services/api_server/app/dependencies/tools.py
 
+from auth.domain.services import CredentialInjectionService
 from toolset.adapters.tool_registry_adapter import ToolRegistryAdapter
 from toolset.adapters.secure_connector import SecureConnector
 from toolset.adapters.tools.google_drive_tool import GoogleDriveTool
@@ -343,20 +359,21 @@ from toolset.domain.services import (
 )
 
 def create_execute_tool_use_case(
-    inject_credential_svc,  # auth.domain.services.CredentialInjectionService
+    inject_credential_svc: CredentialInjectionService,
     execution_repo,         # storage.repositories.ToolExecutionRepository 구현체
 ) -> ExecuteToolUseCase:
     registry = ToolRegistryAdapter()
     registry.register_tool(GoogleDriveTool(), tool_id=uuid4(), category="google")
     registry.register_tool(GmailTool(), tool_id=uuid4(), category="google")
-    # ... 8개 등록
+    # ... 나머지 등록
 
     return ExecuteToolUseCase(
         tool_registry=registry,
-        secure_connector=SecureConnector(inject_credential_svc),
+        secure_connector=SecureConnector(),
         validator=RuntimeValidator(),
         risk_service=RiskAssessmentService(),
         execution_repo=execution_repo,
+        credential_injection_svc=inject_credential_svc,
     )
 ```
 
@@ -364,10 +381,15 @@ def create_execute_tool_use_case(
 
 ## 확인 체크리스트
 
-- [ ] `execute_tool_use_case.py`: `finally` 블록에서 `credential.wipe()` 보장
-- [ ] `execute_tool_use_case.py`: 비도메인 예외 → `ToolExecutionError` 래핑
-- [ ] `execute_tool_use_case.py`: `credential_id=None`일 때 `connector.connect()` 호출 안 함
-- [ ] `execute_tool_use_case.py`: `repo.save()` best-effort (예외 무시)
-- [ ] `list_tools_use_case.py`: `category` 필터 + `is_enabled=False` 필터링
-- [ ] `validate_tool_config_use_case.py`: 실제 API 호출 없이 스키마 검증만
-- [ ] 구현체 직접 import 없음 (Port만 참조)
+- [x] `execute_tool_use_case.py`: `finally` 블록에서 `credential.wipe()` 보장
+- [x] `execute_tool_use_case.py`: 비도메인 예외 → `ToolExecutionError` 래핑
+- [x] `execute_tool_use_case.py`: `credential_id=None`일 때 `credential_svc.inject()` 호출 안 함
+- [x] `execute_tool_use_case.py`: `repo.save()` best-effort (예외 무시)
+- [x] `execute_tool_use_case.py`: `datetime.now(timezone.utc)` 사용 (utcnow 금지)
+- [x] `execute_tool_use_case.py`: `credential_id: UUID | None` (ID 필드 UUID 컨벤션)
+- [x] `execute_tool_use_case.py`: 도메인 예외 시 `error_msg` 캡처 후 re-raise
+- [x] `list_tools_use_case.py`: `category` 필터 + `is_enabled=False` 필터링
+- [x] `validate_tool_config_use_case.py`: 실제 API 호출 없이 스키마 검증만
+- [x] `CredentialInjectionService` 직접 DI (SecureConnectorPort 대신)
+- [x] 구현체 직접 import 없음 (Port + 허용된 cross-module import만 참조)
+- [ ] `auth.CredentialInjectionService.inject()`: `node_id` 파라미터 추가 필요 (현재 1인자)

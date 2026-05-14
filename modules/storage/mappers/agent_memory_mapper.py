@@ -9,7 +9,7 @@ class AgentMemoryMapper:
     @staticmethod
     def to_domain(orm: AgentMemoryModel) -> MemoryEntry:
         return MemoryEntry(
-            entry_id=orm.memory_id,
+            entry_id=orm.entry_id,
             user_id=orm.user_id,
             memory_type=orm.memory_type,
             content=orm.content,
@@ -21,7 +21,7 @@ class AgentMemoryMapper:
     @staticmethod
     def to_orm(entity: MemoryEntry) -> AgentMemoryModel:
         return AgentMemoryModel(
-            memory_id=entity.entry_id,
+            entry_id=entity.entry_id,
             user_id=entity.user_id,
             memory_type=entity.memory_type,
             content=entity.content,
