@@ -129,3 +129,17 @@ class TestWorkflowSchema:
         assert wf.description is None
         assert wf.version is None
         assert wf.sha256 is None
+        assert wf.owner_user_id is None  # v0.3.0: Optional, 점진 마이그레이션 위해 default None
+
+    def test_owner_user_id_accepted(self):
+        owner_id = uuid4()
+        wf = WorkflowSchema(
+            workflow_id=uuid4(),
+            owner_user_id=owner_id,
+            name="Owned",
+            scope="private",
+            is_draft=True,
+            nodes=[],
+            connections=[],
+        )
+        assert wf.owner_user_id == owner_id

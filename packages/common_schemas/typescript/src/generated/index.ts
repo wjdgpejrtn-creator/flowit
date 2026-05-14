@@ -98,6 +98,7 @@ export interface Edge {
 
 export interface WorkflowSchema {
   workflow_id: string;
+  owner_user_id?: string | null;
   name: string;
   description?: string | null;
   scope: "private" | "team" | "public";

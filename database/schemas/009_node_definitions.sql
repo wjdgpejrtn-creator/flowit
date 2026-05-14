@@ -3,7 +3,7 @@
 -- Aligned: name (not display_name), parameter_schema (not parameters),
 --          risk_level + required_connections + service_type added, vector(768)
 
-CREATE TABLE node_definitions (
+CREATE TABLE IF NOT EXISTS node_definitions (
     node_id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     node_type           VARCHAR(100) NOT NULL UNIQUE,
     name                VARCHAR(200) NOT NULL,
@@ -27,13 +27,13 @@ CREATE TABLE node_definitions (
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TRIGGER set_node_definitions_updated_at
+CREATE OR REPLACE TRIGGER set_node_definitions_updated_at
     BEFORE UPDATE ON node_definitions
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
-CREATE INDEX idx_node_definitions_category ON node_definitions(category);
-CREATE INDEX idx_node_definitions_is_mvp ON node_definitions(is_mvp) WHERE is_mvp = TRUE;
+CREATE INDEX IF NOT EXISTS idx_node_definitions_category ON node_definitions(category);
+CREATE INDEX IF NOT EXISTS idx_node_definitions_is_mvp ON node_definitions(is_mvp) WHERE is_mvp = TRUE;
 
-CREATE INDEX idx_node_definitions_embedding_hnsw ON node_definitions
+CREATE INDEX IF NOT EXISTS idx_node_definitions_embedding_hnsw ON node_definitions
     USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);

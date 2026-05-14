@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Diagnose script output (database/scripts/diagnose.py)
+.diagnose_output.json
+
 # C extensions
 *.so
 
