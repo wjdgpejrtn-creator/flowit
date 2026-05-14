@@ -81,6 +81,9 @@ class DiagnosisResult:
     connection_ok: bool
     error: str | None = None
     pg_version: str | None = None
+    pg_current_user: str | None = None
+    pg_session_user: str | None = None
+    pg_can_create_in_public: bool | None = None
     extensions: dict[str, str | None] = field(default_factory=dict)
     schema_migrations_tracking_exists: bool = False
     all_public_tables: list[str] = field(default_factory=list)
@@ -144,6 +147,18 @@ async def _diagnose() -> DiagnosisResult:
         async with engine.connect() as conn:
             result.connection_ok = True
             result.pg_version = (await conn.execute(text("SELECT version()"))).scalar()
+
+            user_row = (
+                await conn.execute(
+                    text(
+                        "SELECT current_user, session_user, "
+                        "has_schema_privilege(current_user, 'public', 'CREATE')"
+                    )
+                )
+            ).one()
+            result.pg_current_user = user_row[0]
+            result.pg_session_user = user_row[1]
+            result.pg_can_create_in_public = bool(user_row[2])
 
             ext_rows = (
                 await conn.execute(
@@ -212,6 +227,16 @@ def _print_human(result: DiagnosisResult) -> None:
         return
 
     print(f"[OK]   connection — {result.pg_version}")
+    print(f"  current_user           : {result.pg_current_user}")
+    print(f"  session_user           : {result.pg_session_user}")
+    create_mark = "OK" if result.pg_can_create_in_public else "MISS"
+    print(f"  CREATE on public schema: [{create_mark}] {result.pg_can_create_in_public}")
+    if result.pg_current_user != result.db_user:
+        print(
+            f"  [WARN] requested DB_IAM_USER={result.db_user!r} but "
+            f"server sees current_user={result.pg_current_user!r} — "
+            f"check ADC: `gcloud auth application-default login`"
+        )
     print()
 
     print("Extensions:")
