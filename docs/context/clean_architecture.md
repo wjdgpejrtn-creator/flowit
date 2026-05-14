@@ -855,23 +855,57 @@ services/frontend/
 
 ### 8.1 database/ (REQ-001)
 
-순수 SQL 계층. Python 코드 의존 없음.
+**순수 SQL 계층** (ADR-0012). DDL + 마이그레이션 도구 + seeds. Python ORM/Repository는 `modules/storage/`가 담당.
 
 ```
 database/
-├── schemas/                            # DDL (15개 SQL 파일)
+├── schemas/                            # DDL (000 추적 + 16 도메인, ADR-0011)
+│   ├── 000_migration_tracking.sql     # schema_migrations 추적 테이블
 │   ├── 001_core.sql                   # users, workflows, executions
 │   ├── ...
-│   └── 015_node_logs_extended.sql
-├── migrations/                         # Alembic
-│   ├── alembic.ini
-│   ├── env.py
-│   └── versions/
+│   └── 016_storage_execution_quality.sql
 ├── seeds/                              # 초기 데이터
-│   └── node_definitions.sql           # 54종 노드 정의
-├── scripts/                            # DB 유틸리티
+│   └── node_definitions.json
+├── scripts/                            # DB 유틸리티 (migrate, diagnose, seed, validate)
 └── tests/                              # SQL 테스트 (pgTAP 등)
 ```
+
+> **현재 잔존**: `database/src/`(ORM/Repository/helpers) 코드는 ADR-0012 follow-up(PR-2a~c)으로 `modules/storage/`로 통째 이전 예정. `protocols.py`(REQ-002 BaseCipher)는 위치 협의 후 결정.
+
+> **변경 이력**:
+> - ADR-0011 (2026-05-14): Alembic 미도입 — raw SQL + `schema_migrations` 추적.
+> - ADR-0012 (2026-05-14, v1→v2 갱신): 초안(v1, PR #62)은 "object storage + RDB Repository 책임 흡수"였으나 cross-module 영향 점검 결과 v2(PR #63)에서 "순수 SQL 계층" 원래 의도 복원 + `modules/storage/`가 영속화 인프라 본부 + `modules/skills_marketplace/` 신규 분리. 자세한 Revision History는 ADR 본문.
+
+### 8.1bis modules/storage/ (REQ-008)
+
+**영속화 인프라**(ADR-0012). RDB ORM/Repository/Mapper + object storage(GCS/ClamAV) adapter + 자체 도메인(`StorageObject` 등). 도메인 모듈의 Port ABC를 구현해 composition root에서 DI로 주입된다.
+
+```
+modules/storage/
+├── domain/                             # StorageObject, UploadPolicy, RetentionPolicy + Ports
+├── application/                        # UploadFileUseCase, DownloadFileUseCase 등
+├── adapters/                           # GCSAdapter, ClamAVAdapter, LocalStorageAdapter
+├── orm/                                # SQLAlchemy ORM (다른 모듈 도메인 엔티티의 RDB 매핑) — SSOT
+├── repositories/                       # 다른 모듈 Port 구현체 (PgSessionRepository 등)
+├── mappers/                            # ORM ↔ 도메인 변환
+└── tests/
+```
+
+### 8.1ter modules/skills_marketplace/ (신규, REQ-013 후보)
+
+**Skills Marketplace 도메인** (ADR-0012, 2026-05-14 신설). 사용자 자동화 스킬 노드의 3계층 lifecycle (personal → team → company 승격). Workflow Composer가 노드/스킬 후보 검토 시 호출.
+
+```
+modules/skills_marketplace/
+├── domain/
+│   ├── entities/                       # PersonalSkill(이름 미정 — 구현 시 결정), TeamSkill, CompanySkill
+│   ├── value_objects/                  # SkillTier, ApprovalDecision
+│   └── ports/                          # SkillRepository, SkillEmbedderPort
+├── application/use_cases/              # PromoteToTeamUseCase, PromoteToCompanyUseCase, SearchSkillsUseCase
+└── tests/
+```
+
+> 본 모듈은 ADR-0012 follow-up(PR-2d)으로 신설. 현재 `modules/storage/marketplace/`에 있는 코드를 분리 이전. `PersonalSkill` 이름은 PR #54의 `ai_agent.PersonalSkill`(사용자 패턴 메모리)과 충돌 — 본 모듈 측이 다른 이름 채택 (PR-2d 시점에 옵션 결정).
 
 ### 8.2 infra/ (REQ-011)
 

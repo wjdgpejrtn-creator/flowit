@@ -4,7 +4,7 @@
 
 CREATE EXTENSION IF NOT EXISTS "vector";
 
-CREATE TABLE skills (
+CREATE TABLE IF NOT EXISTS skills (
     skill_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(200) NOT NULL,
     description     TEXT NOT NULL,
@@ -21,22 +21,22 @@ CREATE TABLE skills (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TRIGGER set_skills_updated_at
+CREATE OR REPLACE TRIGGER set_skills_updated_at
     BEFORE UPDATE ON skills
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
-CREATE INDEX idx_skills_embedding_hnsw ON skills
+CREATE INDEX IF NOT EXISTS idx_skills_embedding_hnsw ON skills
     USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
 
-CREATE INDEX idx_skills_search_vector_gin ON skills USING gin (search_vector);
-CREATE INDEX idx_skills_author_id ON skills(author_id);
-CREATE INDEX idx_skills_lifecycle_state ON skills(lifecycle_state);
+CREATE INDEX IF NOT EXISTS idx_skills_search_vector_gin ON skills USING gin (search_vector);
+CREATE INDEX IF NOT EXISTS idx_skills_author_id ON skills(author_id);
+CREATE INDEX IF NOT EXISTS idx_skills_lifecycle_state ON skills(lifecycle_state);
 
 -- ============================================================
 -- skill_stats (aggregated metrics)
 -- ============================================================
-CREATE TABLE skill_stats (
+CREATE TABLE IF NOT EXISTS skill_stats (
     skill_id        UUID PRIMARY KEY REFERENCES skills(skill_id) ON DELETE CASCADE,
     use_count       INTEGER NOT NULL DEFAULT 0,
     avg_rating      NUMERIC(3, 2) NOT NULL DEFAULT 0.00,
@@ -45,14 +45,14 @@ CREATE TABLE skill_stats (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TRIGGER set_skill_stats_updated_at
+CREATE OR REPLACE TRIGGER set_skill_stats_updated_at
     BEFORE UPDATE ON skill_stats
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
 -- ============================================================
 -- skill_promotion_logs (lifecycle state audit trail)
 -- ============================================================
-CREATE TABLE skill_promotion_logs (
+CREATE TABLE IF NOT EXISTS skill_promotion_logs (
     log_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     skill_id        UUID NOT NULL REFERENCES skills(skill_id) ON DELETE CASCADE,
     from_state      VARCHAR(20) NOT NULL,
@@ -62,4 +62,4 @@ CREATE TABLE skill_promotion_logs (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_skill_promotion_logs_skill_id ON skill_promotion_logs(skill_id);
+CREATE INDEX IF NOT EXISTS idx_skill_promotion_logs_skill_id ON skill_promotion_logs(skill_id);

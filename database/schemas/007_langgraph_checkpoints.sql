@@ -2,7 +2,7 @@
 -- LangGraph PostgresSaver compatible checkpoint tables (REQ-004/007)
 -- These tables follow LangGraph's internal schema — do not modify column names
 
-CREATE TABLE checkpoints (
+CREATE TABLE IF NOT EXISTS checkpoints (
     thread_id               VARCHAR(200) NOT NULL,
     checkpoint_ns           VARCHAR(200) NOT NULL DEFAULT '',
     checkpoint_id           VARCHAR(200) NOT NULL,
@@ -14,7 +14,7 @@ CREATE TABLE checkpoints (
     PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
 );
 
-CREATE TABLE checkpoint_writes (
+CREATE TABLE IF NOT EXISTS checkpoint_writes (
     thread_id       VARCHAR(200) NOT NULL,
     checkpoint_ns   VARCHAR(200) NOT NULL DEFAULT '',
     checkpoint_id   VARCHAR(200) NOT NULL,

@@ -64,6 +64,7 @@ class WorkflowSchema(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     workflow_id: UUID
+    owner_user_id: Optional[UUID] = None  # 소유자(creator). DB schema는 NOT NULL이라 Repository.save 시점에 필수 — Optional은 점진 마이그레이션/역직렬화 호환용
     name: str
     description: Optional[str] = None
     scope: Literal["private", "team", "public"]
