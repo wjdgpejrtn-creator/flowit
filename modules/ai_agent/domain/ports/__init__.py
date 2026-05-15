@@ -1,5 +1,4 @@
 from .agent_memory_repository import AgentMemoryRepository
-from .embedding_port import EmbeddingPort
 from .llm_port import LLMPort
 from .node_registry import NodeRegistry
 from .personal_memory_store import PersonalMemoryStore
@@ -8,7 +7,6 @@ from .workflow_repository import WorkflowRepository
 
 __all__ = [
     "AgentMemoryRepository",
-    "EmbeddingPort",
     "LLMPort",
     "NodeRegistry",
     "PersonalMemoryStore",

@@ -9,7 +9,7 @@ from ai_agent.application.agents.personalization.recall_personal_skills_use_case
     _cosine_similarity,
 )
 from ai_agent.domain.entities.memory_file import MemoryFile, MemoryFileRef
-from ai_agent.domain.ports.embedding_port import EmbeddingPort
+from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from ai_agent.domain.ports.personal_memory_store import PersonalMemoryStore
 
 
@@ -40,7 +40,7 @@ class TestRecallPersonalSkillsUseCase:
     @pytest.mark.asyncio
     async def test_empty_index_returns_empty(self):
         store = AsyncMock(spec=PersonalMemoryStore)
-        emb = AsyncMock(spec=EmbeddingPort)
+        emb = AsyncMock(spec=EmbedderPort)
         store.load_index.return_value = []
         uc = RecallPersonalSkillsUseCase(store, emb)
         result = await uc.execute(uuid4(), "쿼리")
@@ -51,7 +51,7 @@ class TestRecallPersonalSkillsUseCase:
     async def test_returns_top_k_by_similarity(self):
         uid = uuid4()
         store = AsyncMock(spec=PersonalMemoryStore)
-        emb = AsyncMock(spec=EmbeddingPort)
+        emb = AsyncMock(spec=EmbedderPort)
 
         store.load_index.return_value = [_make_ref("a"), _make_ref("b"), _make_ref("c")]
         store.load_file.side_effect = [_make_file("a"), _make_file("b"), _make_file("c")]
@@ -73,7 +73,7 @@ class TestRecallPersonalSkillsUseCase:
     async def test_below_min_score_excluded(self):
         uid = uuid4()
         store = AsyncMock(spec=PersonalMemoryStore)
-        emb = AsyncMock(spec=EmbeddingPort)
+        emb = AsyncMock(spec=EmbedderPort)
 
         store.load_index.return_value = [_make_ref("low")]
         store.load_file.return_value = _make_file("low")
@@ -88,7 +88,7 @@ class TestRecallPersonalSkillsUseCase:
     async def test_missing_embedding_generates_and_saves(self):
         uid = uuid4()
         store = AsyncMock(spec=PersonalMemoryStore)
-        emb = AsyncMock(spec=EmbeddingPort)
+        emb = AsyncMock(spec=EmbedderPort)
 
         store.load_index.return_value = [_make_ref("no_emb")]
         store.load_file.return_value = _make_file("no_emb")
@@ -108,7 +108,7 @@ class TestRecallPersonalSkillsUseCase:
     async def test_missing_file_is_skipped(self):
         uid = uuid4()
         store = AsyncMock(spec=PersonalMemoryStore)
-        emb = AsyncMock(spec=EmbeddingPort)
+        emb = AsyncMock(spec=EmbedderPort)
 
         store.load_index.return_value = [_make_ref("ghost")]
         store.load_embedding.return_value = [1.0, 0.0]

@@ -7,8 +7,8 @@ from __future__ import annotations
 import math
 from uuid import UUID
 
+from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from ....domain.entities.memory_file import MemoryFile
-from ....domain.ports.embedding_port import EmbeddingPort
 from ....domain.ports.personal_memory_store import PersonalMemoryStore
 
 _DEFAULT_TOP_K = 3
@@ -33,7 +33,7 @@ class RecallPersonalSkillsUseCase:
     def __init__(
         self,
         memory_store: PersonalMemoryStore,
-        embedding: EmbeddingPort,
+        embedding: EmbedderPort,
         top_k: int = _DEFAULT_TOP_K,
         min_score: float = _DEFAULT_MIN_SCORE,
     ) -> None:
