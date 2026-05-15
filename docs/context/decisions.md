@@ -31,3 +31,4 @@
 | 0008 | [NodeExecutionState를 common_schemas 공유 타입으로 도입](./adr/ADR-0008-node-execution-state-shared-type.md) | Accepted | 2026-05-07 |
 | 0009 | [UtcDatetime 공용 타입 도입 — naive datetime 자동 UTC 변환](./adr/ADR-0009-utc-datetime-type.md) | Accepted | 2026-05-08 |
 | 0010 | [Storage 모듈 아키텍처 — Mapper 패턴 + 타 모듈 Port ABC 구현](./adr/ADR-0010-storage-module-architecture.md) | Accepted | 2026-05-07 |
+| 0013 | [EmbedderPort SSOT — nodes_graph 소유 + ai_agent 구현체 (예외 패턴)](./adr/ADR-0013-embedder-port-ssot.md) | Accepted | 2026-05-12 |

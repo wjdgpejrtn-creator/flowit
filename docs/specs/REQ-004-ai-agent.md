@@ -158,7 +158,7 @@ LLM 자유 생성 산업 default는 v2(Sprint 4+) 이연.
 | 어댑터 | 설명 | 구현하는 Port | 외부 의존성 | 사용 sub-agent |
 |--------|------|---------------|-------------|--------------|
 | `ModalLLMAdapter` | Modal GPU 서버 호출 (Gemma 4) | `LLMPort` | `httpx`, `modal` | 전체 |
-| `ModalEmbeddingAdapter` 🆕 | Modal GPU 임베딩 호출 (BGE-M3) | `EmbeddingPort` | `httpx` | composer, personalization |
+| `ModalEmbeddingAdapter` 🆕 | Modal GPU 임베딩 호출 (BGE-M3) | `EmbedderPort` (nodes_graph 소유, 예외 패턴 — PR #30 5/12 결정) | `httpx` | composer, personalization, skills_builder |
 | `GCSMemoryStore` 🆕 | GCS 버킷 `gs://workflow-automation-personal/users/{user_id}/` 읽기/쓰기 | `PersonalMemoryStore` | `google-cloud-storage` | personalization |
 | `NodeRegistryAdapter` | nodes_graph의 `NodeDefinitionRepository`를 감싸는 Facade | `NodeRegistry` | `nodes_graph.domain.ports.NodeDefinitionRepository` (DI 주입) | composer, skills_builder |
 | `HTTPSubAgentClient` 🆕 | 다른 sub-agent Modal endpoint 호출 (VPC 내부) | `SubAgentClient` | `httpx` | orchestrator |
@@ -320,7 +320,7 @@ type: {{user|feedback|project|reference}}
 | 모듈 구조 | 단일 ComposeWorkflowUseCase | Main Orchestrator + 3 Sub-Agent | Sprint 3 신정혜 단독 배포 병목 해소, 단일 책임 원칙 |
 | application 폴더 | `application/use_cases/` | `application/agents/{orchestrator,workflow_composer,skills_builder,personalization}/` | sub-agent 경계 명시 |
 | Personalization 저장소 | (없음) | GCS 파일 (MEMORY.md 패턴) | 사용자가 Claude Code memory 시스템과 동일 포맷 명시 요청 |
-| 신규 Port | (없음) | `EmbeddingPort`, `PersonalMemoryStore`, (선택) `SubAgentClient` | BGE-M3 분리 호출 + GCS 어댑터 추상화 |
+| 신규 Port | (없음) | `PersonalMemoryStore`, (선택) `SubAgentClient` | GCS 어댑터 추상화 (Embedder는 nodes_graph 소유 `EmbedderPort` 재사용, PR #30 5/12 결정) |
 | api_server 경계 | 직접 import | HTTP 어댑터 (`OrchestratorClient`) | sub-agent가 Modal app로 분리되어 in-process 호출 불가 |
 | AgentState | 동일 | `personal_memory: list[MemoryEntry]` 필드 추가 | Orchestrator → Composer 전달용 |
 | AgentMode | ONBOARDING/WIZARD/EDIT/GENERAL/SECURITY | + `SKILL_BUILDER` | Skills Builder 분기 표현 |
@@ -439,7 +439,7 @@ modules/ai_agent/
 │   │   └── slot_filling_service.py
 │   └── ports/
 │       ├── llm_port.py
-│       ├── embedding_port.py          # EmbeddingPort (신규)
+│       │                              # (EmbedderPort는 nodes_graph/domain/ports 소유, ai_agent는 import만 — PR #30 5/12 결정)
 │       ├── agent_memory_repository.py
 │       ├── personal_memory_store.py   # PersonalMemoryStore (신규)
 │       ├── workflow_repository.py
@@ -505,5 +505,6 @@ modules/ai_agent/
 | 일자 | 변경 | 담당 |
 |------|------|------|
 | 2026-05-05 | 클래스 다이어그램 교차분석 확정본 (단일 ComposeWorkflowUseCase) | 황대원 |
-| 2026-05-11 | Sprint 3 멀티 에이전트 구조 전환 — Main Orchestrator + 3 Sub-Agent, EmbeddingPort + PersonalMemoryStore 신규, GCS 어댑터, inter-agent HTTP 계약 | 황대원 |
+| 2026-05-11 | Sprint 3 멀티 에이전트 구조 전환 — Main Orchestrator + 3 Sub-Agent, PersonalMemoryStore 신규, GCS 어댑터, inter-agent HTTP 계약. (당시 EmbeddingPort 신규 명시했으나 2026-05-12 박아름 결정으로 nodes_graph `EmbedderPort`로 통합, 예외 패턴) | 황대원 |
+| 2026-05-12 | **EmbedderPort SSOT 결정** — ai_agent에 별도 `EmbeddingPort` 신설 폐기, nodes_graph 소유 `EmbedderPort` 1개로 통합. 구현체만 ai_agent (`adapters/llm/modal_embedding_adapter.py`)가 소유하는 예외 패턴. 이유: 의존성 역전 위반 회피 — `nodes_graph → ai_agent` 의존 차단. 조장 후속 확인 (PR #54 embedder_port shim revert 요청) | 박아름 |
 | 2026-05-12 | common_schemas Sprint 3 신규 타입 구현 — `agent_protocol.py`(AgentProtocolRequest/Response), `MemoryEntry` SSOT 이관, `AgentMode.SKILL_BUILDER`, `IntentResult.intent="build_skill"`, `AgentState.personal_memory`. PR: `feature/req-012-agent-protocol`. | 황대원 |
