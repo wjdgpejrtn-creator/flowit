@@ -360,7 +360,7 @@ modules/ai_agent/                       # Sprint 3 멀티 에이전트 구조 (R
 │   │   └── slot_filling_service.py     # SlotFillingService
 │   └── ports/
 │       ├── llm_port.py                 # LLMPort (ABC, Gemma 4)
-│       ├── embedding_port.py           # EmbeddingPort (Sprint 3 신규, BGE-M3)
+│       │                               # (EmbedderPort는 nodes_graph/domain/ports에 있음 — ai_agent는 import만, PR #30 5/12 결정)
 │       ├── agent_memory_repository.py  # AgentMemoryRepository (RDB)
 │       ├── personal_memory_store.py    # PersonalMemoryStore (Sprint 3 신규, GCS)
 │       ├── workflow_repository.py      # WorkflowRepository
@@ -1271,7 +1271,7 @@ Workflow_Automation/
 │   │   │   ├── entities/                   # MemoryEntry, ConversationMessage, PersonalSkill, SkillNode
 │   │   │   ├── value_objects/              # TurnLimit, QualityThreshold
 │   │   │   ├── services/                   # IntentAnalyzer, Drafter, QAEvaluator, SlotFilling
-│   │   │   └── ports/                      # LLMPort, EmbeddingPort, AgentMemoryRepository,
+│   │   │   └── ports/                      # LLMPort, AgentMemoryRepository, (EmbedderPort는 nodes_graph 소유),
 │   │   │                                   #   PersonalMemoryStore, WorkflowRepository, NodeRegistry,
 │   │   │                                   #   SubAgentClient(선택)
 │   │   ├── application/
@@ -1507,7 +1507,7 @@ Workflow_Automation/
 | `ai_agent/domain/ports/` | `WorkflowRepository` | `storage/repositories/pg_workflow_repository.py` |
 | `ai_agent/domain/ports/` | `NodeRegistry` | `ai_agent/adapters/node_registry_adapter.py` (Facade, REQ-003 ABC 래핑) |
 | `ai_agent/domain/ports/` | `LLMPort` | `ai_agent/adapters/llm/modal_llm_adapter.py` (Modal Gemma 4) |
-| `ai_agent/domain/ports/` | `EmbeddingPort` | `ai_agent/adapters/llm/modal_embedding_adapter.py` (Modal BGE-M3, Sprint 3) |
+| `nodes_graph/domain/ports/` | `EmbedderPort` | `ai_agent/adapters/llm/modal_embedding_adapter.py` (Modal BGE-M3, Sprint 3, **예외 패턴** — Port 소유 모듈(nodes_graph)이 아닌 외부 모듈(ai_agent)이 구현체 소유. PR #30 2026-05-12 결정) |
 | `ai_agent/domain/ports/` | `PersonalMemoryStore` | `ai_agent/adapters/memory/gcs_memory_store.py` (GCS, Sprint 3 — storage 모듈 경유 X) |
 | `ai_agent/domain/ports/` | `SubAgentClient` (선택) | `ai_agent/adapters/agent_clients/http_sub_agent_client.py` (orchestrator HTTP, Sprint 3) |
 | `toolset/domain/ports/` | `ToolRegistry` | `toolset/adapters/` (내부 등록) |
