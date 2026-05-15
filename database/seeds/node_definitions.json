@@ -2798,6 +2798,68 @@
     "service_type": "anthropic"
   },
   {
+    "node_type": "gemma_chat",
+    "name": "Gemma Chat",
+    "category": "ai",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "response_format": {
+          "type": "string",
+          "enum": [
+            "text",
+            "json",
+            "markdown"
+          ],
+          "default": "text"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "default": 1024
+        },
+        "temperature": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 2
+        },
+        "system": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "finish_reason": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "Gemma 4 LLM 추론 (시스템 내장, 자격증명 불필요). prompt → 텍스트 응답. REQ-004 ModalLLMAdapter 위임.",
+    "is_mvp": true,
+    "service_type": "gemma"
+  },
+  {
     "node_type": "google_calendar_create_event",
     "name": "Google Calendar 이벤트 생성",
     "category": "integration",

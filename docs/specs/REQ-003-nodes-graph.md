@@ -480,18 +480,18 @@ modules/nodes_graph/
 
 > 카테고리는 DB `node_definitions.category` CHECK 제약(영문 8종: `trigger`, `action`, `condition`, `transform`, `ai`, `integration`, `utility`, `output`)에 맞춤. Microsoft(Outlook/Teams/OneDrive), Notion, OpenAI는 데모 버전 후속 개발로 보류 (2026-05-11 조장 결정).
 >
-> 박아름 1주차 작업분 41종(28 domain + 13 external) + 햄햄(가원) toolset 영역 연결분 14종(REQ-005 toolset → nodes_graph 카탈로그) = **합계 55종**. toolset 연결은 햄햄 commit `59f0e26 feat(toolset+nodes_graph): toolset 14종 tool 노드를 nodes_graph 카탈로그에 연결`로 머지됨.
+> 박아름 1주차 작업분 41종(28 domain + 13 external) + 박아름 5/14 야간 추가 `gemma_chat` 1종 (PR #68) + 햄햄(가원) toolset 영역 연결분 14종(REQ-005 toolset → nodes_graph 카탈로그) = **합계 56종**. toolset 연결은 햄햄 commit `59f0e26 feat(toolset+nodes_graph): toolset 14종 tool 노드를 nodes_graph 카탈로그에 연결`로 머지됨.
 
-| 카테고리 | 종수 | 박아름 1주차 (41) | + 햄햄 toolset (14) |
+| 카테고리 | 종수 | 박아름 1주차 (41) + 5/14 (1) | + 햄햄 toolset (14) |
 |---------|:---:|------|------|
 | `trigger` | 6 | `schedule_trigger`, `webhook_trigger`, `manual_trigger`, `event_trigger`, `api_poll_trigger`, `file_watch_trigger` | — |
 | `condition` | 10 | `if_condition`, `switch_case`, `loop_count`, `loop_list`, `retry`, `merge_branch`, `stop_workflow`, `delay` | + `conditional`, `loop` |
 | `transform` | 18 | `text_transform`, `json_extract`, `json_merge`, `csv_parse`, `csv_build`, `number_calc`, `date_format`, `list_filter`, `list_map`, `string_template`, `regex_extract`, `regex_replace`, `base64_encode`, `base64_decode` | + `file_transform`, `json_transform`, `text_template`, `data_mapping` |
-| `ai` | 1 (+후속) | `anthropic_chat` (`openai_chat`는 데모 후속 보류) | — |
+| `ai` | 2 (+후속) | `anthropic_chat` (외부 LLM, API key 자격증명), `gemma_chat` (시스템 내장 Gemma 4, 자격증명 불필요 — 5/14 야간 추가) — `openai_chat`은 데모 후속 보류 | — |
 | `integration` | 11 | `http_request`, `google_drive_read`, `google_sheets_read`, `postgresql_query`, `mysql_query`, `bigquery_query`, `google_calendar_create_event`, `linear_create_issue` | + `rest_api`, `graphql`, `http_request_tool` |
 | `output` | 2 | `pdf_generate`, `google_docs_write` | — |
 | `action` | 5 (+후속) | `slack_post_message`, `gmail_send` (Microsoft `outlook_send`/`teams_post_message` 후속 보류) | + `webhook`, `slack_notify`, `email_send` |
 | `utility` | 2 | (박아름 1주차엔 utility 분류 없음) | + `file_read`, `file_write` |
-| **합계** | **55** | **41** (28 domain + 13 external) | **+14** (toolset) |
+| **합계** | **56** | **42** (28 domain + 14 external, gemma_chat 포함) | **+14** (toolset) |
 
 각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. toolset 14종은 `modules/nodes_graph/adapters/catalog/tools/toolset_nodes.py`에서 `NodeDefinition` 형태로 정의되어 `catalog_registry.py`로 통합 등록된다.
