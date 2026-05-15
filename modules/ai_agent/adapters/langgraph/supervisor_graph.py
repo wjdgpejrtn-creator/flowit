@@ -252,7 +252,7 @@ class LangGraphSupervisor:
             self._route,
             {_COMPOSER: _COMPOSER, _SKILLS: _SKILLS, _FINALIZE: _FINALIZE},
         )
-        graph.add_edge(_COMPOSER, "update_memory")
+        graph.add_edge(_COMPOSER, END)  # draft/refine/clarify — 워크플로우 미완료, 저장 skip
         graph.add_edge(_SKILLS, "update_memory")
         graph.add_edge(_FINALIZE, "update_memory")
         graph.add_edge("update_memory", END)
