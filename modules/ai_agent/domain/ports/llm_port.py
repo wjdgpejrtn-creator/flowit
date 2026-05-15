@@ -3,7 +3,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, TypeVar
 
-T = TypeVar("T")
+from pydantic import BaseModel
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class LLMPort(ABC):

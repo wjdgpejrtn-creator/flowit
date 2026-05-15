@@ -2,7 +2,7 @@
 -- RANGE partitioned by started_at (monthly) for high-volume node execution logs
 -- Status values aligned with common_schemas NodeExecutionState
 
-CREATE TABLE node_logs (
+CREATE TABLE IF NOT EXISTS node_logs (
     log_id          UUID NOT NULL DEFAULT gen_random_uuid(),
     execution_id    UUID NOT NULL,
     node_id         VARCHAR(100) NOT NULL,
@@ -19,17 +19,17 @@ CREATE TABLE node_logs (
     PRIMARY KEY (log_id, started_at)
 ) PARTITION BY RANGE (started_at);
 
-CREATE INDEX idx_node_logs_execution_id ON node_logs(execution_id);
-CREATE INDEX idx_node_logs_node_type ON node_logs(node_type);
-CREATE INDEX idx_node_logs_status ON node_logs(status);
+CREATE INDEX IF NOT EXISTS idx_node_logs_execution_id ON node_logs(execution_id);
+CREATE INDEX IF NOT EXISTS idx_node_logs_node_type ON node_logs(node_type);
+CREATE INDEX IF NOT EXISTS idx_node_logs_status ON node_logs(status);
 
-CREATE TABLE node_logs_2026_05 PARTITION OF node_logs
+CREATE TABLE IF NOT EXISTS node_logs_2026_05 PARTITION OF node_logs
     FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
 
-CREATE TABLE node_logs_2026_06 PARTITION OF node_logs
+CREATE TABLE IF NOT EXISTS node_logs_2026_06 PARTITION OF node_logs
     FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
 
-CREATE TABLE node_logs_2026_07 PARTITION OF node_logs
+CREATE TABLE IF NOT EXISTS node_logs_2026_07 PARTITION OF node_logs
     FOR VALUES FROM ('2026-07-01') TO ('2026-08-01');
 
-CREATE TABLE node_logs_default PARTITION OF node_logs DEFAULT;
+CREATE TABLE IF NOT EXISTS node_logs_default PARTITION OF node_logs DEFAULT;

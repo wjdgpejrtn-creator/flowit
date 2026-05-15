@@ -2,7 +2,7 @@
 name = "api_server"
 version = "0.1.0"
 description = "REQ-009: FastAPI Core API Server"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",

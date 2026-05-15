@@ -1,10 +1,20 @@
 """Skills Builder — 산업 표준 default seed → NodeDefinition upsert.
 
 REQ-004 spec §2.2 BuildFromIndustryDefaultUseCase.
-Sprint 3 v1: seed 5개 산업 하드코딩. v2(Sprint 4+): LLM 자유 생성.
+
+활성 산업 (2026-05-12 조장 합의):
+  ecommerce — 데모 baseline. LG헬로비전 사내 자동화 시장 리서치 결과
+              직무 영역(CS/IT Ops/Document/HR/Marketing) 중심 + 산업은 e-commerce
+              한 축으로 baseline 구성.
+
+비활성 산업 (deprecated, 호출 막힘 / seed JSON 파일은 보존):
+  manufacturing / service / wholesale_retail / food / it
+  → Sprint 3 v1 베타로 작성된 5종. 데모 baseline에서는 제외.
+  → seed JSON 파일은 modules/ai_agent/seeds/industry_defaults/에 유지 (히스토리/복원용).
+  → execute() 호출 시 E_INDUSTRY_DEACTIVATED 에러 반환.
 
 flow:
-    industry_code (manufacturing/service/wholesale_retail/food/it)
+    industry_code (ecommerce only — active)
       → modules/ai_agent/seeds/industry_defaults/{code}.json 로드
       → 각 항목을 SkillNode로 검증
       → NodeDefinition으로 변환 (embedding 포함)
@@ -28,18 +38,24 @@ from ....domain.entities.skill_node import SkillNode
 
 
 # uuid5 namespace for skills builder generated nodes (industry default).
-# 같은 industry_code + node_type 조합은 항상 같은 node_id 생성 (idempotent upsert).
+# node_id = uuid5(_NS, f"{industry_code}:{node_type}") — industry_code를 명시 결합해서
+# 산업 간 node_type 우연 충돌을 namespace 레벨에서 차단 (PR #42 리뷰 후속, 견고성).
+# 같은 (industry_code, node_type) 조합은 항상 같은 node_id 생성 → idempotent upsert.
 _SKILLS_BUILDER_NS = uuid5(UUID("00000000-0000-0000-0000-000000000000"), "workflow-automation.skills_builder")
 
 _DEFAULT_SEEDS_DIR = Path(__file__).resolve().parents[3] / "seeds" / "industry_defaults"
 
-_SUPPORTED_INDUSTRIES = {"manufacturing", "service", "wholesale_retail", "food", "it"}
+# 활성 산업 — 데모 baseline (2026-05-12 조장 합의)
+_ACTIVE_INDUSTRIES = {"ecommerce"}
+
+# 비활성 산업 — Sprint 3 v1 베타 5종. seed 파일 보존, 호출 막힘
+_DEPRECATED_INDUSTRIES = {"manufacturing", "service", "wholesale_retail", "food", "it"}
 
 
 class BuildFromIndustryDefaultUseCase:
     """산업 default seed → nodes_graph 카탈로그 upsert 일괄 처리.
 
-    Sprint 3 v1: 5개 산업 하드코딩 (manufacturing/service/wholesale_retail/food/it).
+    Sprint 3 baseline: ecommerce 1종 활성. 기존 5종은 deprecated.
     """
 
     def __init__(
@@ -58,11 +74,23 @@ class BuildFromIndustryDefaultUseCase:
         industry_code: str,
     ) -> AsyncGenerator[SSEFrame, None]:
         """seed JSON 로드 → SkillNode 검증 → NodeDefinition upsert."""
-        # 1. industry_code 검증
-        if industry_code not in _SUPPORTED_INDUSTRIES:
+        # 1. industry_code 검증 — 활성/비활성/미지원 3분기
+        if industry_code in _DEPRECATED_INDUSTRIES:
+            yield ErrorFrame(
+                code="E_INDUSTRY_DEACTIVATED",
+                message=(
+                    f"산업 코드 '{industry_code}'는 비활성화 상태입니다 (Sprint 3 v1 베타, "
+                    f"2026-05-12 조장 결정으로 데모 baseline에서 제외). "
+                    f"활성 산업: {sorted(_ACTIVE_INDUSTRIES)}. "
+                    f"seed JSON 파일은 modules/ai_agent/seeds/industry_defaults/에 보존됨"
+                ),
+            )
+            return
+
+        if industry_code not in _ACTIVE_INDUSTRIES:
             yield ErrorFrame(
                 code="E_INDUSTRY_NOT_SUPPORTED",
-                message=f"산업 코드 '{industry_code}'는 지원하지 않습니다. 가능: {sorted(_SUPPORTED_INDUSTRIES)}",
+                message=f"산업 코드 '{industry_code}'는 지원하지 않습니다. 활성: {sorted(_ACTIVE_INDUSTRIES)}",
             )
             return
 
@@ -85,26 +113,62 @@ class BuildFromIndustryDefaultUseCase:
         yield AgentNodeFrame(agent_node_name="skills_builder.load_industry_default")
 
         # 3. 각 항목 처리
+        #
+        # 부분 실패 정책 (PR #42 리뷰 후속):
+        # - convert 실패 (seed JSON 항목 깨짐): 전체 중단 (E_SEED_ENTRY_INVALID).
+        #   seed 파일 자체가 broken이면 다음 항목도 동일 위험이라 fail-fast.
+        # - embed/upsert 실패 (런타임 외부 의존성 오류): 해당 노드만 격리,
+        #   다른 노드 계속 진행. ResultFrame.failed_node_types에 기록.
+        # - uuid5 deterministic이라 부분 실패 후 재실행 안전 (이미 upsert된 노드는
+        #   덮어쓰기 = idempotent. 실패 노드만 새로 시도).
         version = seed.get("version", "1.0.0")
         skill_nodes_data = seed.get("skill_nodes", [])
         upserted_node_types: list[str] = []
+        failed_node_types: list[dict] = []
 
         for entry in skill_nodes_data:
             try:
                 node_def = self._convert_entry_to_node_definition(entry, industry_code, version)
             except (KeyError, ValueError) as e:
+                # seed JSON 항목 자체가 깨짐 → 전체 중단
                 yield ErrorFrame(
                     code="E_SEED_ENTRY_INVALID",
                     message=f"seed 항목 변환 실패 ({entry.get('node_type', '?')}): {e}",
                 )
                 return
 
-            # description 임베딩
-            node_def.embedding = await self._embedder.embed(node_def.description)
+            # description 임베딩 (외부 의존성 — 격리 처리)
+            try:
+                node_def.embedding = await self._embedder.embed(node_def.description)
+            except Exception as e:
+                failed_node_types.append({
+                    "node_type": node_def.node_type,
+                    "stage": "embed",
+                    "error": str(e),
+                })
+                yield ErrorFrame(
+                    code="E_EMBEDDING_FAILED",
+                    message=f"임베딩 실패 ({node_def.node_type}): {e}",
+                )
+                continue
 
             yield AgentNodeFrame(agent_node_name=f"skills_builder.upsert.{node_def.node_type}")
 
-            await self._repo.upsert(node_def)
+            # upsert (외부 의존성 — 격리 처리)
+            try:
+                await self._repo.upsert(node_def)
+            except Exception as e:
+                failed_node_types.append({
+                    "node_type": node_def.node_type,
+                    "stage": "upsert",
+                    "error": str(e),
+                })
+                yield ErrorFrame(
+                    code="E_UPSERT_FAILED",
+                    message=f"upsert 실패 ({node_def.node_type}): {e}",
+                )
+                continue
+
             upserted_node_types.append(node_def.node_type)
 
         # 4. 결과 프레임
@@ -114,7 +178,9 @@ class BuildFromIndustryDefaultUseCase:
                 "industry_code": industry_code,
                 "industry_name": seed.get("industry_name", ""),
                 "upserted_count": len(upserted_node_types),
+                "failed_count": len(failed_node_types),
                 "node_types": upserted_node_types,
+                "failed_node_types": failed_node_types,
                 "user_id": str(user_id),
             },
         )
@@ -144,7 +210,7 @@ class BuildFromIndustryDefaultUseCase:
         # NodeDefinition 변환
         node_type = entry["node_type"]
         return NodeDefinition(
-            node_id=uuid5(_SKILLS_BUILDER_NS, node_type),
+            node_id=uuid5(_SKILLS_BUILDER_NS, f"{industry_code}:{node_type}"),
             node_type=node_type,
             name=entry["name"],
             category=entry["category"],

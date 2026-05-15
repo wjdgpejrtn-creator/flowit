@@ -2,7 +2,7 @@
 name = "execution_engine"
 version = "0.1.0"
 description = "REQ-007: Celery Worker + Agent Dispatcher"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "celery[redis]>=5.4.0",
     "pydantic>=2.7.0",
