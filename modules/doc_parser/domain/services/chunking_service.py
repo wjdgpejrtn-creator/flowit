@@ -185,16 +185,35 @@ class ChunkingService:
     ) -> list[Chunk]:
         """4순위: 표 독립 청크 처리.
 
+        XLSX 2층+3층 구조 분기:
+            table[0]이 dict → normalized_headers + data_rows 로 재구성
+            table[0]이 list → 기존 flat rows 처리
+
         20행 초과 시 header 유지 후 row group 단위로 분할.
+
+        # TODO: ContentBlock.metadata 필드 추가 후 이 분기 제거 (황대원님 협의 필요)
         """
         if not block.table:
             return []
 
-        rows = block.table
-        data_rows = rows[1:]
+        # ── XLSX 2층+3층 구조 분기 ──
+        if isinstance(block.table[0], dict):
+            meta = block.table[0]
+            normalized_headers = meta.get("normalized_headers", [])
+            data_rows = meta.get("data_rows", [])
+            # 청킹용 rows: normalized_headers 를 헤더 행으로 재구성
+            rows = ([normalized_headers] + data_rows) if normalized_headers else data_rows
+        else:
+            # 기존 flat rows
+            rows = block.table
+
+        if not rows:
+            return []
+
+        data_rows_for_chunk = rows[1:]
         row_group_size = 20
 
-        if len(data_rows) <= row_group_size:
+        if len(data_rows_for_chunk) <= row_group_size:
             return [Chunk(
                 chunk_id=uuid4(),
                 block=block,
@@ -202,12 +221,11 @@ class ChunkingService:
                 parent_document_id=document_id,
             )]
 
-        # 20행 초과 → 블록을 분할해서 각각 청크로
+        # 20행 초과 → header 유지하며 row group 단위 분할
         chunks: list[Chunk] = []
         header = rows[0] if rows else []
-        for i, offset in enumerate(range(0, len(data_rows), row_group_size)):
-            group_rows = [header] + data_rows[offset: offset + row_group_size]
-            # 분할된 표를 새 ContentBlock으로 만들어 Chunk에 담음
+        for i, offset in enumerate(range(0, len(data_rows_for_chunk), row_group_size)):
+            group_rows = [header] + data_rows_for_chunk[offset: offset + row_group_size]
             sub_block = block.model_copy(update={"table": group_rows})
             chunks.append(Chunk(
                 chunk_id=uuid4(),

@@ -17,7 +17,12 @@ import re
 from common_schemas.document import ContentBlock, DocumentBlock
 
 from doc_parser.domain.entities.chunk import Chunk
-from doc_parser.domain.entities.quality import QualityConfig, QualityGateResult, QualityMetrics
+from doc_parser.domain.entities.quality import (
+    ParseCoverage,
+    QualityConfig,
+    QualityGateResult,
+    QualityMetrics,
+)
 from doc_parser.domain.entities.warning import WarningInfo
 
 
@@ -56,6 +61,9 @@ class QualityGate:
         warnings: list[WarningInfo] = []
         error_codes: list[str] = []
 
+        # ── 커버리지 계산 (모든 반환 지점에서 공유) ──
+        coverage = self._calc_coverage(document, blocks)
+
         # ── 1. 텍스트 길이 검사 (failed 판정) ──
         page_count = document.file_meta.page_count or 1
         min_length = max(
@@ -79,6 +87,7 @@ class QualityGate:
                 ],
                 error_codes=["E0211"],
                 decision_reason=f"텍스트 길이 {len(full_text)} < 최소 {min_length}",
+                coverage=coverage,
             )
 
         # ── 2. 품질 지표 계산 ──
@@ -104,6 +113,7 @@ class QualityGate:
                     f"경고 {len(warnings)}건 누적 "
                     f"(임계값: {config.warn_threshold_count}건)"
                 ),
+                coverage=coverage,
             )
 
         # ── 5. 최종 판정 ──
@@ -113,6 +123,63 @@ class QualityGate:
             metrics=metrics,
             warnings=warnings,
             error_codes=error_codes,
+            coverage=coverage,
+        )
+
+    # ──────────────────────────────────────────
+    # Private — 커버리지 계산
+    # ──────────────────────────────────────────
+
+    def _calc_coverage(
+        self,
+        document: DocumentBlock,
+        blocks: list[ContentBlock],
+    ) -> ParseCoverage:
+        """파싱 커버리지 계산.
+
+        QualityGate 담당 필드:
+            total_pages   → FileMeta.page_count
+            parsed_pages  → blocks 에서 실제 등장한 page 집합
+            text_blocks   → block_type in ("text", "heading") 집계
+            table_blocks  → block_type == "table" 집계
+            warnings      → 커버리지 이상 감지 시 메시지 추가
+
+        Skeleton 필드 (InterleavingParser 연결 후 채움):
+            vision_blocks → 0 고정
+            failed_blocks → 0 고정
+
+        Args:
+            document: 파싱된 DocumentBlock
+            blocks: 전체 ContentBlock 목록
+
+        Returns:
+            ParseCoverage
+        """
+        total_pages = document.file_meta.page_count or 0
+        parsed_pages = len({b.page for b in blocks if b.page is not None})
+        text_blocks = sum(
+            1 for b in blocks if b.block_type in ("text", "heading")
+        )
+        table_blocks = sum(
+            1 for b in blocks if b.block_type == "table"
+        )
+
+        coverage_warnings: list[str] = []
+        if total_pages > 0 and parsed_pages < total_pages:
+            coverage_warnings.append(
+                f"파싱 누락 페이지 감지: {parsed_pages}/{total_pages} 페이지 파싱됨"
+            )
+        if not blocks:
+            coverage_warnings.append("추출된 블록 없음")
+
+        return ParseCoverage(
+            total_pages=total_pages,
+            parsed_pages=parsed_pages,
+            text_blocks=text_blocks,
+            table_blocks=table_blocks,
+            vision_blocks=0,    # TODO: InterleavingParser 연결 후 채움
+            failed_blocks=0,    # TODO: InterleavingParser 연결 후 채움
+            warnings=coverage_warnings,
         )
 
     # ──────────────────────────────────────────
@@ -170,16 +237,35 @@ class QualityGate:
         return headings / len(blocks)
 
     def _calc_valid_table_ratio(self, blocks: list[ContentBlock]) -> float:
-        """유효한 표(2행 이상, 2열 이상) 비율."""
+        """유효한 표 비율 계산.
+
+        유효 표 기준: 2행 이상, 2열 이상.
+
+        XLSX 2층 구조 분기:
+            table[0]이 dict → data_rows 기준으로 유효성 판단
+            table[0]이 list → 기존 flat rows 처리
+
+        # TODO: ContentBlock.metadata 필드 추가 후 이 분기 제거 (황대원님 협의 필요)
+        """
         table_blocks = [b for b in blocks if b.block_type == "table"]
         if not table_blocks:
             return 1.0  # 표 없으면 해당 없음 → 1.0
 
-        valid = sum(
-            1
-            for b in table_blocks
-            if b.table and len(b.table) >= 2 and len(b.table[0]) >= 2
-        )
+        valid = 0
+        for b in table_blocks:
+            if not b.table:
+                continue
+            # XLSX 2층 구조 분기
+            if isinstance(b.table[0], dict):
+                meta = b.table[0]
+                data_rows = meta.get("data_rows", [])
+                normalized_headers = meta.get("normalized_headers", [])
+                is_valid = len(data_rows) >= 1 and len(normalized_headers) >= 2
+            else:
+                is_valid = len(b.table) >= 2 and len(b.table[0]) >= 2
+            if is_valid:
+                valid += 1
+
         return valid / len(table_blocks)
 
     def _calc_structural_chunk_ratio(self, chunks: list[Chunk]) -> float:
@@ -249,7 +335,7 @@ class QualityGate:
     ) -> list[WarningInfo]:
         threshold = config.min_valid_table_ratio
         if ratio < threshold:
-            # 하네스 문서 여부에 따라 등급 다름 (is_harness_doc → E0204)
+            # TODO: is_harness_doc 분기 추가 (황대원님 협의 필요)
             return [
                 WarningInfo(
                     code="E0204",
