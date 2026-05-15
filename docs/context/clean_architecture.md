@@ -284,7 +284,7 @@ modules/nodes_graph/
 │   │   └── node_definition.py          # NodeDefinition
 │   │       # NodeConfig(REQ-012) 확장
 │   │       # 추가 필드: service_type, required_connections (H-4 확정)
-│   │       # 54종 노드 정의의 도메인 표현
+│   │       # 56종 노드 정의의 도메인 표현 (gemma_chat 추가, PR #68 5/15 머지)
 │   ├── catalog/                        # 노드 카탈로그 (30종 구현, PR #30)
 │   │   ├── __init__.py                 # ⚠️ get_all_node_definitions()는 여기 두지 않음
 │   │   │                               #   → application/catalog_registry.py에서 조립
@@ -623,7 +623,7 @@ modules/storage/
 │   ├── execution_model.py
 │   ├── session_model.py                # ChatSessionModel (REQ-001)
 │   ├── oauth_connection_model.py
-│   ├── node_definition_model.py        # 54종 노드 + embedding vector(768)
+│   ├── node_definition_model.py        # 56종 노드 + embedding vector(768) (gemma_chat 포함, PR #68 5/15 머지)
 │   ├── agent_memory_model.py           # user_id, memory_type (M-10 필드명 통일)
 │   ├── document_model.py
 │   ├── skill_model.py
