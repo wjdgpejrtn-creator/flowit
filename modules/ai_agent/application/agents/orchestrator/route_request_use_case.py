@@ -117,8 +117,9 @@ class RouteRequestUseCase:
 
             elif intent.intent == "build_skill":
                 yield AgentNodeFrame(agent_node_name="skills_node")
+                skill_payload = self._build_skill_payload(intent.analyzed_entities, message, user_id)
                 async for frame in self._relay(
-                    self._skills, state, {"message": message}, trace_id
+                    self._skills, state, skill_payload, trace_id
                 ):
                     yield frame
 
@@ -201,6 +202,38 @@ class RouteRequestUseCase:
                     break
         except Exception:
             pass  # cleanup은 non-fatal
+
+    def _build_skill_payload(
+        self,
+        entities: dict,
+        message: str,
+        user_id: UUID,
+    ) -> dict:
+        source_type = entities.get("source_type", "sop")
+        payload: dict = {"source_type": source_type}
+        if source_type == "industry_default":
+            payload["industry_code"] = entities.get("industry_code", "")
+        elif source_type == "functional_domain":
+            payload["domain_code"] = entities.get("domain_code", "")
+        else:  # sop
+            payload["document"] = {
+                "document_id": str(uuid4()),
+                "user_id": str(user_id),
+                "file_meta": {
+                    "file_name": "user_input.txt",
+                    "file_type": "txt",
+                    "mime_type": "text/plain",
+                    "file_size": len(message.encode("utf-8")),
+                },
+                "blocks": [
+                    {
+                        "block_id": str(uuid4()),
+                        "block_type": "text",
+                        "content": message,
+                    }
+                ],
+            }
+        return payload
 
     async def _relay(
         self,
