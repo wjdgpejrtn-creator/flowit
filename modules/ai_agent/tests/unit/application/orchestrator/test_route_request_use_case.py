@@ -125,3 +125,58 @@ async def test_non_propose_intent_calls_update_memory():
             if r.payload.get("action") == "update_memory"
         ]
         assert len(update_calls) == 1, f"intent={intent}일 때 update_memory 미호출"
+
+
+@pytest.mark.asyncio
+async def test_build_skill_industry_default_payload():
+    """build_skill + industry_default → skills client에 industry_code payload 전달."""
+    use_case, _, _, skills = _make_use_case(
+        "build_skill",
+        entities={"source_type": "industry_default", "industry_code": "ecommerce"},
+    )
+    await _collect(use_case, uuid4(), uuid4(), "이커머스 스킬 만들어줘")
+
+    assert len(skills.sent_requests) == 1
+    payload = skills.sent_requests[0].payload
+    assert payload["source_type"] == "industry_default"
+    assert payload["industry_code"] == "ecommerce"
+
+
+@pytest.mark.asyncio
+async def test_build_skill_functional_domain_payload():
+    """build_skill + functional_domain → skills client에 domain_code payload 전달."""
+    use_case, _, _, skills = _make_use_case(
+        "build_skill",
+        entities={"source_type": "functional_domain", "domain_code": "hr"},
+    )
+    await _collect(use_case, uuid4(), uuid4(), "HR 팀용 스킬 만들어줘")
+
+    assert len(skills.sent_requests) == 1
+    payload = skills.sent_requests[0].payload
+    assert payload["source_type"] == "functional_domain"
+    assert payload["domain_code"] == "hr"
+
+
+@pytest.mark.asyncio
+async def test_build_skill_sop_payload_document_block_structure():
+    """build_skill + sop → DocumentBlock 구조(Optional 필드 None 포함) 검증."""
+    use_case, _, _, skills = _make_use_case(
+        "build_skill",
+        entities={"source_type": "sop"},
+    )
+    await _collect(use_case, uuid4(), uuid4(), "ITSM 티켓 처리 절차로 스킬 만들어줘")
+
+    assert len(skills.sent_requests) == 1
+    payload = skills.sent_requests[0].payload
+    assert payload["source_type"] == "sop"
+
+    doc = payload["document"]
+    assert "document_id" in doc
+    assert "file_meta" in doc
+    assert "blocks" in doc
+    assert len(doc["blocks"]) == 1
+    assert doc["blocks"][0]["block_type"] == "text"
+    assert doc["blocks"][0]["content"] == "ITSM 티켓 처리 절차로 스킬 만들어줘"
+    # Optional 필드 누락 없이 None으로 처리 가능한지 확인
+    assert doc.get("workflow_id") is None
+    assert doc.get("parser") is None
