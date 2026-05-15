@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..adapters.catalog.external.anthropic_chat import get_node_definition as _anthropic_chat
+from ..adapters.catalog.external.gemma_chat import get_node_definition as _gemma_chat
 from ..adapters.catalog.tools.toolset_nodes import get_node_definitions as _toolset_node_definitions
 from ..adapters.catalog.external.bigquery_query import get_node_definition as _bigquery_query
 from ..adapters.catalog.external.gmail_send import get_node_definition as _gmail_send
@@ -24,13 +25,13 @@ def get_all_node_definitions() -> list[NodeDefinition]:
     카테고리는 DB CHECK 영문 8종(trigger/action/condition/transform/ai/integration/utility/output)
     안에서 지정. Microsoft(Outlook/Teams/OneDrive) / Notion / OpenAI는 데모 후속 개발로 보류.
 
-    구성 (총 55종):
+    구성 (총 56종):
         - domain/catalog/: 28종 (data 14 + control 8 + trigger 6)
         - adapters/catalog/external/ 기타 2종: http_request(integration), pdf_generate(output)
         - adapters/catalog/external/ Communication 2종: slack_post_message, gmail_send (action)
         - adapters/catalog/external/ Document 3종: google_drive_read, google_sheets_read (integration), google_docs_write (output)
         - adapters/catalog/external/ Data 3종: postgresql_query, mysql_query, bigquery_query (integration)
-        - adapters/catalog/external/ AI/ML 1종: anthropic_chat (ai)
+        - adapters/catalog/external/ AI/ML 2종: anthropic_chat (외부 LLM), gemma_chat (시스템 내장 Gemma 4, 5/14 야간 추가)
         - adapters/catalog/external/ Productivity 2종: google_calendar_create_event, linear_create_issue (integration)
         - adapters/catalog/tools/ REQ-005 toolset 14종: api 4 + file 3 + transform 4 + control 2 + notification 2
     """
@@ -48,6 +49,7 @@ def get_all_node_definitions() -> list[NodeDefinition]:
         _mysql_query(),
         _bigquery_query(),
         _anthropic_chat(),
+        _gemma_chat(),
         _google_calendar_create_event(),
         _linear_create_issue(),
     ]
