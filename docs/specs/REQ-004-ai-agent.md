@@ -247,7 +247,12 @@ class AgentProtocolResponse(BaseModel):
 ### 엔드포인트 (각 Modal app)
 
 - `POST /v1/agent/route` — `agent-composer`, `agent-skills-builder`, `agent-personalization` 동일
-- `POST /v1/agent/health` — health check
+- `GET /v1/health` — health check (REST 표준 + 운영 도구 호환성, 2026-05-14 정정)
+
+### SSE 종결 규칙
+
+- 정상 종결: `complete` frame 1개만 발송
+- 에러 종결: `error` frame → `complete` frame 순서로 발송 (dual 종결)
 
 ### 인증
 

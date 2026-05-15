@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from common_schemas import DraftSpec, NodeConfig, NodeInstance, Position, WorkflowSchema
 from common_schemas.exceptions import ExecutionError
@@ -25,7 +25,7 @@ class DrafterService:
     def __init__(self, llm: LLMPort) -> None:
         self._llm = llm
 
-    async def draft(self, spec: DraftSpec, candidates: list[NodeConfig]) -> WorkflowSchema:
+    async def draft(self, spec: DraftSpec, candidates: list[NodeConfig], owner_user_id: UUID) -> WorkflowSchema:
         catalog = [
             {"node_type": n.node_type, "name": n.name, "description": n.description}
             for n in candidates
@@ -36,9 +36,9 @@ class DrafterService:
             + f"\nAvailable nodes: {json.dumps(catalog, ensure_ascii=False)}"
         )
         response = await self._llm.generate(prompt)
-        return self._parse(response, candidates)
+        return self._parse(response, candidates, owner_user_id)
 
-    def _parse(self, response: str, candidates: list[NodeConfig]) -> WorkflowSchema:
+    def _parse(self, response: str, candidates: list[NodeConfig], owner_user_id: UUID) -> WorkflowSchema:
         try:
             data = json.loads(response)
             node_map = {n.node_type: n for n in candidates}
@@ -65,6 +65,7 @@ class DrafterService:
                 is_draft=True,
                 nodes=nodes,
                 connections=[],
+                owner_user_id=owner_user_id,
             )
         except ExecutionError:
             raise
