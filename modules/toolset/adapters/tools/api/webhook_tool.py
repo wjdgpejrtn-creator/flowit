@@ -10,6 +10,7 @@ import httpx
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 
@@ -18,6 +19,8 @@ class WebhookTool(BaseTool):
     description = "웹훅 발송 (fire-and-forget, 외부 엔드포인트 비가역적)"
     version = "1.0.0"
     risk_level = RiskLevel.HIGH
+    category = ToolCategory.API
+    capabilities = ["webhook", "event_trigger", "external_integration"]
 
     input_schema = {
         "type": "object",

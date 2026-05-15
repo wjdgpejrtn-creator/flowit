@@ -8,6 +8,7 @@ import httpx
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 
@@ -16,6 +17,8 @@ class HttpRequestTool(BaseTool):
     description = "범용 HTTP 요청 (임의 URL, 모든 메서드, 비가역적)"
     version = "1.0.0"
     risk_level = RiskLevel.HIGH
+    category = ToolCategory.API
+    capabilities = ["http_request", "arbitrary_url", "external_integration"]
 
     input_schema = {
         "type": "object",

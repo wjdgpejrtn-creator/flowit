@@ -8,6 +8,7 @@ import httpx
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 
@@ -16,6 +17,8 @@ class GraphqlTool(BaseTool):
     description = "GraphQL 쿼리/뮤테이션 실행"
     version = "1.0.0"
     risk_level = RiskLevel.MEDIUM
+    category = ToolCategory.API
+    capabilities = ["graphql", "http_request", "external_integration"]
 
     input_schema = {
         "type": "object",

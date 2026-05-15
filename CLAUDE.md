@@ -137,6 +137,7 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 | ai_agent | nodes_graph의 `domain/services` | `from nodes_graph.domain.services import GraphValidator` |
 | ai_agent | nodes_graph의 `domain/ports` | `from nodes_graph.domain.ports import NodeDefinitionRepository` |
 | toolset | auth의 `domain/services` | `from auth.domain.services import CredentialInjectionService` |
+| toolset | ai_agent의 `domain/ports` | `from ai_agent.domain.ports import LLMPort` (gemma_* wiring — execution_engine이 DI 주입) |
 | storage | auth의 `domain/ports` | `from auth.domain.ports import SessionRepository` (ABC 구현을 위해) |
 | storage | nodes_graph의 `domain/ports` | `from nodes_graph.domain.ports import NodeDefinitionRepository` |
 | storage | ai_agent의 `domain/ports` | `from ai_agent.domain.ports import AgentMemoryRepository` |
