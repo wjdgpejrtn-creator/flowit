@@ -476,7 +476,7 @@ modules/nodes_graph/
 
 ---
 
-## 노드 카탈로그 요약 (Sprint 3 1주차 — 55종)
+## 노드 카탈로그 요약 (Sprint 3 1주차 — 56종)
 
 > 카테고리는 DB `node_definitions.category` CHECK 제약(영문 8종: `trigger`, `action`, `condition`, `transform`, `ai`, `integration`, `utility`, `output`)에 맞춤. Microsoft(Outlook/Teams/OneDrive), Notion, OpenAI는 데모 버전 후속 개발로 보류 (2026-05-11 조장 결정).
 >
