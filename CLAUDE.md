@@ -124,7 +124,7 @@ services/frontend/         ← common_schemas/typescript 타입만
 from common_schemas import WorkflowSchema, NodeInstance, Edge, Position
 from common_schemas import AgentState, DocumentBlock, ContentBlock
 from common_schemas import PermissionSource, PlaintextCredential
-from common_schemas.enums import AgentMode, ExecutionStatus, RiskLevel, ErrorCode
+from common_schemas.enums import AgentMode, ExecutionStatus, RiskLevel, ErrorCode, IntentType
 from common_schemas.exceptions import DomainError, ValidationError, NotFoundError
 from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 ```
@@ -264,7 +264,7 @@ modules/{module_name}/
 | `DocumentBlock`, `ContentBlock`, `FileMeta` | common_schemas/document.py | doc_parser |
 | `Chunk`, `ChunkingStrategy`, `QualityGateResult`, `QualityMetrics`, `WarningInfo` | common_schemas/document.py | doc_parser, ai_agent, storage |
 | `PermissionSource`, `PlaintextCredential` | common_schemas/security.py | auth |
-| `RiskLevel`, `AgentMode`, `ExecutionStatus` | common_schemas/enums.py | toolset, ai_agent |
+| `RiskLevel`, `AgentMode`, `ExecutionStatus`, `IntentType` | common_schemas/enums.py | toolset, ai_agent |
 | `HandoffPayload`, `EvaluationResult` | common_schemas/handoff.py | ai_agent, execution_engine |
 
 ### 암호화 도메인 소유권

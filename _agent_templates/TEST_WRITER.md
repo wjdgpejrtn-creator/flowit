@@ -169,7 +169,7 @@ test("renders empty canvas with add-node button", () => {
 ### ai_agent (REQ-004) — Sprint 3 멀티 에이전트
 
 도메인 (sub-agent 공통):
-- IntentAnalyzerService 의도 분류 (clarify/draft/refine/propose/build_skill)
+- IntentAnalyzerService 의도 분류 (`IntentType` enum — clarify/draft/refine/propose/build_skill)
 - QAEvaluatorService 점수 ≥ 8 통과 판정
 - AgentState 상태 전이 정합성, TurnLimit ≤25 / QualityThreshold ≥8 VO
 

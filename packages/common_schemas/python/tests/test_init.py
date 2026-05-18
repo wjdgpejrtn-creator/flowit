@@ -2,7 +2,7 @@ import common_schemas
 
 
 def test_all_exports():
-    assert len(common_schemas.__all__) == 48
+    assert len(common_schemas.__all__) == 49
 
 
 def test_key_symbols_importable():
@@ -16,6 +16,7 @@ def test_key_symbols_importable():
         DraftSpec,
         Edge,
         HandoffPayload,
+        IntentType,
         MemoryEntry,
         NodeConfig,
         PermissionSource,
@@ -32,6 +33,7 @@ def test_key_symbols_importable():
     assert DraftSpec is not None
     assert Edge is not None
     assert HandoffPayload is not None
+    assert IntentType is not None
     assert MemoryEntry is not None
     assert NodeConfig is not None
     assert PermissionSource is not None

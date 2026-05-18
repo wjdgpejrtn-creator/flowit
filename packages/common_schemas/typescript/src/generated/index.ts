@@ -11,13 +11,6 @@ export enum AgentMode {
   SKILL_BUILDER = "skill_builder",
 }
 
-export enum ExecutionStatus {
-  RUNNING = "running",
-  PAUSED = "paused",
-  COMPLETED = "completed",
-  FAILED = "failed",
-}
-
 export enum ErrorCode {
   E_NODE_TYPE_MISMATCH = "E_NODE_TYPE_MISMATCH",
   E_CYCLE_DETECTED = "E_CYCLE_DETECTED",
@@ -26,6 +19,13 @@ export enum ErrorCode {
   E_PERMISSION_DENIED = "E_PERMISSION_DENIED",
   E_MISSING_CONNECTION = "E_MISSING_CONNECTION",
   E_INVALID_TRIGGER = "E_INVALID_TRIGGER",
+}
+
+export enum ExecutionStatus {
+  RUNNING = "running",
+  PAUSED = "paused",
+  COMPLETED = "completed",
+  FAILED = "failed",
 }
 
 export enum IntentType {
@@ -41,6 +41,11 @@ export enum RiskLevel {
   MEDIUM = "Medium",
   HIGH = "High",
   RESTRICTED = "Restricted",
+}
+
+export interface AgentNodeFrame {
+  frame_type: "agent_node";
+  agent_node_name: string;
 }
 
 export interface UnresolvedNode {
@@ -64,7 +69,7 @@ export interface DraftSpec {
 }
 
 export interface IntentResult {
-  intent: "clarify" | "draft" | "refine" | "propose" | "build_skill";
+  intent: IntentType;
   confidence: number;
   analyzed_entities: Record<string, unknown>;
 }
@@ -156,11 +161,6 @@ export interface SessionFrame {
   frame_type: "session";
   session_id: string;
   langgraph_thread_id: string;
-}
-
-export interface AgentNodeFrame {
-  frame_type: "agent_node";
-  agent_node_name: string;
 }
 
 export interface RationaleDeltaFrame {
@@ -289,6 +289,13 @@ export interface HandoffPayload {
   correlation_id: string;
 }
 
+export interface NodeExecutionState {
+  node_instance_id: string;
+  status: "pending" | "running" | "succeeded" | "failed" | "retrying" | "cancelled";
+  attempt: number;
+  last_error?: string | null;
+}
+
 export interface PermissionSource {
   user_id: string;
   role: "User" | "Admin";
@@ -324,11 +331,4 @@ export interface ValidationErrorResponse {
   errors: Array<ValidationErrorItem>;
 }
 
-export interface NodeExecutionState {
-  node_instance_id: string;
-  status: "pending" | "running" | "succeeded" | "failed" | "retrying" | "cancelled";
-  attempt: number;
-  last_error?: string | null;
-}
-
-export type AnySSEFrame = SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame;
+export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame;

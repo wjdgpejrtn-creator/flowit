@@ -40,3 +40,11 @@ class ErrorCode(str, Enum):
     E_PERMISSION_DENIED = "E_PERMISSION_DENIED"
     E_MISSING_CONNECTION = "E_MISSING_CONNECTION"
     E_INVALID_TRIGGER = "E_INVALID_TRIGGER"
+
+
+class IntentType(str, Enum):
+    CLARIFY = "clarify"
+    DRAFT = "draft"
+    REFINE = "refine"
+    PROPOSE = "propose"
+    BUILD_SKILL = "build_skill"

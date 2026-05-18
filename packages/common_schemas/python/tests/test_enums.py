@@ -1,4 +1,4 @@
-from common_schemas.enums import AgentMode, ErrorCode, ExecutionStatus, RiskLevel
+from common_schemas.enums import AgentMode, ErrorCode, ExecutionStatus, IntentType, RiskLevel
 
 
 class TestAgentMode:
@@ -41,3 +41,20 @@ class TestErrorCode:
 
     def test_member_count(self):
         assert len(ErrorCode) == 7
+
+
+class TestIntentType:
+    def test_values(self):
+        assert IntentType.CLARIFY == "clarify"
+        assert IntentType.DRAFT == "draft"
+        assert IntentType.REFINE == "refine"
+        assert IntentType.PROPOSE == "propose"
+        assert IntentType.BUILD_SKILL == "build_skill"
+
+    def test_member_count(self):
+        assert len(IntentType) == 5
+
+    def test_str_compat(self):
+        # str(IntentType) JSON 직렬화 호환 — Python 3.11 이전 호환 패턴
+        assert IntentType.DRAFT.value == "draft"
+        assert IntentType("draft") == IntentType.DRAFT
