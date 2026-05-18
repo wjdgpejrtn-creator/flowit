@@ -38,7 +38,7 @@ from common_schemas import (
     PermissionSource, PlaintextCredential,
     HandoffPayload, EvaluationResult,
 )
-from common_schemas.enums import AgentMode, ExecutionStatus, RiskLevel, ErrorCode
+from common_schemas.enums import AgentMode, ExecutionStatus, RiskLevel, ErrorCode, IntentType
 from common_schemas.exceptions import DomainError, ValidationError, NotFoundError
 from common_schemas.transport import (
     SSEFrame, SessionFrame, AgentNodeFrame, RationaleDeltaFrame,
@@ -56,7 +56,7 @@ from common_schemas.transport import (
 | `security` | PermissionSource, PlaintextCredential |
 | `transport` | SSE frame 타입 (Session, AgentNode, RationaleDelta 등) + AnySSEFrame discriminated union |
 | `handoff` | HandoffPayload, EvaluationResult |
-| `enums` | AgentMode, ExecutionStatus, RiskLevel, ErrorCode |
+| `enums` | AgentMode, ExecutionStatus, RiskLevel, ErrorCode, IntentType |
 | `exceptions` | DomainError 계층 (Validation, Authorization, NotFound, Conflict, Integrity) |
 | `validation` | ValidationErrorItem, ValidationErrorResponse |
 
@@ -83,7 +83,7 @@ from common_schemas.transport import (
 |--------|------|
 | `AgentState` | LangGraph 상태 컨테이너 (messages, draft, intent, mode) |
 | `DraftSpec` | 워크플로우 초안 명세 |
-| `IntentResult` | 의도 분석 결과 (clarify/draft/refine/propose) |
+| `IntentResult` | 의도 분석 결과 (`intent: IntentType` — clarify/draft/refine/propose/build_skill) |
 | `SlotFillingState` | 온보딩 슬롯 채움 상태 |
 | `UnresolvedNode` | 미확정 노드 참조 |
 
@@ -132,10 +132,11 @@ from common_schemas.transport import (
 
 | Enum | 값 |
 |------|-----|
-| `AgentMode` | ONBOARDING, WIZARD, EDIT, GENERAL, SECURITY |
+| `AgentMode` | ONBOARDING, WIZARD, EDIT, GENERAL, SECURITY, SKILL_BUILDER |
 | `ExecutionStatus` | RUNNING, PAUSED, COMPLETED, FAILED |
 | `RiskLevel` | Low, Medium, High, Restricted |
 | `ErrorCode` | 도메인 에러 코드 열거 |
+| `IntentType` | CLARIFY, DRAFT, REFINE, PROPOSE, BUILD_SKILL (IntentResult.intent SSOT) |
 
 ### exceptions.py — 도메인 예외 계층
 

@@ -23,11 +23,19 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
         self._session_factory = session_factory
 
     def save(self, result: ExecutionResult) -> None:
+        # DB schema(001_core.sql executions.user_id NOT NULL) 방어 — Optional 도메인 필드를
+        # raw SQL INSERT 시점에서 명시 ValueError로 전환. modules/storage mapper와 동일 패턴.
+        if result.user_id is None:
+            raise ValueError(
+                "ExecutionResult.user_id is required for DB persistence "
+                "(executions.user_id NOT NULL). Set user_id in the use case "
+                "before calling Repository.save()."
+            )
         data = result.model_dump(mode="json")
         with self._session_factory() as session:
             session.execute(
                 text("""
-                    INSERT INTO execution_results
+                    INSERT INTO executions
                         (execution_id, workflow_id, user_id, status, node_results,
                          started_at, completed_at, error)
                     VALUES
@@ -42,7 +50,7 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
                 {
                     "execution_id": data["execution_id"],
                     "workflow_id": data["workflow_id"],
-                    "user_id": data.get("user_id"),
+                    "user_id": data["user_id"],
                     "status": data["status"],
                     "node_results": json.dumps(data["node_results"]),
                     "started_at": data["started_at"],
@@ -55,7 +63,7 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
     def get(self, execution_id: UUID) -> ExecutionResult:
         with self._session_factory() as session:
             row = session.execute(
-                text("SELECT * FROM execution_results WHERE execution_id = :eid"),
+                text("SELECT * FROM executions WHERE execution_id = :eid"),
                 {"eid": str(execution_id)},
             ).mappings().first()
 
@@ -90,7 +98,8 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
                     ON CONFLICT (execution_id, node_instance_id) DO UPDATE SET
                         status = EXCLUDED.status,
                         attempt = EXCLUDED.attempt,
-                        last_error = EXCLUDED.last_error
+                        last_error = EXCLUDED.last_error,
+                        updated_at = NOW()
                 """),
                 {
                     "execution_id": str(execution_id),

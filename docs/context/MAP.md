@@ -14,7 +14,7 @@ Workflow_Automation/
 │   └── frontend/             #   REQ-010: Next.js 14 + React Flow
 ├── modules/                  # 도메인 모듈 (서비스에서 import)
 │   ├── auth/                 #   REQ-002: Auth-Security
-│   ├── nodes_graph/          #   REQ-003: 54종 노드 카탈로그
+│   ├── nodes_graph/          #   REQ-003: 56종 노드 카탈로그 (gemma_chat 포함, PR #68 5/15 머지)
 │   ├── ai_agent/             #   REQ-004: LangGraph AI Agent
 │   ├── toolset/              #   REQ-005: 8개 Tool + Secure Connector
 │   ├── doc_parser/           #   REQ-006: 비정형 문서 처리

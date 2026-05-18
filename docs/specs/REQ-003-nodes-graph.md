@@ -49,7 +49,7 @@ from common_schemas.enums import RiskLevel
 
 @dataclass
 class NodeDefinition:
-    """54종 노드 타입의 카탈로그 엔티티.
+    """56종 노드 타입의 카탈로그 엔티티 (gemma_chat 추가, PR #68 5/15 머지).
     
     NodeConfig(REQ-012)의 필드를 모두 포함하며,
     추가로 embedding, service_type 등 REQ-003 전용 필드를 확장한다.
@@ -69,7 +69,7 @@ class NodeDefinition:
     risk_level: RiskLevel                   # REQ-002가 참조하는 필드
     required_connections: list[str]         # REQ-002가 참조 (e.g. ["google", "slack"])
     description: str                        # 노드 설명
-    is_mvp: bool                            # MVP 54종 여부
+    is_mvp: bool                            # MVP 56종 여부 (gemma_chat 포함)
     
     # === REQ-003 확장 필드 ===
     service_type: Optional[str] = None      # REQ-002가 참조 (e.g. "google_workspace")
@@ -122,7 +122,7 @@ TOutput = TypeVar("TOutput")
 class BaseNode(Generic[TInput, TOutput], ABC):
     """모든 노드의 추상 기본 클래스.
     
-    54종 노드가 이 클래스를 상속하여 process()를 구현한다.
+    56종 노드가 이 클래스를 상속하여 process()를 구현한다.
     """
     metadata: NodeMetadata
     input_schema: type[TInput]
@@ -223,7 +223,7 @@ class NodeDefinitionRepository(ABC):
     @abstractmethod
     async def upsert(self, definition: NodeDefinition) -> NodeDefinition:
         """노드 정의 생성 또는 갱신. 
-        Plugin discovery 시 54종 노드를 일괄 등록할 때 사용."""
+        Plugin discovery 시 56종 노드를 일괄 등록할 때 사용."""
         ...
     
     @abstractmethod
@@ -386,7 +386,7 @@ class EmbedderPort(ABC):
     
     @abstractmethod
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """배치 임베딩. Plugin discovery 시 54종 노드 일괄 임베딩에 사용."""
+        """배치 임베딩. Plugin discovery 시 56종 노드 일괄 임베딩에 사용."""
         ...
 ```
 
@@ -476,7 +476,7 @@ modules/nodes_graph/
 
 ---
 
-## 노드 카탈로그 요약 (Sprint 3 1주차 — 55종)
+## 노드 카탈로그 요약 (Sprint 3 1주차 — 56종)
 
 > 카테고리는 DB `node_definitions.category` CHECK 제약(영문 8종: `trigger`, `action`, `condition`, `transform`, `ai`, `integration`, `utility`, `output`)에 맞춤. Microsoft(Outlook/Teams/OneDrive), Notion, OpenAI는 데모 버전 후속 개발로 보류 (2026-05-11 조장 결정).
 >

@@ -139,13 +139,30 @@ DB_NAME=workflow_automation
 
 **Personalization sub-agent**는 위 5키에 더해 `GCS_PERSONAL_BUCKET=<GCS_BUCKET_DEV>` 한 줄을 추가한다 — `agent-personalization-secret`에 같이 묶임. `.env.example` 참조.
 
-### 2.2 본인 Secret만 sync
+### 2.2 본인 Secret 직접 등록
+
+`.env`에 채운 값으로 `modal secret create`를 직접 실행한다. `--force`는 동일 이름 Secret이 이미 있을 때 덮어씀.
 
 ```powershell
-python scripts/sync_modal_secrets.py agent-skills-builder-secret
+modal secret create agent-skills-builder-secret --force `
+  LLM_BASE_URL="값 직접 입력" `
+  EMBEDDING_BASE_URL="값 직접 입력" `
+  CLOUD_SQL_INSTANCE="<GCP_PROJECT_ID>:<REGION>:<INSTANCE>" `
+  DB_IAM_USER="<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com" `
+  DB_NAME="workflow_automation"
 ```
 
-`scripts/sync_modal_secrets.py`의 `SECRET_MAPPINGS`에 본인 sub-agent 이름이 없으면 거기 먼저 한 줄 추가한 뒤 실행한다.
+Personalization sub-agent는 `GCS_PERSONAL_BUCKET` 한 줄을 추가한다.
+
+```powershell
+modal secret create agent-personalization-secret --force `
+  LLM_BASE_URL="값 직접 입력" `
+  EMBEDDING_BASE_URL="값 직접 입력" `
+  CLOUD_SQL_INSTANCE="<GCP_PROJECT_ID>:<REGION>:<INSTANCE>" `
+  DB_IAM_USER="<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com" `
+  DB_NAME="workflow_automation" `
+  GCS_PERSONAL_BUCKET="<GCS_BUCKET_DEV>"
+```
 
 ---
 
@@ -307,8 +324,8 @@ curl https://<WORKSPACE>--skills-builder.modal.run/v1/health
 ## 6. 새 sub-agent 추가 시
 
 1. `services/agents/agent-<name>/main.py` 생성 — §3 패턴 그대로
-2. `scripts/sync_modal_secrets.py`의 `SECRET_MAPPINGS`에 `agent-<name>-secret` 항목 추가 (5키 동일 스키마)
-3. `.env`에 5키 채움 → `python scripts/sync_modal_secrets.py agent-<name>-secret`
+2. 로컬 `.env`에 5키 채움 (LLM_BASE_URL / EMBEDDING_BASE_URL / CLOUD_SQL_INSTANCE / DB_IAM_USER / DB_NAME)
+3. `modal secret create agent-<name>-secret --force KEY=값 ...` 로 직접 등록 (§2.2 패턴 참고)
 4. `modal deploy` → §4 검증
 
 조장에게 별도 요청할 게 없도록 1회 setup(§1)으로 끝나게 설계됨. SA 권한이나 DB GRANT 추가가 필요하면 그때만 조장 호출.

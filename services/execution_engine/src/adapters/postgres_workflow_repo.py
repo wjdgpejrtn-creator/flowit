@@ -38,13 +38,21 @@ class PostgresWorkflowRepository(WorkflowRepositoryPort):
         nodes = [NodeInstance.model_validate(n) for n in row["nodes"]]
         connections = [Edge.model_validate(e) for e in row["connections"]]
 
+        owner_user_id_raw = row.get("user_id")
         return WorkflowSchema(
             workflow_id=UUID(row["workflow_id"]),
+            owner_user_id=UUID(owner_user_id_raw) if owner_user_id_raw else None,
             name=row["name"],
+            description=row.get("description"),
             scope=row["scope"],
             is_draft=row["is_draft"],
             nodes=nodes,
             connections=connections,
+            version=row.get("version"),
+            sha256=row.get("sha256"),
+            created_via_session_id=UUID(row["created_via_session_id"])
+                if row.get("created_via_session_id")
+                else None,
         )
 
     def get_node_config(self, node_id: UUID) -> NodeConfig:

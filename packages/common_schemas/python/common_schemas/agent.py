@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .enums import AgentMode, ExecutionStatus
+from .enums import AgentMode, ExecutionStatus, IntentType
 from .types import UtcDatetime
 from .workflow import NodeConfig, WorkflowSchema
 
@@ -40,7 +40,7 @@ class DraftSpec(BaseModel):
 class IntentResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    intent: Literal["clarify", "draft", "refine", "propose", "build_skill"]
+    intent: IntentType
     confidence: float
     analyzed_entities: dict[str, Any]
 

@@ -7,6 +7,23 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.4.0] - 2026-05-18
+
+### Added
+- `enums.IntentType(str, Enum)` 신설 — 5값(`CLARIFY`, `DRAFT`, `REFINE`, `PROPOSE`, `BUILD_SKILL`) SSOT. PR #70 (신정혜) 후속 권고: `route_request_use_case.py` + `intent_analyzer_service.py`의 문자열 리터럴 분산 하드코딩 일원화.
+
+### Changed
+- `agent.IntentResult.intent` 타입 `Literal["clarify", "draft", "refine", "propose", "build_skill"]` → `IntentType`. **호환성 유지**: `str` 상속 Enum이므로 기존 문자열 입력(`IntentResult(intent="draft", ...)`)은 그대로 동작하고 validation 후에는 `IntentType.DRAFT` 인스턴스가 됨.
+- TypeScript codegen: `IntentResult.intent: IntentType` enum 참조로 변경 (`generated/index.ts`).
+
+### Migration notes
+- **기존 `==` 비교는 모두 무영향**: `ir.intent == "draft"` ↔ `IntentType.DRAFT == "draft"` 모두 `True` (StrEnum 값 비교).
+- **신규 권장 패턴**: `if intent_result.intent is IntentType.BUILD_SKILL:` — IDE 자동완성/타입체크 강화.
+- **기존 `isinstance(..., str)` 체크 무영향**: `IntentType.DRAFT`는 `str` 인스턴스이기도 함.
+
+### Symbols
+- 48 → 49 (+1: `IntentType`)
+
 ## [0.3.0] - 2026-05-14
 
 ### Added

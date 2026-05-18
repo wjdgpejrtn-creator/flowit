@@ -6,6 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
     "common_schemas",
     "pydantic>=2.0",
+    "google-cloud-storage>=2.0",
+    "python-frontmatter>=1.0",
 ]
 
 [project.optional-dependencies]

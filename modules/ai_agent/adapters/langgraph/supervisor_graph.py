@@ -13,7 +13,7 @@ from langgraph.graph import END, StateGraph
 
 from common_schemas.agent import AgentState, MemoryEntry
 from common_schemas.agent_protocol import AgentProtocolRequest
-from common_schemas.enums import AgentMode, ExecutionStatus
+from common_schemas.enums import AgentMode, ExecutionStatus, IntentType
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
@@ -226,10 +226,10 @@ class LangGraphSupervisor:
 
     @staticmethod
     def _route(state: _State) -> str:
-        intent = state.get("intent") or "clarify"
-        if intent == "build_skill":
+        intent = state.get("intent") or IntentType.CLARIFY
+        if intent == IntentType.BUILD_SKILL:
             return _SKILLS
-        if intent == "propose":
+        if intent == IntentType.PROPOSE:
             return _FINALIZE
         return _COMPOSER  # draft / refine / clarify
 
@@ -252,7 +252,7 @@ class LangGraphSupervisor:
             self._route,
             {_COMPOSER: _COMPOSER, _SKILLS: _SKILLS, _FINALIZE: _FINALIZE},
         )
-        graph.add_edge(_COMPOSER, "update_memory")
+        graph.add_edge(_COMPOSER, END)  # draft/refine/clarify — 워크플로우 미완료, 저장 skip
         graph.add_edge(_SKILLS, "update_memory")
         graph.add_edge(_FINALIZE, "update_memory")
         graph.add_edge("update_memory", END)
