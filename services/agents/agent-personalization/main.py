@@ -140,10 +140,16 @@ class PersonalizationAgent:
                 from common_schemas import WorkflowSchema
                 from ai_agent.application.agents.personalization import UpdateUserMemoryUseCase
 
-                workflow = WorkflowSchema.model_validate(req.payload["workflow"])
+                workflow_data = req.payload.get("workflow")
+                workflow = WorkflowSchema.model_validate(workflow_data) if workflow_data else None
                 await UpdateUserMemoryUseCase(
                     self._memory_store, self._llm, self._embedder
-                ).execute(req.user_id, req.payload.get("session_summary", {}), workflow)
+                ).execute(
+                    req.user_id,
+                    req.payload.get("turn_count", 0),
+                    req.payload.get("session_summary"),
+                    workflow,
+                )
                 return AgentProtocolResponse(frames=[], state_delta={}, next_action="complete")
 
             if action == "recall_skills":
