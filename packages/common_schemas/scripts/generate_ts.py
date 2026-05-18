@@ -143,6 +143,8 @@ def _collect_symbols() -> tuple[list[type], list[type[BaseModel]]]:
                 if obj not in models:
                     models.append(obj)
 
+    enums.sort(key=lambda e: e.__name__)
+    models.sort(key=lambda m: m.__name__)
     return enums, models
 
 
