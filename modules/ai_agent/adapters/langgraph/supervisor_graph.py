@@ -13,7 +13,7 @@ from langgraph.graph import END, StateGraph
 
 from common_schemas.agent import AgentState, MemoryEntry
 from common_schemas.agent_protocol import AgentProtocolRequest
-from common_schemas.enums import AgentMode, ExecutionStatus
+from common_schemas.enums import AgentMode, ExecutionStatus, IntentType
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
@@ -226,10 +226,10 @@ class LangGraphSupervisor:
 
     @staticmethod
     def _route(state: _State) -> str:
-        intent = state.get("intent") or "clarify"
-        if intent == "build_skill":
+        intent = state.get("intent") or IntentType.CLARIFY
+        if intent == IntentType.BUILD_SKILL:
             return _SKILLS
-        if intent == "propose":
+        if intent == IntentType.PROPOSE:
             return _FINALIZE
         return _COMPOSER  # draft / refine / clarify
 
