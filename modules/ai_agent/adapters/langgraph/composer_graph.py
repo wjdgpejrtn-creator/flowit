@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 from langgraph.graph import END, StateGraph
 
 from common_schemas.agent import DraftSpec, MemoryEntry, SlotFillingState
-from common_schemas.enums import ExecutionStatus
+from common_schemas.enums import ExecutionStatus, IntentType
 from common_schemas.handoff import HandoffPayload
 from common_schemas.transport import (
     AgentNodeFrame,
@@ -68,6 +68,7 @@ class _State(TypedDict):
     node_candidates: list[NodeConfig]
     workflow_draft: Optional[WorkflowSchema]
     qa_attempts: int
+    pass_flag: bool
     collected_frames: Annotated[list[AnySSEFrame], operator.add]
     error: str | None
 
@@ -129,6 +130,7 @@ class LangGraphOrchestrator:
             "node_candidates": [],
             "workflow_draft": None,
             "qa_attempts": 0,
+            "pass_flag": False,
             "collected_frames": [],
             "error": None,
         }
@@ -241,7 +243,10 @@ class LangGraphOrchestrator:
             result = await self._qa_evaluator.evaluate(workflow, spec)
         except Exception as exc:
             return {"error": f"qa_evaluator 실패: {exc}"}
-        return {"qa_attempts": state["qa_attempts"] + 1}
+        return {
+            "qa_attempts": state["qa_attempts"] + 1,
+            "pass_flag": result.pass_flag,
+        }
 
     # 10. qa_retry_node — QA 실패 시 재시도 준비 (drafter로 돌아감)
     async def _qa_retry_node(self, state: _State) -> dict:
@@ -286,10 +291,10 @@ class LangGraphOrchestrator:
 
     @staticmethod
     def _route_intent(state: _State) -> str:
-        intent = state.get("intent") or "clarify"
-        if intent == "propose":
+        intent = state.get("intent") or IntentType.CLARIFY
+        if intent == IntentType.PROPOSE:
             return _PROPOSE
-        if intent == "clarify":
+        if intent == IntentType.CLARIFY:
             return _CLARIFY
         return _DRAFT  # draft / refine
 
@@ -302,12 +307,10 @@ class LangGraphOrchestrator:
 
     @staticmethod
     def _route_qa(state: _State) -> str:
-        workflow = state.get("workflow_draft")
         qa_attempts = state.get("qa_attempts", 0)
         if qa_attempts >= _QA_MAX_RETRY:
             return _QA_FORCE
-        # workflow_draft가 있으면 QA 통과로 간주 (실제 평가 결과는 qa_evaluator에서 state에 저장 필요)
-        if workflow is not None:
+        if state.get("pass_flag"):
             return _QA_PASS
         return _QA_RETRY
 
