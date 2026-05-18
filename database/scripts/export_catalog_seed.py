@@ -1,7 +1,7 @@
 """박아름 카탈로그 → database/seeds/node_definitions.json 추출.
 
 조장 5/13 합의: placeholder seed는 박아름 노드 카탈로그를 따라간다.
-본 스크립트로 박아름 55종 카탈로그를 JSON으로 추출 + seed 파일 갱신.
+본 스크립트로 박아름 56종 카탈로그를 JSON으로 추출 + seed 파일 갱신 (gemma_chat 추가, PR #68).
 
 embedding은 런타임 생성 필요 (BGE-M3 모델) → JSON에는 포함 안 함.
 bootstrap_node_definitions.py가 embedding 채우는 역할.
