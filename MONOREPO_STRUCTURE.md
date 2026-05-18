@@ -96,7 +96,7 @@ Workflow_Automation/
 │   │   │   ├── entities/                   # MemoryEntry, ConversationMessage, PersonalSkill, SkillNode
 │   │   │   ├── value_objects/              # TurnLimit, QualityThreshold
 │   │   │   ├── services/                   # IntentAnalyzer, Drafter, QAEvaluator, SlotFilling
-│   │   │   └── ports/                      # LLMPort, EmbeddingPort, AgentMemoryRepository,
+│   │   │   └── ports/                      # LLMPort, AgentMemoryRepository, (EmbedderPort는 nodes_graph 소유),
 │   │   │                                   #   PersonalMemoryStore, WorkflowRepository, NodeRegistry,
 │   │   │                                   #   SubAgentClient(선택)
 │   │   ├── application/
@@ -405,7 +405,7 @@ gh pr create --base development --title "feat(auth): Google SSO + JWT 구현"
 | `ai_agent/domain/ports/` | `WorkflowRepository` | `storage/repositories/` |
 | `ai_agent/domain/ports/` | `NodeRegistry` | `ai_agent/adapters/node_registry_adapter.py` (Facade) |
 | `ai_agent/domain/ports/` | `LLMPort` | `ai_agent/adapters/llm/modal_llm_adapter.py` |
-| `ai_agent/domain/ports/` | `EmbeddingPort` | `ai_agent/adapters/llm/modal_embedding_adapter.py` (Sprint 3) |
+| `nodes_graph/domain/ports/` | `EmbedderPort` | `ai_agent/adapters/llm/modal_embedding_adapter.py` (Sprint 3, **예외 패턴** — Port 소유 모듈(nodes_graph)이 아닌 외부 모듈(ai_agent)이 구현체 소유. PR #30 2026-05-12 결정) |
 | `ai_agent/domain/ports/` | `PersonalMemoryStore` | `ai_agent/adapters/memory/gcs_memory_store.py` (Sprint 3, GCS — storage 경유 X) |
 | `ai_agent/domain/ports/` | `SubAgentClient` (선택) | `ai_agent/adapters/agent_clients/http_sub_agent_client.py` (Sprint 3) |
 | `toolset/domain/ports/` | `ToolRegistry` | `toolset/adapters/` |

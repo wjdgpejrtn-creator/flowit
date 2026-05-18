@@ -52,7 +52,7 @@ Modal workspace: workflow-automation (VPC 내부 통신만)
 modules/ai_agent/
 ├── domain/
 │   ├── entities/          # AgentState, MemoryEntry, PersonalSkill, SkillNode
-│   ├── ports/             # LLMPort, EmbeddingPort, AgentMemoryRepository, PersonalMemoryStore (신규)
+│   ├── ports/             # LLMPort, AgentMemoryRepository, PersonalMemoryStore (신규) — EmbedderPort는 nodes_graph 소유 (예외 패턴, PR #30 5/12 결정)
 │   └── services/          # IntentAnalyzer, DrafterService, QAEvaluator, SlotFilling (기존)
 ├── application/
 │   └── agents/            # 신규 — sub-agent별 use case 묶음
@@ -183,7 +183,7 @@ common_schemas.agent_protocol  ─┐
   api_server OrchestratorClient ↔ orchestrator Modal app smoke test
 ```
 
-> 각 sub-agent 어댑터는 `domain/ports/`의 ABC를 구현하므로 **다른 멤버 작업에 차단되지 않음**. 단 `llm-base` Modal 배포(5/12 저녁)는 LLMPort/EmbeddingPort 어댑터의 endpoint를 제공하므로 **5/12 이후 다른 멤버 작업의 dependency**. 신정혜가 슬립 시 stub LLM(echo) 어댑터로 대체.
+> 각 sub-agent 어댑터는 `domain/ports/`의 ABC를 구현하므로 **다른 멤버 작업에 차단되지 않음**. 단 `llm-base` Modal 배포(5/12 저녁)는 LLMPort/`EmbedderPort` 어댑터의 endpoint를 제공하므로 **5/12 이후 다른 멤버 작업의 dependency**. 신정혜가 슬립 시 stub LLM(echo) 어댑터로 대체. (`EmbedderPort`는 nodes_graph 소유, 구현체만 ai_agent — PR #30 5/12 결정)
 
 ### 4.2 멤버별 일자별 작업
 
@@ -207,7 +207,7 @@ common_schemas.agent_protocol  ─┐
 |------|------|--------|
 | 5/11(월) | Sprint 3 kickoff 참여 · inter-agent 통신 계약 sync 참여 (확정 안 작성) · ai_agent adapter 작업 시작 전 design note (`docs/context/decisions.md`에 LangGraph supervisor 패턴 결정) | design note PR |
 | 5/12(화) | **Modal app template** 작성 — 1개 sample (`agent-composer`)로 다른 멤버가 fork 가능한 형태. requirements, secret 마운트, healthcheck endpoint 패턴 · **저녁: `llm-base` Modal app 배포** — Gemma 4 + BGE-M3 단일 endpoint (`/v1/llm/generate`, `/v1/embeddings`) | Modal app template + `llm-base` 배포 완료 |
-| 5/13(수) | `adapters/llm/modal_llm_adapter.py` (LLMPort 구현 — httpx, retry, circuit breaker, `LLM_BASE_URL` env) · `adapters/llm/modal_embedding_adapter.py` (EmbeddingPort 구현 — 768d BGE-M3) | `feature/req-004-llm-adapters` |
+| 5/13(수) | `adapters/llm/modal_llm_adapter.py` (LLMPort 구현 — httpx, retry, circuit breaker, `LLM_BASE_URL` env) · `adapters/llm/modal_embedding_adapter.py` (`EmbedderPort` 구현 — 768d BGE-M3, **Port는 nodes_graph 소유** — PR #30 5/12 결정) | `feature/req-004-llm-adapters` |
 | 5/14(목) | `adapters/langgraph/composer_graph.py` — Workflow Composer 13-노드 StateGraph 빌드 · `ComposeWorkflowUseCase` 본격 구현 (현재 sequential을 LangGraph 호출로 교체) | `feature/req-004-composer-graph` |
 | 5/15(금) | `adapters/langgraph/supervisor_graph.py` — Orchestrator supervisor (load_memory → intent → composer/skills/finalize → update_memory) · `RouteRequestUseCase` 본격 구현 | `feature/req-004-orchestrator-graph` |
 | 5/16(토) | `adapters/agent_clients/http_sub_agent_client.py` (SubAgentClient HTTP 구현, `COMPOSER_URL`/`SKILLS_BUILDER_URL`/`PERSONALIZATION_URL` env) · `adapters/node_registry_adapter.py` (nodes_graph Facade — `NodeDefinitionRepository` DI 주입) | `feature/req-004-sub-agent-client` |
@@ -237,7 +237,7 @@ common_schemas.agent_protocol  ─┐
 | 5/12(화) | **오후 sync** (1h, 신정혜·박아름): inter-agent 통신 계약 · toolset connector 1: `adapters/tools/slack_tool.py` (Slack chat.postMessage, `SecureConnectorPort` DI) · toolset connector 2: `adapters/tools/http_request_tool.py` (generic HTTP) | `feature/req-005-toolset-slack-http` |
 | 5/13(수) | toolset connector 3: `adapters/tools/webhook_tool.py` · `PersonalMemoryStore` Port 정의 (`modules/ai_agent/domain/ports/personal_memory_store.py`) — ABC 메서드 시그니처 확정 | `feature/req-005-toolset-webhook`, `feature/req-004-personal-memory-port` |
 | 5/14(목) | `adapters/memory/gcs_memory_store.py` — PersonalMemoryStore 구현 (google-cloud-storage, MEMORY.md 인덱스 파싱, frontmatter 추출/직렬화) · GCS 버킷 권한 검증 | `feature/req-004-gcs-memory` |
-| 5/15(금) | `LoadUserMemoryUseCase` 본격 구현 — MEMORY.md 인덱스 → 본문 .md 파일들 로드 → list[MemoryEntry] 반환 · `RecallPersonalSkillsUseCase` 본격 구현 — query 임베딩 + 각 entry description 임베딩 코사인 유사도 top-k (EmbeddingPort 사용) | `feature/req-004-personalization-load-recall` |
+| 5/15(금) | `LoadUserMemoryUseCase` 본격 구현 — MEMORY.md 인덱스 → 본문 .md 파일들 로드 → list[MemoryEntry] 반환 · `RecallPersonalSkillsUseCase` 본격 구현 — query 임베딩 + 각 entry description 임베딩 코사인 유사도 top-k (`EmbedderPort` 사용 — nodes_graph 소유) | `feature/req-004-personalization-load-recall` |
 | 5/16(토) | `UpdateUserMemoryUseCase` 본격 구현 — workflow 완료 → LLM 패턴 추출 (LLMPort) → frontmatter 포맷팅 → GCS 저장 · toolset connector 4: `adapters/tools/gmail_tool.py` | `feature/req-004-personalization-update`, `feature/req-005-toolset-gmail` |
 | 5/17(일) | **`agent-personalization` Modal app 배포** · toolset connector 5: `adapters/tools/google_sheets_tool.py` (시간 여유 시 6: Drive, 7: Notion까지) · Personalization integration test (mock GCS or fake_gcs) | Modal app 배포 + 5~7개 connector |
 
@@ -426,7 +426,7 @@ common_schemas.agent_protocol  ─┐
 | 브랜치 | 용도 | 담당 |
 |--------|------|------|
 | `feature/req-004-ai-agent` | 멀티에이전트 재구성 (Phase A1) | 신정혜 (merged 2026-05-11) |
-| `feature/req-004-llm-adapters` | ai_agent LLMPort/EmbeddingPort 어댑터 (A2) | 신정혜 |
+| `feature/req-004-llm-adapters` | ai_agent LLMPort 어댑터 + `EmbedderPort`(nodes_graph 소유) 구현체 (A2) | 신정혜 |
 | `feature/req-004-composer-graph` | Workflow Composer LangGraph 13-노드 (A2) | 신정혜 |
 | `feature/req-004-orchestrator-graph` | Main Orchestrator supervisor (A2) | 신정혜 |
 | `feature/req-004-sub-agent-client` | HTTPSubAgentClient + NodeRegistry Facade (A2) | 신정혜 |
