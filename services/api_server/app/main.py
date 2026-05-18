@@ -22,6 +22,7 @@ from app.middleware.request_id import RequestIdMiddleware
 from app.routers import auth as auth_router
 from app.routers import health
 from app.routers import nodes as nodes_router
+from app.routers import workflows as workflows_router
 
 logger = logging.getLogger(__name__)
 
@@ -73,4 +74,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth_router.router)
     app.include_router(nodes_router.router)
+    app.include_router(workflows_router.router)
     return app
