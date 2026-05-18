@@ -28,6 +28,14 @@ export enum ErrorCode {
   E_INVALID_TRIGGER = "E_INVALID_TRIGGER",
 }
 
+export enum IntentType {
+  CLARIFY = "clarify",
+  DRAFT = "draft",
+  REFINE = "refine",
+  PROPOSE = "propose",
+  BUILD_SKILL = "build_skill",
+}
+
 export enum RiskLevel {
   LOW = "Low",
   MEDIUM = "Medium",
