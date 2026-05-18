@@ -37,9 +37,11 @@
 [services/frontend] ChatPanel → POST /api/v1/ai/compose?stream=true
      ↓
 [services/api_server] Router → 권한 검증 (modules/auth) + Permission Source 주입
-     ↓
-[modules/ai_agent] LangGraph: security → onboarding → intent → retriever → drafter ↔ validator
-     ↓ [SSE] result.intent=draft
+     ↓ (HTTP 어댑터 OrchestratorClient — Sprint 3 PR #38·#46 이후, in-process import 금지)
+[services/agents/orchestrator] Modal app — supervisor 라우팅 (intent 분류 후 sub-agent 호출)
+     ↓ (composer / skills_builder / personalization 각각 별도 Modal app)
+[modules/ai_agent → Modal] LangGraph: security → onboarding → intent → retriever → drafter ↔ validator
+     ↓ [SSE pass-through via api_server] result.intent ∈ IntentType {clarify/draft/refine/propose/build_skill}
 [services/frontend] 캔버스에 적용
      ↓ (사용자 [Save])
 [services/api_server] POST /api/v1/workflows → [modules/storage] 저장

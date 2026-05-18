@@ -776,9 +776,11 @@ services/api_server/
 │   │   ├── cors.py                    # CORS 설정
 │   │   ├── logging.py                 # 요청 로깅
 │   │   └── error_handler.py           # DomainError → HTTP Response 매핑
+│   ├── adapters/
+│   │   └── orchestrator_client.py    # ai_agent Orchestrator Modal app HTTP 어댑터 (Sprint 3 이후)
 │   └── sse/
 │       └── handler.py                 # SSE 스트리밍 핸들러
-│           # AgentState 변경 → SSEFrame 직렬화 → 클라이언트 전송
+│           # Orchestrator Modal app의 text/event-stream을 클라이언트로 패스스루 (PR #38, #46)
 ├── tests/
 ├── Dockerfile
 └── pyproject.toml
@@ -1097,7 +1099,9 @@ ErrorHandler Middleware → DomainError → HTTP Response 매핑
     │   → DraftSpecDeltaFrame → ResultFrame
     ▼
 [5] API Server — SSE Handler (Adapter)
-    │ AgentState → SSEFrame 직렬화 → text/event-stream
+    │ Orchestrator Modal app의 text/event-stream을 클라이언트로 패스스루
+    │ (Sprint 3 PR #38·#46 이후 in-process LangGraph 호출 폐기,
+    │  AgentProtocolRequest/Response 기반 HTTP 어댑터로 분리)
     ▼
 [6] Frontend — SSE Parser
     │ SSEFrame → Zustand store 업데이트
