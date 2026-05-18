@@ -16,6 +16,8 @@ Sub-agent URL 환경변수 (agent-orchestrator-secret):
 from __future__ import annotations
 
 import modal
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 
 app_secret = modal.Secret.from_name("agent-orchestrator-secret")
 
@@ -72,8 +74,6 @@ class OrchestratorAgent:
 
     @modal.asgi_app()
     def fastapi(self):
-        from fastapi import FastAPI
-        from fastapi.responses import StreamingResponse
         from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 
         api = FastAPI(title="orchestrator", version="1.0")
@@ -83,7 +83,8 @@ class OrchestratorAgent:
             return {"status": "ok"}
 
         @api.post("/v1/agent/route")
-        async def route(req: AgentProtocolRequest):
+        async def route(request: Request):
+            req = AgentProtocolRequest.model_validate(await request.json())
             async def generate():
                 try:
                     async for frame in await self._graph.stream(

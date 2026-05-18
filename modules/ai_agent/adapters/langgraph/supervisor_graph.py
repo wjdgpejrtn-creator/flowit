@@ -176,7 +176,12 @@ class LangGraphSupervisor:
             user_id=state["user_id"],
             state=agent_state,
             personal_memory=state["personal_memory"],
-            payload={"action": "update_memory"},
+            payload={
+                "action": "update_memory",
+                "turn_count": 1,
+                "session_summary": None,
+                "workflow": None,
+            },
             trace_id=state["trace_id"],
         )
         try:

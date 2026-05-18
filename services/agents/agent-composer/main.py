@@ -12,6 +12,8 @@ Health:
 from __future__ import annotations
 
 import modal
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 app_secret = modal.Secret.from_name("agent-composer-secret")
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
@@ -129,8 +131,6 @@ class AgentComposer:
     @modal.asgi_app()
     def fastapi(self):
         import json
-        from fastapi import FastAPI, HTTPException
-        from fastapi.responses import StreamingResponse
         from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 
         api = FastAPI(title="agent-composer", version="1.0")
@@ -152,7 +152,8 @@ class AgentComposer:
             return {"status": "ok", "db": "iam-connected"}
 
         @api.post("/v1/agent/route")
-        async def route(req: AgentProtocolRequest):
+        async def route(request: Request):
+            req = AgentProtocolRequest.model_validate(await request.json())
             async def generate():
                 try:
                     async for frame in await self._graph.stream(
