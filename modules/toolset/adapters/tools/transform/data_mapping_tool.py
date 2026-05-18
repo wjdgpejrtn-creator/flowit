@@ -5,6 +5,7 @@ from typing import Any
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 
@@ -13,6 +14,8 @@ class DataMappingTool(BaseTool):
     description = "필드 매핑/리네이밍 (old_field → new_field)"
     version = "1.0.0"
     risk_level = RiskLevel.LOW
+    category = ToolCategory.TRANSFORM
+    capabilities = ["data_mapping", "field_mapping", "data_processing"]
 
     input_schema = {
         "type": "object",

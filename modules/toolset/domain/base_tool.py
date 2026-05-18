@@ -5,6 +5,8 @@ from typing import Any
 
 from common_schemas.enums import RiskLevel
 
+from .entities.tool_metadata import ToolCategory
+
 
 class BaseTool(ABC):
 
@@ -23,6 +25,14 @@ class BaseTool(ABC):
     @property
     @abstractmethod
     def risk_level(self) -> RiskLevel: ...
+
+    @property
+    @abstractmethod
+    def category(self) -> ToolCategory: ...
+
+    @property
+    @abstractmethod
+    def capabilities(self) -> list[str]: ...
 
     @property
     @abstractmethod

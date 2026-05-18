@@ -6,6 +6,7 @@ from typing import Any
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 
@@ -14,6 +15,8 @@ class FileReadTool(BaseTool):
     description = "파일 읽기 (텍스트/바이너리)"
     version = "1.0.0"
     risk_level = RiskLevel.LOW
+    category = ToolCategory.FILE
+    capabilities = ["file_read", "file_access"]
 
     input_schema = {
         "type": "object",

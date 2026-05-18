@@ -5,6 +5,7 @@ from typing import Any
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 _OPS = {
@@ -26,6 +27,8 @@ class ConditionalTool(BaseTool):
     description = "조건 분기 (if/else 로직)"
     version = "1.0.0"
     risk_level = RiskLevel.LOW
+    category = ToolCategory.CONTROL
+    capabilities = ["conditional", "branching", "flow_control"]
 
     input_schema = {
         "type": "object",

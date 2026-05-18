@@ -5,6 +5,7 @@ from typing import Any
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 _DEFAULT_MAX = 100
@@ -15,6 +16,8 @@ class LoopTool(BaseTool):
     description = "배열 순회 — 각 항목에 인덱스를 붙여 반환"
     version = "1.0.0"
     risk_level = RiskLevel.MEDIUM
+    category = ToolCategory.CONTROL
+    capabilities = ["loop", "iteration", "flow_control"]
 
     input_schema = {
         "type": "object",

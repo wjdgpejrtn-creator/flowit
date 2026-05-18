@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from common_schemas.enums import RiskLevel
 
-from ...domain.entities.tool_metadata import ToolMetadata
+from ...domain.entities.tool_metadata import ToolCategory, ToolMetadata
 from ...domain.ports.tool_registry import ToolRegistry
 
 
@@ -12,7 +12,7 @@ class ListToolsUseCase:
 
     def execute(
         self,
-        category: str | None = None,
+        category: ToolCategory | None = None,
         risk_level: RiskLevel | None = None,
     ) -> list[ToolMetadata]:
         if category is not None:

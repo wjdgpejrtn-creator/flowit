@@ -8,6 +8,7 @@ import jmespath.exceptions
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 
@@ -16,6 +17,8 @@ class JsonTransformTool(BaseTool):
     description = "JMESPath 표현식으로 JSON 데이터 추출/변환"
     version = "1.0.0"
     risk_level = RiskLevel.LOW
+    category = ToolCategory.TRANSFORM
+    capabilities = ["json_transform", "jmespath", "data_processing"]
 
     input_schema = {
         "type": "object",

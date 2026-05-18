@@ -6,6 +6,7 @@ from typing import Any
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 
@@ -14,6 +15,8 @@ class TextTemplateTool(BaseTool):
     description = "Jinja2 스타일 변수 치환 템플릿 렌더링 ({variable} 문법)"
     version = "1.0.0"
     risk_level = RiskLevel.LOW
+    category = ToolCategory.TRANSFORM
+    capabilities = ["text_template", "variable_substitution", "text_generation"]
 
     input_schema = {
         "type": "object",

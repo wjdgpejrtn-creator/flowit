@@ -7,6 +7,7 @@ import httpx
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 
@@ -15,6 +16,8 @@ class SlackNotifyTool(BaseTool):
     description = "Slack 메시지 전송 (Webhook URL은 credential로 주입, 비가역적)"
     version = "1.0.0"
     risk_level = RiskLevel.HIGH
+    category = ToolCategory.NOTIFICATION
+    capabilities = ["slack_notify", "webhook", "notification"]
 
     input_schema = {
         "type": "object",

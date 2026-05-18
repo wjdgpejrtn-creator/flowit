@@ -1,7 +1,6 @@
-"""Personalization — 컨텍스트 기반 관련 personal skill 검색.
+"""Personalization — 컨텍스트 기반 관련 memory 검색 (BGE-M3 임베딩 유사도).
 
-BGE-M3 코사인 유사도 top-k 반환.
-embedding이 없는 항목은 on-the-fly로 계산한다.
+Workflow Composer가 프롬프트 작성 전 호출해 관련 사용자 패턴을 주입한다.
 """
 from __future__ import annotations
 
@@ -9,45 +8,11 @@ import math
 from uuid import UUID
 
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
+from ....domain.entities.memory_file import MemoryFile
+from ....domain.ports.personal_memory_store import PersonalMemoryStore
 
-from ai_agent.domain.entities.personal_skill import PersonalSkill
-from ai_agent.domain.ports.personal_memory_store import PersonalMemoryStore
-
-
-class RecallPersonalSkillsUseCase:
-    def __init__(
-        self,
-        memory_store: PersonalMemoryStore,
-        embedder: EmbedderPort,
-    ) -> None:
-        self._store = memory_store
-        self._embedder = embedder
-
-    async def execute(
-        self,
-        user_id: UUID,
-        query: str,
-        limit: int = 5,
-    ) -> list[PersonalSkill]:
-        skills = await self._store.list_entries(user_id)
-        if not skills:
-            return []
-
-        query_vec = await self._embedder.embed(query)
-
-        scored: list[tuple[float, PersonalSkill]] = []
-        for skill in skills:
-            if skill.embedding:
-                vec = skill.embedding
-            else:
-                vec = await self._embedder.embed(
-                    f"{skill.name} {skill.description} {skill.body}"
-                )
-            score = _cosine_similarity(query_vec, vec)
-            scored.append((score, skill))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [skill for _, skill in scored[:limit]]
+_DEFAULT_TOP_K = 3
+_DEFAULT_MIN_SCORE = 0.5
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -57,3 +22,54 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     if norm_a == 0 or norm_b == 0:
         return 0.0
     return dot / (norm_a * norm_b)
+
+
+class RecallPersonalSkillsUseCase:
+    """BGE-M3 코사인 유사도 기반 개인 memory 검색.
+
+    Returns: 유사도 내림차순 상위 top_k 개의 MemoryFile (min_score 미만 제외).
+    """
+
+    def __init__(
+        self,
+        memory_store: PersonalMemoryStore,
+        embedding: EmbedderPort,
+        top_k: int = _DEFAULT_TOP_K,
+        min_score: float = _DEFAULT_MIN_SCORE,
+    ) -> None:
+        self._store = memory_store
+        self._embedding = embedding
+        self._top_k = top_k
+        self._min_score = min_score
+
+    async def execute(self, user_id: UUID, query: str) -> list[MemoryFile]:
+        """query와 관련된 사용자 memory 파일을 유사도 순으로 반환."""
+        refs = await self._store.load_index(user_id)
+        if not refs:
+            return []
+
+        query_vec = await self._embedding.embed(query)
+
+        scored: list[tuple[float, MemoryFile]] = []
+        for ref in refs:
+            emb = await self._store.load_embedding(user_id, ref.name)
+            if emb is None:
+                # embedding 없으면 해당 파일 로드 후 on-the-fly 생성 + 저장
+                try:
+                    file = await self._store.load_file(user_id, ref.filename)
+                except FileNotFoundError:
+                    continue
+                emb = await self._embedding.embed(file.body)
+                await self._store.save_embedding(user_id, ref.name, emb)
+            else:
+                try:
+                    file = await self._store.load_file(user_id, ref.filename)
+                except FileNotFoundError:
+                    continue
+
+            score = _cosine_similarity(query_vec, emb)
+            if score >= self._min_score:
+                scored.append((score, file))
+
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [f for _, f in scored[: self._top_k]]

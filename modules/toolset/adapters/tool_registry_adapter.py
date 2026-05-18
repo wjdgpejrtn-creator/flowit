@@ -5,7 +5,7 @@ from uuid import UUID
 from common_schemas.exceptions import NotFoundError
 
 from ..domain.base_tool import BaseTool
-from ..domain.entities.tool_metadata import ToolMetadata
+from ..domain.entities.tool_metadata import ToolCategory, ToolMetadata
 from ..domain.exceptions import ConflictError
 from ..domain.ports.tool_registry import ToolRegistry
 
@@ -35,7 +35,7 @@ class ToolRegistryAdapter(ToolRegistry):
     def list_all(self) -> list[ToolMetadata]:
         return list(self._metadata.values())
 
-    def list_by_category(self, category: str) -> list[ToolMetadata]:
+    def list_by_category(self, category: ToolCategory) -> list[ToolMetadata]:
         return [m for m in self._metadata.values() if m.category == category]
 
     # ── 어댑터 전용 (DI 조립용) ────────────────────────────────────────────
@@ -44,10 +44,9 @@ class ToolRegistryAdapter(ToolRegistry):
         self,
         tool: BaseTool,
         tool_id: UUID,
-        category: str,
         overwrite: bool = True,
     ) -> None:
-        """도구 등록. overwrite=False면 중복 tool_name 시 ConflictError."""
+        """도구 등록. category/capabilities는 tool에서 직접 읽음. overwrite=False면 중복 시 ConflictError."""
         if not overwrite and tool.name in self._tools:
             raise ConflictError(
                 message=f"Tool '{tool.name}' is already registered.",
@@ -55,13 +54,13 @@ class ToolRegistryAdapter(ToolRegistry):
             )
         self._tools[tool.name] = tool
         self._metadata[tool.name] = ToolMetadata.from_tool(
-            tool, tool_id=tool_id, category=category,
+            tool, tool_id=tool_id, category=tool.category,
         )
 
-    def register_bulk(self, tools: list[tuple[BaseTool, UUID, str]]) -> None:
-        """일괄 등록. (tool, tool_id, category) 튜플 리스트."""
-        for tool, tool_id, category in tools:
-            self.register_tool(tool, tool_id, category)
+    def register_bulk(self, tools: list[tuple[BaseTool, UUID]]) -> None:
+        """일괄 등록. (tool, tool_id) 튜플 리스트."""
+        for tool, tool_id in tools:
+            self.register_tool(tool, tool_id)
 
     def __len__(self) -> int:
         return len(self._tools)

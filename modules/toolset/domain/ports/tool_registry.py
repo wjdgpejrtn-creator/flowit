@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from ..base_tool import BaseTool
-from ..entities.tool_metadata import ToolMetadata
+from ..entities.tool_metadata import ToolCategory, ToolMetadata
 
 
 class ToolRegistry(ABC):
@@ -19,6 +19,6 @@ class ToolRegistry(ABC):
         ...
 
     @abstractmethod
-    def list_by_category(self, category: str) -> list[ToolMetadata]:
+    def list_by_category(self, category: ToolCategory) -> list[ToolMetadata]:
         ...
 

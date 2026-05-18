@@ -1,78 +1,120 @@
+from __future__ import annotations
+
+import pytest
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import pytest
-
-from ai_agent.application.agents.personalization import RecallPersonalSkillsUseCase
-from ai_agent.domain.entities.personal_skill import PersonalSkill
-from ai_agent.domain.ports.personal_memory_store import PersonalMemoryStore
+from ai_agent.application.agents.personalization.recall_personal_skills_use_case import (
+    RecallPersonalSkillsUseCase,
+    _cosine_similarity,
+)
+from ai_agent.domain.entities.memory_file import MemoryFile, MemoryFileRef
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
+from ai_agent.domain.ports.personal_memory_store import PersonalMemoryStore
 
 
-def _skill(name: str, embedding: list[float] | None = None) -> PersonalSkill:
-    return PersonalSkill(
-        user_id=uuid4(),
-        skill_type="user",
-        name=name,
-        description=f"{name} 설명",
-        body="본문",
-        embedding=embedding,
-    )
+def _make_ref(name: str) -> MemoryFileRef:
+    return MemoryFileRef(filename=f"{name}.md", name=name, description=f"{name} desc")
+
+
+def _make_file(name: str) -> MemoryFile:
+    return MemoryFile(filename=f"{name}.md", name=name, description="", memory_type="feedback", body=f"{name} 내용")
+
+
+class TestCosineSimilarity:
+    def test_identical_vectors(self):
+        v = [1.0, 0.0, 0.0]
+        assert _cosine_similarity(v, v) == pytest.approx(1.0)
+
+    def test_orthogonal_vectors(self):
+        assert _cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
+
+    def test_opposite_vectors(self):
+        assert _cosine_similarity([1.0, 0.0], [-1.0, 0.0]) == pytest.approx(-1.0)
+
+    def test_zero_vector_returns_zero(self):
+        assert _cosine_similarity([0.0, 0.0], [1.0, 1.0]) == 0.0
 
 
 class TestRecallPersonalSkillsUseCase:
     @pytest.mark.asyncio
-    async def test_returns_empty_when_no_skills(self):
+    async def test_empty_index_returns_empty(self):
         store = AsyncMock(spec=PersonalMemoryStore)
-        store.list_entries = AsyncMock(return_value=[])
-        embedder = AsyncMock(spec=EmbedderPort)
-        result = await RecallPersonalSkillsUseCase(store, embedder).execute(uuid4(), "슬랙")
+        emb = AsyncMock(spec=EmbedderPort)
+        store.load_index.return_value = []
+        uc = RecallPersonalSkillsUseCase(store, emb)
+        result = await uc.execute(uuid4(), "쿼리")
         assert result == []
-        embedder.embed.assert_not_called()
+        emb.embed.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_uses_precomputed_embedding(self):
-        vec = [1.0, 0.0, 0.0]
-        skill = _skill("slack", embedding=vec)
+    async def test_returns_top_k_by_similarity(self):
+        uid = uuid4()
         store = AsyncMock(spec=PersonalMemoryStore)
-        store.list_entries = AsyncMock(return_value=[skill])
-        embedder = AsyncMock(spec=EmbedderPort)
-        embedder.embed = AsyncMock(return_value=vec)
-        await RecallPersonalSkillsUseCase(store, embedder).execute(uuid4(), "슬랙", limit=1)
-        # query용 1회만 embed 호출 (precomputed embedding은 그대로 사용)
-        assert embedder.embed.call_count == 1
+        emb = AsyncMock(spec=EmbedderPort)
+
+        store.load_index.return_value = [_make_ref("a"), _make_ref("b"), _make_ref("c")]
+        store.load_file.side_effect = [_make_file("a"), _make_file("b"), _make_file("c")]
+        # 쿼리 embedding = [1, 0, 0]
+        emb.embed.return_value = [1.0, 0.0, 0.0]
+        # a와 유사, b와 중간, c와 무관
+        store.load_embedding.side_effect = [
+            [1.0, 0.0, 0.0],  # a: similarity 1.0
+            [0.0, 1.0, 0.0],  # b: similarity 0.0
+            [1.0, 0.0, 0.0],  # c: similarity 1.0
+        ]
+
+        uc = RecallPersonalSkillsUseCase(store, emb, top_k=2, min_score=0.5)
+        result = await uc.execute(uid, "관련 쿼리")
+        assert len(result) == 2
+        assert all(f.name in ("a", "c") for f in result)
 
     @pytest.mark.asyncio
-    async def test_embeds_skill_on_the_fly_when_no_embedding(self):
-        skill = _skill("gmail")  # embedding=None
+    async def test_below_min_score_excluded(self):
+        uid = uuid4()
         store = AsyncMock(spec=PersonalMemoryStore)
-        store.list_entries = AsyncMock(return_value=[skill])
-        embedder = AsyncMock(spec=EmbedderPort)
-        embedder.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
-        await RecallPersonalSkillsUseCase(store, embedder).execute(uuid4(), "이메일", limit=1)
-        # query + skill on-the-fly = 2회
-        assert embedder.embed.call_count == 2
+        emb = AsyncMock(spec=EmbedderPort)
+
+        store.load_index.return_value = [_make_ref("low")]
+        store.load_file.return_value = _make_file("low")
+        emb.embed.return_value = [1.0, 0.0]
+        store.load_embedding.return_value = [0.0, 1.0]  # orthogonal → score 0.0
+
+        uc = RecallPersonalSkillsUseCase(store, emb, top_k=5, min_score=0.5)
+        result = await uc.execute(uid, "쿼리")
+        assert result == []
 
     @pytest.mark.asyncio
-    async def test_top_k_limit(self):
-        skills = [_skill(f"skill_{i}", embedding=[float(i), 0.0, 0.0]) for i in range(5)]
+    async def test_missing_embedding_generates_and_saves(self):
+        uid = uuid4()
         store = AsyncMock(spec=PersonalMemoryStore)
-        store.list_entries = AsyncMock(return_value=skills)
-        embedder = AsyncMock(spec=EmbedderPort)
-        embedder.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
-        result = await RecallPersonalSkillsUseCase(store, embedder).execute(uuid4(), "test", limit=3)
-        assert len(result) == 3
+        emb = AsyncMock(spec=EmbedderPort)
+
+        store.load_index.return_value = [_make_ref("no_emb")]
+        store.load_file.return_value = _make_file("no_emb")
+        store.load_embedding.return_value = None  # no cached embedding
+        # embed called twice: once for query, once for file body
+        emb.embed.side_effect = [
+            [1.0, 0.0],  # query embedding
+            [1.0, 0.0],  # file body embedding (on-the-fly)
+        ]
+
+        uc = RecallPersonalSkillsUseCase(store, emb, top_k=1, min_score=0.5)
+        result = await uc.execute(uid, "쿼리")
+        store.save_embedding.assert_called_once()
+        assert len(result) == 1
 
     @pytest.mark.asyncio
-    async def test_sorted_by_cosine_similarity_descending(self):
-        # high: [1,0,0] vs query [1,0,0] → cosine 1.0
-        # low:  [0,1,0] vs query [1,0,0] → cosine 0.0
-        high = _skill("high", embedding=[1.0, 0.0, 0.0])
-        low = _skill("low", embedding=[0.0, 1.0, 0.0])
+    async def test_missing_file_is_skipped(self):
+        uid = uuid4()
         store = AsyncMock(spec=PersonalMemoryStore)
-        store.list_entries = AsyncMock(return_value=[low, high])
-        embedder = AsyncMock(spec=EmbedderPort)
-        embedder.embed = AsyncMock(return_value=[1.0, 0.0, 0.0])
-        result = await RecallPersonalSkillsUseCase(store, embedder).execute(uuid4(), "쿼리", limit=2)
-        assert result[0].name == "high"
-        assert result[1].name == "low"
+        emb = AsyncMock(spec=EmbedderPort)
+
+        store.load_index.return_value = [_make_ref("ghost")]
+        store.load_embedding.return_value = [1.0, 0.0]
+        store.load_file.side_effect = FileNotFoundError
+        emb.embed.return_value = [1.0, 0.0]
+
+        uc = RecallPersonalSkillsUseCase(store, emb, top_k=5, min_score=0.0)
+        result = await uc.execute(uid, "쿼리")
+        assert result == []

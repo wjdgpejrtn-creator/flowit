@@ -9,6 +9,7 @@ from typing import Any
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 
@@ -17,6 +18,8 @@ class EmailSendTool(BaseTool):
     description = "이메일 발송 (SMTP, 비가역적)"
     version = "1.0.0"
     risk_level = RiskLevel.HIGH
+    category = ToolCategory.NOTIFICATION
+    capabilities = ["email_send", "smtp", "notification"]
 
     input_schema = {
         "type": "object",

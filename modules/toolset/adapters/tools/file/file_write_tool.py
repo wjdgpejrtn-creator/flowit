@@ -6,6 +6,7 @@ from typing import Any
 from common_schemas.enums import RiskLevel
 
 from ....domain.base_tool import BaseTool
+from ....domain.entities.tool_metadata import ToolCategory
 from ....domain.exceptions import ToolExecutionError
 
 
@@ -14,6 +15,8 @@ class FileWriteTool(BaseTool):
     description = "파일 쓰기/생성 (로컬 쓰기)"
     version = "1.0.0"
     risk_level = RiskLevel.MEDIUM
+    category = ToolCategory.FILE
+    capabilities = ["file_write", "file_access"]
 
     input_schema = {
         "type": "object",

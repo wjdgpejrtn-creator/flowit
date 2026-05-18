@@ -1,5 +1,6 @@
 from common_schemas.enums import RiskLevel
 from toolset.domain.base_tool import BaseTool
+from toolset.domain.entities.tool_metadata import ToolCategory
 
 
 class DummyTool(BaseTool):
@@ -7,6 +8,8 @@ class DummyTool(BaseTool):
     description = "테스트용 도구"
     version = "1.0.0"
     risk_level = RiskLevel.MEDIUM
+    category = ToolCategory.TRANSFORM
+    capabilities = ["test"]
     input_schema = {
         "type": "object",
         "properties": {"message": {"type": "string"}},
@@ -27,6 +30,8 @@ class HighRiskDummyTool(BaseTool):
     description = "HIGH 위험도 테스트용"
     version = "1.0.0"
     risk_level = RiskLevel.HIGH
+    category = ToolCategory.API
+    capabilities = ["test"]
     input_schema = {"type": "object", "properties": {}}
     output_schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
 
@@ -39,6 +44,8 @@ class RestrictedDummyTool(BaseTool):
     description = "RESTRICTED 위험도 테스트용"
     version = "1.0.0"
     risk_level = RiskLevel.RESTRICTED
+    category = ToolCategory.API
+    capabilities = ["test"]
     input_schema = {"type": "object", "properties": {}}
     output_schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
 
