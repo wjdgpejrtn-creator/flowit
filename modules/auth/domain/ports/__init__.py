@@ -1,6 +1,13 @@
-﻿from .cipher_port import CipherPort
+from .cipher_port import CipherPort
 from .oauth_client_port import OAuthClientPort
 from .oauth_connection_repository import OAuthConnectionRepository
 from .session_repository import SessionRepository
+from .user_repository import UserRepository
 
-__all__ = ["CipherPort", "OAuthClientPort", "SessionRepository", "OAuthConnectionRepository"]
+__all__ = [
+    "CipherPort",
+    "OAuthClientPort",
+    "SessionRepository",
+    "OAuthConnectionRepository",
+    "UserRepository",
+]
