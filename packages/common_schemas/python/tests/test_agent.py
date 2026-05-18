@@ -11,7 +11,7 @@ from common_schemas.agent import (
     SlotFillingState,
     UnresolvedNode,
 )
-from common_schemas.enums import AgentMode, ExecutionStatus
+from common_schemas.enums import AgentMode, ExecutionStatus, IntentType
 
 
 class TestUnresolvedNode:
@@ -47,7 +47,8 @@ class TestDraftSpec:
 
 
 class TestIntentResult:
-    def test_valid_intents(self):
+    def test_valid_intents_str_input(self):
+        # 문자열 입력 호환성 (기존 코드 마이그레이션 부담 최소화)
         for intent in ("clarify", "draft", "refine", "propose", "build_skill"):
             ir = IntentResult(
                 intent=intent,
@@ -55,6 +56,16 @@ class TestIntentResult:
                 analyzed_entities={},
             )
             assert ir.intent == intent
+            assert isinstance(ir.intent, IntentType)
+
+    def test_valid_intents_enum_input(self):
+        for member in IntentType:
+            ir = IntentResult(
+                intent=member,
+                confidence=0.9,
+                analyzed_entities={},
+            )
+            assert ir.intent is member
 
     def test_invalid_intent(self):
         with pytest.raises(ValidationError):

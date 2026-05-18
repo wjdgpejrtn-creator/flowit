@@ -18,6 +18,14 @@ export enum ExecutionStatus {
   FAILED = "failed",
 }
 
+export enum IntentType {
+  CLARIFY = "clarify",
+  DRAFT = "draft",
+  REFINE = "refine",
+  PROPOSE = "propose",
+  BUILD_SKILL = "build_skill",
+}
+
 export enum ErrorCode {
   E_NODE_TYPE_MISMATCH = "E_NODE_TYPE_MISMATCH",
   E_CYCLE_DETECTED = "E_CYCLE_DETECTED",
@@ -56,7 +64,7 @@ export interface DraftSpec {
 }
 
 export interface IntentResult {
-  intent: "clarify" | "draft" | "refine" | "propose" | "build_skill";
+  intent: IntentType;
   confidence: number;
   analyzed_entities: Record<string, unknown>;
 }
