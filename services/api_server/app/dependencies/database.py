@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import AsyncIterator
 
@@ -12,10 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 async def _build_iam_engine(settings: Settings) -> AsyncEngine:
-    # sub-agent 표준 패턴 ([[sub_agent_cloud_sql_iam]]) — cloud-sql-python-connector 비동기 IAM
+    # sub-agent 표준 패턴 ([[sub_agent_cloud_sql_iam]]) — cloud-sql-python-connector 비동기 IAM.
+    # async lifespan 컨텍스트에서는 Connector(loop=...) 명시가 필수 — 미명시 시 connection pool이
+    # 다른 이벤트 루프에서 getconn을 호출해 ConnectorLoopError 발생. personalization sub-agent는
+    # sync `@modal.enter()`에서 Connector를 생성해 자동 안전했음.
     from google.cloud.sql.connector import Connector, IPTypes
 
-    connector = Connector()
+    loop = asyncio.get_running_loop()
+    connector = Connector(loop=loop, refresh_strategy="lazy")
 
     async def getconn():
         return await connector.connect_async(
