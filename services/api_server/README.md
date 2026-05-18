@@ -14,7 +14,7 @@ pip install -e "services/api_server[dev]"
 ## 실행
 
 ```bash
-uvicorn src.main:create_app --factory --reload --port 8000
+uvicorn app.main:create_app --factory --reload --port 8000
 ```
 
 ## 아키텍처 역할
@@ -113,8 +113,8 @@ Downstream (이 서비스를 소비):
 ### DB 연결 — staging/prod (Cloud SQL IAM, [[sub_agent_cloud_sql_iam]] 표준)
 | 변수명 | 필수 | 설명 |
 |--------|------|------|
-| `INSTANCE_CONNECTION_NAME` | Y | `project:region:instance` (예: `wf-auto:asia-northeast3:wf-pg`) |
-| `DB_USER` | Y | IAM SA 이메일 (예: `api-server-sa@wf-auto.iam`). 비밀번호 없음 — 런타임 SA 토큰 |
+| `CLOUD_SQL_INSTANCE` | Y | `project:region:instance` (예: `wf-auto:asia-northeast3:wf-pg`). sub-agent 표준과 동일 변수명 ([[sub_agent_cloud_sql_iam]]) |
+| `DB_IAM_USER` | Y | IAM SA 이메일 (예: `api-server-sa@wf-auto.iam`). 비밀번호 없음 — 런타임 SA 토큰 |
 | `DB_NAME` | Y | DB 이름 |
 
 ### DB 연결 — 로컬 dev only (DSN fallback)
