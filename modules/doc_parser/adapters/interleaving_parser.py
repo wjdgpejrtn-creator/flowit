@@ -4,29 +4,18 @@ REQ-006 doc_parser — adapters/interleaving_parser.py
 InterleavingParser
 텍스트 파싱 + 비전 모드 인터리빙 지휘자
 
-처리 흐름:
-    BaseParser 스트림 쫘라라락
-      → TableDetector.detect(block)
-          → None        : 텍스트 그대로 ✅
-          → VisionType  : 찰칵📸 → VisionExtractor → ContentBlock
+수정 방향:
+    - DOCX는 기본적으로 XML 기반 DocxParser 결과를 신뢰한다.
+    - DOCX를 "전체 1장 찰칵" 대상으로 넣지 않는다.
+    - HWP만 full-page fallback 대상으로 유지한다.
+    - PDF/HWPX/PPTX는 감지 후 선택적으로 비전 호출한다.
+    - CSV/MD는 비전 스킵한다.
 
-포맷별 전략:
-    그룹 A (감지 후 찰칵): PDF, HWPX, PPTX
-        → 블록 스트림 흐르다가 표/이미지 감지 시 해당 페이지 찰칵
-    그룹 B (전체 찰칵):   DOCX, HWP
-        → 페이지 단위 전체 찰칵 + 텍스트 병행
-    그룹 C (3층 구조):    XLSX
-        → 기존 XlsxParser 유지 (별도 처리)
-    그룹 D (비전 스킵):   CSV, MD
-        → BaseParser 결과 그대로 반환
-
-페이지당 최대 1번 찰칵 원칙:
-    같은 페이지에서 표/그래프가 여러 개 감지되어도
-    해당 페이지는 1번만 찰칵📸 (중복 캡처 방지)
+중요:
+    DOCX는 내부적으로 고정 page 개념이 없으므로 page 기반 vision을 기본으로 쓰지 않는다.
+    DOCX에서 비전이 필요하면 별도 deep-mode 또는 image/object fallback으로 분리하는 것이 안전하다.
 """
 from __future__ import annotations
-
-from uuid import uuid4
 
 from common_schemas.document import (
     ContentBlock,
@@ -36,43 +25,34 @@ from common_schemas.document import (
 )
 
 from doc_parser.adapters.vision.table_detector import TableDetector
-from doc_parser.adapters.vision.vision_extractor import VisionExtractor
 from doc_parser.domain.entities.vision_type import VisionType
 from doc_parser.domain.ports.parser_port import ParserPort
 from doc_parser.domain.ports.vision_port import VisionPort
 
-# 비전 스킵 포맷 (그룹 D)
+
+# 비전 스킵 포맷
 _VISION_SKIP_MIME = {
     "text/csv",
     "text/markdown",
 }
 
-# 전체 페이지 찰칵 포맷 (그룹 B)
+# 전체 페이지 찰칵 포맷
+# NOTE:
+#   DOCX는 여기서 제거한다.
+#   DOCX는 python-docx XML 순회로 본문/표를 모두 긁어오는 것이 기본 전략이다.
 _FULL_PAGE_MIME = {
     "application/x-hwp",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
+
+# DOCX MIME
+_DOCX_MIME = (
+    "application/vnd.openxmlformats-officedocument"
+    ".wordprocessingml.document"
+)
 
 
 class InterleavingParser(ParserPort):
-    """텍스트 + 비전 인터리빙 파서.
-
-    ParserFactory가 BaseParser + TableDetector + VisionExtractor를
-    조립해서 반환하는 래퍼 파서.
-
-    Args:
-        base_parser: 포맷별 BaseParser (텍스트 추출 담당)
-        table_detector: 에엥? 감지 담당
-        vision_extractor: 찰칵📸 + Gemma4 담당
-
-    Example:
-        parser = InterleavingParser(
-            base_parser=HwpParser(),
-            table_detector=TableDetector(broken_char_threshold=0.3),
-            vision_extractor=VisionExtractor(llm=LLMBase()),
-        )
-        doc = parser.parse(file_path, file_meta)
-    """
+    """텍스트 + 비전 인터리빙 파서."""
 
     def __init__(
         self,
@@ -84,46 +64,38 @@ class InterleavingParser(ParserPort):
         self._table_detector = table_detector
         self._vision_extractor = vision_extractor
 
-    # ──────────────────────────────────────────
-    # ParserPort 구현
-    # ──────────────────────────────────────────
-
     def parse(
         self,
         file_path: str,
         file_meta: FileMeta,
     ) -> DocumentBlock:
-        """인터리빙 파싱 → DocumentBlock 반환.
-
-        Args:
-            file_path: 파일 경로
-            file_meta: 파일 메타데이터
-
-        Returns:
-            DocumentBlock: 텍스트 + 비전 블록이 인터리빙된 문서
-        """
+        """인터리빙 파싱 → DocumentBlock 반환."""
         mime_type = file_meta.mime_type or ""
 
-        # ── 그룹 D: 비전 스킵 ──
+        # 그룹 D: 비전 스킵
         if mime_type in _VISION_SKIP_MIME:
             return self._base_parser.parse(file_path, file_meta)
 
-        # ── 1. BaseParser로 텍스트 추출 ──
+        # 1. BaseParser로 텍스트/구조 추출
         base_doc = self._base_parser.parse(file_path, file_meta)
 
-        # ── 그룹 B: 전체 페이지 찰칵 ──
+        # DOCX:
+        #   page 기반 vision을 기본으로 붙이지 않는다.
+        #   DocxParser가 문단/표를 원문 순서대로 뽑는 것이 우선이다.
+        if mime_type == _DOCX_MIME:
+            return self._rebuild_doc(base_doc, list(base_doc.blocks), file_meta)
+
+        # HWP:
+        #   현재 HWP는 구조 파싱이 까다로우므로 full-page fallback 유지
         if mime_type in _FULL_PAGE_MIME:
             return self._parse_full_page(file_path, file_meta, base_doc)
 
-        # ── 그룹 A: 감지 후 찰칵 (인터리빙) ──
+        # PDF/HWPX/PPTX:
+        #   감지 후 선택적으로 비전 호출
         return self._parse_interleaving(file_path, file_meta, base_doc)
 
     def supports(self, mime_type: str) -> bool:
         return self._base_parser.supports(mime_type)
-
-    # ──────────────────────────────────────────
-    # Private — 그룹 A: 인터리빙
-    # ──────────────────────────────────────────
 
     def _parse_interleaving(
         self,
@@ -131,29 +103,26 @@ class InterleavingParser(ParserPort):
         file_meta: FileMeta,
         base_doc: DocumentBlock,
     ) -> DocumentBlock:
-        """블록 스트림 흐르다가 에엥? 감지 시 찰칵📸.
+        """블록 스트림 흐르다가 비전 필요 시 찰칵.
 
-        페이지당 최대 1번 찰칵 원칙 적용.
+        페이지당 최대 1회 비전 호출.
         """
         result_blocks: list[ContentBlock] = []
-        captured_pages: set[int] = set()  # 이미 찰칵한 페이지 추적
+        captured_pages: set[int] = set()
 
         for block in base_doc.blocks:
             vision_type = self._table_detector.detect(block)
 
             if vision_type is None:
-                # 정상 텍스트 → 그냥 쫘라라락
                 result_blocks.append(block)
                 continue
 
             page_num = block.page or 1
 
-            # 이미 찰칵한 페이지면 스킵 (중복 방지)
             if page_num in captured_pages:
                 result_blocks.append(block)
                 continue
 
-            # 찰칵📸
             vision_block = self._vision_extractor.extract(
                 file_path=file_path,
                 vision_type=vision_type,
@@ -164,17 +133,14 @@ class InterleavingParser(ParserPort):
             captured_pages.add(page_num)
 
             if vision_block:
-                # 비전 블록으로 교체
+                # 기존 블록을 날려버리면 원문 손실 위험이 있으므로
+                # 원문 블록 + 비전 보조 블록을 모두 보존한다.
+                result_blocks.append(block)
                 result_blocks.append(vision_block)
             else:
-                # 비전 실패 → 원본 텍스트 블록 유지 + warning
                 result_blocks.append(block)
 
         return self._rebuild_doc(base_doc, result_blocks, file_meta)
-
-    # ──────────────────────────────────────────
-    # Private — 그룹 B: 전체 페이지 찰칵
-    # ──────────────────────────────────────────
 
     def _parse_full_page(
         self,
@@ -182,15 +148,13 @@ class InterleavingParser(ParserPort):
         file_meta: FileMeta,
         base_doc: DocumentBlock,
     ) -> DocumentBlock:
-        """전체 페이지를 찰칵📸 + 텍스트 병행.
+        """전체 페이지 fallback.
 
-        DOCX/HWP 전략:
-            페이지 경계를 모르므로 전체를 1장으로 찰칵.
-            텍스트 추출 결과 + 비전 결과를 합쳐서 반환.
+        현재는 HWP 전용에 가깝게 사용한다.
+        DOCX는 이 경로로 보내지 않는다.
         """
         result_blocks: list[ContentBlock] = list(base_doc.blocks)
 
-        # 전체 문서를 1장으로 찰칵📸
         vision_block = self._vision_extractor.extract(
             file_path=file_path,
             vision_type=VisionType.FULL_PAGE,
@@ -202,10 +166,6 @@ class InterleavingParser(ParserPort):
             result_blocks.append(vision_block)
 
         return self._rebuild_doc(base_doc, result_blocks, file_meta)
-
-    # ──────────────────────────────────────────
-    # Private — DocumentBlock 재조립
-    # ──────────────────────────────────────────
 
     def _rebuild_doc(
         self,
@@ -219,7 +179,7 @@ class InterleavingParser(ParserPort):
             file_meta=file_meta,
             parser=ParserMeta(
                 parser_name=f"Interleaving({base_doc.parser.parser_name})",
-                parser_version="1.0.0",
+                parser_version="1.1.0",
             ),
             blocks=blocks,
         )

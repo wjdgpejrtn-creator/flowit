@@ -1,5 +1,5 @@
 """
-REQ-006 doc_parser — adapters/vision/vision_type.py
+REQ-006 doc_parser — domain/entities/vision_type.py
 
 VisionType
 비전 모드 감지 유형 + 프롬프트 전략
