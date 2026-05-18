@@ -50,7 +50,7 @@ Workflow_Automation/
 │       │   │   ├── validation.py           # ValidationErrorResponse, ...
 │       │   │   ├── transport.py            # SSEFrame 계열
 │       │   │   ├── handoff.py              # HandoffPayload, EvaluationResult
-│       │   │   ├── enums.py                # AgentMode, ExecutionStatus, RiskLevel, ErrorCode
+│       │   │   ├── enums.py                # AgentMode, ExecutionStatus, RiskLevel, ErrorCode, IntentType
 │       │   │   └── exceptions.py           # DomainError 계층
 │       │   └── pyproject.toml
 │       ├── typescript/

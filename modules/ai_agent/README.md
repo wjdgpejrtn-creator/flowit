@@ -35,7 +35,7 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 |--------|-------------|------|
 | `AgentState` | `common_schemas.agent` | LangGraph StateGraph state 타입 (`personal_memory: list[MemoryEntry]` 포함) |
 | `DraftSpec` | `common_schemas.agent` | Consultant 초안 사양 |
-| `IntentResult` | `common_schemas.agent` | IntentAnalyzerService 출력 (intent ∈ {clarify, draft, refine, propose, build_skill}) |
+| `IntentResult` | `common_schemas.agent` | IntentAnalyzerService 출력. `intent: IntentType` (clarify/draft/refine/propose/build_skill — `from common_schemas import IntentType`) |
 | `SlotFillingState` | `common_schemas.agent` | 슬롯 채움 상태 |
 | `MemoryEntry` | `common_schemas.agent` | Orchestrator ↔ sub-agent payload + RDB SSOT (Sprint 3 §2.4 이관) |
 | `AgentProtocolRequest` / `AgentProtocolResponse` | `common_schemas.agent_protocol` | Inter-agent HTTP 통신 계약 |
