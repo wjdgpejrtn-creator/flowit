@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 from langgraph.graph import END, StateGraph
 
 from common_schemas.agent import DraftSpec, MemoryEntry, SlotFillingState
-from common_schemas.enums import ExecutionStatus
+from common_schemas.enums import ExecutionStatus, IntentType
 from common_schemas.handoff import HandoffPayload
 from common_schemas.transport import (
     AgentNodeFrame,
@@ -291,10 +291,10 @@ class LangGraphOrchestrator:
 
     @staticmethod
     def _route_intent(state: _State) -> str:
-        intent = state.get("intent") or "clarify"
-        if intent == "propose":
+        intent = state.get("intent") or IntentType.CLARIFY
+        if intent == IntentType.PROPOSE:
             return _PROPOSE
-        if intent == "clarify":
+        if intent == IntentType.CLARIFY:
             return _CLARIFY
         return _DRAFT  # draft / refine
 

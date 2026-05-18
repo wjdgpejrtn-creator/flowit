@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from common_schemas import IntentResult
+from common_schemas.enums import IntentType
 from common_schemas.exceptions import ExecutionError
 
 from ..ports.llm_port import LLMPort
@@ -50,7 +51,7 @@ class IntentAnalyzerService:
         try:
             data = json.loads(response)
             return IntentResult(
-                intent=data["intent"],
+                intent=IntentType(data["intent"]),
                 confidence=float(data["confidence"]),
                 analyzed_entities=data.get("analyzed_entities", {}),
             )

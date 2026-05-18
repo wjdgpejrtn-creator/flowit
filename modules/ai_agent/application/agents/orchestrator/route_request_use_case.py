@@ -13,12 +13,15 @@
 """
 from __future__ import annotations
 
+import logging
 from typing import AsyncGenerator, AsyncIterator
 from uuid import UUID, uuid4
 
+logger = logging.getLogger(__name__)
+
 from common_schemas.agent import AgentState, MemoryEntry
 from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
-from common_schemas.enums import AgentMode, ExecutionStatus
+from common_schemas.enums import AgentMode, ExecutionStatus, IntentType
 from common_schemas.transport import (
     AgentNodeFrame,
     ErrorFrame,
@@ -93,7 +96,7 @@ class RouteRequestUseCase:
             # 3. routable state
             mode = (
                 AgentMode.SKILL_BUILDER
-                if intent.intent == "build_skill"
+                if intent.intent == IntentType.BUILD_SKILL
                 else AgentMode.WIZARD
             )
             state = AgentState(
@@ -108,14 +111,14 @@ class RouteRequestUseCase:
             )
 
             # 4. route
-            if intent.intent in ("draft", "refine", "clarify"):
+            if intent.intent in (IntentType.DRAFT, IntentType.REFINE, IntentType.CLARIFY):
                 yield AgentNodeFrame(agent_node_name="composer_node")
                 async for frame in self._relay(
                     self._composer, state, {"message": message}, trace_id
                 ):
                     yield frame
 
-            elif intent.intent == "build_skill":
+            elif intent.intent == IntentType.BUILD_SKILL:
                 yield AgentNodeFrame(agent_node_name="skills_node")
                 skill_payload = self._build_skill_payload(intent.analyzed_entities, message, user_id)
                 async for frame in self._relay(
@@ -123,15 +126,15 @@ class RouteRequestUseCase:
                 ):
                     yield frame
 
-            elif intent.intent == "propose":
+            elif intent.intent == IntentType.PROPOSE:
                 yield AgentNodeFrame(agent_node_name="finalize_node")
                 yield ResultFrame(
-                    intent="propose",
+                    intent=IntentType.PROPOSE,
                     payload={"session_id": str(session_id), "status": "accepted"},
                 )
 
             # 5. update_memory_node — propose는 메모리 저장 불필요
-            if intent.intent in ("draft", "refine", "clarify", "build_skill"):
+            if intent.intent in (IntentType.DRAFT, IntentType.REFINE, IntentType.CLARIFY, IntentType.BUILD_SKILL):
                 yield AgentNodeFrame(agent_node_name="update_memory_node")
                 await self._update_personal_memory(state, turn_count, trace_id)
 
@@ -200,8 +203,8 @@ class RouteRequestUseCase:
             async for resp in self._personalization.send(req):
                 if resp.next_action != "continue":
                     break
-        except Exception:
-            pass  # cleanup은 non-fatal
+        except Exception as exc:
+            logger.warning("cleanup_personal_memory 실패 (non-fatal) trace_id=%s: %s", trace_id, exc)
 
     def _build_skill_payload(
         self,
@@ -216,6 +219,7 @@ class RouteRequestUseCase:
         elif source_type == "functional_domain":
             payload["domain_code"] = entities.get("domain_code", "")
         else:  # sop
+            # TODO: doc_parser 연동 후 document_id/block_id는 파서가 발급한 값으로 교체
             payload["document"] = {
                 "document_id": str(uuid4()),
                 "user_id": str(user_id),
@@ -227,7 +231,7 @@ class RouteRequestUseCase:
                 },
                 "blocks": [
                     {
-                        "block_id": str(uuid4()),
+                        "block_id": str(uuid4()),  # TODO: doc_parser stub
                         "block_type": "text",
                         "content": message,
                     }
