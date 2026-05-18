@@ -11,9 +11,11 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, alias="API_PORT")
     cors_origins: str = Field(default="", alias="CORS_ORIGINS")
 
-    redis_url: str = Field(alias="REDIS_URL")
+    # REQ-011 infra 미구축 단계에서는 Optional — Phase F(Celery)에서 필수가 됨
+    redis_url: str | None = Field(default=None, alias="REDIS_URL")
 
-    orchestrator_url: str = Field(alias="ORCHESTRATOR_URL")
+    # Phase E에서 필수가 됨. 미구축 단계에서는 health가 "skipped" 응답
+    orchestrator_url: str | None = Field(default=None, alias="ORCHESTRATOR_URL")
     orchestrator_timeout_s: float = Field(default=60.0, alias="ORCHESTRATOR_TIMEOUT_S")
 
     cloud_sql_instance: str | None = Field(default=None, alias="CLOUD_SQL_INSTANCE")

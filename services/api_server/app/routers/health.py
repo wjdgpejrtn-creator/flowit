@@ -26,7 +26,9 @@ async def _check_db(session: AsyncSession) -> str:
         return f"fail:{exc.__class__.__name__}"
 
 
-async def _check_redis(redis_client: aioredis.Redis) -> str:
+async def _check_redis(redis_client: aioredis.Redis | None) -> str:
+    if redis_client is None:
+        return "skipped"
     try:
         await asyncio.wait_for(redis_client.ping(), timeout=2.0)
         return "ok"
@@ -35,7 +37,9 @@ async def _check_redis(redis_client: aioredis.Redis) -> str:
         return f"fail:{exc.__class__.__name__}"
 
 
-async def _check_orchestrator(client: httpx.AsyncClient) -> str:
+async def _check_orchestrator(client: httpx.AsyncClient | None) -> str:
+    if client is None:
+        return "skipped"
     try:
         resp = await client.get("/v1/health", timeout=2.0)
         if resp.status_code < 500:
@@ -50,15 +54,15 @@ async def _check_orchestrator(client: httpx.AsyncClient) -> str:
 async def health(
     request: Request,
     session: AsyncSession = Depends(get_db),
-    redis_client: aioredis.Redis = Depends(get_redis),
-    orchestrator: httpx.AsyncClient = Depends(get_orchestrator_http),
+    redis_client: aioredis.Redis | None = Depends(get_redis),
+    orchestrator: httpx.AsyncClient | None = Depends(get_orchestrator_http),
 ) -> dict[str, str]:
     db_status, redis_status, orch_status = await asyncio.gather(
         _check_db(session),
         _check_redis(redis_client),
         _check_orchestrator(orchestrator),
     )
-    overall = "ok" if all(s == "ok" for s in (db_status, redis_status, orch_status)) else "degraded"
+    overall = "ok" if all(s in ("ok", "skipped") for s in (db_status, redis_status, orch_status)) else "degraded"
     return {
         "status": overall,
         "db": db_status,
