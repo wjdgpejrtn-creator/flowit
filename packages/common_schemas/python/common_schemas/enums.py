@@ -1,6 +1,14 @@
 from enum import Enum
 
 
+class IntentType(str, Enum):
+    CLARIFY = "clarify"
+    DRAFT = "draft"
+    REFINE = "refine"
+    PROPOSE = "propose"
+    BUILD_SKILL = "build_skill"
+
+
 class AgentMode(str, Enum):
     ONBOARDING = "onboarding"
     WIZARD = "wizard"

@@ -10,7 +10,7 @@ from .document import (
     SheetMeta,
     SourceRef,
 )
-from .enums import AgentMode, ErrorCode, ExecutionStatus, RiskLevel
+from .enums import AgentMode, ErrorCode, ExecutionStatus, IntentType, RiskLevel
 from .exceptions import (
     AuthorizationError,
     DomainError,
@@ -40,6 +40,7 @@ __all__ = [
     "AgentMode",
     "ErrorCode",
     "ExecutionStatus",
+    "IntentType",
     "RiskLevel",
     # exceptions
     "AuthorizationError",
