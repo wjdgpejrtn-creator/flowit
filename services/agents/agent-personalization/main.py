@@ -41,7 +41,6 @@ image = (
     .add_local_dir("modules/ai_agent", remote_path="/pkg/ai_agent", copy=True)
     .run_commands(
         "pip install -e /pkg/common_schemas",
-        "pip install -e /pkg/auth",
         "pip install -e /pkg/nodes_graph",
         "pip install -e /pkg/storage",
         "pip install -e /pkg/ai_agent",
@@ -184,6 +183,7 @@ class PersonalizationAgent:
 
         @api.get("/v1/health")
         async def health() -> dict[str, object]:
+            import asyncio
             from sqlalchemy import text
 
             try:
@@ -193,10 +193,24 @@ class PersonalizationAgent:
             except Exception as exc:
                 db_ok, db_err = False, repr(exc)
 
+            try:
+                from google.cloud import storage as gcs
+                bucket_name = os.environ.get("GCS_PERSONAL_BUCKET", "")
+                client = gcs.Client()
+                bucket = client.bucket(bucket_name)
+                await asyncio.to_thread(bucket.reload)
+                gcs_ok, gcs_err = True, None
+            except Exception as exc:
+                gcs_ok, gcs_err = False, repr(exc)
+
+            errors: dict[str, object] = {}
             if not db_ok:
-                raise HTTPException(
-                    status_code=503, detail={"db": {"ok": False, "error": db_err}}
-                )
-            return {"status": "ok", "db": "iam-connected"}
+                errors["db"] = {"ok": False, "error": db_err}
+            if not gcs_ok:
+                errors["gcs"] = {"ok": False, "error": gcs_err}
+
+            if errors:
+                raise HTTPException(status_code=503, detail=errors)
+            return {"status": "ok", "db": "iam-connected", "gcs": bucket_name}
 
         return api
