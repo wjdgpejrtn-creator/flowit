@@ -19,11 +19,12 @@ router = APIRouter(tags=["health"])
 
 async def _check_db(session: AsyncSession) -> str:
     try:
-        await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=2.0)
+        await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=5.0)
         return "ok"
     except Exception as exc:
-        logger.warning("health: db failed: %s", exc)
-        return f"fail:{exc.__class__.__name__}"
+        logger.exception("health: db failed")
+        msg = str(exc) or repr(exc)
+        return f"fail:{exc.__class__.__name__}: {msg[:200]}"
 
 
 async def _check_redis(redis_client: aioredis.Redis | None) -> str:
