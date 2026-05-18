@@ -98,7 +98,8 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
                     ON CONFLICT (execution_id, node_instance_id) DO UPDATE SET
                         status = EXCLUDED.status,
                         attempt = EXCLUDED.attempt,
-                        last_error = EXCLUDED.last_error
+                        last_error = EXCLUDED.last_error,
+                        updated_at = NOW()
                 """),
                 {
                     "execution_id": str(execution_id),
