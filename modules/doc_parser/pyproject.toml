@@ -27,6 +27,8 @@ dependencies = [
     "lxml>=5.0",
     # Markdown
     "markdown-it-py>=3.0",
+    # Modal (Gemma4 원격 호출)
+    "modal>=0.73",
 ]
 
 [project.optional-dependencies]
