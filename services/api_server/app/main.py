@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import Settings
 from app.dependencies.auth import get_jwt_adapter, get_permission_resolver
+from app.dependencies.celery_client import init_celery
 from app.dependencies.clients import (
     dispose_orchestrator_http,
     dispose_redis,
@@ -20,6 +21,7 @@ from app.middleware.cors import install_cors
 from app.middleware.error_handler import install_error_handlers
 from app.middleware.request_id import RequestIdMiddleware
 from app.routers import auth as auth_router
+from app.routers import exec_control as exec_control_router
 from app.routers import health
 from app.routers import nodes as nodes_router
 from app.routers import workflows as workflows_router
@@ -37,6 +39,7 @@ async def _lifespan(app: FastAPI):
 
     app.state.redis = await init_redis(settings)
     app.state.orchestrator_http = init_orchestrator_http(settings)
+    app.state.celery = init_celery(settings)
 
     logger.info("api_server lifespan: ready")
     try:
@@ -75,4 +78,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router.router)
     app.include_router(nodes_router.router)
     app.include_router(workflows_router.router)
+    app.include_router(exec_control_router.router)
     return app
