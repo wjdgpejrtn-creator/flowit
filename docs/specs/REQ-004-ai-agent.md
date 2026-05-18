@@ -305,11 +305,15 @@ gs://workflow-automation-personal/users/{user_id}/
 name: {{memory name}}
 description: {{one-line, used for relevance ranking}}
 type: {{user|feedback|project|reference}}
+updated_at: 2026-05-15T12:00:00+00:00   # UTC ISO-8601
+embedding: [0.1, 0.2, ...]               # BGE-M3 768d (optional; P-2 이후 .emb.json으로 분리 예정)
 ---
 {{body}}
 ```
 
 `RecallPersonalSkillsUseCase`는 query 임베딩과 각 entry의 description 임베딩 코사인 유사도로 top-k 반환.
+
+`GCSMemoryStore`는 세션 스코프 내 중복 GCS 호출을 방지하기 위해 `_cache: dict[UUID, list[PersonalSkill]]` 인메모리 캐시를 유지한다. 첫 `list_entries()` 호출 시 캐시를 채우고, `save_entry()` 시 캐시를 갱신한다 (2026-05-15 구현 완료).
 
 ---
 
@@ -508,3 +512,4 @@ modules/ai_agent/
 | 2026-05-11 | Sprint 3 멀티 에이전트 구조 전환 — Main Orchestrator + 3 Sub-Agent, PersonalMemoryStore 신규, GCS 어댑터, inter-agent HTTP 계약. (당시 EmbeddingPort 신규 명시했으나 2026-05-12 박아름 결정으로 nodes_graph `EmbedderPort`로 통합, 예외 패턴) | 황대원 |
 | 2026-05-12 | **EmbedderPort SSOT 결정** — ai_agent에 별도 `EmbeddingPort` 신설 폐기, nodes_graph 소유 `EmbedderPort` 1개로 통합. 구현체만 ai_agent (`adapters/llm/modal_embedding_adapter.py`)가 소유하는 예외 패턴. 이유: 의존성 역전 위반 회피 — `nodes_graph → ai_agent` 의존 차단. 조장 후속 확인 (PR #54 embedder_port shim revert 요청) | 박아름 |
 | 2026-05-12 | common_schemas Sprint 3 신규 타입 구현 — `agent_protocol.py`(AgentProtocolRequest/Response), `MemoryEntry` SSOT 이관, `AgentMode.SKILL_BUILDER`, `IntentResult.intent="build_skill"`, `AgentState.personal_memory`. PR: `feature/req-012-agent-protocol`. | 황대원 |
+| 2026-05-15 | **Personalization 저장 구조 개선** — ① GCSMemoryStore Session Cache (`_cache: dict[UUID, list[PersonalSkill]]`) 구현 완료: 세션 내 GCS 중복 호출 제거, `save_entry()` 시 캐시 갱신. ② Content Hash Dedupe 제거: 중복 저장 방지 목적의 hash 비교 로직을 단순화 (Debounce P-4a로 대체 예정). ③ EmbeddingPort SSOT 이관: `ai_agent/domain/ports/embedding_port.py` 폐기, `nodes_graph.domain.ports.EmbedderPort` 사용으로 통일. | 이가원 |

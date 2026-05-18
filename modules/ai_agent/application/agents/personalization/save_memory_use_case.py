@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from ....domain.entities.memory_entry import MemoryEntry
+from common_schemas import MemoryEntry
+
 from ....domain.ports.agent_memory_repository import AgentMemoryRepository
 
 
