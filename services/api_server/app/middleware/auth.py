@@ -10,4 +10,10 @@ class AuthMiddleware(_BaseAuthMiddleware):
     base는 `/healthz`만 허용하므로 service-local subclass로 확장한다.
     """
 
-    _PUBLIC_PATHS = _BaseAuthMiddleware._PUBLIC_PATHS | {"/health", "/api/docs", "/api/v1/openapi.json"}
+    _PUBLIC_PATHS = _BaseAuthMiddleware._PUBLIC_PATHS | {
+        "/health",
+        "/api/docs",
+        "/api/v1/openapi.json",
+        "/api/v1/auth/authorize",
+        "/api/v1/auth/refresh",  # refresh token으로 새 access 발급 — Bearer 없이도 허용
+    }

@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import Settings
+from app.dependencies.auth import get_jwt_adapter, get_permission_resolver
 from app.dependencies.clients import (
     dispose_orchestrator_http,
     dispose_redis,
@@ -14,9 +15,11 @@ from app.dependencies.clients import (
     init_redis,
 )
 from app.dependencies.database import dispose_db_engine, init_db_engine
+from app.middleware.auth import AuthMiddleware
 from app.middleware.cors import install_cors
 from app.middleware.error_handler import install_error_handlers
 from app.middleware.request_id import RequestIdMiddleware
+from app.routers import auth as auth_router
 from app.routers import health
 
 logger = logging.getLogger(__name__)
@@ -58,9 +61,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Middleware (등록 역순으로 실행됨 — 위쪽이 outermost)
     install_cors(app, settings)
     app.add_middleware(RequestIdMiddleware)
-    # AuthMiddleware는 Phase B에서 등록 (PermissionResolver/JWTAdapter DI 완성 후)
+    app.add_middleware(
+        AuthMiddleware,
+        jwt_adapter=get_jwt_adapter(),
+        permission_resolver=get_permission_resolver(),
+    )
 
     install_error_handlers(app)
 
     app.include_router(health.router)
+    app.include_router(auth_router.router)
     return app
