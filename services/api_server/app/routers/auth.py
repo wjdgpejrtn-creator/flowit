@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from auth.adapters.oauth.google_oauth_client import GoogleOAuthClient
@@ -52,6 +52,22 @@ async def login(
         return await use_case.execute(req.code)
     except Exception as exc:
         # Google OAuth 실패(invalid code) 등은 401로 표면화
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {exc}") from exc
+
+
+@router.get("/callback", response_model=TokenPair)
+async def callback(
+    code: str = Query(..., description="Google OAuth authorization code"),
+    state: str | None = Query(None, description="CSRF state (authorize에서 발급)"),
+    use_case: AuthenticateUseCase = Depends(get_authenticate_use_case),
+) -> TokenPair:
+    """Google OAuth redirect_uri 수신 endpoint. dev/staging에서 브라우저로 직접 호출하여
+    JSON으로 access/refresh 토큰을 표시. 프로덕션에서는 프론트엔드가 받아서 cookie/storage에
+    저장 후 워크플로 페이지로 redirect하는 것이 일반적.
+    """
+    try:
+        return await use_case.execute(code)
+    except Exception as exc:
         raise HTTPException(status_code=401, detail=f"Authentication failed: {exc}") from exc
 
 

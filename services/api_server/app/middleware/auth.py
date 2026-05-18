@@ -15,5 +15,6 @@ class AuthMiddleware(_BaseAuthMiddleware):
         "/api/docs",
         "/api/v1/openapi.json",
         "/api/v1/auth/authorize",
+        "/api/v1/auth/callback",  # Google OAuth redirect_uri 수신
         "/api/v1/auth/refresh",  # refresh token으로 새 access 발급 — Bearer 없이도 허용
     }
