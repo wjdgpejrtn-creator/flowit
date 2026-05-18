@@ -5,6 +5,7 @@ Actions (payload["action"]):
   update_memory  — UpdateUserMemoryUseCase (LLM 패턴 추출 → GCS 저장)
   recall_skills  — RecallPersonalSkillsUseCase (BGE-M3 코사인 유사도 top-k)
   save_memory    — SaveMemoryUseCase (RDB AgentMemoryRepository)
+  cleanup_memory — GCSMemoryStore 인메모리 캐시 정리 (세션 종료 시)
 
 Deploy:
     PYTHONUTF8=1 modal deploy services/agents/agent-personalization/main.py
@@ -177,6 +178,10 @@ class PersonalizationAgent:
                     await SaveMemoryUseCase(PgAgentMemoryRepository(session)).execute(
                         req.session_id, entries
                     )
+                return AgentProtocolResponse(frames=[], state_delta={}, next_action="complete")
+
+            if action == "cleanup_memory":
+                await self._memory_store.cleanup(req.user_id)
                 return AgentProtocolResponse(frames=[], state_delta={}, next_action="complete")
 
             raise HTTPException(status_code=400, detail=f"Unknown action: {action!r}")
