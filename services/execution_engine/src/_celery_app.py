@@ -24,6 +24,8 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_routes={
         "execution_engine.execute_workflow": {"queue": "default"},
+        "execution_engine.cancel_execution": {"queue": "default"},
+        "execution_engine.resume_execution": {"queue": "default"},
         "execution_engine.execute_node": {"queue": "default"},
         "execution_engine.handle_handoff": {"queue": "default"},
         "execution_engine.level_callback": {"queue": "default"},

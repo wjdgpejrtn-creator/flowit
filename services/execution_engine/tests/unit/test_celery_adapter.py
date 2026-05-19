@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
-
-from src.adapters.celery_adapter import CeleryAdapter, QUEUE_ROUTING
+from src.adapters.celery_adapter import (
+    EXECUTE_WORKFLOW_TASK_NAME,
+    CeleryAdapter,
+)
 
 
 @pytest.fixture
@@ -62,6 +65,58 @@ class TestDispatchChord:
 
             assert result == "chord-456"
             assert mock_app.signature.call_count == 3  # 2 tasks + 1 callback
+
+
+class TestDispatchWorkflow:
+    def test_dispatch_workflow_sends_correct_task_name(self, adapter, mock_app):
+        exec_id, wf_id, user_id = uuid4(), uuid4(), uuid4()
+
+        task_id = adapter.dispatch_workflow(
+            execution_id=exec_id,
+            workflow_id=wf_id,
+            user_id=user_id,
+            trigger_type="resume",
+            parameters={"foo": "bar"},
+        )
+
+        assert task_id == "task-123"
+        mock_app.send_task.assert_called_once()
+        call = mock_app.send_task.call_args
+        assert call.args[0] == EXECUTE_WORKFLOW_TASK_NAME
+        args_list = call.kwargs["args"]
+        ctx = args_list[1]
+        assert args_list[0] == str(wf_id)
+        assert ctx["execution_id"] == str(exec_id)
+        assert ctx["workflow_id"] == str(wf_id)
+        assert ctx["user_id"] == str(user_id)
+        assert ctx["trigger_type"] == "resume"
+        assert ctx["parameters"] == {"foo": "bar"}
+        assert call.kwargs["queue"] == "default"
+
+    def test_dispatch_workflow_handles_null_user(self, adapter, mock_app):
+        adapter.dispatch_workflow(
+            execution_id=uuid4(),
+            workflow_id=uuid4(),
+            user_id=None,
+            trigger_type="manual",
+        )
+        ctx = mock_app.send_task.call_args.kwargs["args"][1]
+        assert ctx["user_id"] is None
+        assert ctx["parameters"] == {}
+
+
+class TestRevoke:
+    def test_revoke_calls_app_control_revoke(self, adapter, mock_app):
+        adapter.revoke("celery-task-abc")
+        mock_app.control.revoke.assert_called_once_with(
+            "celery-task-abc", terminate=True, signal="SIGTERM",
+        )
+
+    def test_revoke_without_terminate(self, adapter, mock_app):
+        adapter.revoke("celery-task-def", terminate=False)
+        mock_app.control.revoke.assert_called_once_with(
+            "celery-task-def", terminate=False, signal="SIGTERM",
+        )
 
 
 class TestResolveQueue:

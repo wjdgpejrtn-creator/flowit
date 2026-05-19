@@ -8,6 +8,7 @@ from .session_model import SessionModel
 from .skill_model import SkillModel, SkillPromotionLogModel, SkillStatsModel
 from .storage_object_model import StorageObjectModel
 from .tool_execution_model import ToolExecutionModel
+from .user_model import UserModel
 from .workflow_model import WorkflowModel
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "SkillStatsModel",
     "StorageObjectModel",
     "ToolExecutionModel",
+    "UserModel",
     "WorkflowModel",
 ]

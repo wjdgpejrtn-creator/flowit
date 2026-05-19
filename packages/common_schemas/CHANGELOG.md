@@ -7,6 +7,77 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.6.1] - 2026-05-19
+
+### Added — ExecutionStatus enum 멤버 2종 (PR-A, REQ-007 cancel/resume 실 구현 동반)
+- `ExecutionStatus.PENDING` (값 `"pending"`) — 신규 execution insert 직후 task pickup 전 상태. DB CheckConstraint `ck_executions_status`는 이미 `pending` 허용 — enum과 DB 정합 회복.
+- `ExecutionStatus.CANCELLED` (값 `"cancelled"`) — `/executions/{id}/cancel` 후 Celery `revoke` + 마킹. DB CheckConstraint `cancelled` 허용과 정합.
+
+### Changed
+- `ExecutionStatus` 멤버 수 4 → 6. `test_enums.py` 갱신.
+- DB CheckConstraint와 enum 사이 사각지대 해소 (이전: DB는 6종 허용 / enum은 4종 노출).
+- `enums.py`에 동일 이름으로 두 번 정의돼 있던 `IntentType` 중복 정의 제거 (Python에서는 후위 정의가 덮어쓰는 형태였어 동작상 차이는 없었음). 결과적으로 첫 위치 1건이 제거되고 끝부분 1건만 잔존 — 멤버/값 동일하여 외부 영향 없음.
+
+### Symbols
+- 56 → 56 (enum 멤버 추가만, 신규 symbol 없음)
+
+### Migration notes
+- 기존 코드 무영향 (멤버 추가만).
+- `ExecutionOrchestrator.VALID_TRANSITIONS` 확장 동반 (services/execution_engine 측 동일 PR) — `PENDING → RUNNING`, `{RUNNING, PAUSED} → CANCELLED` 전환 허용.
+- 사용 예시:
+  ```python
+  from common_schemas import ExecutionStatus
+  if exec.status in {ExecutionStatus.RUNNING, ExecutionStatus.PAUSED}:
+      ...  # cancellable
+  ```
+
+## [0.6.0] - 2026-05-19
+
+### Added — SSE 모니터링 프레임 4종 (PR #74, 신정혜 + 황대원 common_schemas 보강)
+- `transport.sse.PipelineStatusFrame` — 생성 파이프라인 각 서비스 진행 상태 (`service_name`, `status: Literal["started","completed","failed"]`, `elapsed_ms`). 오른쪽 사이드바 실시간 표시용.
+- `transport.sse.IntentResultFrame` — 의도 분석 결과 (`intent`, `entities`). 오른쪽 사이드바 표시용.
+- `transport.sse.QAMetricFrame` — QA 평가 결과 (`score`, `attempt`, `pass_flag`, `feedback`). 오른쪽 사이드바 표시용.
+- `transport.sse.WorkflowDraftFrame` — 워크플로우 초안 (`nodes`, `connections`). 가운데 캔버스 실시간 시각화용.
+- `AnySSEFrame` discriminated union에 4종 Tag 추가 (`pipeline_status`/`intent_result`/`qa_metric`/`workflow_draft`).
+
+### Changed
+- `common_schemas.__init__` + `transport/__init__.py`에 4종 re-export 추가.
+- TypeScript codegen: 4개 인터페이스 자동 생성 (`generated/index.ts`).
+
+### Symbols
+- 52 → 56 (+4: `PipelineStatusFrame`, `IntentResultFrame`, `QAMetricFrame`, `WorkflowDraftFrame`)
+
+### Migration notes
+- 추가만 있는 변경 — 기존 코드 무영향.
+- 신규 사용 패턴 (composer_graph 각 노드에서 emit, supervisor가 Queue로 relay):
+  ```python
+  from common_schemas import PipelineStatusFrame, IntentResultFrame, QAMetricFrame, WorkflowDraftFrame
+  ```
+
+## [0.5.0] - 2026-05-19
+
+### Added — ADR-0015 §D4 LLM tool-use transport SSOT
+- `transport/llm.py` 신설 — `Message`, `ToolCall`, `LLMResponse` 3개 Pydantic 모델. ADR-0015 호출 경로 B (LLM tool-use) 인프라의 기반 타입. `LLMPort.generate(messages: list[Message], tools=...) -> LLMResponse` 시그니처가 본 타입을 사용 (F2 신정혜 PR-A 의존).
+- `Message`: `role: Literal["system","user","assistant","tool"], content: str, tool_call_id: str|None, name: str|None`
+- `ToolCall`: `id: str, name: str, arguments: dict[str, Any]` — LLM이 요청한 도구 호출 직렬화
+- `LLMResponse`: `content: str|None, tool_calls: list[ToolCall], finish_reason: Literal["stop","tool_calls","length"]`
+- 신규 테스트 `test_transport_llm.py` — Message 3건 + ToolCall 2건 + LLMResponse 3건 (총 8건)
+
+### Changed — transport 모듈 구조
+- `transport.py` (71줄 단일 파일) → `transport/` 디렉토리로 마이그레이션
+  - `transport/sse.py` — 기존 SSE 프레임 7개 + `AnySSEFrame` discriminated union (내용 변경 없음)
+  - `transport/llm.py` — 신규 LLM tool-use 타입 (위)
+  - `transport/__init__.py` — 둘 다 re-export
+- **외부 import 호환성 유지**: `from common_schemas.transport import SSEFrame` / `from common_schemas import SSEFrame` 모두 그대로 동작. 변경 사항 0.
+
+### Symbols
+- 49 → 52 (+3: `LLMResponse`, `Message`, `ToolCall`)
+
+### Migration notes
+- 기존 `from common_schemas.transport import SSEFrame` (또는 다른 SSE 프레임) 무영향.
+- 신규 코드 권장 패턴: `from common_schemas import LLMResponse, Message, ToolCall` (또는 `from common_schemas.transport import ...`).
+- `transport.py` 파일은 삭제되었으나 `transport/__init__.py`가 동일 symbol을 re-export하므로 import 경로 변경 불필요.
+
 ## [0.4.0] - 2026-05-18
 
 ### Added

@@ -9,12 +9,14 @@ from ..orm.execution_model import ExecutionModel
 
 
 @dataclass
-class ExecutionResult:
-    """스펙 기반 임시 정의 — services/execution_engine/src/domain/entities/
-    execution_result.py에 정식 entity 있으나 services→modules 의존 방향
-    위반이라 import 못함. SSOT 통합은 별도 PR(common_schemas 이전 또는
-    Port-Adapter 재설계)로 처리. 본 임시 dataclass는 정식 entity와 필드
-    구성 일치 유지."""
+class ExecutionRow:
+    """Transfer-object row dataclass — modules/storage 전용.
+
+    services/execution_engine/src/domain/entities/execution_result.py의 정식
+    `ExecutionResult` Pydantic 엔티티와 필드 구성을 일치시키되, services→modules
+    의존 방향 위반을 피하기 위해 storage 내부 dataclass로 보유. 이름은 의도적으로
+    분리 (`ExecutionRow` ≠ 도메인 `ExecutionResult`) — grep 추적성 + 향후 표류
+    방지. SSOT 통합(common_schemas 이전 or Port-Adapter 재설계)은 별도 PR."""
 
     execution_id: UUID
     workflow_id: UUID
@@ -24,12 +26,13 @@ class ExecutionResult:
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
+    task_queue_id: Optional[str] = None
 
 
 class ExecutionMapper:
     @staticmethod
-    def to_domain(orm: ExecutionModel) -> ExecutionResult:
-        return ExecutionResult(
+    def to_domain(orm: ExecutionModel) -> ExecutionRow:
+        return ExecutionRow(
             execution_id=orm.execution_id,
             workflow_id=orm.workflow_id,
             user_id=orm.user_id,  # ORM은 NOT NULL, dataclass는 Optional
@@ -38,15 +41,16 @@ class ExecutionMapper:
             started_at=orm.started_at,
             completed_at=orm.completed_at,
             error=orm.error,
+            task_queue_id=orm.task_queue_id,
         )
 
     @staticmethod
-    def to_orm(entity: ExecutionResult) -> ExecutionModel:
+    def to_orm(entity: ExecutionRow) -> ExecutionModel:
         if entity.user_id is None:
             raise ValueError(
-                "ExecutionResult.user_id is required for DB persistence "
-                "(executions.user_id NOT NULL). Set user_id in the use case "
-                "before calling Repository.save()."
+                "ExecutionRow.user_id is required for DB persistence "
+                "(executions.user_id NOT NULL). Set user_id before calling "
+                "Repository.save()."
             )
         return ExecutionModel(
             execution_id=entity.execution_id,
@@ -57,4 +61,5 @@ class ExecutionMapper:
             started_at=entity.started_at,
             completed_at=entity.completed_at,
             error=entity.error,
+            task_queue_id=entity.task_queue_id,
         )

@@ -242,9 +242,17 @@ class CredentialInjectionService:
 
 | Input | Output | 설명 |
 |-------|--------|------|
-| OAuth authorization code, redirect_uri | `TokenPair` | Google OAuth 코드 교환 → 세션 생성 → JWT 발급 |
+| OAuth authorization code, redirect_uri | `TokenPair` | Google OAuth 코드 교환 → **users 테이블 JIT auto-provisioning (없으면 INSERT)** → 세션 생성 → JWT 발급 |
 
-의존성: `SessionRepository`, `OAuthConnectionRepository`, `CipherPort`, 외부 Google OAuth 클라이언트
+의존성: `SessionRepository`, `OAuthConnectionRepository`, `UserRepository`, `CipherPort`, 외부 Google OAuth 클라이언트
+
+JIT auto-provisioning 동작:
+1. `user_id = uuid5(NAMESPACE_DNS, google_sub)` (결정적 UUID 파생)
+2. `user_repo.find_by_id(user_id)` 조회 — `None`이면 `user_repo.create(user_id, email, name, role="User", department_id=None)` 호출
+3. `name`이 `user_info`에 없으면 email local-part로 fallback
+4. 기존 user 발견 시 재생성 안 함 (created_at 보존)
+
+후속 확장 (별도 PR): 이메일/이름 동기화 update, Workspace 도메인 검증 (`hd` 클레임), Admin 승인 워크플로 (`role="Pending"`)
 
 ---
 

@@ -25,11 +25,18 @@ from .transport import (
     AnySSEFrame,
     DraftSpecDeltaFrame,
     ErrorFrame,
+    IntentResultFrame,
+    LLMResponse,
+    Message,
+    PipelineStatusFrame,
+    QAMetricFrame,
     RationaleDeltaFrame,
     ResultFrame,
     SessionFrame,
     SlotFillQuestionFrame,
     SSEFrame,
+    ToolCall,
+    WorkflowDraftFrame,
 )
 from .types import UtcDatetime
 from .validation import ValidationErrorItem, ValidationErrorResponse
@@ -75,7 +82,7 @@ __all__ = [
     # agent_protocol (inter-agent HTTP contract)
     "AgentProtocolRequest",
     "AgentProtocolResponse",
-    # transport
+    # transport — SSE frames
     "AgentNodeFrame",
     "AnySSEFrame",
     "DraftSpecDeltaFrame",
@@ -85,6 +92,15 @@ __all__ = [
     "SSEFrame",
     "SessionFrame",
     "SlotFillQuestionFrame",
+    # transport — SSE monitoring frames (PR #74, 사이드바 + 캔버스 실시간)
+    "IntentResultFrame",
+    "PipelineStatusFrame",
+    "QAMetricFrame",
+    "WorkflowDraftFrame",
+    # transport — LLM tool-use (ADR-0015 §D4)
+    "LLMResponse",
+    "Message",
+    "ToolCall",
     # validation
     "ValidationErrorItem",
     "ValidationErrorResponse",

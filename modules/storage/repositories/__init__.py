@@ -6,6 +6,7 @@ from .pg_oauth_repository import PgOAuthRepository
 from .pg_session_repository import PgSessionRepository
 from .pg_skill_repository import PgSkillRepository
 from .pg_tool_execution_repository import PgToolExecutionRepository
+from .pg_user_repository import PgUserRepository
 from .pg_workflow_repository import PgWorkflowRepository
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "PgSessionRepository",
     "PgSkillRepository",
     "PgToolExecutionRepository",
+    "PgUserRepository",
     "PgWorkflowRepository",
 ]

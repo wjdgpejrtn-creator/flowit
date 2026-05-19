@@ -72,6 +72,7 @@ class Container:
             execution_repo=self._execution_repo,
             event_publisher=self._event_publisher,
             orchestrator=self._orchestrator,
+            task_queue=self._task_queue,
         )
 
     @cached_property

@@ -43,6 +43,7 @@ from common_schemas.exceptions import DomainError, ValidationError, NotFoundErro
 from common_schemas.transport import (
     SSEFrame, SessionFrame, AgentNodeFrame, RationaleDeltaFrame,
     SlotFillQuestionFrame, DraftSpecDeltaFrame, ResultFrame, ErrorFrame, AnySSEFrame,
+    Message, ToolCall, LLMResponse,  # ADR-0015 §D4 LLM tool-use transport
 )
 ```
 
@@ -54,7 +55,7 @@ from common_schemas.transport import (
 | `agent` | AgentState, DraftSpec, IntentResult, SlotFillingState, UnresolvedNode |
 | `document` | BBox, FileMeta, SourceRef, ParserMeta, SheetMeta, ContentBlock, DocumentBlock, AnalysisResult |
 | `security` | PermissionSource, PlaintextCredential |
-| `transport` | SSE frame 타입 (Session, AgentNode, RationaleDelta 등) + AnySSEFrame discriminated union |
+| `transport` | SSE frame 타입(`transport/sse.py`) + LLM tool-use 타입(`transport/llm.py`, ADR-0015 §D4) |
 | `handoff` | HandoffPayload, EvaluationResult |
 | `enums` | AgentMode, ExecutionStatus, RiskLevel, ErrorCode, IntentType |
 | `exceptions` | DomainError 계층 (Validation, Authorization, NotFound, Conflict, Integrity) |
@@ -107,7 +108,7 @@ from common_schemas.transport import (
 | `PermissionSource` | 사용자 권한 컨텍스트 (user_id, role, department_id, risk_ceiling) |
 | `PlaintextCredential` | 복호화된 자격증명 (자동 wipe 지원) |
 
-### transport.py — SSE 스트리밍 프레임
+### transport/sse.py — SSE 스트리밍 프레임
 
 | 클래스 | 설명 |
 |--------|------|
@@ -119,7 +120,19 @@ from common_schemas.transport import (
 | `DraftSpecDeltaFrame` | 초안 증분 업데이트 |
 | `ResultFrame` | 최종 결과 (intent: clarify/draft/refine/propose) |
 | `ErrorFrame` | 에러 알림 |
-| `AnySSEFrame` | Discriminated union — frame_type 기반 역직렬화 |
+| `PipelineStatusFrame` | 생성 파이프라인 서비스별 진행 상태 (`service_name`, `status`, `elapsed_ms`) — 오른쪽 사이드바 |
+| `IntentResultFrame` | 의도 분석 결과 (`intent`, `entities`) — 오른쪽 사이드바 |
+| `QAMetricFrame` | QA 평가 결과 (`score`, `attempt`, `pass_flag`, `feedback`) — 오른쪽 사이드바 |
+| `WorkflowDraftFrame` | 워크플로우 초안 (`nodes`, `connections`) — 가운데 캔버스 실시간 시각화 |
+| `AnySSEFrame` | Discriminated union — frame_type 기반 역직렬화 (13종) |
+
+### transport/llm.py — LLM tool-use transport (ADR-0015 §D4)
+
+| 클래스 | 설명 |
+|--------|------|
+| `Message` | LLM 대화 메시지 (`role`, `content`, `tool_call_id`, `name`) — system/user/assistant/tool 4종 role |
+| `ToolCall` | LLM이 요청한 도구 호출 (`id`, `name`, `arguments`) — LLM 응답 직렬화용 |
+| `LLMResponse` | LLM 응답 (`content`, `tool_calls`, `finish_reason`) — `LLMPort.generate()` 반환 타입 (F2 신정혜 PR-A 이후) |
 
 ### handoff.py — 에이전트 → 실행엔진 핸드오프
 

@@ -9,12 +9,20 @@ from ..entities.execution_result import NodeResult
 from .topological_scheduler import TopologicalScheduler
 
 VALID_TRANSITIONS: dict[ExecutionStatus, set[ExecutionStatus]] = {
+    ExecutionStatus.PENDING: {
+        ExecutionStatus.RUNNING,
+        ExecutionStatus.CANCELLED,  # task pickup 전 cancel
+    },
     ExecutionStatus.RUNNING: {
         ExecutionStatus.PAUSED,
         ExecutionStatus.COMPLETED,
         ExecutionStatus.FAILED,
+        ExecutionStatus.CANCELLED,
     },
-    ExecutionStatus.PAUSED: {ExecutionStatus.RUNNING},
+    ExecutionStatus.PAUSED: {
+        ExecutionStatus.RUNNING,
+        ExecutionStatus.CANCELLED,
+    },
 }
 
 
