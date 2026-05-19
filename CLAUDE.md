@@ -140,6 +140,7 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 | toolset | auth의 `domain/services` | `from auth.domain.services import CredentialInjectionService` |
 | toolset | nodes_graph의 `application/use_cases` | `from nodes_graph.application.use_cases import SearchNodesUseCase` (NodeSearchPort 구현체가 자연어 노드 검색 시. **선반영** — 현재 `modules/toolset/` 실코드 0건, 박아름 후속 PR(toolset 정리) + 햄햄 NodeSearchPort 구현 시 도달) |
 | storage | auth의 `domain/ports` | `from auth.domain.ports import SessionRepository` (ABC 구현을 위해) |
+| storage | auth의 `domain/entities` | `from auth.domain.entities import User` (PgUserRepository 구현체가 ORM ↔ 도메인 변환 시, PR #87 cef92fa) |
 | storage | nodes_graph의 `domain/ports` | `from nodes_graph.domain.ports import NodeDefinitionRepository` |
 | storage | ai_agent의 `domain/ports` | `from ai_agent.domain.ports import AgentMemoryRepository` |
 | skills_marketplace | storage의 `domain/ports/SkillRepository` (ABC) | `from storage.domain.ports import SkillRepository` (구현은 storage가, 호출은 skills_marketplace가) |
