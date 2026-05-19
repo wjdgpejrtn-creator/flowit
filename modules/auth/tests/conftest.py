@@ -6,9 +6,11 @@ from uuid import uuid4
 import pytest
 from auth.domain.entities.oauth_connection import OAuthConnection
 from auth.domain.entities.session import Session
+from auth.domain.entities.user import User, UserRole
 from auth.domain.ports.cipher_port import CipherPort
 from auth.domain.ports.oauth_connection_repository import OAuthConnectionRepository
 from auth.domain.ports.session_repository import SessionRepository
+from auth.domain.ports.user_repository import UserRepository
 
 
 class InMemorySessionRepository(SessionRepository):
@@ -94,6 +96,54 @@ class FakeCipher(CipherPort):
         return ciphertext.removeprefix(b"ENC:")
 
 
+class InMemoryUserRepository(UserRepository):
+    def __init__(self) -> None:
+        self._store: dict = {}
+
+    async def find_by_id(self, user_id) -> User | None:
+        return self._store.get(user_id)
+
+    async def find_by_email(self, email: str) -> User | None:
+        for user in self._store.values():
+            if user.email == email:
+                return user
+        return None
+
+    async def create(
+        self,
+        user_id,
+        email: str,
+        name: str,
+        role: UserRole = "User",
+        department_id=None,
+    ) -> User:
+        now = datetime.now(UTC)
+        user = User(
+            user_id=user_id,
+            email=email,
+            name=name,
+            role=role,
+            department_id=department_id,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        self._store[user_id] = user
+        return user
+
+    async def update_role(self, user_id, role: UserRole) -> None:
+        if user_id in self._store:
+            self._store[user_id] = self._store[user_id].model_copy(
+                update={"role": role, "updated_at": datetime.now(UTC)}
+            )
+
+    async def update_department(self, user_id, department_id) -> None:
+        if user_id in self._store:
+            self._store[user_id] = self._store[user_id].model_copy(
+                update={"department_id": department_id, "updated_at": datetime.now(UTC)}
+            )
+
+
 @pytest.fixture
 def session_repo() -> InMemorySessionRepository:
     return InMemorySessionRepository()
@@ -107,6 +157,11 @@ def oauth_repo() -> InMemoryOAuthRepository:
 @pytest.fixture
 def cipher() -> FakeCipher:
     return FakeCipher()
+
+
+@pytest.fixture
+def user_repo() -> InMemoryUserRepository:
+    return InMemoryUserRepository()
 
 
 @pytest.fixture
