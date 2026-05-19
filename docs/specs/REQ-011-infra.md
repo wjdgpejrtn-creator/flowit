@@ -13,8 +13,8 @@
 
 | 리소스 | 설명 |
 |--------|------|
-| `Cloud Run (api_server)` | REQ-009 API 서버 배포 |
-| `Cloud Run (execution_engine)` | REQ-007 실행 엔진 배포 |
+| `Cloud Run (api_server)` | REQ-009 API 서버 배포. HTTP gen2 service. `ingress=ALL`, `cpu_idle=true`(request-driven), public invoker |
+| `Cloud Run (execution_engine worker)` | REQ-007 Celery worker. **옵션 A**: Cloud Run service + dummy HTTP probe(`worker_entry.py`) + `celery worker` subprocess. `min=max=1`, `cpu_idle=false`(always-on), `ingress=INTERNAL_ONLY`, public invoker 차단. GKE/GCE 대비 비용 ~$30-50/월. (ADR 후보 — Cloud Run Jobs는 24h 한계로 long-running daemon 부적합) |
 | `Cloud SQL (PostgreSQL 15)` | REQ-001 Database + pgvector |
 | `Cloud Storage` | REQ-008 파일 저장소 |
 | `Redis (Memorystore)` | Celery broker + 세션 캐시 |

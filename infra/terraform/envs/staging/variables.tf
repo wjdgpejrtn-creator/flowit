@@ -99,3 +99,37 @@ variable "api_server_service_account" {
   type        = string
   default     = ""
 }
+
+# ---------------------------------------------------------------------------
+# Cloud Run — REQ-007 execution_engine worker (Celery worker daemon)
+# 패턴 옵션 A: Cloud Run service + dummy HTTP probe + celery subprocess.
+# Worker entry는 services/execution_engine/src/worker_entry.py.
+# ---------------------------------------------------------------------------
+variable "enable_execution_engine_worker" {
+  description = "Deploy execution_engine Celery worker to Cloud Run (default false — 이미지 빌드 완료 + Redis 가용 시 활성화)"
+  type        = bool
+  default     = false
+}
+
+variable "execution_engine_worker_image" {
+  description = "execution_engine worker container image (gcr.io/PROJECT/execution-engine-worker:TAG). Required when enable_execution_engine_worker=true"
+  type        = string
+  default     = ""
+}
+
+variable "execution_engine_worker_service_account" {
+  description = "Runtime service account email for execution_engine worker. 권한: Cloud SQL IAM Authenticator + VPC-SC(Redis Private Service Access) + Secret Manager secretAccessor (본 PR locals.effective_secret_accessors가 자동 부여). SA 자체 생성은 현재 gcloud로 수동 — 후속 PR에서 google_service_account 리소스로 코드화 예정"
+  type        = string
+  default     = ""
+}
+
+# ---------------------------------------------------------------------------
+# Artifact Registry image push 권한자 — Cloud Build CI / 팀원 gcloud builds submit.
+# 기본값이 빈 list면 agent_secret_accessors fallback (현 staging 운영 패턴).
+# CI SA를 별도로 두거나 비-팀원 contractor가 추가될 때 본 변수만 명시 override.
+# ---------------------------------------------------------------------------
+variable "artifact_registry_writers" {
+  description = "Artifact Registry writer IAM principals (image push). 빈 list면 agent_secret_accessors fallback"
+  type        = list(string)
+  default     = []
+}

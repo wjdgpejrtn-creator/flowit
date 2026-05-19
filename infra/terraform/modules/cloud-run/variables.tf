@@ -85,6 +85,18 @@ variable "allow_public_access" {
   default     = false
 }
 
+variable "ingress" {
+  description = "Cloud Run v2 ingress mode: INGRESS_TRAFFIC_ALL | INGRESS_TRAFFIC_INTERNAL_ONLY | INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER. worker는 internal-only 권장."
+  type        = string
+  default     = "INGRESS_TRAFFIC_ALL"
+}
+
+variable "cpu_idle" {
+  description = "Cloud Run v2 CPU 할당 모드. false = always-on CPU (long-running celery worker용, instance billable always). true(default) = request 처리 중에만 CPU 할당."
+  type        = bool
+  default     = true
+}
+
 variable "labels" {
   description = "Resource labels"
   type        = map(string)
