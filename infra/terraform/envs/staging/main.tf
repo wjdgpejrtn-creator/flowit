@@ -25,6 +25,20 @@ locals {
     managed_by  = "terraform"
     req         = "req-011-infra"
   }
+
+  # Cloud Build SA가 GCS bucket source upload / Cloud Logging write / AR push에
+  # 필요한 권한 — 이름 부여 (line 22+ data.google_project.this 정의 이후 사용)
+  # AR push 권한자 — 명시적 override 없으면 secret accessor list 재사용 (현 staging 운영 패턴).
+  # 별도 CI SA가 추가될 때 var.artifact_registry_writers를 채워 의미 분리.
+  ar_writers = length(var.artifact_registry_writers) > 0 ? var.artifact_registry_writers : var.agent_secret_accessors
+
+  # GCP Secret Manager `secretAccessor` 멤버 — 기존 5명/Modal SA + Cloud Run SA(설정된 경우)
+  # api_server / worker SA는 본 PR에서 변수로 노출 → enable 시점에 자동 포함
+  effective_secret_accessors = compact(concat(
+    var.agent_secret_accessors,
+    var.api_server_service_account != "" ? ["serviceAccount:${var.api_server_service_account}"] : [],
+    var.execution_engine_worker_service_account != "" ? ["serviceAccount:${var.execution_engine_worker_service_account}"] : [],
+  ))
 }
 
 # ---------------------------------------------------------------------------
@@ -96,7 +110,7 @@ module "container_registry" {
     var.api_server_service_account != "" ? "serviceAccount:${var.api_server_service_account}" : "",
     var.execution_engine_worker_service_account != "" ? "serviceAccount:${var.execution_engine_worker_service_account}" : "",
   ])
-  writer_members = var.agent_secret_accessors # 팀원이 gcloud builds submit 시 push 권한 필요
+  writer_members = local.ar_writers # default = agent_secret_accessors fallback (var.artifact_registry_writers override 가능)
 
   labels = merge(local.common_labels, { role = "container-registry" })
 }
@@ -109,7 +123,7 @@ module "agent_secrets" {
 
   project_id       = var.project_id
   secret_names     = var.agent_secret_names
-  accessor_members = var.agent_secret_accessors
+  accessor_members = local.effective_secret_accessors
 }
 
 # ---------------------------------------------------------------------------
@@ -235,10 +249,20 @@ module "execution_engine_worker" {
 
   env_vars = {
     ENVIRONMENT = var.environment
-    REDIS_URL   = module.redis.redis_url
+  }
+
+  # PR #80 GCP Secret Manager에서 직접 주입 — load_secrets_to_env 우회.
+  # container.create_container()가 boot 시 KeyError 없이 모든 env를 읽는다.
+  secret_env_vars = {
+    REDIS_URL          = { secret_id = "redis-url", version = "latest" }
+    CLOUD_SQL_INSTANCE = { secret_id = "cloud-sql-instance", version = "latest" }
+    DB_IAM_USER        = { secret_id = "db-iam-user", version = "latest" }
+    DB_NAME            = { secret_id = "db-name", version = "latest" }
+    LLM_BASE_URL       = { secret_id = "llm-base-url", version = "latest" }
+    EMBEDDING_BASE_URL = { secret_id = "embedding-base-url", version = "latest" }
   }
 
   labels = merge(local.common_labels, { role = "execution-worker" })
 
-  depends_on = [module.networking, module.redis]
+  depends_on = [module.networking, module.redis, module.agent_secrets]
 }
