@@ -7,6 +7,7 @@ from .session_mapper import SessionMapper
 from .skill_mapper import Skill, SkillMapper
 from .storage_object_mapper import StorageObjectMapper
 from .tool_execution_mapper import ToolExecutionMapper
+from .user_mapper import UserMapper
 from .workflow_mapper import WorkflowMapper
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "SkillMapper",
     "StorageObjectMapper",
     "ToolExecutionMapper",
+    "UserMapper",
     "WorkflowMapper",
 ]
