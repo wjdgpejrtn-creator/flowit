@@ -18,6 +18,8 @@ Secrets:
 from __future__ import annotations
 
 import modal
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
 
@@ -97,8 +99,6 @@ class OrchestratorAgent:
 
     @modal.asgi_app()
     def fastapi(self):
-        from fastapi import FastAPI
-        from fastapi.responses import StreamingResponse
         from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 
         api = FastAPI(title="orchestrator", version="1.0")
@@ -108,7 +108,8 @@ class OrchestratorAgent:
             return {"status": "ok"}
 
         @api.post("/v1/agent/route")
-        async def route(req: AgentProtocolRequest):
+        async def route(request: Request):
+            req = AgentProtocolRequest.model_validate(await request.json())
             async def generate():
                 try:
                     async for frame in await self._graph.stream(
@@ -116,6 +117,7 @@ class OrchestratorAgent:
                         session_id=req.session_id,
                         message=req.payload.get("message", ""),
                         trace_id=req.trace_id,
+                        turn_count=req.state.turn_count,
                     ):
                         resp = AgentProtocolResponse(
                             frames=[frame],
