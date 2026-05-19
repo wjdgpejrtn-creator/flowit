@@ -71,7 +71,7 @@
 
 > **ai_agent의 `PersonalMemoryStore`(REQ-004 §2.1, Sprint 3 신규)는 storage 모듈에서 구현하지 않는다.** GCS 파일(`gs://workflow-automation-personal/users/{user_id}/MEMORY.md`) 기반이라 RDB Repository 패턴과 다르며, 어댑터는 `modules/ai_agent/adapters/memory/gcs_memory_store.py`에 위치한다. storage 모듈의 `GCSAdapter`(파일 업로드/다운로드 범용 어댑터)와도 별개 — Personalization은 memory.md 포맷 파싱·인덱싱 책임을 직접 가진다.
 | `PgWorkflowRepository` | `execution_engine/domain/ports/` | `get(workflow_id: UUID) → WorkflowSchema`, `save(schema: WorkflowSchema) → UUID`, `get_node_config(node_id: UUID) → NodeConfig` |
-| `PgExecutionRepository` | `execution_engine/domain/ports/` | `save(result: ExecutionResult) → None`, `get(execution_id: UUID) → ExecutionResult`, `update_node_state(execution_id, state: NodeExecutionState) → None` |
+| `PgExecutionRepository` | `execution_engine/domain/ports/` | `save(row: ExecutionRow) → None`, `get(execution_id: UUID) → ExecutionRow`, `update_node_state(execution_id, state: NodeExecutionState) → None` (transfer-object `ExecutionRow`는 storage 내부 dataclass — 도메인 `ExecutionResult`와 의도적 이름 분리) |
 | `PgDocumentRepository` | `doc_parser/domain/ports/` | `save(document: DocumentBlock) → UUID`, `save_chunks(chunks: list[Chunk]) → None`, `save_quality_log(result, document_id) → None` |
 | `PgToolExecutionRepository` | `toolset/domain/ports/ToolExecutionRepository` | `save(record: ToolExecutionRecord) → None`, `find_by_tool(tool_name, limit) → list[ToolExecutionRecord]` |
 | `PgSkillRepository` | 자체 정의 | `upsert(skill) → Skill`, `get_by_id(skill_id) → Skill`, `list(offset, limit) → list[Skill]`, `search(query, embedding, limit) → list[Skill]` (하이브리드: 0.4×FTS + 0.6×vector) |

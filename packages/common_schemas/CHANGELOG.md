@@ -7,6 +7,30 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.6.1] - 2026-05-19
+
+### Added — ExecutionStatus enum 멤버 2종 (PR-A, REQ-007 cancel/resume 실 구현 동반)
+- `ExecutionStatus.PENDING` (값 `"pending"`) — 신규 execution insert 직후 task pickup 전 상태. DB CheckConstraint `ck_executions_status`는 이미 `pending` 허용 — enum과 DB 정합 회복.
+- `ExecutionStatus.CANCELLED` (값 `"cancelled"`) — `/executions/{id}/cancel` 후 Celery `revoke` + 마킹. DB CheckConstraint `cancelled` 허용과 정합.
+
+### Changed
+- `ExecutionStatus` 멤버 수 4 → 6. `test_enums.py` 갱신.
+- DB CheckConstraint와 enum 사이 사각지대 해소 (이전: DB는 6종 허용 / enum은 4종 노출).
+- `enums.py`에 동일 이름으로 두 번 정의돼 있던 `IntentType` 중복 정의 제거 (Python에서는 후위 정의가 덮어쓰는 형태였어 동작상 차이는 없었음). 결과적으로 첫 위치 1건이 제거되고 끝부분 1건만 잔존 — 멤버/값 동일하여 외부 영향 없음.
+
+### Symbols
+- 56 → 56 (enum 멤버 추가만, 신규 symbol 없음)
+
+### Migration notes
+- 기존 코드 무영향 (멤버 추가만).
+- `ExecutionOrchestrator.VALID_TRANSITIONS` 확장 동반 (services/execution_engine 측 동일 PR) — `PENDING → RUNNING`, `{RUNNING, PAUSED} → CANCELLED` 전환 허용.
+- 사용 예시:
+  ```python
+  from common_schemas import ExecutionStatus
+  if exec.status in {ExecutionStatus.RUNNING, ExecutionStatus.PAUSED}:
+      ...  # cancellable
+  ```
+
 ## [0.6.0] - 2026-05-19
 
 ### Added — SSE 모니터링 프레임 4종 (PR #74, 신정혜 + 황대원 common_schemas 보강)

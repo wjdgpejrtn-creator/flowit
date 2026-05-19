@@ -157,3 +157,29 @@ class TestValidateStateTransition:
             orchestrator.validate_state_transition(
                 ExecutionStatus.PAUSED, ExecutionStatus.COMPLETED,
             )
+
+    def test_pending_to_running(self, orchestrator):
+        orchestrator.validate_state_transition(
+            ExecutionStatus.PENDING, ExecutionStatus.RUNNING,
+        )
+
+    def test_pending_to_cancelled(self, orchestrator):
+        orchestrator.validate_state_transition(
+            ExecutionStatus.PENDING, ExecutionStatus.CANCELLED,
+        )
+
+    def test_running_to_cancelled(self, orchestrator):
+        orchestrator.validate_state_transition(
+            ExecutionStatus.RUNNING, ExecutionStatus.CANCELLED,
+        )
+
+    def test_paused_to_cancelled(self, orchestrator):
+        orchestrator.validate_state_transition(
+            ExecutionStatus.PAUSED, ExecutionStatus.CANCELLED,
+        )
+
+    def test_invalid_cancelled_to_running(self, orchestrator):
+        with pytest.raises(ExecutionError, match="Cannot transition"):
+            orchestrator.validate_state_transition(
+                ExecutionStatus.CANCELLED, ExecutionStatus.RUNNING,
+            )

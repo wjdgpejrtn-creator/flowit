@@ -1,6 +1,6 @@
 from .agent_memory_mapper import AgentMemoryMapper
 from .document_mapper import DocumentMapper
-from .execution_mapper import ExecutionMapper, ExecutionResult
+from .execution_mapper import ExecutionMapper, ExecutionRow
 from .node_definition_mapper import NodeDefinitionMapper
 from .oauth_connection_mapper import OAuthConnectionMapper
 from .session_mapper import SessionMapper
@@ -14,7 +14,7 @@ __all__ = [
     "AgentMemoryMapper",
     "DocumentMapper",
     "ExecutionMapper",
-    "ExecutionResult",
+    "ExecutionRow",
     "NodeDefinitionMapper",
     "OAuthConnectionMapper",
     "SessionMapper",

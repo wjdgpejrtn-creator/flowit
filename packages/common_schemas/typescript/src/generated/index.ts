@@ -22,10 +22,12 @@ export enum ErrorCode {
 }
 
 export enum ExecutionStatus {
+  PENDING = "pending",
   RUNNING = "running",
   PAUSED = "paused",
   COMPLETED = "completed",
   FAILED = "failed",
+  CANCELLED = "cancelled",
 }
 
 export enum IntentType {

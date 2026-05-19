@@ -19,16 +19,49 @@ def execute_workflow_task(self, workflow_id: str, context_data: dict) -> dict:
     container = create_container()
     use_case = container.execute_workflow_use_case
 
+    # task_queue_id는 ExecutionContext를 통해 use case에 전달 → 첫 INSERT와 같은
+    # transaction에 영속화. Container 내부 repo 직접 접근 / 별도 save 호출 없음.
     context = ExecutionContext(
         execution_id=UUID(context_data["execution_id"]),
         workflow_id=UUID(context_data["workflow_id"]),
         user_id=UUID(context_data["user_id"]),
         trigger_type=context_data["trigger_type"],
         parameters=context_data.get("parameters", {}),
+        task_queue_id=self.request.id,
     )
 
     result = use_case.execute(UUID(workflow_id), context)
     return result.model_dump(mode="json")
+
+
+@shared_task(
+    name="execution_engine.cancel_execution",
+    bind=True,
+    max_retries=0,
+    acks_late=True,
+)
+def cancel_execution_task(self, execution_id: str) -> dict:
+    from ..dependencies.container import create_container
+
+    container = create_container()
+    use_case = container.pause_resume_use_case
+    use_case.execute(UUID(execution_id), action="cancel")
+    return {"execution_id": execution_id, "action": "cancel", "status": "cancelled"}
+
+
+@shared_task(
+    name="execution_engine.resume_execution",
+    bind=True,
+    max_retries=0,
+    acks_late=True,
+)
+def resume_execution_task(self, execution_id: str) -> dict:
+    from ..dependencies.container import create_container
+
+    container = create_container()
+    use_case = container.pause_resume_use_case
+    use_case.execute(UUID(execution_id), action="resume")
+    return {"execution_id": execution_id, "action": "resume", "status": "running"}
 
 
 @shared_task(

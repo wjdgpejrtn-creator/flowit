@@ -1,14 +1,6 @@
 from enum import Enum
 
 
-class IntentType(str, Enum):
-    CLARIFY = "clarify"
-    DRAFT = "draft"
-    REFINE = "refine"
-    PROPOSE = "propose"
-    BUILD_SKILL = "build_skill"
-
-
 class AgentMode(str, Enum):
     ONBOARDING = "onboarding"
     WIZARD = "wizard"
@@ -19,10 +11,12 @@ class AgentMode(str, Enum):
 
 
 class ExecutionStatus(str, Enum):
+    PENDING = "pending"
     RUNNING = "running"
     PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class RiskLevel(str, Enum):

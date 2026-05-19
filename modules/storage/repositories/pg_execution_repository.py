@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from common_schemas import NodeExecutionState
 from common_schemas.exceptions import NotFoundError
 
-from ..mappers.execution_mapper import ExecutionMapper, ExecutionResult
+from ..mappers.execution_mapper import ExecutionMapper, ExecutionRow
 from ..orm.execution_model import ExecutionModel
 
 
@@ -21,12 +21,12 @@ class PgExecutionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def save(self, result: ExecutionResult) -> None:
+    async def save(self, result: ExecutionRow) -> None:
         model = ExecutionMapper.to_orm(result)
         merged = await self._session.merge(model)
         await self._session.flush()
 
-    async def get(self, execution_id: UUID) -> ExecutionResult:
+    async def get(self, execution_id: UUID) -> ExecutionRow:
         stmt = select(ExecutionModel).where(ExecutionModel.execution_id == execution_id)
         result = await self._session.execute(stmt)
         model = result.scalar_one_or_none()

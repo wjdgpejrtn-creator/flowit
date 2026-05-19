@@ -16,13 +16,15 @@ class TestAgentMode:
 
 class TestExecutionStatus:
     def test_values(self):
+        assert ExecutionStatus.PENDING == "pending"
         assert ExecutionStatus.RUNNING == "running"
         assert ExecutionStatus.COMPLETED == "completed"
         assert ExecutionStatus.FAILED == "failed"
         assert ExecutionStatus.PAUSED == "paused"
+        assert ExecutionStatus.CANCELLED == "cancelled"
 
     def test_member_count(self):
-        assert len(ExecutionStatus) == 4
+        assert len(ExecutionStatus) == 6
 
 
 class TestRiskLevel:
