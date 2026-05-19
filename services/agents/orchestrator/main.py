@@ -10,14 +10,16 @@ Deploy:
 Health:
     curl https://<WORKSPACE>--orchestrator.modal.run/v1/health
 
-Sub-agent URL 환경변수 (agent-orchestrator-secret):
-    COMPOSER_URL, SKILLS_BUILDER_URL, PERSONALIZATION_URL
+Secrets:
+    GCP Secret Manager가 SSOT (2026-05-19 마이그레이션). Modal에 남는 secret은
+    `cloudsql-iam-sa` 1개 — GCP ADC root credential. sub-agent URL + LLM URL은
+    boot()에서 services.common.gcp_secrets.load_secrets_to_env로 런타임 pull.
 """
 from __future__ import annotations
 
 import modal
 
-app_secret = modal.Secret.from_name("agent-orchestrator-secret")
+gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -27,10 +29,15 @@ image = (
         "pydantic>=2.13",
         "langgraph>=0.2",
         "modal>=0.73",
+        "google-cloud-secret-manager>=2.20",
     )
-    .env({"PYTHONPATH": "/app/modules:/app/common_schemas_src"})
+    .env({
+        "PYTHONPATH": "/app/modules:/app/common_schemas_src:/repo",
+        "GOOGLE_CLOUD_PROJECT": "<GCP_PROJECT_ID>",
+    })
     .add_local_dir("modules", remote_path="/app/modules")
     .add_local_dir("packages/common_schemas/python", remote_path="/app/common_schemas_src")
+    .add_local_dir("services/common", remote_path="/repo/services/common")
 )
 
 app = modal.App("orchestrator")
@@ -38,7 +45,7 @@ app = modal.App("orchestrator")
 
 @app.cls(
     image=image,
-    secrets=[app_secret],
+    secrets=[gcp_secret],
     timeout=600,
     scaledown_window=300,
 )
@@ -49,11 +56,29 @@ class OrchestratorAgent:
     @modal.enter()
     def boot(self) -> None:
         import os
+        import tempfile
+        from pathlib import Path
+
+        from services.common.gcp_secrets import load_secrets_to_env
 
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from ai_agent.adapters.agent_clients.http_sub_agent_client import HTTPSubAgentClient
         from ai_agent.adapters.langgraph.supervisor_graph import LangGraphSupervisor
         from ai_agent.domain.services.intent_analyzer_service import IntentAnalyzerService
+
+        # GCP SA JSON → 임시 파일 → ADC 환경변수
+        sa_payload = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+        sa_path = Path(tempfile.gettempdir()) / "gcp-sa.json"
+        sa_path.write_text(sa_payload, encoding="utf-8")
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
+
+        # GCP Secret Manager → 환경변수 주입
+        load_secrets_to_env({
+            "composer-url":        "COMPOSER_URL",
+            "skills-builder-url":  "SKILLS_BUILDER_URL",
+            "personalization-url": "PERSONALIZATION_URL",
+            "llm-base-url":        "LLM_BASE_URL",  # ModalLLMAdapter HTTP fallback
+        })
 
         llm = ModalLLMAdapter()
 

@@ -120,6 +120,8 @@ image = (
         "pgvector>=0.3",
         # Cloud SQL IAM 인증 — google-cloud-sql-connector 만이 enable_iam_auth=True 지원
         "cloud-sql-python-connector[asyncpg]>=1.12",
+        # GCP Secret Manager (런타임 secret pull, 2026-05-19 마이그레이션)
+        "google-cloud-secret-manager>=2.20",
         # Transitive: storage.mappers → toolset.runtime_validator → import jsonschema.
         # 박아름 use case가 toolset 직접 사용 안 하지만 storage import 체인으로 끌려옴.
         "jsonschema>=4.0",
@@ -132,17 +134,20 @@ image = (
         "PYTHONPATH": ":".join([
             "/repo/packages/common_schemas/python",
             "/repo/modules",
+            "/repo",
         ]),
+        "GOOGLE_CLOUD_PROJECT": "<GCP_PROJECT_ID>",
     })
     # 모노레포 소스 마운트 (Modal worker의 PYTHONPATH에 추가됨) — 마지막에 배치
     .add_local_dir("packages/common_schemas/python", "/repo/packages/common_schemas/python")
     # modules 전체 통째 마운트 — storage가 auth/toolset/doc_parser 등 거의 모든 도메인을
     # transitive import하므로 개별 add_local_dir 대신 한 번에 마운트 (가이드 함정 회피).
     .add_local_dir("modules", "/repo/modules")
+    # services.common.gcp_secrets 헬퍼 — GCP Secret Manager 런타임 pull용
+    .add_local_dir("services/common", "/repo/services/common")
 )
 
 
-app_secret = modal.Secret.from_name("agent-skills-builder-secret")
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
 
 app = modal.App(APP_NAME)
@@ -150,7 +155,7 @@ app = modal.App(APP_NAME)
 
 @app.cls(
     image=image,
-    secrets=[app_secret, gcp_secret],
+    secrets=[gcp_secret],
     timeout=600,
     scaledown_window=300,
 )
@@ -175,6 +180,8 @@ class SkillsBuilderAgent:
 
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+        from services.common.gcp_secrets import load_secrets_to_env
+
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
 
@@ -183,6 +190,15 @@ class SkillsBuilderAgent:
         sa_path = Path(tempfile.gettempdir()) / "gcp-sa.json"
         sa_path.write_text(sa_payload, encoding="utf-8")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
+
+        # 2) GCP Secret Manager → 환경변수 주입
+        load_secrets_to_env({
+            "cloud-sql-instance": "CLOUD_SQL_INSTANCE",
+            "db-iam-user":        "DB_IAM_USER",
+            "db-name":            "DB_NAME",
+            "llm-base-url":       "LLM_BASE_URL",
+            "embedding-base-url": "EMBEDDING_BASE_URL",
+        })
 
         # 2) 어댑터 wiring (RPC LLM + HTTP embedding) — async 의존 없음
         self._llm = ModalLLMAdapter()
