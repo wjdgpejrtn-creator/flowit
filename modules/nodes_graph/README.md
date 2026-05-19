@@ -1,6 +1,6 @@
 # nodes_graph
 
-> REQ-003: 54종 노드 정의 카탈로그, 그래프 검증 (위상 정렬), 직렬화
+> REQ-003: 53종 노드 정의 카탈로그, 그래프 검증 (위상 정렬), 직렬화
 >
 > 구현 명세 → [`docs/specs/REQ-003-nodes_graph.md`](../../docs/specs/REQ-003-nodes_graph.md)
 
@@ -64,7 +64,10 @@ from nodes_graph.application.use_cases import (
 
 | 어댑터 | 설명 |
 |--------|------|
-| `ToolToNodeWrapper` | REQ-005 `BaseTool` → `BaseNode` 래핑. `to_node_definition() → NodeDefinition` 메서드로 카탈로그 등록용 엔티티 생성 |
+| `catalog/external/*` | 25종 NodeDefinition 파일 (기존 14 + REQ-005 toolset 연동 신규 11). `BaseNode.process()`는 NotImplementedError + ToolsetExecutor 위임 메시지 |
+| `catalog/registry.py` | Plugin discovery 진입점 (`discover_and_register`) |
+
+> **`ToolToNodeWrapper` 제거 — 2026-05-19 박아름 toolset 정리 PR**: 5/15 햄햄·박아름 합의 + 5/19 조장 안. toolset 14종 중 중복 3종(`http_request_tool`/`conditional`/`loop`)은 양쪽 제거, 나머지 11종은 `external/`에 개별 파일로 직접 등록.
 
 ## 의존 관계
 
@@ -73,8 +76,8 @@ Upstream (이 모듈이 의존):
   ├── common_schemas (REQ-012)
   │     └── WorkflowSchema, NodeInstance, NodeConfig, Edge, Position
   │     └── RiskLevel, ErrorCode, ValidationErrorItem, ValidationErrorResponse
-  └── toolset (REQ-005) [Optional — ToolToNodeWrapper용]
-        └── BaseTool
+  └── toolset (REQ-005) — 직접 import 없음.
+        실행은 services/execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출.
 
 Downstream (이 모듈에 의존):
   ├── auth (REQ-002)            → NodeDefinitionRepository ABC import (CredentialInjectionService)
@@ -90,7 +93,9 @@ Downstream (이 모듈에 의존):
 |--------|------|------|
 | 없음 | — | 순수 도메인 로직. 임베딩 설정은 EmbedderPort 구현체가 관리 |
 
-## 노드 카탈로그 요약 (54종 MVP)
+## 노드 카탈로그 요약 (53종 MVP)
+
+> 상세 분류는 `docs/specs/REQ-003-nodes-graph.md` §"노드 카탈로그 요약" 참조. 28 domain + 25 external (기존 14 + REQ-005 toolset 연동 11).
 
 | 카테고리 | MVP | 예시 node_type |
 |---------|:---:|------|
