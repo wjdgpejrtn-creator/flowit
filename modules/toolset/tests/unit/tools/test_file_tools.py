@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from toolset.adapters.tools.file.file_read_tool import FileReadTool
-from toolset.adapters.tools.file.file_transform_tool import FileTransformTool
-from toolset.adapters.tools.file.file_write_tool import FileWriteTool
+from toolset.adapters.internal.file.file_read_tool import FileReadTool
+from toolset.adapters.internal.file.file_transform_tool import FileTransformTool
+from toolset.adapters.internal.file.file_write_tool import FileWriteTool
 from toolset.domain.exceptions import ToolExecutionError
 
 
