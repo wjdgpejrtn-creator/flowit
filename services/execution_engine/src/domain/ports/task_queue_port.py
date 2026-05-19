@@ -13,3 +13,7 @@ class TaskQueuePort(ABC):
     @abstractmethod
     def dispatch_chord(self, tasks: list[dict[str, Any]], callback: str) -> str:
         ...
+
+    @abstractmethod
+    def revoke(self, task_id: str, *, terminate: bool = True) -> None:
+        ...

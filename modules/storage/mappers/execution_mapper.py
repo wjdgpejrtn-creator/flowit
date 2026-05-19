@@ -24,6 +24,7 @@ class ExecutionResult:
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
+    celery_task_id: Optional[str] = None
 
 
 class ExecutionMapper:
@@ -38,6 +39,7 @@ class ExecutionMapper:
             started_at=orm.started_at,
             completed_at=orm.completed_at,
             error=orm.error,
+            celery_task_id=orm.celery_task_id,
         )
 
     @staticmethod
@@ -57,4 +59,5 @@ class ExecutionMapper:
             started_at=entity.started_at,
             completed_at=entity.completed_at,
             error=entity.error,
+            celery_task_id=entity.celery_task_id,
         )

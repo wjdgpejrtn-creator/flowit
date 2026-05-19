@@ -35,6 +35,9 @@ class CeleryAdapter(TaskQueuePort):
         result = chord(group(sigs))(callback_sig)
         return result.id
 
+    def revoke(self, task_id: str, *, terminate: bool = True) -> None:
+        self._app.control.revoke(task_id, terminate=terminate, signal="SIGTERM")
+
     @staticmethod
     def resolve_queue(category: str) -> str:
         return QUEUE_ROUTING.get(category, "default")

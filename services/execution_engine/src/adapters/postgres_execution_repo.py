@@ -37,15 +37,16 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
                 text("""
                     INSERT INTO executions
                         (execution_id, workflow_id, user_id, status, node_results,
-                         started_at, completed_at, error)
+                         started_at, completed_at, error, celery_task_id)
                     VALUES
                         (:execution_id, :workflow_id, :user_id, :status, :node_results,
-                         :started_at, :completed_at, :error)
+                         :started_at, :completed_at, :error, :celery_task_id)
                     ON CONFLICT (execution_id) DO UPDATE SET
                         status = EXCLUDED.status,
                         node_results = EXCLUDED.node_results,
                         completed_at = EXCLUDED.completed_at,
-                        error = EXCLUDED.error
+                        error = EXCLUDED.error,
+                        celery_task_id = COALESCE(EXCLUDED.celery_task_id, executions.celery_task_id)
                 """),
                 {
                     "execution_id": data["execution_id"],
@@ -56,6 +57,7 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
                     "started_at": data["started_at"],
                     "completed_at": data["completed_at"],
                     "error": data["error"],
+                    "celery_task_id": data.get("celery_task_id"),
                 },
             )
             session.commit()
@@ -84,6 +86,7 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
             started_at=row["started_at"],
             completed_at=row["completed_at"],
             error=row["error"],
+            celery_task_id=row.get("celery_task_id"),
         )
 
     def update_node_state(self, execution_id: UUID, state: NodeExecutionState) -> None:

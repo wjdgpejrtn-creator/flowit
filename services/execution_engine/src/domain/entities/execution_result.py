@@ -37,6 +37,7 @@ class ExecutionResult(BaseModel):
     started_at: UtcDatetime = Field(default_factory=_utcnow)
     completed_at: Optional[UtcDatetime] = None
     error: Optional[str] = None
+    celery_task_id: Optional[str] = None
 
     def mark_completed(self) -> None:
         self.status = ExecutionStatus.COMPLETED
@@ -46,3 +47,7 @@ class ExecutionResult(BaseModel):
         self.status = ExecutionStatus.FAILED
         self.completed_at = datetime.now(timezone.utc)
         self.error = error
+
+    def mark_cancelled(self) -> None:
+        self.status = ExecutionStatus.CANCELLED
+        self.completed_at = datetime.now(timezone.utc)

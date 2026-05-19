@@ -64,6 +64,20 @@ class TestDispatchChord:
             assert mock_app.signature.call_count == 3  # 2 tasks + 1 callback
 
 
+class TestRevoke:
+    def test_revoke_calls_app_control_revoke(self, adapter, mock_app):
+        adapter.revoke("celery-task-abc")
+        mock_app.control.revoke.assert_called_once_with(
+            "celery-task-abc", terminate=True, signal="SIGTERM",
+        )
+
+    def test_revoke_without_terminate(self, adapter, mock_app):
+        adapter.revoke("celery-task-def", terminate=False)
+        mock_app.control.revoke.assert_called_once_with(
+            "celery-task-def", terminate=False, signal="SIGTERM",
+        )
+
+
 class TestResolveQueue:
     def test_ai_routes_to_llm(self):
         assert CeleryAdapter.resolve_queue("ai") == "llm"
