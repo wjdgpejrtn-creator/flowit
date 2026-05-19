@@ -34,7 +34,10 @@
 
 | 클래스 | 파일 경로 | 상태 |
 |--------|-----------|------|
-| `ToolToNodeWrapper` | `adapters/tool_to_node_wrapper.py` | ✅ 완료 |
+| `adapters/catalog/external/*` | 25종 NodeDefinition 개별 파일 (기존 14 + REQ-005 toolset 연동 신규 11) | ✅ 완료 |
+| `adapters/catalog/registry.py` | Plugin discovery 진입점 | ✅ 완료 |
+
+> `ToolToNodeWrapper` 제거 — 2026-05-19 박아름 toolset 정리 PR. 5/15 햄햄·박아름 합의 + 5/19 조장 안 반영. toolset 14종 중 중복 3종(`http_request_tool`/`conditional`/`loop`) 양쪽 제거, 나머지 11종은 `external/`로 직접 등록. 실행은 `services/execution_engine.ToolsetExecutor`가 `node_type` 기반으로 `toolset.execute_tool()` 호출.
 
 ---
 
@@ -113,7 +116,7 @@
 3. domain/ports: NodeDefinitionRepository ABC → EmbedderPort ABC
 4. domain/services: GraphValidator → GraphSerializer
 5. application/use_cases: ValidateGraphUseCase → SearchNodesUseCase → RegisterNodesUseCase
-6. adapters: ToolToNodeWrapper
+6. adapters: catalog/external/ 25종 + catalog/registry.py (Plugin discovery)
 7. tests: unit/domain → unit/application
 ```
 
@@ -136,7 +139,7 @@
 | 항목 | 이유 | 해결 조건 |
 |------|------|-----------|
 | `EmbedderPort` 구현체 | BGE-M3 구현은 ai_agent(REQ-004) 담당 | REQ-004 완성 후 |
-| `ToolToNodeWrapper.process()` credential 주입 방식 | REQ-005 BaseTool 인터페이스 미확정 | REQ-005 완성 후 |
+| Internal Tool 5종(`file_read`/`file_write`/`file_transform`/`json_transform`/`data_mapping`) 보안 검증 | toolset 도구 자체 입력 검증(allowlist/sandbox) 필요 | 햄햄 REQ-005 PHASE 2에서 처리 (2026-05-19 합의) |
 | `search_by_embedding()` 실제 벡터 검색 | pgvector 환경 필요 | REQ-008 storage 구성 후 integration 테스트 |
 
 ---

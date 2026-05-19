@@ -99,7 +99,7 @@ REQ-003 spec H-4 합의에 따라 `NodeDefinition`의 아래 3개 필드를 REQ-
 
 ### 2.1 결정: **NotImplementedError stub**
 
-Sprint 3 1주차 박아름 작업 scope는 **NodeDefinition 메타데이터 + BaseNode 상속 + dataclass Input/Output 정의**까지. 실제 API 호출은 **toolset(REQ-005) connector 또는 `ToolToNodeWrapper` 경유**로 향후 처리.
+Sprint 3 1주차 박아름 작업 scope는 **NodeDefinition 메타데이터 + BaseNode 상속 + dataclass Input/Output 정의**까지. 실제 API 호출은 **services/execution_engine.ToolsetExecutor가 `node_type` 기반으로 `toolset.execute_tool()` 호출**로 처리 (2026-05-19 박아름 toolset 정리 PR에서 `ToolToNodeWrapper` 제거 — REQ-005 toolset 연동 11종은 `adapters/catalog/external/`에 개별 NodeDefinition 파일로 등록).
 
 ```python
 class SlackPostMessageNode(BaseNode[SlackPostMessageInput, SlackPostMessageOutput]):
@@ -109,9 +109,9 @@ class SlackPostMessageNode(BaseNode[SlackPostMessageInput, SlackPostMessageOutpu
 
     async def process(self, input: SlackPostMessageInput) -> SlackPostMessageOutput:
         raise NotImplementedError(
-            "외부 서비스 호출은 REQ-005 toolset connector를 통해 처리. "
-            "ToolToNodeWrapper로 BaseTool을 래핑하거나, execution_engine "
-            "디스패처에서 service_type 기반 라우팅."
+            "외부 서비스 호출은 REQ-005 toolset.execute_tool()을 통해 처리. "
+            "services/execution_engine.ToolsetExecutor가 node_type 기반으로 호출. "
+            "BaseNode.process() 직접 호출 X."
         )
 ```
 
