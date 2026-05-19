@@ -120,7 +120,11 @@ from common_schemas.transport import (
 | `DraftSpecDeltaFrame` | 초안 증분 업데이트 |
 | `ResultFrame` | 최종 결과 (intent: clarify/draft/refine/propose) |
 | `ErrorFrame` | 에러 알림 |
-| `AnySSEFrame` | Discriminated union — frame_type 기반 역직렬화 |
+| `PipelineStatusFrame` | 생성 파이프라인 서비스별 진행 상태 (`service_name`, `status`, `elapsed_ms`) — 오른쪽 사이드바 |
+| `IntentResultFrame` | 의도 분석 결과 (`intent`, `entities`) — 오른쪽 사이드바 |
+| `QAMetricFrame` | QA 평가 결과 (`score`, `attempt`, `pass_flag`, `feedback`) — 오른쪽 사이드바 |
+| `WorkflowDraftFrame` | 워크플로우 초안 (`nodes`, `connections`) — 가운데 캔버스 실시간 시각화 |
+| `AnySSEFrame` | Discriminated union — frame_type 기반 역직렬화 (13종) |
 
 ### transport/llm.py — LLM tool-use transport (ADR-0015 §D4)
 

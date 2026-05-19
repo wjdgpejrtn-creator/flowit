@@ -7,10 +7,13 @@ from common_schemas import DraftSpec, SlotFillingState
 from common_schemas.transport import (
     AgentNodeFrame,
     DraftSpecDeltaFrame,
+    IntentResultFrame,
+    QAMetricFrame,
     ResultFrame,
     SessionFrame,
     SlotFillQuestionFrame,
     SSEFrame,
+    WorkflowDraftFrame,
 )
 
 from ....domain.ports.node_registry import NodeRegistry
@@ -59,6 +62,7 @@ class ComposeWorkflowUseCase:
         yield AgentNodeFrame(agent_node_name="intent_node")
         messages = [{"role": "user", "content": message}]
         intent = await self._intent_analyzer.analyze(messages, context={})
+        yield IntentResultFrame(intent=intent.intent, entities=intent.analyzed_entities)
 
         # 2. Clarify: slot filling
         if intent.intent == "clarify":
@@ -93,9 +97,18 @@ class ComposeWorkflowUseCase:
             yield AgentNodeFrame(agent_node_name="drafter_node")
             yield DraftSpecDeltaFrame(delta={"attempt": attempt + 1})
             workflow = await self._drafter.draft(draft_spec, candidates)
+            nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
+            connections_data = [c.model_dump(mode="json") for c in workflow.connections]
+            yield WorkflowDraftFrame(nodes=nodes_data, connections=connections_data)
 
             yield AgentNodeFrame(agent_node_name="qa_evaluator_node")
             qa_result = await self._qa_evaluator.evaluate(workflow, draft_spec)
+            yield QAMetricFrame(
+                score=qa_result.score,
+                attempt=attempt + 1,
+                pass_flag=qa_result.pass_flag,
+                feedback=qa_result.feedback,
+            )
             if qa_result.pass_flag:
                 break
 
