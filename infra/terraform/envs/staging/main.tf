@@ -56,6 +56,30 @@ resource "google_project_service" "run" {
   disable_on_destroy = false
 }
 
+# Cloud Build default compute SA — 기본 권한 부족 사례 (소스 업로드용 GCS object get
+# + Cloud Logging write + Artifact Registry write). gcloud builds submit 시 필요.
+data "google_project" "this" {
+  project_id = var.project_id
+}
+
+locals {
+  cloud_build_default_sa = "serviceAccount:${data.google_project.this.number}-compute@developer.gserviceaccount.com"
+  cloud_build_sa_roles = toset([
+    "roles/storage.objectAdmin",     # 소스 tarball get/put (gs://PROJECT_cloudbuild/...)
+    "roles/logging.logWriter",       # CLOUD_LOGGING_ONLY 옵션 사용 시
+    "roles/artifactregistry.writer", # docker push to AR repo
+  ])
+}
+
+resource "google_project_iam_member" "cloud_build_default_sa" {
+  for_each = local.cloud_build_sa_roles
+  project  = var.project_id
+  role     = each.value
+  member   = local.cloud_build_default_sa
+
+  depends_on = [google_project_service.cloudbuild]
+}
+
 # ---------------------------------------------------------------------------
 # Artifact Registry — Cloud Run service 이미지 저장소 (api_server + execution_engine worker)
 # ---------------------------------------------------------------------------
