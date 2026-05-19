@@ -13,6 +13,7 @@ spec §3.2 Workflow Composer 내부 StateGraph 구현. LangGraph는 adapters/에
 from __future__ import annotations
 
 import operator
+import time
 from typing import Annotated, Any, AsyncGenerator, Optional, TypedDict
 from uuid import UUID, uuid4
 
@@ -158,18 +159,31 @@ class LangGraphOrchestrator:
         compressed = state["messages"][-1:]
         return {"messages": compressed, "turn_count": 1}
 
-    # 2. security_node — 기본 리스크 평가 (pass-through, 향후 CredentialInjectionService 연동)
+    # 2. security_node — 기본 입력 검증 (빈 메시지, 길이 초과)
     async def _security_node(self, state: _State) -> dict:
-        return {}
+        t0 = time.monotonic()
+        message = state["messages"][-1].get("content", "") if state["messages"] else ""
+        if not message.strip():
+            return {"error": "빈 메시지는 처리할 수 없습니다."}
+        if len(message) > 10_000:
+            return {"error": f"메시지가 너무 깁니다 ({len(message)}자). 최대 10,000자."}
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "collected_frames": [
+                PipelineStatusFrame(service_name="security", status="completed", elapsed_ms=elapsed)
+            ]
+        }
 
     # 3. intent_node
     async def _intent_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
         try:
             result = await self._intent_analyzer.analyze(
                 state["messages"], context={}
             )
         except Exception as exc:
             return {"intent": "clarify", "error": f"intent 분석 실패: {exc}"}
+        elapsed = int((time.monotonic() - t0) * 1000)
         draft_spec = DraftSpec(
             natural_language_intent=state["messages"][-1].get("content", ""),
             unresolved_nodes=[],
@@ -184,10 +198,8 @@ class LangGraphOrchestrator:
             "intent_analyzed_entities": result.analyzed_entities,
             "draft_spec": draft_spec,
             "collected_frames": [
-                IntentResultFrame(
-                    intent=result.intent,
-                    entities=result.analyzed_entities,
-                )
+                IntentResultFrame(intent=result.intent, entities=result.analyzed_entities),
+                PipelineStatusFrame(service_name="intent", status="completed", elapsed_ms=elapsed),
             ],
         }
 
@@ -211,16 +223,24 @@ class LangGraphOrchestrator:
 
     # 6. retriever_node — 노드 후보 검색
     async def _retriever_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
         spec = state["draft_spec"]
         query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
         try:
             candidates = await self._node_registry.search(query)
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
-        return {"node_candidates": candidates}
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "node_candidates": candidates,
+            "collected_frames": [
+                PipelineStatusFrame(service_name="retriever", status="completed", elapsed_ms=elapsed)
+            ],
+        }
 
     # 7. drafter_node — 워크플로우 초안 생성
     async def _drafter_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
         spec = state["draft_spec"]
         if spec is None:
             return {"error": "DraftSpec 없음"}
@@ -228,6 +248,7 @@ class LangGraphOrchestrator:
             workflow = await self._drafter.draft(spec, state["node_candidates"], owner_user_id=state["user_id"])
         except Exception as exc:
             return {"error": f"drafter 실패: {exc}"}
+        elapsed = int((time.monotonic() - t0) * 1000)
         nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
         connections_data = [c.model_dump(mode="json") for c in workflow.connections]
         return {
@@ -235,6 +256,7 @@ class LangGraphOrchestrator:
             "collected_frames": [
                 DraftSpecDeltaFrame(delta={"attempt": state["qa_attempts"] + 1}),
                 WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
+                PipelineStatusFrame(service_name="drafter", status="completed", elapsed_ms=elapsed),
             ],
         }
 
@@ -251,6 +273,7 @@ class LangGraphOrchestrator:
 
     # 9. qa_evaluator_node — LLM-as-a-Judge 품질 평가
     async def _qa_evaluator_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
         workflow = state["workflow_draft"]
         spec = state["draft_spec"]
         if workflow is None or spec is None:
@@ -259,6 +282,7 @@ class LangGraphOrchestrator:
             result = await self._qa_evaluator.evaluate(workflow, spec)
         except Exception as exc:
             return {"error": f"qa_evaluator 실패: {exc}"}
+        elapsed = int((time.monotonic() - t0) * 1000)
         attempt = state["qa_attempts"] + 1
         return {
             "qa_attempts": attempt,
@@ -270,7 +294,8 @@ class LangGraphOrchestrator:
                     attempt=attempt,
                     pass_flag=result.pass_flag,
                     feedback=result.feedback,
-                )
+                ),
+                PipelineStatusFrame(service_name="qa_evaluator", status="completed", elapsed_ms=elapsed),
             ],
         }
 
@@ -284,6 +309,7 @@ class LangGraphOrchestrator:
 
     # 12. handoff_node — WorkflowRepository.save → workflow_id → REQ-007
     async def _handoff_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
         workflow = state["workflow_draft"]
         if workflow is None:
             return {
@@ -295,12 +321,11 @@ class LangGraphOrchestrator:
             workflow_id = await self._workflow_repo.save(workflow)
         except Exception as exc:
             return {"error": f"workflow 저장 실패: {exc}"}
+        elapsed = int((time.monotonic() - t0) * 1000)
         return {
             "collected_frames": [
-                ResultFrame(
-                    intent="draft",
-                    payload={"workflow_id": str(workflow_id)},
-                )
+                ResultFrame(intent="draft", payload={"workflow_id": str(workflow_id)}),
+                PipelineStatusFrame(service_name="handoff", status="completed", elapsed_ms=elapsed),
             ]
         }
 
