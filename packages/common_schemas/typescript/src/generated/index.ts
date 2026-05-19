@@ -191,8 +191,35 @@ export interface ErrorFrame {
   message: string;
 }
 
+export interface PipelineStatusFrame {
+  frame_type: "pipeline_status";
+  service_name: string;
+  status: "started" | "completed" | "failed";
+  elapsed_ms?: number | null;
+}
+
+export interface IntentResultFrame {
+  frame_type: "intent_result";
+  intent: string;
+  entities: Record<string, unknown>;
+}
+
+export interface QAMetricFrame {
+  frame_type: "qa_metric";
+  score: number;
+  attempt: number;
+  pass_flag: boolean;
+  feedback: string;
+}
+
+export interface WorkflowDraftFrame {
+  frame_type: "workflow_draft";
+  nodes: Array<Record<string, unknown>>;
+  connections: Array<Record<string, unknown>>;
+}
+
 export interface AgentProtocolResponse {
-  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame>;
+  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame>;
   state_delta: Record<string, unknown>;
   next_action: "continue" | "complete" | "error";
 }
@@ -331,4 +358,4 @@ export interface ValidationErrorResponse {
   errors: Array<ValidationErrorItem>;
 }
 
-export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame;
+export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame;

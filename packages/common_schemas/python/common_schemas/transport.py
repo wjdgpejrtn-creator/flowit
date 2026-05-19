@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Tag
@@ -51,6 +51,39 @@ class ErrorFrame(SSEFrame):
     message: str
 
 
+# --- 실시간 모니터링 프레임 (오른쪽 사이드바) ---
+
+class PipelineStatusFrame(SSEFrame):
+    """생성 파이프라인 각 서비스의 진행 상태. 오른쪽 사이드바 실시간 표시용."""
+    frame_type: Literal["pipeline_status"] = "pipeline_status"
+    service_name: str
+    status: Literal["started", "completed", "failed"]
+    elapsed_ms: Optional[int] = None
+
+
+class IntentResultFrame(SSEFrame):
+    """의도 분석 결과 — 인텐트 분류 + 추출 엔티티. 오른쪽 사이드바 표시용."""
+    frame_type: Literal["intent_result"] = "intent_result"
+    intent: str
+    entities: dict[str, Any]
+
+
+class QAMetricFrame(SSEFrame):
+    """QA 평가 결과 — 점수 + 시도 횟수 + 통과 여부. 오른쪽 사이드바 표시용."""
+    frame_type: Literal["qa_metric"] = "qa_metric"
+    score: float
+    attempt: int
+    pass_flag: bool
+    feedback: str
+
+
+class WorkflowDraftFrame(SSEFrame):
+    """워크플로우 초안 — 노드 목록 + 연결 구조. 가운데 캔버스 실시간 시각화용."""
+    frame_type: Literal["workflow_draft"] = "workflow_draft"
+    nodes: list[dict[str, Any]]
+    connections: list[dict[str, Any]]
+
+
 def _get_frame_discriminator(v: Any) -> str:
     if isinstance(v, dict):
         return v.get("frame_type", "")
@@ -66,6 +99,10 @@ AnySSEFrame = Annotated[
         Annotated[DraftSpecDeltaFrame, Tag("draft_spec_delta")],
         Annotated[ResultFrame, Tag("result")],
         Annotated[ErrorFrame, Tag("error")],
+        Annotated[PipelineStatusFrame, Tag("pipeline_status")],
+        Annotated[IntentResultFrame, Tag("intent_result")],
+        Annotated[QAMetricFrame, Tag("qa_metric")],
+        Annotated[WorkflowDraftFrame, Tag("workflow_draft")],
     ],
     Discriminator(_get_frame_discriminator),
 ]

@@ -20,16 +20,19 @@ from langgraph.graph import END, StateGraph
 
 from common_schemas.agent import DraftSpec, MemoryEntry, SlotFillingState
 from common_schemas.enums import ExecutionStatus, IntentType
-from common_schemas.handoff import HandoffPayload
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
     DraftSpecDeltaFrame,
     ErrorFrame,
+    IntentResultFrame,
+    PipelineStatusFrame,
+    QAMetricFrame,
     ResultFrame,
     SessionFrame,
     SlotFillQuestionFrame,
     SSEFrame,
+    WorkflowDraftFrame,
 )
 from common_schemas.workflow import NodeConfig, WorkflowSchema
 from nodes_graph.domain.services.graph_validator import GraphValidator
@@ -68,6 +71,7 @@ class _State(TypedDict):
     node_candidates: list[NodeConfig]
     workflow_draft: Optional[WorkflowSchema]
     qa_attempts: int
+    qa_score: float
     pass_flag: bool
     collected_frames: Annotated[list[AnySSEFrame], operator.add]
     error: str | None
@@ -130,6 +134,7 @@ class LangGraphOrchestrator:
             "node_candidates": [],
             "workflow_draft": None,
             "qa_attempts": 0,
+            "qa_score": 0.0,
             "pass_flag": False,
             "collected_frames": [],
             "error": None,
@@ -178,6 +183,12 @@ class LangGraphOrchestrator:
             "intent": result.intent,
             "intent_analyzed_entities": result.analyzed_entities,
             "draft_spec": draft_spec,
+            "collected_frames": [
+                IntentResultFrame(
+                    intent=result.intent,
+                    entities=result.analyzed_entities,
+                )
+            ],
         }
 
     # 4. consultant_node — clarify 인텐트: slot filling 준비
@@ -217,9 +228,14 @@ class LangGraphOrchestrator:
             workflow = await self._drafter.draft(spec, state["node_candidates"], owner_user_id=state["user_id"])
         except Exception as exc:
             return {"error": f"drafter 실패: {exc}"}
+        nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
+        connections_data = [c.model_dump(mode="json") for c in workflow.connections]
         return {
             "workflow_draft": workflow,
-            "collected_frames": [DraftSpecDeltaFrame(delta={"attempt": state["qa_attempts"] + 1})],
+            "collected_frames": [
+                DraftSpecDeltaFrame(delta={"attempt": state["qa_attempts"] + 1}),
+                WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
+            ],
         }
 
     # 8. validator_node — 그래프 구조 검증
@@ -243,9 +259,19 @@ class LangGraphOrchestrator:
             result = await self._qa_evaluator.evaluate(workflow, spec)
         except Exception as exc:
             return {"error": f"qa_evaluator 실패: {exc}"}
+        attempt = state["qa_attempts"] + 1
         return {
-            "qa_attempts": state["qa_attempts"] + 1,
+            "qa_attempts": attempt,
+            "qa_score": result.score,
             "pass_flag": result.pass_flag,
+            "collected_frames": [
+                QAMetricFrame(
+                    score=result.score,
+                    attempt=attempt,
+                    pass_flag=result.pass_flag,
+                    feedback=result.feedback,
+                )
+            ],
         }
 
     # 10. qa_retry_node — QA 실패 시 재시도 준비 (drafter로 돌아감)
@@ -269,11 +295,6 @@ class LangGraphOrchestrator:
             workflow_id = await self._workflow_repo.save(workflow)
         except Exception as exc:
             return {"error": f"workflow 저장 실패: {exc}"}
-        handoff = HandoffPayload(
-            workflow_id=workflow_id,
-            session_id=state["session_id"],
-            user_id=state["user_id"],
-        )
         return {
             "collected_frames": [
                 ResultFrame(

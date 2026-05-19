@@ -5,6 +5,7 @@ spec §3.1 supervisor diagram 구현. LangGraph는 adapters/에만 존재 (CLAUD
 """
 from __future__ import annotations
 
+import asyncio
 import operator
 from typing import Annotated, Any, AsyncGenerator, TypedDict
 from uuid import UUID, uuid4
@@ -61,6 +62,7 @@ class LangGraphSupervisor:
         self._personalization = personalization_client
         self._composer = composer_client
         self._skills = skills_client
+        self._live_queues: dict[UUID, asyncio.Queue] = {}
         self._graph = self._build()
 
     # ------------------------------------------------------------------ public
@@ -83,6 +85,9 @@ class LangGraphSupervisor:
         trace_id: str | None,
         turn_count: int = 1,
     ) -> AsyncGenerator[SSEFrame, None]:
+        queue: asyncio.Queue[SSEFrame | None] = asyncio.Queue()
+        self._live_queues[session_id] = queue
+
         yield SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
 
         initial: _State = {
@@ -98,14 +103,35 @@ class LangGraphSupervisor:
             "error": None,
         }
 
-        async for event in self._graph.astream(initial, stream_mode="updates"):
-            for node_name, updates in event.items():
-                yield AgentNodeFrame(agent_node_name=node_name)
-                for frame in updates.get("collected_frames", []):
-                    yield frame
-                if updates.get("error"):
-                    yield ErrorFrame(code="E_SUPERVISOR", message=updates["error"])
-                    return
+        # relay 노드(_COMPOSER, _SKILLS)는 _relay()가 직접 Queue에 put하므로
+        # run_graph에서는 collected_frames를 중복 emit하지 않음.
+        # 나머지 노드(load_memory, intent, finalize, update_memory)는 여기서 emit.
+        _RELAY_NODES = {_COMPOSER, _SKILLS}
+
+        async def _run_graph() -> None:
+            try:
+                async for event in self._graph.astream(initial, stream_mode="updates"):
+                    for node_name, updates in event.items():
+                        await queue.put(AgentNodeFrame(agent_node_name=node_name))
+                        if node_name not in _RELAY_NODES:
+                            for frame in updates.get("collected_frames", []):
+                                await queue.put(frame)
+                        if updates.get("error"):
+                            await queue.put(
+                                ErrorFrame(code="E_SUPERVISOR", message=updates["error"])
+                            )
+                            return
+            finally:
+                await queue.put(None)
+                self._live_queues.pop(session_id, None)
+
+        asyncio.create_task(_run_graph())
+
+        while True:
+            frame = await queue.get()
+            if frame is None:
+                break
+            yield frame
 
     # ------------------------------------------------------------------ nodes
 
@@ -221,10 +247,14 @@ class LangGraphSupervisor:
             payload={"message": state["message"]},
             trace_id=state["trace_id"],
         )
+        live_queue = self._live_queues.get(state["session_id"])
         frames: list[AnySSEFrame] = []
         try:
             async for resp in client.send(req):
-                frames.extend(resp.frames)
+                for frame in resp.frames:
+                    frames.append(frame)
+                    if live_queue:
+                        await live_queue.put(frame)
                 if resp.next_action != "continue":
                     break
         except Exception as exc:

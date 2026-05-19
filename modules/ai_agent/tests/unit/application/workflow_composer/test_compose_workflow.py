@@ -4,7 +4,13 @@ from uuid import uuid4
 import pytest
 
 from common_schemas import WorkflowSchema
-from common_schemas.transport import ResultFrame, SessionFrame
+from common_schemas.transport import (
+    IntentResultFrame,
+    QAMetricFrame,
+    ResultFrame,
+    SessionFrame,
+    WorkflowDraftFrame,
+)
 
 from ai_agent.application.agents.workflow_composer import ComposeWorkflowUseCase
 from ai_agent.domain.ports import NodeRegistry, WorkflowRepository
@@ -109,3 +115,62 @@ class TestComposeWorkflowUseCase:
         gen = await uc.execute(uuid4(), uuid4(), "보고서 자동화")
         frames = [f async for f in gen]
         assert drafter.draft.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_yields_intent_result_frame(self):
+        from common_schemas import IntentResult
+        intent_svc = AsyncMock(spec=IntentAnalyzerService)
+        intent_svc.analyze = AsyncMock(return_value=IntentResult(
+            intent="draft", confidence=0.95, analyzed_entities={"tool": "slack"},
+        ))
+        uc = _build_uc(intent_analyzer=intent_svc)
+        gen = await uc.execute(uuid4(), uuid4(), "슬랙으로 보고서 보내줘")
+        frames = [f async for f in gen]
+        intent_frames = [f for f in frames if isinstance(f, IntentResultFrame)]
+        assert len(intent_frames) == 1
+        assert intent_frames[0].intent == "draft"
+        assert intent_frames[0].entities == {"tool": "slack"}
+
+    @pytest.mark.asyncio
+    async def test_yields_qa_metric_frame(self):
+        from common_schemas import EvaluationResult
+        qa = AsyncMock(spec=QAEvaluatorService)
+        qa.evaluate = AsyncMock(return_value=EvaluationResult(
+            score=8.5, pass_flag=True, reason="good", feedback="looks great",
+        ))
+        uc = _build_uc(qa_evaluator=qa)
+        gen = await uc.execute(uuid4(), uuid4(), "보고서 자동화")
+        frames = [f async for f in gen]
+        qa_frames = [f for f in frames if isinstance(f, QAMetricFrame)]
+        assert len(qa_frames) == 1
+        assert qa_frames[0].score == 8.5
+        assert qa_frames[0].pass_flag is True
+        assert qa_frames[0].attempt == 1
+
+    @pytest.mark.asyncio
+    async def test_yields_workflow_draft_frame(self):
+        uc = _build_uc()
+        gen = await uc.execute(uuid4(), uuid4(), "보고서 자동화")
+        frames = [f async for f in gen]
+        draft_frames = [f for f in frames if isinstance(f, WorkflowDraftFrame)]
+        assert len(draft_frames) >= 1
+        assert isinstance(draft_frames[0].nodes, list)
+        assert isinstance(draft_frames[0].connections, list)
+
+    @pytest.mark.asyncio
+    async def test_qa_metric_frame_attempt_increments_on_retry(self):
+        from common_schemas import EvaluationResult
+        qa = AsyncMock(spec=QAEvaluatorService)
+        qa.evaluate = AsyncMock(side_effect=[
+            EvaluationResult(score=5.0, pass_flag=False, reason="", feedback="retry"),
+            EvaluationResult(score=9.0, pass_flag=True, reason="", feedback="pass"),
+        ])
+        uc = _build_uc(qa_evaluator=qa)
+        gen = await uc.execute(uuid4(), uuid4(), "보고서 자동화")
+        frames = [f async for f in gen]
+        qa_frames = [f for f in frames if isinstance(f, QAMetricFrame)]
+        assert len(qa_frames) == 2
+        assert qa_frames[0].attempt == 1
+        assert qa_frames[0].pass_flag is False
+        assert qa_frames[1].attempt == 2
+        assert qa_frames[1].pass_flag is True
