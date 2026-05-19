@@ -143,7 +143,7 @@ class PersonalizationAgent:
                 workflow_data = req.payload.get("workflow")
                 workflow = WorkflowSchema.model_validate(workflow_data) if workflow_data else None
                 await UpdateUserMemoryUseCase(
-                    self._memory_store, self._llm, self._embedder
+                    self._memory_store, self._llm
                 ).execute(
                     req.user_id,
                     req.payload.get("turn_count", 0),
