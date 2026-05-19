@@ -38,7 +38,7 @@ class ExecutionModel(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    celery_task_id: Mapped[Optional[str]] = mapped_column(String(155), nullable=True)
+    task_queue_id: Mapped[Optional[str]] = mapped_column(String(155), nullable=True)
 
 
 class NodeResultModel(Base):

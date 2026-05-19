@@ -19,25 +19,16 @@ def execute_workflow_task(self, workflow_id: str, context_data: dict) -> dict:
     container = create_container()
     use_case = container.execute_workflow_use_case
 
+    # task_queue_id는 ExecutionContext를 통해 use case에 전달 → 첫 INSERT와 같은
+    # transaction에 영속화. Container 내부 repo 직접 접근 / 별도 save 호출 없음.
     context = ExecutionContext(
         execution_id=UUID(context_data["execution_id"]),
         workflow_id=UUID(context_data["workflow_id"]),
         user_id=UUID(context_data["user_id"]),
         trigger_type=context_data["trigger_type"],
         parameters=context_data.get("parameters", {}),
+        task_queue_id=self.request.id,
     )
-
-    # cancel_execution_task가 revoke 시 사용할 task_id를 ExecutionRepository에 영속화.
-    # 워크플로우 실행 시작 직전에 task_id를 저장해 cancel 가능성 확보.
-    try:
-        existing = container._execution_repo.get(context.execution_id)
-        existing.celery_task_id = self.request.id
-        container._execution_repo.save(existing)
-    except Exception:
-        # 첫 실행 시 row가 없을 수 있음 — execute_workflow가 알아서 INSERT.
-        # 그 경로에서는 celery_task_id 누락. 보강: ExecuteWorkflowUseCase가
-        # 첫 save 시 context에서 task_id 받아 저장하도록 후속 PR.
-        pass
 
     result = use_case.execute(UUID(workflow_id), context)
     return result.model_dump(mode="json")

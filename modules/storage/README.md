@@ -38,7 +38,7 @@ from storage.repositories import (
 | `PgNodeDefinitionRepository` | `nodes_graph/domain/ports/` | `async get_by_id(node_id) → Optional[NodeDefinition]`, `async list_all(mvp_only) → list[NodeDefinition]`, `async search_by_embedding(query, limit) → list[NodeDefinition]`, `async upsert(definition) → NodeDefinition` |
 | `PgAgentMemoryRepository` | `ai_agent/domain/ports/` | `save(entry: MemoryEntry) → None`, `find_by_user(user_id, limit) → list[MemoryEntry]`, `find_by_session(session_id, limit) → list[MemoryEntry]` |
 | `PgWorkflowRepository` | `execution_engine/domain/ports/` | `get(workflow_id: UUID) → WorkflowSchema`, `save(schema: WorkflowSchema) → UUID`, `get_node_config(node_id: UUID) → NodeConfig` |
-| `PgExecutionRepository` | `execution_engine/domain/ports/` | `save(result: ExecutionResult) → None`, `get(execution_id: UUID) → ExecutionResult`, `update_node_state(execution_id, state: NodeExecutionState) → None` |
+| `PgExecutionRepository` | `execution_engine/domain/ports/` | `save(row: ExecutionRow) → None`, `get(execution_id: UUID) → ExecutionRow`, `update_node_state(execution_id, state: NodeExecutionState) → None` (`ExecutionRow`는 storage 측 transfer-object dataclass — 도메인 `ExecutionResult`와 의도적 분리, [[duplicate_code_verify_before_remove]]) |
 | `PgDocumentRepository` | `doc_parser/domain/ports/` | `save(document: DocumentBlock) → UUID`, `save_chunks(chunks: list[Chunk]) → None`, `save_quality_log(result, document_id) → None` |
 | `PgToolExecutionRepository` | `toolset/domain/ports/` | `save(record: ToolExecutionRecord) → None`, `find_by_tool(tool_name, limit) → list[ToolExecutionRecord]` |
 | `PgSkillRepository` | 자체 정의 | `upsert`, `get_by_id`, `list`, `search` (하이브리드) |

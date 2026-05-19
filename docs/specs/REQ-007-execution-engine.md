@@ -51,8 +51,8 @@ from common_schemas import (
 
 | 클래스 | 필드 | 설명 |
 |--------|------|------|
-| `ExecutionContext` | `execution_id: UUID`, `workflow_id: UUID`, `user_id: UUID`, `trigger_type: Literal["manual", "scheduled", "handoff"]`, `started_at: datetime`, `parameters: dict[str, Any]` | 워크플로우 실행 컨텍스트 (실행 한 번의 메타정보) |
-| `ExecutionResult` | `execution_id: UUID`, `workflow_id: UUID`, `user_id: Optional[UUID]`, `status: ExecutionStatus`, `node_results: list[NodeResult]`, `started_at: datetime`, `completed_at: Optional[datetime]`, `error: Optional[str]` | 워크플로우 전체 실행 결과 (user_id: 실행 발신자 추적, EvaluateAndRefine 재실행 시 활용) |
+| `ExecutionContext` | `execution_id: UUID`, `workflow_id: UUID`, `user_id: UUID`, `trigger_type: Literal["manual", "scheduled", "handoff", "resume"]`, `started_at: datetime`, `parameters: dict[str, Any]`, `task_queue_id: Optional[str]` | 워크플로우 실행 컨텍스트 (실행 한 번의 메타정보). `task_queue_id`는 워커 pickup 시점에 broker가 부여한 task id — `ExecuteWorkflowUseCase`가 첫 INSERT에 그대로 영속화 |
+| `ExecutionResult` | `execution_id: UUID`, `workflow_id: UUID`, `user_id: Optional[UUID]`, `status: ExecutionStatus`, `node_results: list[NodeResult]`, `started_at: datetime`, `completed_at: Optional[datetime]`, `error: Optional[str]`, `task_queue_id: Optional[str]` | 워크플로우 전체 실행 결과 (user_id: 실행 발신자 추적). `task_queue_id`는 cancel 시 `TaskQueuePort.revoke` 인자로 사용 — 컬럼명/필드명은 broker 비종속 (Celery → 다른 큐로 교체 시 adapter만 수정). `mark_cancelled()` 메서드는 status=CANCELLED + completed_at 자동 세팅 |
 | `NodeResult` | `node_instance_id: UUID`, `status: Literal["succeeded", "failed", "cancelled", "skipped"]`, `output: dict[str, Any]`, `started_at: datetime`, `completed_at: datetime`, `retry_count: int`, `error: Optional[str]` | 개별 노드 실행 결과 |
 | `ExecutionLevel` | `level: int`, `nodes: list[NodeInstance]` | 위상 정렬 결과의 한 실행 레벨 (같은 레벨 = 병렬 실행 가능) |
 | `RetryPolicy` | `max_retries: int`, `backoff_base_seconds: float`, `retryable_errors: list[str]` | 노드 재시도 정책 VO |
@@ -80,8 +80,10 @@ from common_schemas import (
 | | `get(execution_id: UUID) -> ExecutionResult` | 실행 결과 조회 |
 | | `update_node_state(execution_id: UUID, state: NodeExecutionState) -> None` | 노드 상태 업데이트 |
 | `NodeExecutorPort` | `execute(node: NodeInstance, config: NodeConfig, inputs: dict[str, Any]) -> dict[str, Any]` | 개별 노드 실행 (Tool 호출 또는 LLM Agent 디스패치) |
-| `TaskQueuePort` | `dispatch(task_name: str, args: dict) -> str` | Celery 태스크 발행 |
-| | `dispatch_chord(tasks: list[dict], callback: str) -> str` | Celery chord (병렬 그룹 + 콜백) |
+| `TaskQueuePort` | `dispatch(task_name: str, args: dict) -> str` | 일반 task 발행 (legacy / adapter 내부용) |
+| | `dispatch_chord(tasks: list[dict], callback: str) -> str` | 병렬 그룹 + 콜백 (chord) |
+| | `dispatch_workflow(*, execution_id: UUID, workflow_id: UUID, user_id: UUID \| None, trigger_type: Literal["manual","scheduled","handoff","resume"], parameters: dict \| None = None) -> str` | **의미적** 메서드. application 레이어가 broker-specific task name/queue를 몰라야 함 — adapter가 직렬화 책임. 반환 = 새 `task_queue_id` |
+| | `revoke(task_id: str, *, terminate: bool = True) -> None` | 발행된 task 취소. Celery 어댑터는 `app.control.revoke(task_id, terminate=..., signal="SIGTERM")` 호출 |
 | `CredentialProviderPort` | `get_credential(credential_id: UUID, user_id: UUID) -> dict[str, str]` | REQ-002 자격증명 주입 (복호화된 credential 반환) |
 | `EventPublisherPort` | `publish_status(execution_id: UUID, status: ExecutionStatus) -> None` | SSE로 프론트엔드에 상태 전파 |
 | | `publish_node_complete(execution_id: UUID, node_result: NodeResult) -> None` | 노드 완료 이벤트 발행 |
@@ -90,10 +92,10 @@ from common_schemas import (
 
 | 유스케이스 | Input -> Output | 설명 |
 |-----------|----------------|------|
-| `ExecuteWorkflowUseCase` | `(workflow_id: UUID, context: ExecutionContext) -> ExecutionResult` | 전체 오케스트레이션: 워크플로우 조회 -> DAG 검증 -> 위상 정렬 -> 레벨별 실행 -> 결과 저장 |
+| `ExecuteWorkflowUseCase` | `(workflow_id: UUID, context: ExecutionContext) -> ExecutionResult` | 전체 오케스트레이션: 워크플로우 조회 -> DAG 검증 -> 위상 정렬 -> 레벨별 실행 -> 결과 저장. `context.task_queue_id`는 첫 `ExecutionResult` 인스턴스 생성 시 그대로 전달 → 단일 transaction 영속화 |
 | `DispatchNodeUseCase` | `(node: NodeInstance, config: NodeConfig, inputs: dict, user_id: UUID, execution_id: UUID) -> NodeResult` | 단일 노드 실행: credential 주입(__user_id__ + __credentials__) -> NodeExecutor 호출 -> 재시도 처리 -> 결과 반환 |
 | `HandleHandoffUseCase` | `(payload: HandoffPayload) -> ExecutionResult` | REQ-004 QA 통과 후 핸드오프 수신: WorkflowSchema 조회 -> ExecuteWorkflowUseCase 위임 |
-| `PauseResumeUseCase` | `(execution_id: UUID, action: Literal["pause", "resume"], approval: Optional[dict]) -> None` | HITL 노드 일시 중지/재개 처리 |
+| `PauseResumeUseCase` | `(execution_id: UUID, action: Literal["pause", "resume", "cancel"], approval: Optional[dict]) -> None` | 일시 중지 / 재개 / 취소. `cancel` 시 `task_queue.revoke()` 호출 후 status=CANCELLED 마킹. `resume` 시 `task_queue.dispatch_workflow()` → 새 task_queue_id로 갱신해 옛 task에 대한 revoke를 방지 |
 | `EvaluateAndRefineUseCase` | `(execution_id: UUID, evaluation: EvaluationResult) -> Optional[ExecutionResult]` | QA score < 8 시 Self-Refine 재실행 (최대 3회) |
 
 ### Infrastructure/Adapter Layer (`adapters/`)

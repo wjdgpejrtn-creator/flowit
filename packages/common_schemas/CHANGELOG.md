@@ -16,6 +16,7 @@ This project follows [Semantic Versioning](https://semver.org/):
 ### Changed
 - `ExecutionStatus` 멤버 수 4 → 6. `test_enums.py` 갱신.
 - DB CheckConstraint와 enum 사이 사각지대 해소 (이전: DB는 6종 허용 / enum은 4종 노출).
+- `enums.py`에 동일 이름으로 두 번 정의돼 있던 `IntentType` 중복 정의 제거 (Python에서는 후위 정의가 덮어쓰는 형태였어 동작상 차이는 없었음). 결과적으로 첫 위치 1건이 제거되고 끝부분 1건만 잔존 — 멤버/값 동일하여 외부 영향 없음.
 
 ### Symbols
 - 56 → 56 (enum 멤버 추가만, 신규 symbol 없음)

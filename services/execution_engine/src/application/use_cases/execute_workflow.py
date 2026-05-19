@@ -37,6 +37,7 @@ class ExecuteWorkflowUseCase:
             workflow_id=workflow_id,
             user_id=context.user_id,
             started_at=context.started_at,
+            task_queue_id=context.task_queue_id,
         )
 
         try:
