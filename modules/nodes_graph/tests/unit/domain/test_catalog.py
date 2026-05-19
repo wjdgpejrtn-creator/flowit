@@ -11,16 +11,26 @@ from nodes_graph.domain.catalog.trigger.webhook_trigger import WebhookTriggerInp
 
 def test_catalog_count():
     defs = get_all_node_definitions()
-    # 28 domain (data 14 + control 8 + trigger 6) + 14 external + 14 toolset:
-    #   external (14):
+    # 28 domain (data 14 + control 8 + trigger 6) + 25 external = 53
+    #   external 25 = 기존 14 + REQ-005 toolset 연동 신규 11 (박아름 5/19 toolset 정리 PR)
+    #
+    #   기존 14 (박아름 1주차 + gemma_chat PR #68):
     #   - 기타 2: http_request, pdf_generate
     #   - Communication 2: slack_post_message, gmail_send (Microsoft 보류)
     #   - Document 3: google_drive_read, google_sheets_read, google_docs_write (OneDrive 보류)
     #   - Data 3: postgresql_query, mysql_query, bigquery_query
     #   - AI/ML 2: anthropic_chat (OpenAI 보류), gemma_chat (5/14 야간 추가, PR #68)
     #   - Productivity 2: google_calendar_create_event, linear_create_issue (Notion 보류)
-    #   toolset (14): 햄햄 commit `59f0e26`로 toolset 14종 tool 노드를 카탈로그에 연결
-    assert len(defs) == 56
+    #
+    #   신규 11 (REQ-005 toolset 연동, 5/15 햄햄 합의 + 5/19 조장 안):
+    #   - integration 2: rest_api, graphql
+    #   - action 3: webhook, email_send, slack_notify
+    #   - transform 4: text_template, json_transform, data_mapping, file_transform
+    #   - utility 2: file_read, file_write
+    #
+    #   중복 제거 3종: http_request_tool(=external/http_request), conditional(=domain/control/if_condition),
+    #                  loop(=domain/control/loop_list) → 양쪽 제거
+    assert len(defs) == 53
 
 
 def test_catalog_unique_node_ids():
