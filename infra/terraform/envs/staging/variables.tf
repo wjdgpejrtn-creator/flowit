@@ -43,6 +43,8 @@ variable "agent_secret_names" {
     "personalization-url",
     # llm-base 전용
     "huggingface-token",
+    # execution_engine Celery broker + api_server SSE pub/sub (REQ-007/009, PR #84 후속)
+    "redis-url",
   ]
 }
 
