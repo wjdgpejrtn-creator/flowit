@@ -2,7 +2,7 @@ import common_schemas
 
 
 def test_all_exports():
-    assert len(common_schemas.__all__) == 56
+    assert len(common_schemas.__all__) == 57
 
 
 def test_key_symbols_importable():

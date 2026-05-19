@@ -45,6 +45,12 @@ variable "agent_secret_names" {
     "huggingface-token",
     # execution_engine Celery broker + api_server SSE pub/sub (REQ-007/009, PR #84 후속)
     "redis-url",
+    # api_server 전용 (REQ-009, PR #75 Cloud Run 배포 — 본 PR-C 추가)
+    "jwt-secret-key",       # JWT 토큰 서명 키 (32바이트+)
+    "encryption-key",       # AES-GCM 암호화 키 (base64 32바이트)
+    "google-client-id",     # Google OAuth Client ID
+    "google-client-secret", # Google OAuth Client Secret
+    "google-redirect-uri",  # OAuth callback URL (staging Cloud Run public hostname)
   ]
 }
 

@@ -1,3 +1,4 @@
+from . import broker_tasks
 from .agent import AgentState, DraftSpec, IntentResult, MemoryEntry, MemoryType, SlotFillingState, UnresolvedNode
 from .agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 from .document import (
@@ -112,4 +113,6 @@ __all__ = [
     "HandoffPayload",
     # types
     "UtcDatetime",
+    # broker tasks (SSOT for Celery task names — api_server/execution_engine 양쪽 참조)
+    "broker_tasks",
 ]

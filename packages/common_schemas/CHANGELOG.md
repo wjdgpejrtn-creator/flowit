@@ -7,6 +7,23 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.6.2] - 2026-05-19
+
+### Added — broker task name 상수 모듈 (PR #75 리뷰 #4 반영)
+- `common_schemas.broker_tasks` 모듈 신설 — Celery task name 단일 정의 (`TASK_EXECUTE_WORKFLOW` / `TASK_CANCEL_EXECUTION` / `TASK_RESUME_EXECUTION` / `TASK_EXECUTE_NODE` / `TASK_HANDLE_HANDOFF` / `TASK_LEVEL_CALLBACK` + `QUEUE_DEFAULT`).
+- 이전엔 api_server router (`workflows.py` / `exec_control.py`) + execution_engine `_celery_app.py task_routes` + `celery_tasks.py @shared_task name=...` + `celery_adapter.py EXECUTE_WORKFLOW_TASK_NAME` 4곳에 같은 문자열이 중복. SSOT 도입으로 drift 방지.
+
+### Symbols
+- 56 → 57 (+1: `broker_tasks` 모듈, 단일 namespace로 export)
+
+### Migration notes
+- 기존 매직 문자열 호출자는 점진 교체:
+  ```python
+  from common_schemas.broker_tasks import TASK_EXECUTE_WORKFLOW
+  celery.send_task(TASK_EXECUTE_WORKFLOW, args=[...])
+  ```
+- 본 PR(#75)에서 api_server 측은 모두 교체. execution_engine 측 decorator는 후속 PR (decorator import-time evaluation 안전 검토 후).
+
 ## [0.6.1] - 2026-05-19
 
 ### Added — ExecutionStatus enum 멤버 2종 (PR-A, REQ-007 cancel/resume 실 구현 동반)
