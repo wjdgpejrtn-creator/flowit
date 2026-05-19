@@ -9,6 +9,7 @@ from ...domain.ports.cipher_port import CipherPort
 from ...domain.ports.oauth_client_port import OAuthClientPort
 from ...domain.ports.oauth_connection_repository import OAuthConnectionRepository
 from ...domain.ports.session_repository import SessionRepository
+from ...domain.ports.user_repository import UserRepository
 from ...domain.value_objects.token_pair import TokenPair
 
 
@@ -17,12 +18,14 @@ class AuthenticateUseCase:
         self,
         session_repo: SessionRepository,
         oauth_repo: OAuthConnectionRepository,
+        user_repo: UserRepository,
         cipher: CipherPort,
         google_oauth: OAuthClientPort,
         jwt_adapter: object,
     ) -> None:
         self._session_repo = session_repo
         self._oauth_repo = oauth_repo
+        self._user_repo = user_repo
         self._cipher = cipher
         self._google_oauth = google_oauth
         self._jwt_adapter = jwt_adapter
@@ -33,6 +36,17 @@ class AuthenticateUseCase:
         # Derive deterministic user_id from Google subject identifier
         google_sub: str = user_info["sub"]
         user_id = uuid.uuid5(uuid.NAMESPACE_DNS, google_sub)
+
+        # JIT auto-provisioning — INSERT users row on first SSO login
+        if await self._user_repo.find_by_id(user_id) is None:
+            email: str = user_info["email"]
+            await self._user_repo.create(
+                user_id=user_id,
+                email=email,
+                name=user_info.get("name") or email.split("@")[0],
+                role="User",
+                department_id=None,
+            )
 
         # Encrypt OAuth tokens before storing
         enc_access = self._cipher.encrypt(user_info["access_token"].encode())

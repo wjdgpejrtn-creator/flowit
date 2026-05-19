@@ -15,9 +15,15 @@ pip install -e "modules/auth[dev]"
 
 ```python
 from auth.domain.services import PermissionResolver, CredentialInjectionService
-from auth.domain.entities import Session, OAuthConnection
+from auth.domain.entities import Session, OAuthConnection, User
 from auth.domain.value_objects import TokenPair
-from auth.domain.ports import SessionRepository, OAuthConnectionRepository, CipherPort, OAuthClientPort
+from auth.domain.ports import (
+    SessionRepository,
+    OAuthConnectionRepository,
+    UserRepository,
+    CipherPort,
+    OAuthClientPort,
+)
 from auth.application.use_cases import (
     AuthenticateUseCase,
     IssueTokenUseCase,
@@ -34,6 +40,7 @@ from auth.application.use_cases import (
 |--------|----------|------|
 | `Session` | `session_id: UUID`, `user_id: UUID`, `session_hash: str`, `expires_at: datetime`, `is_revoked: bool`, `device_info: Optional[str]` | JWT 세션. `is_expired() → bool`, `revoke() → None` 메서드 제공 |
 | `OAuthConnection` | `oauth_id: UUID`, `user_id: UUID`, `service: Literal["google","slack"]`, `credential_id: UUID`, `access_token_encrypted: bytes`, `refresh_token_encrypted: Optional[bytes]`, `scopes: list[str]`, `is_active: bool` | 외부 서비스 OAuth 연결. `revoke() → None` 메서드 제공 |
+| `User` | `user_id: UUID`, `email: str`, `name: str`, `role: Literal["User","Admin"]`, `department_id: Optional[UUID]`, `is_active: bool`, `created_at/updated_at: UtcDatetime` | 사용자 식별 정보. PR #87(cef92fa) 신설, JIT auto-provisioning 시 `AuthenticateUseCase`가 INSERT |
 
 ### domain/value_objects
 
@@ -61,6 +68,11 @@ from auth.application.use_cases import (
 | | `async get_active_for_user(user_id: UUID, service: str) → Optional[OAuthConnection]` | |
 | | `async update_tokens(credential_id: UUID, new_tokens: dict) → None` | |
 | | `async revoke(credential_id: UUID) → None` | |
+| `UserRepository` | `async find_by_id(user_id: UUID) → Optional[User]` | `storage/repositories/` (PR #87 cef92fa) |
+| | `async find_by_email(email: str) → Optional[User]` | |
+| | `async create(user_id: UUID, email: str, name: str, role: Literal["User","Admin"] = "User", department_id: Optional[UUID] = None) → User` | |
+| | `async update_role(user_id: UUID, role: Literal["User","Admin"]) → None` | |
+| | `async update_department(user_id: UUID, department_id: Optional[UUID]) → None` | |
 | `CipherPort` | `encrypt(plaintext: bytes) → bytes`, `decrypt(ciphertext: bytes) → bytes` | `auth/adapters/cipher/` (자체 구현) |
 | `OAuthClientPort` | `async exchange_code(code: str) → dict`, `async refresh_access_token(refresh_token: str) → dict`, `async get_user_info(access_token: str) → dict` | `auth/adapters/oauth/` (자체 구현) |
 
@@ -68,7 +80,7 @@ from auth.application.use_cases import (
 
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
-| `AuthenticateUseCase` | `OAuth code, redirect_uri → TokenPair` | Google OAuth 코드 교환 + 세션 생성 |
+| `AuthenticateUseCase` | `OAuth code, redirect_uri → TokenPair` | Google OAuth 코드 교환 → **users JIT auto-provisioning (없으면 INSERT)** → 세션 생성. 의존성: `SessionRepository`, `OAuthConnectionRepository`, `UserRepository`, `CipherPort`, `OAuthClientPort` |
 | `IssueTokenUseCase` | `session_hash: str → TokenPair` | 기존 세션에서 JWT 발급 |
 | `RefreshTokenUseCase` | `refresh_token: str → TokenPair` | 액세스 토큰 갱신 (Refresh Token Rotation 적용) |
 | `InjectCredentialUseCase` | `credential_id: UUID, node_id: UUID → PlaintextCredential` | 노드 실행 시 자격증명 복호화 |
@@ -97,9 +109,9 @@ Upstream (이 모듈이 의존):
 
 Downstream (이 모듈에 의존):
   ├── ai_agent (REQ-004)      → CredentialInjectionService 호출
-  ├── api_server (REQ-009)    → AuthMiddleware, JWT 검증
+  ├── api_server (REQ-009)    → AuthMiddleware, JWT 검증, AuthenticateUseCase 호출
   ├── execution_engine (REQ-007) → InjectCredentialUseCase 호출
-  └── storage (REQ-008)       → SessionRepository, OAuthConnectionRepository 구현체 제공
+  └── storage (REQ-008)       → SessionRepository, OAuthConnectionRepository, UserRepository 구현체 제공
 ```
 
 ## 환경 변수

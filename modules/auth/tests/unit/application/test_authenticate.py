@@ -13,6 +13,7 @@ class FakeGoogleOAuth:
         return {
             "sub": self._sub,
             "email": self._email,
+            "name": "Test User",
             "access_token": "goog_access_token",
             "refresh_token": "goog_refresh_token",
             "scopes": ["email", "profile"],
@@ -31,8 +32,8 @@ class FakeJWT:
 
 
 @pytest.mark.asyncio
-async def test_authenticate_returns_token_pair(session_repo, oauth_repo, cipher):
-    uc = AuthenticateUseCase(session_repo, oauth_repo, cipher, FakeGoogleOAuth(), FakeJWT())
+async def test_authenticate_returns_token_pair(session_repo, oauth_repo, user_repo, cipher):
+    uc = AuthenticateUseCase(session_repo, oauth_repo, user_repo, cipher, FakeGoogleOAuth(), FakeJWT())
     pair = await uc.execute("auth_code_abc")
 
     assert pair.access_token.startswith("tok:")
@@ -41,10 +42,10 @@ async def test_authenticate_returns_token_pair(session_repo, oauth_repo, cipher)
 
 
 @pytest.mark.asyncio
-async def test_authenticate_derives_deterministic_user_id(session_repo, oauth_repo, cipher):
+async def test_authenticate_derives_deterministic_user_id(session_repo, oauth_repo, user_repo, cipher):
     google = FakeGoogleOAuth(sub="stable_sub_999")
     jwt = FakeJWT()
-    uc = AuthenticateUseCase(session_repo, oauth_repo, cipher, google, jwt)
+    uc = AuthenticateUseCase(session_repo, oauth_repo, user_repo, cipher, google, jwt)
 
     pair1 = await uc.execute("code_1")
     pair2 = await uc.execute("code_2")
@@ -58,9 +59,9 @@ async def test_authenticate_derives_deterministic_user_id(session_repo, oauth_re
 
 
 @pytest.mark.asyncio
-async def test_authenticate_stores_encrypted_token(session_repo, oauth_repo, cipher):
+async def test_authenticate_stores_encrypted_token(session_repo, oauth_repo, user_repo, cipher):
     google = FakeGoogleOAuth(sub="sub_encrypt_test")
-    uc = AuthenticateUseCase(session_repo, oauth_repo, cipher, google, FakeJWT())
+    uc = AuthenticateUseCase(session_repo, oauth_repo, user_repo, cipher, google, FakeJWT())
     await uc.execute("code_xyz")
 
     user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "sub_encrypt_test")
@@ -71,9 +72,9 @@ async def test_authenticate_stores_encrypted_token(session_repo, oauth_repo, cip
 
 
 @pytest.mark.asyncio
-async def test_authenticate_second_login_updates_tokens(session_repo, oauth_repo, cipher):
+async def test_authenticate_second_login_updates_tokens(session_repo, oauth_repo, user_repo, cipher):
     google_first = FakeGoogleOAuth(sub="sub_reauth")
-    uc = AuthenticateUseCase(session_repo, oauth_repo, cipher, google_first, FakeJWT())
+    uc = AuthenticateUseCase(session_repo, oauth_repo, user_repo, cipher, google_first, FakeJWT())
     await uc.execute("first_code")
 
     class FakeGoogleOAuthV2(FakeGoogleOAuth):
@@ -82,9 +83,73 @@ async def test_authenticate_second_login_updates_tokens(session_repo, oauth_repo
             result["access_token"] = "new_access_token"
             return result
 
-    uc2 = AuthenticateUseCase(session_repo, oauth_repo, cipher, FakeGoogleOAuthV2(sub="sub_reauth"), FakeJWT())
+    uc2 = AuthenticateUseCase(
+        session_repo, oauth_repo, user_repo, cipher, FakeGoogleOAuthV2(sub="sub_reauth"), FakeJWT()
+    )
     await uc2.execute("second_code")
 
     user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "sub_reauth")
     conn = await oauth_repo.get_active_for_user(user_id, "google")
     assert cipher.decrypt(conn.access_token_encrypted) == b"new_access_token"
+
+
+# ── JIT user auto-provisioning (REQ-002 보강, 2026-05-19) ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_jit_creates_new_user_on_first_login(session_repo, oauth_repo, user_repo, cipher):
+    """첫 로그인 시 users 테이블에 INSERT (JIT auto-provisioning)."""
+    google = FakeGoogleOAuth(sub="new_sub_jit", email="newuser@example.com")
+    uc = AuthenticateUseCase(session_repo, oauth_repo, user_repo, cipher, google, FakeJWT())
+
+    user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "new_sub_jit")
+    assert await user_repo.find_by_id(user_id) is None
+
+    await uc.execute("first_login_code")
+
+    created = await user_repo.find_by_id(user_id)
+    assert created is not None
+    assert created.user_id == user_id
+    assert created.email == "newuser@example.com"
+    assert created.role == "User"
+    assert created.department_id is None
+    assert created.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_existing_user_skips_create(session_repo, oauth_repo, user_repo, cipher):
+    """이미 존재하는 user는 재생성하지 않음 (created_at 변경 없음 검증)."""
+    google = FakeGoogleOAuth(sub="existing_sub", email="existing@example.com")
+    uc = AuthenticateUseCase(session_repo, oauth_repo, user_repo, cipher, google, FakeJWT())
+
+    await uc.execute("first_code")
+    user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "existing_sub")
+    first_user = await user_repo.find_by_id(user_id)
+    assert first_user is not None
+    original_created_at = first_user.created_at
+
+    await uc.execute("second_code")
+    second_user = await user_repo.find_by_id(user_id)
+    assert second_user.created_at == original_created_at, "JIT 블록이 기존 user를 재생성하면 안 됨"
+
+
+@pytest.mark.asyncio
+async def test_jit_falls_back_to_email_prefix_when_name_missing(
+    session_repo, oauth_repo, user_repo, cipher
+):
+    """Google user_info에 name 부재 시 email local-part로 fallback."""
+
+    class NoNameOAuth(FakeGoogleOAuth):
+        async def exchange_code(self, code: str) -> dict:
+            result = await super().exchange_code(code)
+            result.pop("name", None)
+            return result
+
+    google = NoNameOAuth(sub="no_name_sub", email="alice.kim@example.com")
+    uc = AuthenticateUseCase(session_repo, oauth_repo, user_repo, cipher, google, FakeJWT())
+
+    await uc.execute("code")
+
+    user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "no_name_sub")
+    created = await user_repo.find_by_id(user_id)
+    assert created.name == "alice.kim"
