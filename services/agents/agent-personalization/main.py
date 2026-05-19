@@ -100,10 +100,18 @@ class PersonalizationAgent:
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from ai_agent.adapters.memory.gcs_memory_store import GCSMemoryStore
+        from toolset.adapters.tool_registry_adapter import ToolRegistryAdapter
+        from toolset.bootstrap import register_default_tools
 
         self._llm = ModalLLMAdapter()
         self._embedder = ModalEmbeddingAdapter()
         self._memory_store = GCSMemoryStore()
+
+        # tool registry — 14종 기본 tool 등록
+        self._tool_registry = ToolRegistryAdapter()
+        register_default_tools(self._tool_registry)
+        # TODO: self._tool_dispatcher = ToolsetDispatcher(ExecuteToolUseCase(self._tool_registry))
+        #       신정혜 항목 4(ToolsetDispatcher) 완료 후 주입
 
     @modal.exit()
     def shutdown(self) -> None:
