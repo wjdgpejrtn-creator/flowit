@@ -27,7 +27,7 @@
 
 | 클래스 | 파일 경로 | 상태 |
 |--------|-----------|------|
-| `AuthenticateUseCase` | `application/use_cases/authenticate.py` | ✅ 완료 |
+| `AuthenticateUseCase` | `application/use_cases/authenticate.py` | ✅ 완료 (2026-05-19 JIT user auto-provisioning 보강, PR #88) |
 | `IssueTokenUseCase` | `application/use_cases/issue_token.py` | ✅ 완료 |
 | `RefreshTokenUseCase` | `application/use_cases/refresh_token.py` | ✅ 완료 |
 | `InjectCredentialUseCase` | `application/use_cases/inject_credential.py` | ✅ 완료 |
