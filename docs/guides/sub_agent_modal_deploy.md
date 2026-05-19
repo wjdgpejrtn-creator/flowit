@@ -2,7 +2,9 @@
 
 Sprint 3 멀티 에이전트 구조에서 각 sub-agent(Skills Builder / Personalization / 그 외 후속)는 **별도 Modal app**으로 배포되고, staging Cloud SQL에 **IAM 인증**으로 접근한다. 본 가이드는 sub-agent 담당자가 막힘없이 배포까지 갈 수 있게 구성됐다.
 
-> 사전 전제: `docs/guides/cloud-sql-setup.md` (IAM 인증 표준), `services/agents/llm-base/main.py` (참조 구현).
+> 사전 전제: `docs/guides/cloud-sql-setup.md` (IAM 인증 표준), `services/agents/agent-composer/main.py` (참조 구현).
+>
+> **Secret 관리 변경 (PR #80, 2026-05-19)**: 환경 변수는 **GCP Secret Manager가 SSOT**다. Modal Secret은 ADC root credential 1개(`cloudsql-iam-sa`)만 마운트하고, 나머지는 `services.common.gcp_secrets.load_secrets_to_env`로 boot()에서 런타임 pull한다. 배포자는 `roles/secretmanager.secretAccessor` IAM만 있으면 secret 값을 모른 채로 `modal deploy` 가능.
 
 ---
 
@@ -11,12 +13,13 @@ Sprint 3 멀티 에이전트 구조에서 각 sub-agent(Skills Builder / Persona
 | 항목 | 확인 방법 | 관련 |
 |------|----------|------|
 | Modal CLI + 공용 토큰 영속화 | `modal profile list` 출력에 `dhwang0803` 워크스페이스 1개 | 전체 |
-| `cloudsql-iam-sa` Secret 존재 | `modal secret list` 출력에 포함 | 전체 |
+| `cloudsql-iam-sa` Modal Secret 존재 | `modal secret list` 출력에 포함 | 전체 |
 | `llm-base` app 배포됨 | `modal app list`에 `llm-base` state=deployed | 전체 |
 | GCP `cloudsql-iam-modal` SA가 DB IAM user로 등록됨 | 조장에게 확인 | 전체 |
+| GCP `secretmanager.secretAccessor` IAM 부여됨 | `gcloud secrets get-iam-policy llm-base-url --project=<GCP_PROJECT_ID>`에 본인 `user:<email>` 포함 | 전체 |
 | GCS 버킷 + SA storage 권한 | `gcloud storage buckets list --project=<GCP_PROJECT_ID>`에 `<GCS_BUCKET_DEV>` 포함 | Personalization만 |
 
-위 4~5개 중 하나라도 빠지면 조장(황대원)에게 알려야 한다 — **§1은 조장만 1회 실행**한다.
+위 5~6개 중 하나라도 빠지면 조장(황대원)에게 알려야 한다 — **§1은 조장만 1회 실행**한다.
 
 ---
 
@@ -118,51 +121,29 @@ gcloud storage buckets get-iam-policy gs://$BUCKET --format="json(bindings[].rol
 
 ---
 
-## 2. (sub-agent 담당자) Modal Secret 등록
+## 2. (sub-agent 담당자) 사전 확인 — 본인 IAM 권한
 
-본인 sub-agent용 Secret(`agent-<name>-secret`)만 만든다. `cloudsql-iam-sa`는 조장이 이미 등록함.
+PR #80 (2026-05-19) 이후 sub-agent별 Modal Secret(`agent-*-secret`)을 만들지 않는다. 환경 변수는 GCP Secret Manager에 미리 등록된 값(`cloud-sql-instance`, `db-iam-user`, `db-name`, `llm-base-url`, `embedding-base-url`, `gcs-personal-bucket`)을 boot()에서 런타임 pull한다.
 
-### 2.1 `.env` 채우기
-
-`.env.example`을 `.env`로 복사 후 아래 5키를 채운다 (`agent-skills-builder-secret` 예시):
-
-```env
-LLM_BASE_URL=https://<WORKSPACE>--llm-base.modal.run
-EMBEDDING_BASE_URL=https://<WORKSPACE>--llm-base.modal.run
-CLOUD_SQL_INSTANCE=<GCP_PROJECT_ID>:<REGION>:<INSTANCE>
-DB_IAM_USER=<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com
-DB_NAME=workflow_automation
-```
-
-> `LLM_BASE_URL`은 헬스체크용 (실제 generate는 RPC). `EMBEDDING_BASE_URL`은 BGE-M3 ASGI 호출용 — 동일 URL.
-> `DB_IAM_USER`는 **공용 SA의 풀 이메일**(`.gserviceaccount.com` 포함). DB GRANT 시점에는 `.gserviceaccount.com`을 제외하지만 connector는 풀 이메일을 요구한다.
-
-**Personalization sub-agent**는 위 5키에 더해 `GCS_PERSONAL_BUCKET=<GCS_BUCKET_DEV>` 한 줄을 추가한다 — `agent-personalization-secret`에 같이 묶임. `.env.example` 참조.
-
-### 2.2 본인 Secret 직접 등록
-
-`.env`에 채운 값으로 `modal secret create`를 직접 실행한다. `--force`는 동일 이름 Secret이 이미 있을 때 덮어씀.
+본인이 할 일은 **딱 하나** — GCP IAM이 부여돼 있는지 확인:
 
 ```powershell
-modal secret create agent-skills-builder-secret --force `
-  LLM_BASE_URL="값 직접 입력" `
-  EMBEDDING_BASE_URL="값 직접 입력" `
-  CLOUD_SQL_INSTANCE="<GCP_PROJECT_ID>:<REGION>:<INSTANCE>" `
-  DB_IAM_USER="<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com" `
-  DB_NAME="workflow_automation"
+gcloud secrets get-iam-policy llm-base-url --project=<GCP_PROJECT_ID> `
+  --format="json(bindings[].members)"
 ```
 
-Personalization sub-agent는 `GCS_PERSONAL_BUCKET` 한 줄을 추가한다.
+출력에 `user:<본인 이메일>`이 포함되어 있어야 한다. 없으면 조장에게 IAM 추가 요청 — Terraform `infra/terraform/envs/staging/variables.tf`의 `agent_secret_accessors` 리스트에 본인 이메일 추가 + `terraform apply`.
 
-```powershell
-modal secret create agent-personalization-secret --force `
-  LLM_BASE_URL="값 직접 입력" `
-  EMBEDDING_BASE_URL="값 직접 입력" `
-  CLOUD_SQL_INSTANCE="<GCP_PROJECT_ID>:<REGION>:<INSTANCE>" `
-  DB_IAM_USER="<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com" `
-  DB_NAME="workflow_automation" `
-  GCS_PERSONAL_BUCKET="<GCS_BUCKET_DEV>"
-```
+### 신규 환경 변수가 필요할 때
+
+`.env`나 `modal secret create`로 푸시하는 대신:
+
+1. `infra/terraform/envs/staging/variables.tf`의 `agent_secret_names`에 secret ID 추가 (kebab-case)
+2. `terraform -chdir=infra/terraform/envs/staging apply`
+3. `gcloud secrets versions add <secret-id> --data-file=- --project=<GCP_PROJECT_ID>` 로 값 push
+4. main.py boot()의 `load_secrets_to_env({...})` 매핑에 한 줄 추가
+
+회전은 새 version push만으로 끝남 (코드 변경 0).
 
 ---
 
@@ -184,15 +165,27 @@ image = (
         "pgvector>=0.3",
         # Cloud SQL IAM 인증 — google-cloud-sql-connector 만이 enable_iam_auth=True 지원
         "cloud-sql-python-connector[asyncpg]>=1.12",
+        # GCP Secret Manager 런타임 pull (PR #80)
+        "google-cloud-secret-manager>=2.20",
     )
-    # ... add_local_dir / env ...
+    .env({
+        "PYTHONPATH": "/app/modules:/app/common_schemas_src:/repo",
+        "GOOGLE_CLOUD_PROJECT": "<GCP_PROJECT_ID>",
+    })
+    .add_local_dir("modules", remote_path="/app/modules")
+    .add_local_dir("packages/common_schemas/python", remote_path="/app/common_schemas_src")
+    # services.common.gcp_secrets 헬퍼 마운트 — load_secrets_to_env 호출용
+    .add_local_dir("services/common", remote_path="/repo/services/common")
 )
 ```
 
+> **3개 필수 추가** (마이그레이션 후): `google-cloud-secret-manager` pip, `PYTHONPATH=/repo` + `GOOGLE_CLOUD_PROJECT`, `add_local_dir("services/common", ...)`.
+
 ### 3.2 Secret 마운트 + boot()
 
+Modal에 마운트하는 Secret은 **`cloudsql-iam-sa` 1개**만이다. 나머지는 boot()에서 GCP Secret Manager에서 pull.
+
 ```python
-app_secret = modal.Secret.from_name("agent-skills-builder-secret")
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
 
 app = modal.App("agent-skills-builder")
@@ -200,7 +193,7 @@ app = modal.App("agent-skills-builder")
 
 @app.cls(
     image=image,
-    secrets=[app_secret, gcp_secret],
+    secrets=[gcp_secret],
     timeout=600,
     scaledown_window=300,
 )
@@ -209,13 +202,14 @@ class SkillsBuilderAgent:
 
     @modal.enter()
     def boot(self) -> None:
-        import json
         import os
         import tempfile
         from pathlib import Path
 
         from google.cloud.sql.connector import Connector, IPTypes
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from services.common.gcp_secrets import load_secrets_to_env
 
         # 1) GCP SA JSON을 임시 파일로 풀고 ADC 변수 지정
         #    google-auth는 GOOGLE_APPLICATION_CREDENTIALS가 가리키는 파일을 읽음
@@ -224,7 +218,17 @@ class SkillsBuilderAgent:
         sa_path.write_text(sa_payload, encoding="utf-8")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
 
-        # 2) Cloud SQL Python Connector — IAM 인증 (비밀번호 없음)
+        # 2) GCP Secret Manager → 환경변수 주입
+        load_secrets_to_env({
+            "cloud-sql-instance": "CLOUD_SQL_INSTANCE",
+            "db-iam-user":        "DB_IAM_USER",
+            "db-name":            "DB_NAME",
+            "llm-base-url":       "LLM_BASE_URL",
+            "embedding-base-url": "EMBEDDING_BASE_URL",
+            # personalization은 "gcs-personal-bucket": "GCS_PERSONAL_BUCKET" 추가
+        })
+
+        # 3) Cloud SQL Python Connector — IAM 인증 (비밀번호 없음)
         self._connector = Connector()
 
         async def getconn():
@@ -244,7 +248,7 @@ class SkillsBuilderAgent:
         )
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
 
-        # 3) 어댑터 wiring (RPC LLM + HTTP embedding)
+        # 4) 어댑터 wiring (RPC LLM + HTTP embedding)
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         self._llm = ModalLLMAdapter()
@@ -260,7 +264,9 @@ class SkillsBuilderAgent:
             asyncio.run(self._connector.close_async())
 ```
 
-> **금지 패턴**: `os.environ["DATABASE_URL"]`로 DSN 만들기. `DB_PASSWORD` 같은 키 도입. 둘 다 팀 표준(IAM 인증)을 깬다.
+> **금지 패턴**:
+> - `modal.Secret.from_name("agent-*-secret")` — PR #80 이후 삭제됨. `cloudsql-iam-sa` 1개만.
+> - `os.environ["DATABASE_URL"]`로 DSN 만들기, `DB_PASSWORD` 같은 키 — 팀 표준(IAM 인증)을 깬다.
 
 ### 3.3 헬스체크
 
@@ -316,6 +322,9 @@ curl https://<WORKSPACE>--skills-builder.modal.run/v1/health
 | `cloud-sql-python-connector` import 시 `protobuf` 충돌 | 다른 google-* 라이브러리와 버전 불일치 | image에 `protobuf>=4.25` 명시 핀 또는 `--no-deps` 우회 |
 | (Personalization) `403 Forbidden: ... does not have storage.objects.create` | 버킷 IAM에 SA `roles/storage.objectAdmin` 미부여 | §1.4의 `gcloud storage buckets add-iam-policy-binding` 재실행 |
 | (Personalization) `NotFound: 404 The specified bucket does not exist` | `GCS_PERSONAL_BUCKET` 값이 dev 버킷 이름과 불일치 | `gcloud storage buckets list --project=<GCP_PROJECT_ID>`로 실제 이름 확인 |
+| `ModuleNotFoundError: No module named 'services'` (boot 단계) | `add_local_dir("services/common", ...)` 누락 또는 PYTHONPATH에 `/repo` 미포함 | §3.1 image 정의 4종(`google-cloud-secret-manager` pip + PYTHONPATH `/repo` + `GOOGLE_CLOUD_PROJECT` + add_local_dir) 모두 추가 |
+| `PermissionDenied: ... does not have secretmanager.versions.access` | 본인 GCP 이메일이 secret accessor IAM에 미부여 | 조장에게 `agent_secret_accessors`에 추가 요청 → `terraform apply` |
+| `Secret [foo] not found` | GCP Secret Manager에 등록 안 됨 또는 다른 프로젝트 | `gcloud secrets list --project=<GCP_PROJECT_ID>`로 존재 확인. 없으면 Terraform `agent_secret_names`에 추가 후 apply |
 
 자세한 Windows + Modal 배포 함정은 메모리 `modal_deploy_quirks.md` (Modal 배포 운영 quirks)를 참고.
 
@@ -323,9 +332,9 @@ curl https://<WORKSPACE>--skills-builder.modal.run/v1/health
 
 ## 6. 새 sub-agent 추가 시
 
-1. `services/agents/agent-<name>/main.py` 생성 — §3 패턴 그대로
-2. 로컬 `.env`에 5키 채움 (LLM_BASE_URL / EMBEDDING_BASE_URL / CLOUD_SQL_INSTANCE / DB_IAM_USER / DB_NAME)
-3. `modal secret create agent-<name>-secret --force KEY=값 ...` 로 직접 등록 (§2.2 패턴 참고)
+1. `services/agents/agent-<name>/main.py` 생성 — §3 패턴 그대로 (Modal Secret은 `cloudsql-iam-sa` 1개만)
+2. main.py boot()의 `load_secrets_to_env({...})`에 필요한 secret_id → env var 매핑
+3. 새 secret 키가 필요하면 `infra/terraform/envs/staging/variables.tf`의 `agent_secret_names` 리스트에 추가 → `terraform apply` → `gcloud secrets versions add` 로 값 push
 4. `modal deploy` → §4 검증
 
-조장에게 별도 요청할 게 없도록 1회 setup(§1)으로 끝나게 설계됨. SA 권한이나 DB GRANT 추가가 필요하면 그때만 조장 호출.
+조장에게 별도 요청할 게 없도록 §1 setup(GCP SA + Modal Secret + Terraform secret-manager 모듈)이 1회로 끝나게 설계됨. SA 권한, DB GRANT, IAM accessor 추가가 필요하면 그때만 조장 호출.
