@@ -1,0 +1,31 @@
+# Cloud Build config for api_server image.
+#
+# Build context = repo root (Dockerfile COPY가 packages/common_schemas + modules + services/api_server 사용).
+# 빌드 명령 (repo root에서):
+#   gcloud builds submit \
+#     --config=services/api_server/cloudbuild.yaml \
+#     --substitutions=_TAG=phase-f \
+#     .
+
+substitutions:
+  _AR_LOCATION: asia-northeast3
+  _AR_REPOSITORY: workflow-staging
+  _IMAGE: api-server
+  _TAG: latest
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - --tag
+      - ${_AR_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE}:${_TAG}
+      - --file
+      - services/api_server/Dockerfile
+      - .
+
+images:
+  - ${_AR_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE}:${_TAG}
+
+options:
+  logging: CLOUD_LOGGING_ONLY

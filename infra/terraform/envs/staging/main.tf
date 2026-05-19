@@ -211,12 +211,25 @@ module "api_server" {
 
   env_vars = {
     ENVIRONMENT = var.environment
-    REDIS_URL   = module.redis.redis_url
+  }
+
+  # PR #80 GCP Secret Manager + 본 PR-C 신규 추가(jwt/encryption/google) — Cloud Run이 직접 주입.
+  # api_server는 startup 시 `os.getenv` + Settings(pydantic-settings)로 읽음. plaintext env 회피.
+  secret_env_vars = {
+    REDIS_URL            = { secret_id = "redis-url", version = "latest" }
+    CLOUD_SQL_INSTANCE   = { secret_id = "cloud-sql-instance", version = "latest" }
+    DB_IAM_USER          = { secret_id = "db-iam-user", version = "latest" }
+    DB_NAME              = { secret_id = "db-name", version = "latest" }
+    JWT_SECRET_KEY       = { secret_id = "jwt-secret-key", version = "latest" }
+    ENCRYPTION_KEY       = { secret_id = "encryption-key", version = "latest" }
+    GOOGLE_CLIENT_ID     = { secret_id = "google-client-id", version = "latest" }
+    GOOGLE_CLIENT_SECRET = { secret_id = "google-client-secret", version = "latest" }
+    GOOGLE_REDIRECT_URI  = { secret_id = "google-redirect-uri", version = "latest" }
   }
 
   labels = merge(local.common_labels, { role = "api-server" })
 
-  depends_on = [module.networking, module.redis]
+  depends_on = [module.networking, module.redis, module.agent_secrets]
 }
 
 # ---------------------------------------------------------------------------
