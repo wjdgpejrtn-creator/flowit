@@ -35,17 +35,13 @@ image = (
         "fpdf2>=2.7",
         "PyJWT>=2.8",
     )
+    .env({"PYTHONPATH": "/pkg/common_schemas:/pkg"})
     .add_local_dir("packages/common_schemas/python", remote_path="/pkg/common_schemas", copy=True)
     .add_local_dir("modules/auth", remote_path="/pkg/auth", copy=True)
     .add_local_dir("modules/nodes_graph", remote_path="/pkg/nodes_graph", copy=True)
     .add_local_dir("modules/storage", remote_path="/pkg/storage", copy=True)
     .add_local_dir("modules/ai_agent", remote_path="/pkg/ai_agent", copy=True)
-    .run_commands(
-        "pip install -e /pkg/common_schemas",
-        "pip install -e /pkg/nodes_graph",
-        "pip install -e /pkg/storage",
-        "pip install -e /pkg/ai_agent",
-    )
+    .add_local_dir("modules/toolset", remote_path="/pkg/toolset", copy=True)
 )
 
 app_secret = modal.Secret.from_name("agent-personalization-secret")
