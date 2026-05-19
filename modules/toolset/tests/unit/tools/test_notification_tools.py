@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from toolset.adapters.tools.notification.email_send_tool import EmailSendTool
-from toolset.adapters.tools.notification.slack_notify_tool import SlackNotifyTool
+from toolset.adapters.internal.notification.email_send_tool import EmailSendTool
+from toolset.adapters.internal.notification.slack_notify_tool import SlackNotifyTool
 from toolset.domain.exceptions import ToolExecutionError
 
 
