@@ -7,15 +7,12 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from common_schemas import PermissionSource
+from common_schemas.broker_tasks import QUEUE_DEFAULT, TASK_CANCEL_EXECUTION, TASK_RESUME_EXECUTION
 
 from app.dependencies.celery_client import get_celery
 from app.dependencies.permission import get_permission_source
 
 router = APIRouter(prefix="/api/v1/executions", tags=["exec_control"])
-
-CANCEL_TASK = "execution_engine.cancel_execution"
-RESUME_TASK = "execution_engine.resume_execution"
-CELERY_QUEUE = "default"
 
 
 class ControlResponse(BaseModel):
@@ -30,7 +27,7 @@ async def cancel_execution(
     _permission: PermissionSource = Depends(get_permission_source),
     celery: Celery = Depends(get_celery),
 ) -> ControlResponse:
-    async_result = celery.send_task(CANCEL_TASK, args=[str(execution_id)], queue=CELERY_QUEUE)
+    async_result = celery.send_task(TASK_CANCEL_EXECUTION, args=[str(execution_id)], queue=QUEUE_DEFAULT)
     return ControlResponse(execution_id=execution_id, action="cancel", task_id=async_result.id)
 
 
@@ -40,5 +37,5 @@ async def resume_execution(
     _permission: PermissionSource = Depends(get_permission_source),
     celery: Celery = Depends(get_celery),
 ) -> ControlResponse:
-    async_result = celery.send_task(RESUME_TASK, args=[str(execution_id)], queue=CELERY_QUEUE)
+    async_result = celery.send_task(TASK_RESUME_EXECUTION, args=[str(execution_id)], queue=QUEUE_DEFAULT)
     return ControlResponse(execution_id=execution_id, action="resume", task_id=async_result.id)

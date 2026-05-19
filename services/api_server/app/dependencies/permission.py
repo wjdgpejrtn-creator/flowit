@@ -42,7 +42,12 @@ async def get_permission_source(
     if session is None or session.is_revoked or session.is_expired():
         raise AuthorizationError("Session expired or revoked", code="E-AUTH-006")
 
-    department_id = user.department_id or user.user_id  # fallback: single-tenant
+    # TODO(req-002 onboarding): department_id가 NULL인 사용자는 user_id로 fallback.
+    # PR #88(JIT user provisioning) 직후 모든 신규 user가 department_id=None으로 생성되므로
+    # 본 분기가 default 경로. multi-tenant 도입 시 onboarding flow에서 정식 할당하는 별도 PR
+    # 필요 — single-tenant mode 가정이 깨지면 모든 user가 자기 자신 department 안에 격리되어
+    # team scope workflow 공유가 작동하지 않음.
+    department_id = user.department_id or user.user_id  # fallback: single-tenant patch
     return resolver.resolve(
         user_id=user.user_id,
         role=user.role,

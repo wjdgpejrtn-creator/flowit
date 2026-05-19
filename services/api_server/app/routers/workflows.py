@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ai_agent.domain.ports.workflow_repository import WorkflowRepository
 from common_schemas import PermissionSource, ValidationErrorResponse, WorkflowSchema
+from common_schemas.broker_tasks import QUEUE_DEFAULT, TASK_EXECUTE_WORKFLOW
 from nodes_graph.application.use_cases.validate_graph_use_case import ValidateGraphUseCase
 
 from app.dependencies.celery_client import get_celery
@@ -18,9 +19,6 @@ from app.dependencies.use_cases import get_validate_graph_use_case
 from app.services.workflow_service import WorkflowService
 
 router = APIRouter(prefix="/api/v1/workflows", tags=["workflows"])
-
-CELERY_TASK_NAME = "execution_engine.execute_workflow"
-CELERY_QUEUE = "default"
 
 
 class ExecuteRequest(BaseModel):
@@ -107,8 +105,8 @@ async def execute_workflow(
         "parameters": req.parameters,
     }
     async_result = celery.send_task(
-        CELERY_TASK_NAME,
+        TASK_EXECUTE_WORKFLOW,
         args=[str(workflow_id), context_data],
-        queue=CELERY_QUEUE,
+        queue=QUEUE_DEFAULT,
     )
     return ExecuteResponse(execution_id=execution_id, status="queued", task_id=async_result.id)

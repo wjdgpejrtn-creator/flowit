@@ -12,15 +12,26 @@ from .jwt_adapter import JWTAdapter
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    _PUBLIC_PATHS = {"/api/v1/auth/callback", "/api/v1/auth/login", "/healthz", "/docs", "/openapi.json"}
+    # 기본 익명 허용 경로. service-local 확장은 __init__의 `extra_public_paths` 인자 사용
+    # (private `_PUBLIC_PATHS` 직접 확장보다 권장 — base 변경 시 silent break 방지).
+    _PUBLIC_PATHS = frozenset({"/api/v1/auth/callback", "/api/v1/auth/login", "/healthz", "/docs", "/openapi.json"})
 
-    def __init__(self, app, jwt_adapter: JWTAdapter, permission_resolver: PermissionResolver) -> None:
+    def __init__(
+        self,
+        app,
+        jwt_adapter: JWTAdapter,
+        permission_resolver: PermissionResolver,
+        extra_public_paths: frozenset[str] | set[str] | None = None,
+    ) -> None:
         super().__init__(app)
         self._jwt = jwt_adapter
         self._resolver = permission_resolver
+        self._public_paths: frozenset[str] = (
+            self._PUBLIC_PATHS | frozenset(extra_public_paths) if extra_public_paths else self._PUBLIC_PATHS
+        )
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        if request.url.path in self._PUBLIC_PATHS:
+        if request.url.path in self._public_paths:
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization", "")

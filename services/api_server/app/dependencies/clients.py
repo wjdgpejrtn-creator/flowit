@@ -63,8 +63,9 @@ async def dispose_orchestrator_http(client: httpx.AsyncClient | None) -> None:
 
 
 def get_redis(request: Request) -> aioredis.Redis | None:
-    return request.app.state.redis
+    # lifespan 미진입(TestClient의 단일 요청 mode) 경로에서도 안전한 fallback
+    return getattr(request.app.state, "redis", None)
 
 
 def get_orchestrator_http(request: Request) -> httpx.AsyncClient | None:
-    return request.app.state.orchestrator_http
+    return getattr(request.app.state, "orchestrator_http", None)
