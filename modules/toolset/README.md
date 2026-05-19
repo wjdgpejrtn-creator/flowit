@@ -129,7 +129,7 @@ Upstream (이 모듈이 의존):
 Downstream (이 모듈에 의존):
   ├── execution_engine (REQ-007) → ExecuteToolUseCase 호출
   ├── api_server (REQ-009)       → ListToolsUseCase 호출
-  ├── nodes_graph (REQ-003)      → ToolToNodeWrapper로 BaseTool → NodeDefinition 변환
+  ├── nodes_graph (REQ-003)      → external/ 카탈로그에 NodeDefinition 직접 등록 (ToolToNodeWrapper 제거 — ADR-0014)
   └── storage (REQ-008)          → ToolExecutionRepository 구현체 제공
 ```
 

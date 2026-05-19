@@ -5,6 +5,7 @@ Actions (payload["action"]):
   update_memory  — UpdateUserMemoryUseCase (LLM 패턴 추출 → GCS 저장)
   recall_skills  — RecallPersonalSkillsUseCase (BGE-M3 코사인 유사도 top-k)
   save_memory    — SaveMemoryUseCase (RDB AgentMemoryRepository)
+  cleanup_memory — GCSMemoryStore 인메모리 캐시 정리 (세션 종료 시)
 
 Deploy:
     PYTHONUTF8=1 modal deploy services/agents/agent-personalization/main.py
@@ -34,17 +35,13 @@ image = (
         "fpdf2>=2.7",
         "PyJWT>=2.8",
     )
+    .env({"PYTHONPATH": "/pkg/common_schemas:/pkg"})
     .add_local_dir("packages/common_schemas/python", remote_path="/pkg/common_schemas", copy=True)
     .add_local_dir("modules/auth", remote_path="/pkg/auth", copy=True)
     .add_local_dir("modules/nodes_graph", remote_path="/pkg/nodes_graph", copy=True)
     .add_local_dir("modules/storage", remote_path="/pkg/storage", copy=True)
     .add_local_dir("modules/ai_agent", remote_path="/pkg/ai_agent", copy=True)
-    .run_commands(
-        "pip install -e /pkg/common_schemas",
-        "pip install -e /pkg/nodes_graph",
-        "pip install -e /pkg/storage",
-        "pip install -e /pkg/ai_agent",
-    )
+    .add_local_dir("modules/toolset", remote_path="/pkg/toolset", copy=True)
 )
 
 app_secret = modal.Secret.from_name("agent-personalization-secret")
@@ -99,10 +96,18 @@ class PersonalizationAgent:
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from ai_agent.adapters.memory.gcs_memory_store import GCSMemoryStore
+        from toolset.adapters.tool_registry_adapter import ToolRegistryAdapter
+        from toolset.bootstrap import register_default_tools
 
         self._llm = ModalLLMAdapter()
         self._embedder = ModalEmbeddingAdapter()
         self._memory_store = GCSMemoryStore()
+
+        # tool registry — 14종 기본 tool 등록
+        self._tool_registry = ToolRegistryAdapter()
+        register_default_tools(self._tool_registry)
+        # TODO: self._tool_dispatcher = ToolsetDispatcher(ExecuteToolUseCase(self._tool_registry))
+        #       신정혜 항목 4(ToolsetDispatcher) 완료 후 주입
 
     @modal.exit()
     def shutdown(self) -> None:
@@ -142,7 +147,7 @@ class PersonalizationAgent:
                 workflow_data = req.payload.get("workflow")
                 workflow = WorkflowSchema.model_validate(workflow_data) if workflow_data else None
                 await UpdateUserMemoryUseCase(
-                    self._memory_store, self._llm, self._embedder
+                    self._memory_store, self._llm
                 ).execute(
                     req.user_id,
                     req.payload.get("turn_count", 0),
@@ -177,6 +182,10 @@ class PersonalizationAgent:
                     await SaveMemoryUseCase(PgAgentMemoryRepository(session)).execute(
                         req.session_id, entries
                     )
+                return AgentProtocolResponse(frames=[], state_delta={}, next_action="complete")
+
+            if action == "cleanup_memory":
+                await self._memory_store.cleanup(req.user_id)
                 return AgentProtocolResponse(frames=[], state_delta={}, next_action="complete")
 
             raise HTTPException(status_code=400, detail=f"Unknown action: {action!r}")
