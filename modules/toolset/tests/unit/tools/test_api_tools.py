@@ -5,99 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from toolset.adapters.tools.api.graphql_tool import GraphqlTool
-from toolset.adapters.tools.api.http_request_tool import HttpRequestTool
-from toolset.adapters.tools.api.rest_api_tool import RestApiTool
-from toolset.adapters.tools.api.webhook_tool import WebhookTool
+from toolset.adapters.internal.api.graphql_tool import GraphqlTool
+from toolset.adapters.internal.api.rest_api_tool import RestApiTool
+from toolset.adapters.internal.api.webhook_tool import WebhookTool
 from toolset.domain.exceptions import ToolExecutionError
-from toolset.domain.value_objects.connector_response import ConnectorResponse
-
-
-# ── HttpRequestTool ───────────────────────────────────────────────────────────
-
-class TestHttpRequestTool:
-    @pytest.mark.asyncio
-    async def test_get_request_success(self):
-        tool = HttpRequestTool()
-        mock_resp = MagicMock()
-        mock_resp.content = json.dumps({"hello": "world"}).encode()
-        mock_resp.status_code = 200
-        mock_resp.headers = {"content-type": "application/json"}
-
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.request.return_value = mock_resp
-            mock_client_cls.return_value.__aenter__.return_value = mock_client
-
-            result = await tool.execute({"url": "https://example.com/api"})
-
-        assert result["status_code"] == 200
-        assert result["body"] == {"hello": "world"}
-
-    @pytest.mark.asyncio
-    async def test_post_with_body(self):
-        tool = HttpRequestTool()
-        mock_resp = MagicMock()
-        mock_resp.content = b'{"id": 1}'
-        mock_resp.status_code = 201
-        mock_resp.headers = {}
-
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.request.return_value = mock_resp
-            mock_client_cls.return_value.__aenter__.return_value = mock_client
-
-            result = await tool.execute({"url": "https://api.example.com", "method": "POST", "body": {"name": "test"}})
-
-        assert result["status_code"] == 201
-
-    @pytest.mark.asyncio
-    async def test_uses_connector_when_provided(self):
-        tool = HttpRequestTool()
-        mock_connector = AsyncMock()
-        mock_credential = MagicMock()
-        mock_connector.connect.return_value = ConnectorResponse(
-            status_code=200, body=b'{"ok": true}', headers={}
-        )
-
-        result = await tool.execute(
-            {"url": "https://secure.api"},
-            connector=mock_connector,
-            credential=mock_credential,
-        )
-
-        mock_connector.connect.assert_called_once()
-        assert result["status_code"] == 200
-
-    @pytest.mark.asyncio
-    async def test_non_json_response_returned_as_string(self):
-        tool = HttpRequestTool()
-        mock_resp = MagicMock()
-        mock_resp.content = b"plain text response"
-        mock_resp.status_code = 200
-        mock_resp.headers = {}
-
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.request.return_value = mock_resp
-            mock_client_cls.return_value.__aenter__.return_value = mock_client
-
-            result = await tool.execute({"url": "https://example.com"})
-
-        assert result["body"] == "plain text response"
-
-    @pytest.mark.asyncio
-    async def test_request_error_raises_tool_execution_error(self):
-        import httpx
-        tool = HttpRequestTool()
-
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.request.side_effect = httpx.ConnectError("connection refused")
-            mock_client_cls.return_value.__aenter__.return_value = mock_client
-
-            with pytest.raises(ToolExecutionError):
-                await tool.execute({"url": "https://unreachable.example"})
 
 
 # ── RestApiTool ───────────────────────────────────────────────────────────────

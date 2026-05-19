@@ -14,8 +14,9 @@ from nodes_graph.adapters.catalog.registry import (
 
 def test_discover_returns_full_catalog():
     nodes = discover_node_definitions()
-    # 28 domain + 14 external (gemma_chat 추가, PR #68) + 14 toolset = 56
-    assert len(nodes) == 56
+    # 28 domain + 25 external (기존 14 + 박아름 5/19 toolset 정리 PR 신규 11) = 53
+    # toolset_nodes 14 제거: 중복 3종(http_request_tool/conditional/loop) + 신규 11종은 external/로 이전
+    assert len(nodes) == 53
 
 
 def test_discover_returns_unique_node_ids():
@@ -33,9 +34,9 @@ def test_discover_returns_unique_node_types():
 @pytest.mark.asyncio
 async def test_discover_and_register_registers_all_nodes(node_repo, embedder):
     count = await discover_and_register(node_repo, embedder)
-    assert count == 56
+    assert count == 53
     stored = await node_repo.list_all()
-    assert len(stored) == 56
+    assert len(stored) == 53
 
 
 @pytest.mark.asyncio
@@ -54,4 +55,4 @@ async def test_discover_and_register_idempotent(node_repo, embedder):
     await discover_and_register(node_repo, embedder)
     await discover_and_register(node_repo, embedder)
     stored = await node_repo.list_all()
-    assert len(stored) == 56
+    assert len(stored) == 53

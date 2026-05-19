@@ -34,3 +34,4 @@
 | 0011 | [schema_migrations 추적 + bootstrap 기반 raw SQL 마이그레이션](./adr/ADR-0011-migration-tracking-pattern.md) | Accepted | 2026-05-14 |
 | 0012 | [`database/` / `modules/storage/` / `modules/skills_marketplace/` 책임 분배](./adr/ADR-0012-database-storage-module-boundary.md) | Accepted | 2026-05-14 |
 | 0013 | [EmbedderPort SSOT — nodes_graph 소유 + ai_agent 구현체 (예외 패턴)](./adr/ADR-0013-embedder-port-ssot.md) | Accepted | 2026-05-12 |
+| 0014 | [ToolToNodeWrapper 제거 + REQ-005 toolset 11종을 nodes_graph external/로 직접 등록](./adr/ADR-0014-tool-to-node-wrapper-removal.md) | Accepted | 2026-05-19 |

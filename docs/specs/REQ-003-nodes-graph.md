@@ -49,7 +49,7 @@ from common_schemas.enums import RiskLevel
 
 @dataclass
 class NodeDefinition:
-    """56종 노드 타입의 카탈로그 엔티티 (gemma_chat 추가, PR #68 5/15 머지).
+    """53종 노드 타입의 카탈로그 엔티티 (gemma_chat 추가, PR #68 5/15 머지).
     
     NodeConfig(REQ-012)의 필드를 모두 포함하며,
     추가로 embedding, service_type 등 REQ-003 전용 필드를 확장한다.
@@ -69,7 +69,7 @@ class NodeDefinition:
     risk_level: RiskLevel                   # REQ-002가 참조하는 필드
     required_connections: list[str]         # REQ-002가 참조 (e.g. ["google", "slack"])
     description: str                        # 노드 설명
-    is_mvp: bool                            # MVP 56종 여부 (gemma_chat 포함)
+    is_mvp: bool                            # MVP 53종 여부 (gemma_chat 포함)
     
     # === REQ-003 확장 필드 ===
     service_type: Optional[str] = None      # REQ-002가 참조 (e.g. "google_workspace")
@@ -122,7 +122,7 @@ TOutput = TypeVar("TOutput")
 class BaseNode(Generic[TInput, TOutput], ABC):
     """모든 노드의 추상 기본 클래스.
     
-    56종 노드가 이 클래스를 상속하여 process()를 구현한다.
+    53종 노드가 이 클래스를 상속하여 process()를 구현한다.
     """
     metadata: NodeMetadata
     input_schema: type[TInput]
@@ -223,7 +223,7 @@ class NodeDefinitionRepository(ABC):
     @abstractmethod
     async def upsert(self, definition: NodeDefinition) -> NodeDefinition:
         """노드 정의 생성 또는 갱신. 
-        Plugin discovery 시 56종 노드를 일괄 등록할 때 사용."""
+        Plugin discovery 시 53종 노드를 일괄 등록할 때 사용."""
         ...
     
     @abstractmethod
@@ -323,7 +323,7 @@ class CatalogRegistry:
     """
 
     def get_all_node_definitions(self) -> list[NodeDefinition]:
-        """카탈로그 전체 30종 NodeDefinition 반환.
+        """카탈로그 전체 53종 NodeDefinition 반환.
         RegisterNodesUseCase.execute()의 입력으로 사용."""
         ...
 ```
@@ -332,42 +332,12 @@ class CatalogRegistry:
 
 ### Infrastructure/Adapter Layer (`modules/nodes_graph/adapters/`)
 
-#### tool_to_node_wrapper.py — `ToolToNodeWrapper`
-
-```python
-class ToolToNodeWrapper:
-    """REQ-005 BaseTool → REQ-003 BaseNode 변환 어댑터.
-    
-    REQ-005 toolset 모듈의 BaseTool 인터페이스를 REQ-003의 BaseNode 인터페이스로
-    래핑하여, 기존 도구를 워크플로우 노드로 사용할 수 있게 한다.
-    """
-    
-    def __init__(self, tool: "BaseTool"):  # REQ-005의 BaseTool
-        """
-        tool의 메타데이터로부터 NodeMetadata 생성:
-        - tool.tool_id → node_id
-        - tool.name → name
-        - tool.risk_level → risk_level
-        - tool.input_schema → input_schema
-        - tool.output_schema → output_schema
-        """
-        ...
-    
-    async def process(self, input: dict) -> dict:
-        """
-        tool.run(params, credential) 호출을 BaseNode.process() 시그니처로 래핑.
-        credential은 CredentialInjectionService를 통해 주입받아야 하므로
-        input에 credential 정보가 포함되어야 한다.
-        """
-        ...
-    
-    def to_node_definition(self) -> NodeDefinition:
-        """BaseTool의 메타데이터로 NodeDefinition 엔티티 생성.
-        RegisterNodesUseCase에서 카탈로그 등록 시 사용."""
-        ...
-```
-
----
+> **`tool_to_node_wrapper.py` (ToolToNodeWrapper) 제거 — 2026-05-19 박아름 toolset 정리 PR**
+> 
+> 5/15 햄햄·박아름 합의 + 5/19 조장 안 반영. toolset 14종(http_request_tool/conditional/loop 중복 3종 제외)
+> 모두 `adapters/catalog/external/`에 개별 NodeDefinition 파일로 등록. 실행 흐름은
+> `services/execution_engine.ToolsetExecutor`가 `node_type` 기반으로 `toolset.execute_tool()` 호출.
+> BaseNode.process()는 NotImplementedError + 위임 메시지 패턴(anthropic_chat 패턴 정합).
 
 #### ports/embedder_port.py — `EmbedderPort` (ABC)
 
@@ -386,7 +356,7 @@ class EmbedderPort(ABC):
     
     @abstractmethod
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """배치 임베딩. Plugin discovery 시 56종 노드 일괄 임베딩에 사용."""
+        """배치 임베딩. Plugin discovery 시 53종 노드 일괄 임베딩에 사용."""
         ...
 ```
 
@@ -412,8 +382,9 @@ Upstream (이 모듈이 의존):
   │     └── WorkflowSchema, NodeInstance, NodeConfig, Edge, Position
   │     └── RiskLevel, ErrorCode
   │     └── ValidationErrorItem, ValidationErrorResponse
-  └── modules/toolset (REQ-005) [Optional — ToolToNodeWrapper용]
-        └── BaseTool (어댑터에서 래핑 대상)
+  └── modules/toolset (REQ-005) — 직접 import 없음.
+        catalog/external/* 의 BaseNode.process()는 NotImplementedError로 위임만 표명하고,
+        실제 실행은 services/execution_engine.ToolsetExecutor가 node_type 기반으로 toolset 호출.
 
 Downstream (이 모듈에 의존):
   ├── modules/auth (REQ-002)
@@ -466,32 +437,35 @@ modules/nodes_graph/
 │       ├── search_nodes_use_case.py
 │       └── register_nodes_use_case.py
 ├── adapters/
-│   └── tool_to_node_wrapper.py     # ToolToNodeWrapper (REQ-005 어댑터)
+│   └── catalog/
+│       ├── external/                # 25종 NodeDefinition (기존 14 + 신규 11 REQ-005 연동)
+│       └── registry.py              # Plugin discovery
 └── tests/
     ├── test_graph_validator.py
     ├── test_node_definition.py
-    ├── test_search_nodes.py
-    └── test_tool_to_node_wrapper.py
+    └── test_search_nodes.py
 ```
 
 ---
 
-## 노드 카탈로그 요약 (Sprint 3 1주차 — 56종)
+## 노드 카탈로그 요약 (Sprint 3 2주차 — 53종)
 
 > 카테고리는 DB `node_definitions.category` CHECK 제약(영문 8종: `trigger`, `action`, `condition`, `transform`, `ai`, `integration`, `utility`, `output`)에 맞춤. Microsoft(Outlook/Teams/OneDrive), Notion, OpenAI는 데모 버전 후속 개발로 보류 (2026-05-11 조장 결정).
 >
-> 박아름 1주차 작업분 41종(28 domain + 13 external) + 박아름 5/14 야간 추가 `gemma_chat` 1종 (PR #68) + 햄햄(가원) toolset 영역 연결분 14종(REQ-005 toolset → nodes_graph 카탈로그) = **합계 56종**. toolset 연결은 햄햄 commit `59f0e26 feat(toolset+nodes_graph): toolset 14종 tool 노드를 nodes_graph 카탈로그에 연결`로 머지됨.
+> 박아름 1주차 작업분 41종(28 domain + 13 external) + 박아름 5/14 야간 추가 `gemma_chat` 1종 (PR #68) + 박아름 5/19 toolset 정리 PR로 REQ-005 toolset 연동 11종을 `adapters/catalog/external/`로 이전 = **합계 53종**.
+>
+> 5/15 햄햄·박아름 합의 + 5/19 조장 안: toolset 14 중 중복 3종(`http_request_tool` ↔ `external/http_request`, `conditional` ↔ `domain/control/if_condition`, `loop` ↔ `domain/control/loop_list`)은 양쪽 제거. 나머지 11종은 `external/`에 개별 NodeDefinition 파일로 등록.
 
-| 카테고리 | 종수 | 박아름 1주차 (41) + 5/14 (1) | + 햄햄 toolset (14) |
+| 카테고리 | 종수 | 박아름 1주차 (42, gemma_chat 포함) | + 5/19 toolset 연동 (11) |
 |---------|:---:|------|------|
 | `trigger` | 6 | `schedule_trigger`, `webhook_trigger`, `manual_trigger`, `event_trigger`, `api_poll_trigger`, `file_watch_trigger` | — |
-| `condition` | 10 | `if_condition`, `switch_case`, `loop_count`, `loop_list`, `retry`, `merge_branch`, `stop_workflow`, `delay` | + `conditional`, `loop` |
+| `condition` | 8 | `if_condition`, `switch_case`, `loop_count`, `loop_list`, `retry`, `merge_branch`, `stop_workflow`, `delay` | — |
 | `transform` | 18 | `text_transform`, `json_extract`, `json_merge`, `csv_parse`, `csv_build`, `number_calc`, `date_format`, `list_filter`, `list_map`, `string_template`, `regex_extract`, `regex_replace`, `base64_encode`, `base64_decode` | + `file_transform`, `json_transform`, `text_template`, `data_mapping` |
 | `ai` | 2 (+후속) | `anthropic_chat` (외부 LLM, API key 자격증명), `gemma_chat` (시스템 내장 Gemma 4, 자격증명 불필요 — 5/14 야간 추가) — `openai_chat`은 데모 후속 보류 | — |
-| `integration` | 11 | `http_request`, `google_drive_read`, `google_sheets_read`, `postgresql_query`, `mysql_query`, `bigquery_query`, `google_calendar_create_event`, `linear_create_issue` | + `rest_api`, `graphql`, `http_request_tool` |
+| `integration` | 10 | `http_request`, `google_drive_read`, `google_sheets_read`, `postgresql_query`, `mysql_query`, `bigquery_query`, `google_calendar_create_event`, `linear_create_issue` | + `rest_api`, `graphql` |
 | `output` | 2 | `pdf_generate`, `google_docs_write` | — |
 | `action` | 5 (+후속) | `slack_post_message`, `gmail_send` (Microsoft `outlook_send`/`teams_post_message` 후속 보류) | + `webhook`, `slack_notify`, `email_send` |
 | `utility` | 2 | (박아름 1주차엔 utility 분류 없음) | + `file_read`, `file_write` |
-| **합계** | **56** | **42** (28 domain + 14 external, gemma_chat 포함) | **+14** (toolset) |
+| **합계** | **53** | **42** (28 domain + 14 external, gemma_chat 포함) | **+11** (toolset 연동) |
 
-각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. toolset 14종은 `modules/nodes_graph/adapters/catalog/tools/toolset_nodes.py`에서 `NodeDefinition` 형태로 정의되어 `catalog_registry.py`로 통합 등록된다.
+각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. 신규 11종은 `modules/nodes_graph/adapters/catalog/external/` 아래 개별 파일로 등록되며, `BaseNode.process()`는 NotImplementedError + ToolsetExecutor 위임 메시지(anthropic_chat 패턴 정합). 실행은 `services/execution_engine.ToolsetExecutor`가 `node_type` 기반으로 `toolset.execute_tool()` 호출.

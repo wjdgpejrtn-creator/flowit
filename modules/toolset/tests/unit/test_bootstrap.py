@@ -9,11 +9,8 @@ from toolset.adapters.tool_registry_adapter import ToolRegistryAdapter
 
 _EXPECTED_TOOL_NAMES = {
     "graphql",
-    "http_request_tool",
     "rest_api",
     "webhook",
-    "conditional",
-    "loop",
     "file_read",
     "file_transform",
     "file_write",
@@ -34,9 +31,9 @@ def _make_registry() -> ToolRegistryAdapter:
 
 
 class TestRegisterDefaultTools:
-    def test_registers_exactly_14_tools(self):
+    def test_registers_exactly_11_tools(self):
         registry = _make_registry()
-        assert len(registry) == 14
+        assert len(registry) == 11
 
     def test_all_expected_tool_names_present(self):
         registry = _make_registry()
@@ -68,4 +65,4 @@ class TestRegisterDefaultTools:
         registry = ToolRegistryAdapter()
         register_default_tools(registry)
         register_default_tools(registry)
-        assert len(registry) == 14
+        assert len(registry) == 11

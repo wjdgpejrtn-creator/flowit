@@ -25,7 +25,7 @@ execution_engine (REQ-007)
 
 - **실행 주체**: `services/execution_engine`이 DI로 `ExecuteToolUseCase`를 주입받아 호출
 - **보안 흐름**: `PermissionSource.risk_ceiling` 검사 → Credential 획득 → 실행 → Credential 즉시 `wipe()`
-- **노드 등록**: `nodes_graph`의 `ToolToNodeWrapper`가 `BaseTool` 메타데이터를 `NodeDefinition`으로 변환
+- **노드 등록**: `nodes_graph/adapters/catalog/external/`에 직접 NodeDefinition 등록 (ToolToNodeWrapper 제거 — ADR-0014)
 - **이력 저장**: `ToolExecutionRepository` Port를 통해 `modules/storage`에 위임
 
 ---
@@ -207,7 +207,7 @@ from auth.domain.services import CredentialInjectionService
 | REQ-012 황대원 | common_schemas 타입 확정 | ✅ 완료 (PR #11) | Done |
 | REQ-002 박아름 | `CredentialInjectionService.inject()` 시그니처 확인 (node_id 필요성) | Phase 3 전 | 대기 |
 | REQ-007 황대원 | `ExecuteToolUseCase` 호출 패턴 전달 (tool_name, input_data, context) | Phase 2 완료 후 | 대기 |
-| REQ-003 박아름 | `BaseTool` 메타데이터 구조 → `ToolToNodeWrapper` 연동 | Phase 1 완료 후 | 대기 |
+| REQ-003 박아름 | toolset 11종 external NodeDefinition 등록 완료 (ToolToNodeWrapper 제거 — ADR-0014) | ✅ 완료 (PR #78) | Done |
 | REQ-001 황대원 | `ToolExecutionRepository` 테이블 스키마 협의 + `StateManager` PostgreSQL fallback | Phase 3 전 | 대기 |
 
 ---
