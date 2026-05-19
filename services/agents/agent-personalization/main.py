@@ -51,7 +51,6 @@ image = (
     .add_local_dir("services/common", remote_path="/repo/services/common", copy=True)
 )
 
-app_secret = modal.Secret.from_name("agent-personalization-secret")
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
 
 app = modal.App(APP_NAME)
@@ -59,7 +58,7 @@ app = modal.App(APP_NAME)
 
 @app.cls(
     image=image,
-    secrets=[app_secret, gcp_secret],
+    secrets=[gcp_secret],
     timeout=600,
     scaledown_window=300,
 )
@@ -143,7 +142,7 @@ class PersonalizationAgent:
         from fastapi import Body, FastAPI, HTTPException
         from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 
-        api = FastAPI(title=APP_NAME, debug=True)
+        api = FastAPI(title=APP_NAME, debug=os.getenv("DEBUG") == "1")
 
         @api.post("/v1/agent/route", response_model=AgentProtocolResponse)
         async def route(req: AgentProtocolRequest = Body(...)) -> AgentProtocolResponse:

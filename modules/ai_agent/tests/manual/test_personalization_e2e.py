@@ -1,27 +1,29 @@
 """Personalization Agent E2E 테스트 — Modal 앱 HTTP 직접 호출.
 
 실행 전 준비:
-    1. modal app list  →  agent-personalization 행의 URL 복사
-    2. 아래 MODAL_URL 변수에 붙여넣기 (후행 슬래시 제거)
-    3. python modules/ai_agent/tests/integration/test_personalization_e2e.py
+    export PERSONALIZATION_AGENT_URL=https://<workspace>--agent-personalization-personalizationagent-fastapi.modal.run
+    python modules/ai_agent/tests/manual/test_personalization_e2e.py
 
 검증 순서:
     health → load_memory → update_memory → recall_skills → cleanup_memory
+
+pytest 자동 수집 대상 아님 — 직접 실행 전용 (pyproject.toml norecursedirs: tests/manual)
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import uuid
 from typing import Any
 
 import httpx
 
-# ── 설정 (실행 전 수정) ─────────────────────────────────────────────────────
-MODAL_URL = "https://dhwang0803--agent-personalization-personalizationagent-fastapi.modal.run"
+# ── 설정 ──────────────────────────────────────────────────────────────────────
+MODAL_URL = os.getenv("PERSONALIZATION_AGENT_URL", "")
 TIMEOUT = 30.0
-# ────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 
 SESSION_ID = uuid.uuid4()
 USER_ID = uuid.uuid4()
@@ -192,8 +194,8 @@ async def test_unknown_action(client: httpx.AsyncClient) -> None:
 
 
 async def main() -> None:
-    if MODAL_URL == "https://<modal-url>":
-        print(f"{FAIL} MODAL_URL을 설정하세요 (modal app list → agent-personalization URL 복사)")
+    if not MODAL_URL:
+        print(f"{FAIL} PERSONALIZATION_AGENT_URL 환경변수를 설정하세요 (modal app list → agent-personalization URL)")
         sys.exit(1)
 
     print(f"대상 URL  : {MODAL_URL}")
