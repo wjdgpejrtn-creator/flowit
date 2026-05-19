@@ -150,11 +150,27 @@ class InterleavingParser(ParserPort):
     ) -> DocumentBlock:
         """전체 페이지 fallback.
 
-        현재는 HWP 전용에 가깝게 사용한다.
-        DOCX는 이 경로로 보내지 않는다.
+        HWP 전략:
+            - base parser 텍스트 결과는 유지
+            - 가능하면 PDF 변환 후 전체 페이지 vision block 추가
+            - extract_all_pages가 없거나 실패하면 기존 page=1 fallback 사용
         """
         result_blocks: list[ContentBlock] = list(base_doc.blocks)
 
+        # VisionExtractor가 전체 페이지 추출을 지원하면 우선 사용
+        if hasattr(self._vision_extractor, "extract_all_pages"):
+            vision_blocks = self._vision_extractor.extract_all_pages(
+                file_path=file_path,
+                vision_type=VisionType.FULL_PAGE,
+                start_block_index=len(result_blocks),
+                max_pages=None,
+            )
+
+            if vision_blocks:
+                result_blocks.extend(vision_blocks)
+                return self._rebuild_doc(base_doc, result_blocks, file_meta)
+
+        # fallback: 기존 1페이지 방식
         vision_block = self._vision_extractor.extract(
             file_path=file_path,
             vision_type=VisionType.FULL_PAGE,

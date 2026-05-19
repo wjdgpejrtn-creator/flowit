@@ -133,6 +133,146 @@ class VisionExtractor(VisionPort):
             if out_dir and not self._debug_output_dir:
                 shutil.rmtree(out_dir, ignore_errors=True)
 
+
+    def extract_all_pages(
+        self,
+        file_path: str,
+        vision_type: VisionType,
+        start_block_index: int = 0,
+        max_pages: int | None = None,
+    ) -> list[ContentBlock]:
+        """파일 전체 페이지를 PDF→PNG로 렌더링한 뒤 페이지별 Gemma4 분석.
+
+        HWP처럼 텍스트 파서가 page/표/이미지 구조를 알기 어려운 포맷의
+        deep fallback 용도.
+        """
+        blocks: list[ContentBlock] = []
+        out_dir = None
+
+        try:
+            pdf_path, out_dir = self._convert_to_pdf(file_path)
+            if not pdf_path:
+                return blocks
+
+            image_paths = self._render_pdf_to_images(
+                pdf_path=pdf_path,
+                out_dir=out_dir,
+                max_pages=max_pages,
+            )
+
+            for idx, image_path in enumerate(image_paths, start=1):
+                data_url = self._to_data_url(image_path)
+                content = self._call_gemma4(data_url, vision_type)
+
+                if not content:
+                    continue
+
+                blocks.append(
+                    ContentBlock(
+                        block_id=uuid4(),
+                        block_type=vision_type.to_block_type(),
+                        content=content,
+                        page=idx,
+                        source_ref=SourceRef(
+                            page=idx,
+                            block_index=start_block_index + len(blocks),
+                        ),
+                    )
+                )
+
+            return blocks
+
+        except Exception:
+            return blocks
+
+        finally:
+            if out_dir and not self._debug_output_dir:
+                shutil.rmtree(out_dir, ignore_errors=True)
+
+    def _convert_to_pdf(
+        self,
+        file_path: str,
+    ) -> tuple[str | None, str | None]:
+        """LibreOffice headless로 파일 → PDF 변환."""
+        try:
+            out_dir = (
+                self._debug_output_dir
+                if self._debug_output_dir
+                else tempfile.mkdtemp(prefix="vision_pdf_")
+            )
+
+            result = subprocess.run(
+                [
+                    _SOFFICE_PATH,
+                    "--headless",
+                    "--convert-to", "pdf",
+                    file_path,
+                    "--outdir", out_dir,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=_CONVERT_TIMEOUT,
+            )
+
+            if result.returncode != 0:
+                return None, out_dir
+
+            stem = Path(file_path).stem
+            pdf_path = Path(out_dir) / f"{stem}.pdf"
+
+            if pdf_path.exists():
+                return str(pdf_path), out_dir
+
+            pdfs = sorted(Path(out_dir).glob("*.pdf"))
+            if pdfs:
+                return str(pdfs[0]), out_dir
+
+            return None, out_dir
+
+        except subprocess.TimeoutExpired:
+            return None, None
+        except Exception:
+            return None, None
+
+    def _render_pdf_to_images(
+        self,
+        pdf_path: str,
+        out_dir: str,
+        max_pages: int | None = None,
+        zoom: float = 2.0,
+    ) -> list[str]:
+        """PDF 전체 페이지를 PNG 이미지로 렌더링."""
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            return []
+
+        image_paths: list[str] = []
+
+        try:
+            doc = fitz.open(pdf_path)
+            total_pages = len(doc)
+
+            if max_pages is not None:
+                total_pages = min(total_pages, max_pages)
+
+            matrix = fitz.Matrix(zoom, zoom)
+            stem = Path(pdf_path).stem
+
+            for page_index in range(total_pages):
+                page = doc[page_index]
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+
+                image_path = Path(out_dir) / f"{stem}_page_{page_index + 1:03d}.png"
+                pix.save(str(image_path))
+                image_paths.append(str(image_path))
+
+            doc.close()
+            return image_paths
+
+        except Exception:
+            return image_paths
+
     # ──────────────────────────────────────────
     # Private — 이미지 캡처
     # ──────────────────────────────────────────
