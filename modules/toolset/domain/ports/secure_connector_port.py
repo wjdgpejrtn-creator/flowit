@@ -1,44 +1,23 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from common_schemas.security import PlaintextCredential
 
+from ..value_objects.connector_response import ConnectorResponse
+
 
 class SecureConnectorPort(ABC):
-    """
-    자격증명 획득/해제 Port.
-    구현체: adapters/secure_connector.py (CredentialInjectionService 연동)
+    """외부 엔드포인트에 자격증명을 주입해 HTTP 요청을 수행하는 Port.
 
-    acquire ~ release 사이에만 평문 메모리 보유.
-    ExecuteToolUseCase.execute() finally 블록에서 반드시 release 호출.
+    구현체: adapters/secure_connector.py (auth.CredentialInjectionService 연동)
+    adapter에서 httpx.Response → ConnectorResponse 변환 책임.
     """
 
     @abstractmethod
-    async def acquire_credential(
+    async def connect(
         self,
-        credential_id: str,
-        service: str,
-    ) -> PlaintextCredential:
-        """Raises: CredentialError — 자격증명 미존재 또는 복호화 실패"""
-        ...
-
-    @abstractmethod
-    async def release_credential(self, credential_id: str) -> None:
-        """메모리에서 credential 제거. best-effort — 실패 시 예외 없음."""
-        ...
-
-    @asynccontextmanager
-    async def credential_context(
-        self,
-        credential_id: str,
-        service: str,
-    ) -> AsyncGenerator[PlaintextCredential, None]:
-        credential = await self.acquire_credential(credential_id, service)
-        try:
-            yield credential
-        finally:
-            credential.wipe()
-            await self.release_credential(credential_id)
+        endpoint: str,
+        credentials: PlaintextCredential,
+        **kwargs,
+    ) -> ConnectorResponse: ...

@@ -1,12 +1,12 @@
 # REQ-007 Execution Engine -- 구현 명세
 
 > 담당: 황대원  
-> 서비스 경로: `services/execution-engine/`  
-> 의존 패키지: `common-schemas >= 0.1.0`, `celery >= 5.3`, `langgraph >= 0.1`
+> 서비스 경로: `services/execution_engine/`  
+> 의존 패키지: `common_schemas >= 0.1.0`, `celery >= 5.3`, `langgraph >= 0.1`
 
 ---
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|
@@ -52,11 +52,11 @@ from common_schemas import (
 | 클래스 | 필드 | 설명 |
 |--------|------|------|
 | `ExecutionContext` | `execution_id: UUID`, `workflow_id: UUID`, `user_id: UUID`, `trigger_type: Literal["manual", "scheduled", "handoff"]`, `started_at: datetime`, `parameters: dict[str, Any]` | 워크플로우 실행 컨텍스트 (실행 한 번의 메타정보) |
-| `ExecutionResult` | `execution_id: UUID`, `workflow_id: UUID`, `status: ExecutionStatus`, `node_results: list[NodeResult]`, `started_at: datetime`, `completed_at: Optional[datetime]`, `error: Optional[str]` | 워크플로우 전체 실행 결과 |
+| `ExecutionResult` | `execution_id: UUID`, `workflow_id: UUID`, `user_id: Optional[UUID]`, `status: ExecutionStatus`, `node_results: list[NodeResult]`, `started_at: datetime`, `completed_at: Optional[datetime]`, `error: Optional[str]` | 워크플로우 전체 실행 결과 (user_id: 실행 발신자 추적, EvaluateAndRefine 재실행 시 활용) |
 | `NodeResult` | `node_instance_id: UUID`, `status: Literal["succeeded", "failed", "cancelled", "skipped"]`, `output: dict[str, Any]`, `started_at: datetime`, `completed_at: datetime`, `retry_count: int`, `error: Optional[str]` | 개별 노드 실행 결과 |
 | `ExecutionLevel` | `level: int`, `nodes: list[NodeInstance]` | 위상 정렬 결과의 한 실행 레벨 (같은 레벨 = 병렬 실행 가능) |
 | `RetryPolicy` | `max_retries: int`, `backoff_base_seconds: float`, `retryable_errors: list[str]` | 노드 재시도 정책 VO |
-| `NodeExecutionState` | `node_instance_id: UUID`, `status: Literal["pending", "running", "succeeded", "failed", "retrying", "cancelled"]`, `attempt: int`, `last_error: Optional[str]` | 노드 실행 상태 추적 |
+| `NodeExecutionState` | *(common_schemas.workflow에서 import)* `node_instance_id: UUID`, `status: Literal["pending", "running", "succeeded", "failed", "retrying", "cancelled"]`, `attempt: int`, `last_error: Optional[str]` | 노드 실행 상태 추적 (SSOT: common_schemas에 정의됨) |
 
 #### domain/services
 
@@ -66,9 +66,9 @@ from common_schemas import (
 | | `validate_dag(workflow: WorkflowSchema) -> None` | 순환 참조 검출. 발견 시 `ValidationError(code=E_CYCLE_DETECTED)` 발생 |
 | `RetryManager` | `should_retry(error: Exception, policy: RetryPolicy, attempt: int) -> bool` | 재시도 가능 여부 판정 |
 | | `get_backoff_delay(policy: RetryPolicy, attempt: int) -> float` | 지수 백오프 지연 시간 계산 |
-| `ExecutionOrchestrator` | `run(workflow: WorkflowSchema, context: ExecutionContext) -> ExecutionResult` | 레벨별 순차 실행, 레벨 내 병렬 실행 오케스트레이션 |
-| | `pause(execution_id: UUID) -> None` | HITL 노드에서 일시 중지 |
-| | `resume(execution_id: UUID, approval: dict) -> None` | 사용자 승인 후 재개 |
+| `ExecutionOrchestrator` | `plan(workflow: WorkflowSchema) -> list[ExecutionLevel]` | 그래프 검증(validate_graph + validate_dag) 후 위상 정렬. 순수 비즈니스 규칙만 캡슐화 (Port 의존 없음) |
+| | `has_failures(level_results: list[NodeResult]) -> bool` | 레벨 실행 결과 중 실패 노드 존재 여부 판정 |
+| | `validate_state_transition(current: ExecutionStatus, target: ExecutionStatus) -> None` | 상태 전이 유효성 검증. 위반 시 ExecutionError 발생 |
 
 #### domain/ports (ABC 인터페이스)
 
@@ -91,7 +91,7 @@ from common_schemas import (
 | 유스케이스 | Input -> Output | 설명 |
 |-----------|----------------|------|
 | `ExecuteWorkflowUseCase` | `(workflow_id: UUID, context: ExecutionContext) -> ExecutionResult` | 전체 오케스트레이션: 워크플로우 조회 -> DAG 검증 -> 위상 정렬 -> 레벨별 실행 -> 결과 저장 |
-| `DispatchNodeUseCase` | `(node: NodeInstance, config: NodeConfig, inputs: dict) -> NodeResult` | 단일 노드 실행: credential 주입 -> NodeExecutor 호출 -> 재시도 처리 -> 결과 반환 |
+| `DispatchNodeUseCase` | `(node: NodeInstance, config: NodeConfig, inputs: dict, user_id: UUID, execution_id: UUID) -> NodeResult` | 단일 노드 실행: credential 주입(__user_id__ + __credentials__) -> NodeExecutor 호출 -> 재시도 처리 -> 결과 반환 |
 | `HandleHandoffUseCase` | `(payload: HandoffPayload) -> ExecutionResult` | REQ-004 QA 통과 후 핸드오프 수신: WorkflowSchema 조회 -> ExecuteWorkflowUseCase 위임 |
 | `PauseResumeUseCase` | `(execution_id: UUID, action: Literal["pause", "resume"], approval: Optional[dict]) -> None` | HITL 노드 일시 중지/재개 처리 |
 | `EvaluateAndRefineUseCase` | `(execution_id: UUID, evaluation: EvaluationResult) -> Optional[ExecutionResult]` | QA score < 8 시 Self-Refine 재실행 (최대 3회) |
@@ -126,7 +126,7 @@ from common_schemas import (
 | LangGraph StateGraph + Celery 2-Tier 구조 | 워크플로우 실행(사용자 정의)은 Celery 태스크, AI Agent 내부 그래프(REQ-004)는 LangGraph. 역할 분리 확정 | HIGH-003 아키텍처 결정 |
 | 핸드오프 수신 인터페이스 추가 | REQ-004 QA 통과 후 HandoffPayload -> WorkflowRepository.get() -> 디스패치 흐름 확정 | HIGH-004 |
 | credential_id -> REQ-002 주입 | NodeInstance.credential_id를 통해 CredentialProviderPort가 런타임에 복호화된 자격증명 주입 | MEDIUM-001 |
-| `ExecutionStatus` enum common-schemas 사용 | 자체 정의 삭제, common-schemas의 ExecutionStatus(RUNNING/PAUSED/COMPLETED/FAILED) 사용 | HIGH-001 SSOT |
+| `ExecutionStatus` enum common_schemas 사용 | 자체 정의 삭제, common_schemas의 ExecutionStatus(RUNNING/PAUSED/COMPLETED/FAILED) 사용 | HIGH-001 SSOT |
 | WorkflowSchema.validate_graph() 활용 | 실행 전 재검증 시 WorkflowSchema 내장 validate_graph() 호출 + TopologicalScheduler.validate_dag() 보완 | MEDIUM-005 |
 
 ---
@@ -134,18 +134,18 @@ from common_schemas import (
 ## 의존성 관계
 
 ```
-services/execution-engine
+services/execution_engine
 ├── depends on ─────────────────────────────────────────────────────────────
-│   ├── packages/common-schemas   (WorkflowSchema, NodeInstance, Edge, ExecutionStatus, HandoffPayload, EvaluationResult, ErrorCode)
-│   ├── modules/nodes-graph       (REQ-003: GraphValidator -- 실행 전 재검증)
+│   ├── packages/common_schemas   (WorkflowSchema, NodeInstance, Edge, ExecutionStatus, HandoffPayload, EvaluationResult, ErrorCode)
+│   ├── modules/nodes_graph       (REQ-003: GraphValidator -- 실행 전 재검증)
 │   ├── modules/toolset           (REQ-005: ExecuteToolUseCase -- 외부 도구 실행)
-│   ├── modules/ai-agent          (REQ-004: LangGraph 에이전트 노드 실행)
+│   ├── modules/ai_agent          (REQ-004: LangGraph 에이전트 노드 실행)
 │   ├── modules/auth              (REQ-002: CredentialStore -- 자격증명 복호화)
 │   └── modules/storage           (REQ-001: WorkflowRepository, ExecutionRepository)
 │
 ├── depended by ────────────────────────────────────────────────────────────
-│   ├── services/api-server       (Celery task dispatch: execute_workflow.delay())
-│   └── modules/ai-agent          (REQ-004 QA 통과 후 핸드오프 발신 -> 본 서비스가 수신)
+│   ├── services/api_server       (Celery task dispatch: execute_workflow.delay())
+│   └── modules/ai_agent          (REQ-004 QA 통과 후 핸드오프 발신 -> 본 서비스가 수신)
 │
 └── runtime dependencies ───────────────────────────────────────────────────
     ├── Redis                     (Celery broker + result backend + SSE pub/sub)
@@ -158,7 +158,7 @@ services/execution-engine
 ```toml
 [project]
 dependencies = [
-    "common-schemas",
+    "common_schemas",
     "pydantic>=2.0",
     "celery[redis]>=5.3",
     "langgraph>=0.1",
@@ -173,7 +173,7 @@ dependencies = [
 ## 디렉토리 구조 (목표)
 
 ```
-services/execution-engine/
+services/execution_engine/
 ├── Dockerfile
 ├── pyproject.toml
 ├── src/
@@ -186,8 +186,7 @@ services/execution-engine/
 │   │   │   ├── execution_context.py    ← ExecutionContext
 │   │   │   ├── execution_result.py     ← ExecutionResult, NodeResult
 │   │   │   ├── execution_level.py      ← ExecutionLevel
-│   │   │   ├── retry_policy.py         ← RetryPolicy
-│   │   │   └── node_state.py           ← NodeExecutionState
+│   │   │   └── retry_policy.py         ← RetryPolicy
 │   │   ├── services/
 │   │   │   ├── __init__.py
 │   │   │   ├── topological_scheduler.py  ← TopologicalScheduler (Kahn's algorithm)

@@ -1,0 +1,35 @@
+-- 003_node_logs_partitioned.sql
+-- RANGE partitioned by started_at (monthly) for high-volume node execution logs
+-- Status values aligned with common_schemas NodeExecutionState
+
+CREATE TABLE IF NOT EXISTS node_logs (
+    log_id          UUID NOT NULL DEFAULT gen_random_uuid(),
+    execution_id    UUID NOT NULL,
+    node_id         VARCHAR(100) NOT NULL,
+    node_type       VARCHAR(50) NOT NULL,
+    status          VARCHAR(30) NOT NULL
+                    CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'skipped', 'retrying', 'cancelled')),
+    attempt         INTEGER NOT NULL DEFAULT 1,
+    input_payload   JSONB,
+    output_payload  JSONB,
+    error           TEXT,
+    duration_ms     INTEGER,
+    worker_id       VARCHAR(100),
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (log_id, started_at)
+) PARTITION BY RANGE (started_at);
+
+CREATE INDEX IF NOT EXISTS idx_node_logs_execution_id ON node_logs(execution_id);
+CREATE INDEX IF NOT EXISTS idx_node_logs_node_type ON node_logs(node_type);
+CREATE INDEX IF NOT EXISTS idx_node_logs_status ON node_logs(status);
+
+CREATE TABLE IF NOT EXISTS node_logs_2026_05 PARTITION OF node_logs
+    FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
+
+CREATE TABLE IF NOT EXISTS node_logs_2026_06 PARTITION OF node_logs
+    FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
+
+CREATE TABLE IF NOT EXISTS node_logs_2026_07 PARTITION OF node_logs
+    FOR VALUES FROM ('2026-07-01') TO ('2026-08-01');
+
+CREATE TABLE IF NOT EXISTS node_logs_default PARTITION OF node_logs DEFAULT;

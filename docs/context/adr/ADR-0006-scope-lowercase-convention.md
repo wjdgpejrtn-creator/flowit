@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-05-05
 - **Deciders**: @dhwang0803-glitch (REQ-001)
-- **Tags**: area/database, area/common-schemas, convention
+- **Tags**: area/database, area/common_schemas, convention
 
 ## Context
 
@@ -37,7 +37,7 @@ CHECK (scope IN ('private', 'team', 'public'))
 
 ### 연동 규칙
 
-- **common-schemas Enum**: `class Scope(str, Enum): PRIVATE = "private"; TEAM = "team"; PUBLIC = "public"`
+- **common_schemas Enum**: `class Scope(str, Enum): PRIVATE = "private"; TEAM = "team"; PUBLIC = "public"`
 - **API 요청/응답**: lowercase 문자열 그대로 사용
 - **프론트엔드**: 표시 시에만 capitalize, 전송 시 lowercase
 - **새 테이블 추가 시**: 동일 CHECK 제약 적용 필수
@@ -58,7 +58,7 @@ CHECK (scope IN ('private', 'team', 'public'))
 
 ### Follow-ups
 
-- [ ] REQ-012: `common-schemas/enums.py`에 `Scope` Enum 추가 (lowercase 값)
+- [ ] REQ-012: `common_schemas/enums.py`에 `Scope` Enum 추가 (lowercase 값)
 - [ ] REQ-010: 프론트엔드에서 scope 필터 UI 구현 시 이 규칙 준수
 - [ ] 신규 scope 값 추가 시 이 ADR 업데이트 + 마이그레이션 스크립트 작성
 

@@ -2,11 +2,11 @@
 
 - **담당자**: 박아름
 - **작성일**: 2026-05-05
-- **참조**: `docs/class_diagram_resolution_proposal.md` (H-1, H-4 확정), `modules/nodes-graph/README.md`
+- **참조**: `docs/class_diagram_resolution_proposal.md` (H-1, H-4 확정), `modules/nodes_graph/README.md`
 
 ---
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|
@@ -31,13 +31,13 @@ from common_schemas.enums import RiskLevel, ErrorCode
 from common_schemas.exceptions import ValidationError, NotFoundError
 ```
 
-**중요 (H-1 합의)**: 이 모듈은 WorkflowSchema, NodeInstance, Edge를 자체 정의하지 않는다. 반드시 common-schemas에서 import한다.
+**중요 (H-1 합의)**: 이 모듈은 WorkflowSchema, NodeInstance, Edge를 자체 정의하지 않는다. 반드시 common_schemas에서 import한다.
 
 ---
 
 ## 이 모듈에서 구현할 클래스
 
-### Domain Layer (`modules/nodes-graph/domain/`)
+### Domain Layer (`modules/nodes_graph/domain/`)
 
 #### entities/node_definition.py — `NodeDefinition`
 
@@ -49,7 +49,7 @@ from common_schemas.enums import RiskLevel
 
 @dataclass
 class NodeDefinition:
-    """54종 노드 타입의 카탈로그 엔티티.
+    """53종 노드 타입의 카탈로그 엔티티 (gemma_chat 추가, PR #68 5/15 머지).
     
     NodeConfig(REQ-012)의 필드를 모두 포함하며,
     추가로 embedding, service_type 등 REQ-003 전용 필드를 확장한다.
@@ -61,7 +61,7 @@ class NodeDefinition:
     node_id: UUID
     node_type: str                          # e.g. "gmail_send", "slack_post", "llm_generate"
     name: str                               # 사람이 읽을 수 있는 이름
-    category: str                           # e.g. "데이터 소스", "AI / LLM", "트리거"
+    category: str                           # DB CHECK 영문 8종: "trigger"|"action"|"condition"|"transform"|"ai"|"integration"|"utility"|"output"
     version: str                            # semver e.g. "1.0.0"
     input_schema: dict[str, Any]            # JSON Schema
     output_schema: dict[str, Any]           # JSON Schema
@@ -69,7 +69,7 @@ class NodeDefinition:
     risk_level: RiskLevel                   # REQ-002가 참조하는 필드
     required_connections: list[str]         # REQ-002가 참조 (e.g. ["google", "slack"])
     description: str                        # 노드 설명
-    is_mvp: bool                            # MVP 54종 여부
+    is_mvp: bool                            # MVP 53종 여부 (gemma_chat 포함)
     
     # === REQ-003 확장 필드 ===
     service_type: Optional[str] = None      # REQ-002가 참조 (e.g. "google_workspace")
@@ -122,7 +122,7 @@ TOutput = TypeVar("TOutput")
 class BaseNode(Generic[TInput, TOutput], ABC):
     """모든 노드의 추상 기본 클래스.
     
-    54종 노드가 이 클래스를 상속하여 process()를 구현한다.
+    53종 노드가 이 클래스를 상속하여 process()를 구현한다.
     """
     metadata: NodeMetadata
     input_schema: type[TInput]
@@ -223,7 +223,7 @@ class NodeDefinitionRepository(ABC):
     @abstractmethod
     async def upsert(self, definition: NodeDefinition) -> NodeDefinition:
         """노드 정의 생성 또는 갱신. 
-        Plugin discovery 시 54종 노드를 일괄 등록할 때 사용."""
+        Plugin discovery 시 53종 노드를 일괄 등록할 때 사용."""
         ...
     
     @abstractmethod
@@ -248,7 +248,7 @@ class NodeDefinitionRepository(ABC):
 
 ---
 
-### Application Layer (`modules/nodes-graph/application/`)
+### Application Layer (`modules/nodes_graph/application/`)
 
 #### use_cases/validate_graph_use_case.py — `ValidateGraphUseCase`
 
@@ -261,7 +261,7 @@ class ValidateGraphUseCase:
     
     async def execute(self, workflow: WorkflowSchema) -> ValidationErrorResponse:
         """
-        1. workflow.validate_graph() — 기본 참조 무결성 (common-schemas 내장)
+        1. workflow.validate_graph() — 기본 참조 무결성 (common_schemas 내장)
         2. GraphValidator.validate() — 정적/의미적 검증
         3. ValidationErrorResponse 반환
         """
@@ -310,44 +310,34 @@ class RegisterNodesUseCase:
 
 ---
 
-### Infrastructure/Adapter Layer (`modules/nodes-graph/adapters/`)
-
-#### tool_to_node_wrapper.py — `ToolToNodeWrapper`
+#### application/catalog_registry.py — `CatalogRegistry`
 
 ```python
-class ToolToNodeWrapper:
-    """REQ-005 BaseTool → REQ-003 BaseNode 변환 어댑터.
-    
-    REQ-005 toolset 모듈의 BaseTool 인터페이스를 REQ-003의 BaseNode 인터페이스로
-    래핑하여, 기존 도구를 워크플로우 노드로 사용할 수 있게 한다.
+class CatalogRegistry:
+    """카탈로그 전체 NodeDefinition 조립 클래스.
+
+    domain/catalog/* 개별 노드 + adapters/catalog/external/* 노드를
+    application 레이어에서 조립한다.
+    domain/__init__.py에서 adapter를 import하면 Clean Architecture 위반이므로
+    반드시 이 클래스를 통해 조립한다 (PR #30 리뷰 확정, PR #34 spec 반영).
     """
-    
-    def __init__(self, tool: "BaseTool"):  # REQ-005의 BaseTool
-        """
-        tool의 메타데이터로부터 NodeMetadata 생성:
-        - tool.tool_id → node_id
-        - tool.name → name
-        - tool.risk_level → risk_level
-        - tool.input_schema → input_schema
-        - tool.output_schema → output_schema
-        """
-        ...
-    
-    async def process(self, input: dict) -> dict:
-        """
-        tool.run(params, credential) 호출을 BaseNode.process() 시그니처로 래핑.
-        credential은 CredentialInjectionService를 통해 주입받아야 하므로
-        input에 credential 정보가 포함되어야 한다.
-        """
-        ...
-    
-    def to_node_definition(self) -> NodeDefinition:
-        """BaseTool의 메타데이터로 NodeDefinition 엔티티 생성.
-        RegisterNodesUseCase에서 카탈로그 등록 시 사용."""
+
+    def get_all_node_definitions(self) -> list[NodeDefinition]:
+        """카탈로그 전체 53종 NodeDefinition 반환.
+        RegisterNodesUseCase.execute()의 입력으로 사용."""
         ...
 ```
 
 ---
+
+### Infrastructure/Adapter Layer (`modules/nodes_graph/adapters/`)
+
+> **`tool_to_node_wrapper.py` (ToolToNodeWrapper) 제거 — 2026-05-19 박아름 toolset 정리 PR**
+> 
+> 5/15 햄햄·박아름 합의 + 5/19 조장 안 반영. toolset 14종(http_request_tool/conditional/loop 중복 3종 제외)
+> 모두 `adapters/catalog/external/`에 개별 NodeDefinition 파일로 등록. 실행 흐름은
+> `services/execution_engine.ToolsetExecutor`가 `node_type` 기반으로 `toolset.execute_tool()` 호출.
+> BaseNode.process()는 NotImplementedError + 위임 메시지 패턴(anthropic_chat 패턴 정합).
 
 #### ports/embedder_port.py — `EmbedderPort` (ABC)
 
@@ -356,7 +346,8 @@ from abc import ABC, abstractmethod
 
 class EmbedderPort(ABC):
     """텍스트 → 벡터 임베딩 변환 인터페이스.
-    구현체: BGE-M3 모델 (768차원) — modules/ai-agent 또는 외부 서비스."""
+    구현체: BGE-M3 모델 (768차원) — modules/ai_agent 또는 외부 서비스.
+    ⚠️ 임베딩 차원 변경 시 storage ORM의 Vector 컬럼도 반드시 동기화 (REQ-008)."""
     
     @abstractmethod
     async def embed(self, text: str) -> list[float]:
@@ -365,7 +356,7 @@ class EmbedderPort(ABC):
     
     @abstractmethod
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """배치 임베딩. Plugin discovery 시 54종 노드 일괄 임베딩에 사용."""
+        """배치 임베딩. Plugin discovery 시 53종 노드 일괄 임베딩에 사용."""
         ...
 ```
 
@@ -387,23 +378,28 @@ class EmbedderPort(ABC):
 
 ```
 Upstream (이 모듈이 의존):
-  ├── packages/common-schemas (REQ-012)
+  ├── packages/common_schemas (REQ-012)
   │     └── WorkflowSchema, NodeInstance, NodeConfig, Edge, Position
   │     └── RiskLevel, ErrorCode
   │     └── ValidationErrorItem, ValidationErrorResponse
-  └── modules/toolset (REQ-005) [Optional — ToolToNodeWrapper용]
-        └── BaseTool (어댑터에서 래핑 대상)
+  └── modules/toolset (REQ-005) — 직접 import 없음.
+        catalog/external/* 의 BaseNode.process()는 NotImplementedError로 위임만 표명하고,
+        실제 실행은 services/execution_engine.ToolsetExecutor가 node_type 기반으로 toolset 호출.
 
 Downstream (이 모듈에 의존):
   ├── modules/auth (REQ-002)
   │     └── NodeDefinitionRepository ABC import
   │     └── CredentialInjectionService가 get_by_id() → NodeDefinition 필드 접근
-  ├── modules/ai-agent (REQ-004)
+  ├── modules/ai_agent (REQ-004) — Workflow Composer
   │     └── GraphValidator 호출 (워크플로우 생성/수정 시 검증)
   │     └── SearchNodesUseCase (노드 추천)
-  ├── services/execution-engine (REQ-007)
+  ├── modules/ai_agent (REQ-004) — Skills Builder
+  │     └── NodeDefinitionRepository.upsert() 호출 — SOP 문서/산업 default에서 추출한
+  │        SkillNode를 NodeDefinition으로 변환해 카탈로그에 등록
+  │        (BuildFromSOPUseCase, BuildFromIndustryDefaultUseCase)
+  ├── services/execution_engine (REQ-007)
   │     └── 위상 정렬로 실행 순서 결정
-  ├── services/api-server (REQ-009)
+  ├── services/api_server (REQ-009)
   │     └── 노드 목록 조회, 그래프 검증 엔드포인트
   └── modules/storage (REQ-008) / database (REQ-001)
         └── NodeDefinitionRepository 구현체 제공
@@ -422,7 +418,7 @@ Downstream (이 모듈에 의존):
 ## 디렉토리 구조 (목표)
 
 ```
-modules/nodes-graph/
+modules/nodes_graph/
 ├── __init__.py
 ├── domain/
 │   ├── entities/
@@ -441,28 +437,35 @@ modules/nodes-graph/
 │       ├── search_nodes_use_case.py
 │       └── register_nodes_use_case.py
 ├── adapters/
-│   └── tool_to_node_wrapper.py     # ToolToNodeWrapper (REQ-005 어댑터)
+│   └── catalog/
+│       ├── external/                # 25종 NodeDefinition (기존 14 + 신규 11 REQ-005 연동)
+│       └── registry.py              # Plugin discovery
 └── tests/
     ├── test_graph_validator.py
     ├── test_node_definition.py
-    ├── test_search_nodes.py
-    └── test_tool_to_node_wrapper.py
+    └── test_search_nodes.py
 ```
 
 ---
 
-## 노드 카탈로그 요약 (54종 MVP)
+## 노드 카탈로그 요약 (Sprint 3 2주차 — 53종)
 
-| 카테고리 | MVP 종수 | 예시 node_type |
-|---------|:---:|------|
-| 데이터 소스 | 5 | `google_drive_read`, `google_sheets_read` |
-| 트리거 | 8 | `schedule_trigger`, `webhook_trigger`, `gmail_trigger` |
-| AI / LLM | 10 | `llm_generate`, `llm_summarize`, `embedding_create` |
-| 데이터 처리 | 14 | `json_transform`, `text_split`, `merge_data` |
-| 조건 / 제어 | 8 | `if_condition`, `switch_case`, `loop_for_each` |
-| 문서 생성 | 4 | `google_docs_write`, `pdf_generate` |
-| 커뮤니케이션 | 2 | `gmail_send`, `slack_post` |
-| 외부 API 연동 | 3 | `http_request`, `google_calendar_create` |
-| **합계** | **54** | |
+> 카테고리는 DB `node_definitions.category` CHECK 제약(영문 8종: `trigger`, `action`, `condition`, `transform`, `ai`, `integration`, `utility`, `output`)에 맞춤. Microsoft(Outlook/Teams/OneDrive), Notion, OpenAI는 데모 버전 후속 개발로 보류 (2026-05-11 조장 결정).
+>
+> 박아름 1주차 작업분 41종(28 domain + 13 external) + 박아름 5/14 야간 추가 `gemma_chat` 1종 (PR #68) + 박아름 5/19 toolset 정리 PR로 REQ-005 toolset 연동 11종을 `adapters/catalog/external/`로 이전 = **합계 53종**.
+>
+> 5/15 햄햄·박아름 합의 + 5/19 조장 안: toolset 14 중 중복 3종(`http_request_tool` ↔ `external/http_request`, `conditional` ↔ `domain/control/if_condition`, `loop` ↔ `domain/control/loop_list`)은 양쪽 제거. 나머지 11종은 `external/`에 개별 NodeDefinition 파일로 등록.
 
-각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다.
+| 카테고리 | 종수 | 박아름 1주차 (42, gemma_chat 포함) | + 5/19 toolset 연동 (11) |
+|---------|:---:|------|------|
+| `trigger` | 6 | `schedule_trigger`, `webhook_trigger`, `manual_trigger`, `event_trigger`, `api_poll_trigger`, `file_watch_trigger` | — |
+| `condition` | 8 | `if_condition`, `switch_case`, `loop_count`, `loop_list`, `retry`, `merge_branch`, `stop_workflow`, `delay` | — |
+| `transform` | 18 | `text_transform`, `json_extract`, `json_merge`, `csv_parse`, `csv_build`, `number_calc`, `date_format`, `list_filter`, `list_map`, `string_template`, `regex_extract`, `regex_replace`, `base64_encode`, `base64_decode` | + `file_transform`, `json_transform`, `text_template`, `data_mapping` |
+| `ai` | 2 (+후속) | `anthropic_chat` (외부 LLM, API key 자격증명), `gemma_chat` (시스템 내장 Gemma 4, 자격증명 불필요 — 5/14 야간 추가) — `openai_chat`은 데모 후속 보류 | — |
+| `integration` | 10 | `http_request`, `google_drive_read`, `google_sheets_read`, `postgresql_query`, `mysql_query`, `bigquery_query`, `google_calendar_create_event`, `linear_create_issue` | + `rest_api`, `graphql` |
+| `output` | 2 | `pdf_generate`, `google_docs_write` | — |
+| `action` | 5 (+후속) | `slack_post_message`, `gmail_send` (Microsoft `outlook_send`/`teams_post_message` 후속 보류) | + `webhook`, `slack_notify`, `email_send` |
+| `utility` | 2 | (박아름 1주차엔 utility 분류 없음) | + `file_read`, `file_write` |
+| **합계** | **53** | **42** (28 domain + 14 external, gemma_chat 포함) | **+11** (toolset 연동) |
+
+각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. 신규 11종은 `modules/nodes_graph/adapters/catalog/external/` 아래 개별 파일로 등록되며, `BaseNode.process()`는 NotImplementedError + ToolsetExecutor 위임 메시지(anthropic_chat 패턴 정합). 실행은 `services/execution_engine.ToolsetExecutor`가 `node_type` 기반으로 `toolset.execute_tool()` 호출.

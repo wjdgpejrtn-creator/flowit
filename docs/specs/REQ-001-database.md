@@ -1,6 +1,12 @@
 # REQ-001 Database — 구현 명세
 
-## common-schemas에서 import할 클래스
+> **ADR-0012 (2026-05-14)**: 본 모듈은 `clean_architecture.md §8.1`의 원래
+> 의도대로 **순수 SQL 계층**을 유지한다. ORM/Repository/Mapper/object storage
+> 어댑터는 모두 `modules/storage`가 담당하며, Skills Marketplace 도메인은
+> 신규 `modules/skills_marketplace/`로 분리된다. 자세한 결정 배경은
+> `docs/context/adr/ADR-0012-database-storage-module-boundary.md`.
+
+## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|
@@ -52,11 +58,20 @@ REQ-002 ABC 계약을 충족하는 구현체:
 - REQ-002의 `BaseCipher`를 DI로 주입받아 CredentialModel 암/복호화에 사용
 - 시그니처: `encrypt(plaintext: bytes) → bytes`, `decrypt(ciphertext: bytes) → bytes`
 
-### 마이그레이션 (alembic/)
+### 마이그레이션 (raw SQL + `schema_migrations` 추적, ADR-0011)
 
-- PostgreSQL 15+ (pgvector 확장 포함)
+- PostgreSQL **16** (pgcrypto + pgvector 확장 포함; 자세한 인스턴스 셋업은 `docs/guides/cloud-sql-setup.md`)
 - UUID PK 전체 적용
 - JSONB 컬럼: NodeInstance.parameters, FileMeta, AgentState.messages
+- **Alembic 미도입** — 결정 배경은 `docs/context/adr/ADR-0011-migration-tracking-pattern.md`
+- 스키마 파일: `database/schemas/NNN_<name>.sql` (000은 추적 테이블 자체, 001~ 도메인)
+- 모든 DDL은 멱등 (`CREATE TABLE/INDEX IF NOT EXISTS`, `CREATE OR REPLACE TRIGGER`)
+- **schema 파일은 적용 후 immutable** — 변경은 새 파일로
+- 적용 도구: `python -m database.scripts.migrate [--status]`
+- 진단 도구: `python -m database.scripts.diagnose`
+- IAM 인증 + cloud-sql-python-connector 사용 (DATABASE_URL fallback 가능)
+- 운영 절차: `docs/guides/db-migration.md`
+- 공유 ownership role `workflow_admin` 패턴: `docs/guides/cloud-sql-setup.md §4-1`
 
 ## 합의된 변경사항
 

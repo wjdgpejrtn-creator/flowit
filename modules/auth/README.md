@@ -90,15 +90,15 @@ from auth.application.use_cases import (
 
 ```
 Upstream (이 모듈이 의존):
-  ├── common-schemas (REQ-012)
+  ├── common_schemas (REQ-012)
   │     └── PermissionSource, PlaintextCredential, RiskLevel, ErrorCode
-  └── nodes-graph (REQ-003)
+  └── nodes_graph (REQ-003)
         └── NodeDefinitionRepository ABC (CredentialInjectionService가 get_by_id 후 필드 접근)
 
 Downstream (이 모듈에 의존):
-  ├── ai-agent (REQ-004)      → CredentialInjectionService 호출
-  ├── api-server (REQ-009)    → AuthMiddleware, JWT 검증
-  ├── execution-engine (REQ-007) → InjectCredentialUseCase 호출
+  ├── ai_agent (REQ-004)      → CredentialInjectionService 호출
+  ├── api_server (REQ-009)    → AuthMiddleware, JWT 검증
+  ├── execution_engine (REQ-007) → InjectCredentialUseCase 호출
   └── storage (REQ-008)       → SessionRepository, OAuthConnectionRepository 구현체 제공
 ```
 

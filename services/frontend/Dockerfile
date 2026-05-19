@@ -5,7 +5,7 @@ WORKDIR /app
 COPY services/frontend/package.json services/frontend/package-lock.json* ./
 RUN npm ci
 
-COPY packages/common-schemas/typescript /app/packages/common-schemas/typescript
+COPY packages/common_schemas/typescript /app/packages/common_schemas/typescript
 COPY services/frontend .
 
 RUN npm run build

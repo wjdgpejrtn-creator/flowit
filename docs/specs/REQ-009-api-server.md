@@ -1,13 +1,13 @@
 # REQ-009 API Server — 구현 명세
 
 - **담당자**: 황대원
-- **모듈 경로**: `services/api-server/`
+- **모듈 경로**: `services/api_server/`
 - **기술 스택**: Python 3.11+, FastAPI, Uvicorn, SSE (Server-Sent Events)
 - **아키텍처 계층**: Interface Adapters (Inbound — HTTP → Use Case)
 
 ---
 
-## 1. common-schemas에서 import할 클래스
+## 1. common_schemas에서 import할 클래스
 
 ### 1.1 Python import (from common_schemas)
 
@@ -31,7 +31,8 @@
 | `ValidationErrorItem` | `validation` | 검증 에러 개별 항목 |
 | `ValidationErrorResponse` | `validation` | 검증 에러 응답 전체 포맷 |
 | `ExecutionStatus` | `enums` | 워크플로우 실행 상태 열거형 |
-| `AgentMode` | `enums` | 에이전트 모드 열거형 (onboarding/wizard/edit/general/security) |
+| `AgentMode` | `enums` | 에이전트 모드 열거형 (onboarding/wizard/edit/general/security/**skill_builder**) |
+| `AgentProtocolRequest` / `AgentProtocolResponse` | `agent_protocol` | OrchestratorClient 어댑터의 요청·응답 페이로드 (REQ-004 §4) |
 
 ### 1.2 import 코드 예시
 
@@ -138,8 +139,8 @@ class TopologicalScheduler:
 | # | 합의 사항 | 영향 |
 |---|-----------|------|
 | 1 | DAGScheduler → **TopologicalScheduler** 개명 | 클래스명 변경. 그래프 알고리즘의 본질(위상정렬)을 정확히 반영 |
-| 2 | SSE transport 스키마를 common-schemas로 이동 | API 서버는 transport 모듈 import만 하면 됨 (자체 정의 불필요) |
-| 3 | ValidationErrorResponse를 common-schemas에서 관리 | 검증 에러 포맷 통일 (프론트엔드와 동일 스키마 공유) |
+| 2 | SSE transport 스키마를 common_schemas로 이동 | API 서버는 transport 모듈 import만 하면 됨 (자체 정의 불필요) |
+| 3 | ValidationErrorResponse를 common_schemas에서 관리 | 검증 에러 포맷 통일 (프론트엔드와 동일 스키마 공유) |
 | 4 | ID 타입 = UUID (str 아님) | 모든 *_id 필드는 `uuid.UUID` 타입 사용 |
 | 5 | Optional 필드 합집합 확장 전략 | 공유 스키마의 Optional 필드는 각 모듈에서 선택적으로 활용 |
 | 6 | `scope` 필드 소문자 통일 (ADR-0006) | "private" / "team" / "public" (PascalCase 금지) |
@@ -149,36 +150,51 @@ class TopologicalScheduler:
 ## 4. 의존성 관계
 
 ```
-services/api-server/
+services/api_server/
 ├── imports from ─────────────────────────────────────────┐
-│   packages/common-schemas/python/                       │ (SSOT 엔티티/VO/Enum)
+│   packages/common_schemas/python/                       │ (SSOT 엔티티/VO/Enum/agent_protocol)
 │                                                         │
-├── calls (via Port interface) ───────────────────────────┐
-│   modules/ai-agent/application/                         │ (에이전트 세션 유스케이스)
+├── calls (via Port interface, in-process) ───────────────┐
 │   modules/workflow-manager/application/                  │ (워크플로우 CRUD 유스케이스)
-│   modules/doc-parser/application/                       │ (문서 파싱 유스케이스)
+│   modules/doc_parser/application/                       │ (문서 파싱 유스케이스)
 │   modules/auth/application/                             │ (인증/인가 유스케이스)
 │   modules/storage/                                      │ (Repository 구현체)
 │                                                         │
+├── calls (via HTTP adapter, out-of-process) ─────────────┐
+│   ai_agent Orchestrator Modal app                       │ (REQ-004 멀티 에이전트 — VPC 내부 HTTP)
+│     `services/api_server/adapters/orchestrator_client.py`│
+│                                                         │
 ├── integrates with ──────────────────────────────────────┐
-│   services/execution-engine/ (REQ-007)                  │ (워크플로우 실행 위임)
+│   services/execution_engine/ (REQ-007)                  │ (워크플로우 실행 위임)
 │                                                         │
 └── consumed by ──────────────────────────────────────────┐
     services/frontend/ (REQ-010)                          │ (HTTP/SSE 클라이언트)
 ```
 
+> **ai_agent in-process import 금지**: Sprint 3에서 ai_agent가 sub-agent별 Modal app으로 분리되었다 (`docs/specs/REQ-004-ai-agent.md` §0). api_server는 `modules/ai_agent/application/*`를 **직접 import하지 않는다**. 대신 `adapters/orchestrator_client.py`(HTTP 어댑터)가 Orchestrator Modal endpoint를 호출하며, SSE 응답을 그대로 클라이언트에 프록시한다.
+
 ### 4.1 DI 조립 규칙
 
 - API 서버는 **조립(Composition Root)** 역할만 수행
-- 모든 유스케이스는 Port 인터페이스를 통해 호출
+- 모든 in-process 유스케이스는 Port 인터페이스를 통해 호출
+- ai_agent는 **HTTP 어댑터(OrchestratorClient)** 만 노출. composition root에서 base URL과 timeout만 주입
 - 구체 구현체는 `DependencyContainer`에서 주입
+
+### 4.2 ai_agent HTTP 어댑터 계약
+
+`OrchestratorClient`는 `common_schemas.agent_protocol.AgentProtocolRequest/Response`로 직렬화하여 Orchestrator Modal app(`POST /v1/agent/route`)을 호출한다. 응답 SSE 스트림은 9종 프레임으로 디코딩되어 `SSEStreamService`가 그대로 클라이언트에 중계한다.
+
+| 환경 변수 | 용도 |
+|----------|------|
+| `ORCHESTRATOR_URL` | Modal app endpoint (VPC 내부) |
+| `ORCHESTRATOR_TIMEOUT_S` | HTTP 타임아웃 (기본 60s) |
 
 ---
 
 ## 5. 디렉토리 구조 (최종)
 
 ```
-services/api-server/
+services/api_server/
 ├── src/
 │   ├── main.py                          # FastAPI app factory + Uvicorn 실행
 │   ├── domain/
@@ -195,6 +211,8 @@ services/api-server/
 │   │   ├── sse_stream_service.py
 │   │   ├── agent_session_service.py
 │   │   └── auth_service.py
+│   ├── adapters/
+│   │   └── orchestrator_client.py      # ai_agent Orchestrator HTTP 어댑터 (Modal app)
 │   └── infrastructure/
 │       ├── container.py                 # DI 컨테이너
 │       ├── sse_encoder.py               # SSEFrame → text/event-stream

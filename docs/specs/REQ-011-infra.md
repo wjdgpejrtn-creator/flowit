@@ -1,6 +1,6 @@
 # REQ-011 Infra — 구현 명세
 
-## common-schemas에서 import할 클래스
+## common_schemas에서 import할 클래스
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|
@@ -13,8 +13,8 @@
 
 | 리소스 | 설명 |
 |--------|------|
-| `Cloud Run (api-server)` | REQ-009 API 서버 배포 |
-| `Cloud Run (execution-engine)` | REQ-007 실행 엔진 배포 |
+| `Cloud Run (api_server)` | REQ-009 API 서버 배포 |
+| `Cloud Run (execution_engine)` | REQ-007 실행 엔진 배포 |
 | `Cloud SQL (PostgreSQL 15)` | REQ-001 Database + pgvector |
 | `Cloud Storage` | REQ-008 파일 저장소 |
 | `Redis (Memorystore)` | Celery broker + 세션 캐시 |
@@ -28,7 +28,7 @@
 | Workflow | 트리거 | 역할 |
 |----------|--------|------|
 | `deploy-prod.yml` | push to release | Cloud Run 프로덕션 배포 |
-| `codegen-drift.yml` | PR/push (common-schemas 변경 시) | TS codegen 정합성 검증 |
+| `codegen-drift.yml` | PR/push (common_schemas 변경 시) | TS codegen 정합성 검증 |
 | `secret-scan.yml` | push | 시크릿 유출 탐지 |
 | (추가 예정) `test.yml` | PR | pytest + ruff + tsc |
 
