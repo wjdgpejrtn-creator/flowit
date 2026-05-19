@@ -41,6 +41,43 @@ module "networking" {
 }
 
 # ---------------------------------------------------------------------------
+# Required project services for Cloud Run image build + deploy
+# (Artifact Registry는 이미 enabled. Cloud Build는 staging 신규 enable.)
+# ---------------------------------------------------------------------------
+resource "google_project_service" "cloudbuild" {
+  project            = var.project_id
+  service            = "cloudbuild.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "run" {
+  project            = var.project_id
+  service            = "run.googleapis.com"
+  disable_on_destroy = false
+}
+
+# ---------------------------------------------------------------------------
+# Artifact Registry — Cloud Run service 이미지 저장소 (api_server + execution_engine worker)
+# ---------------------------------------------------------------------------
+module "container_registry" {
+  source = "../../modules/artifact-registry"
+
+  project_id    = var.project_id
+  location      = var.region
+  repository_id = "workflow-${var.environment}"
+  format        = "DOCKER"
+  description   = "Cloud Run images for api_server + execution_engine worker (REQ-009/REQ-007 staging)"
+
+  reader_members = compact([
+    var.api_server_service_account != "" ? "serviceAccount:${var.api_server_service_account}" : "",
+    var.execution_engine_worker_service_account != "" ? "serviceAccount:${var.execution_engine_worker_service_account}" : "",
+  ])
+  writer_members = var.agent_secret_accessors # 팀원이 gcloud builds submit 시 push 권한 필요
+
+  labels = merge(local.common_labels, { role = "container-registry" })
+}
+
+# ---------------------------------------------------------------------------
 # Secret Manager — 11 sub-agent secrets (Modal pull, ADR-0014 후속 PR #80)
 # ---------------------------------------------------------------------------
 module "agent_secrets" {
@@ -131,6 +168,8 @@ module "api_server" {
   max_instances         = 5
   container_port        = 8080
   allow_public_access   = true # staging — Cloud IAP 미적용 시 public
+  ingress               = "INGRESS_TRAFFIC_ALL"
+  cpu_idle              = true # api_server는 request 기반 — request 없을 때 CPU 할당 안 함 (기본)
 
   env_vars = {
     ENVIRONMENT = var.environment
@@ -138,6 +177,44 @@ module "api_server" {
   }
 
   labels = merge(local.common_labels, { role = "api-server" })
+
+  depends_on = [module.networking, module.redis]
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Run — REQ-007 execution_engine worker (Celery worker daemon)
+# 옵션 A: Cloud Run service + dummy HTTP probe + celery worker subprocess.
+# - min/max=1: 단일 worker 인스턴스 (큐 깊이 기반 스케일링은 후속)
+# - cpu_idle=false: long-running celery process이므로 always-on CPU
+# - ingress=INTERNAL_ONLY: 외부 HTTP 접근 차단 (health-check만)
+# - allow_public_access=false: VPC 내부에서만 접근 가능
+# ---------------------------------------------------------------------------
+module "execution_engine_worker" {
+  count  = var.enable_execution_engine_worker ? 1 : 0
+  source = "../../modules/cloud-run"
+
+  project_id            = var.project_id
+  region                = var.region
+  service_name          = "workflow-execution-worker-${var.environment}"
+  image                 = var.execution_engine_worker_image
+  service_account_email = var.execution_engine_worker_service_account
+  vpc_connector_id      = module.networking.serverless_connector_id
+  vpc_egress            = "PRIVATE_RANGES_ONLY"
+  cpu                   = "1"
+  memory                = "1Gi"
+  min_instances         = 1
+  max_instances         = 1
+  container_port        = 8080
+  allow_public_access   = false
+  ingress               = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  cpu_idle              = false # Celery worker는 long-running daemon — request idle 없음
+
+  env_vars = {
+    ENVIRONMENT = var.environment
+    REDIS_URL   = module.redis.redis_url
+  }
+
+  labels = merge(local.common_labels, { role = "execution-worker" })
 
   depends_on = [module.networking, module.redis]
 }

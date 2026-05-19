@@ -99,3 +99,26 @@ variable "api_server_service_account" {
   type        = string
   default     = ""
 }
+
+# ---------------------------------------------------------------------------
+# Cloud Run — REQ-007 execution_engine worker (Celery worker daemon)
+# 패턴 옵션 A: Cloud Run service + dummy HTTP probe + celery subprocess.
+# Worker entry는 services/execution_engine/src/worker_entry.py.
+# ---------------------------------------------------------------------------
+variable "enable_execution_engine_worker" {
+  description = "Deploy execution_engine Celery worker to Cloud Run (default false — 이미지 빌드 완료 + Redis 가용 시 활성화)"
+  type        = bool
+  default     = false
+}
+
+variable "execution_engine_worker_image" {
+  description = "execution_engine worker container image (gcr.io/PROJECT/execution-engine-worker:TAG). Required when enable_execution_engine_worker=true"
+  type        = string
+  default     = ""
+}
+
+variable "execution_engine_worker_service_account" {
+  description = "Runtime service account email for execution_engine worker. Cloud SQL IAM + Redis VPC + Secret Manager read 권한 필요"
+  type        = string
+  default     = ""
+}
