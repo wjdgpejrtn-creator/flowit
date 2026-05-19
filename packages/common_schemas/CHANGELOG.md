@@ -7,6 +7,29 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.6.0] - 2026-05-19
+
+### Added — SSE 모니터링 프레임 4종 (PR #74, 신정혜 + 황대원 common_schemas 보강)
+- `transport.sse.PipelineStatusFrame` — 생성 파이프라인 각 서비스 진행 상태 (`service_name`, `status: Literal["started","completed","failed"]`, `elapsed_ms`). 오른쪽 사이드바 실시간 표시용.
+- `transport.sse.IntentResultFrame` — 의도 분석 결과 (`intent`, `entities`). 오른쪽 사이드바 표시용.
+- `transport.sse.QAMetricFrame` — QA 평가 결과 (`score`, `attempt`, `pass_flag`, `feedback`). 오른쪽 사이드바 표시용.
+- `transport.sse.WorkflowDraftFrame` — 워크플로우 초안 (`nodes`, `connections`). 가운데 캔버스 실시간 시각화용.
+- `AnySSEFrame` discriminated union에 4종 Tag 추가 (`pipeline_status`/`intent_result`/`qa_metric`/`workflow_draft`).
+
+### Changed
+- `common_schemas.__init__` + `transport/__init__.py`에 4종 re-export 추가.
+- TypeScript codegen: 4개 인터페이스 자동 생성 (`generated/index.ts`).
+
+### Symbols
+- 52 → 56 (+4: `PipelineStatusFrame`, `IntentResultFrame`, `QAMetricFrame`, `WorkflowDraftFrame`)
+
+### Migration notes
+- 추가만 있는 변경 — 기존 코드 무영향.
+- 신규 사용 패턴 (composer_graph 각 노드에서 emit, supervisor가 Queue로 relay):
+  ```python
+  from common_schemas import PipelineStatusFrame, IntentResultFrame, QAMetricFrame, WorkflowDraftFrame
+  ```
+
 ## [0.5.0] - 2026-05-19
 
 ### Added — ADR-0015 §D4 LLM tool-use transport SSOT
