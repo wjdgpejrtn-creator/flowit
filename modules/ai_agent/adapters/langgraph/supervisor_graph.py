@@ -36,6 +36,7 @@ class _State(TypedDict):
     user_id: UUID
     message: str
     trace_id: str | None
+    turn_count: int
     personal_memory: list[MemoryEntry]
     intent: str | None
     intent_analyzed_entities: dict[str, Any]
@@ -70,8 +71,9 @@ class LangGraphSupervisor:
         session_id: UUID,
         message: str,
         trace_id: str | None = None,
+        turn_count: int = 1,
     ) -> AsyncGenerator[SSEFrame, None]:
-        return self._run(user_id, session_id, message, trace_id)
+        return self._run(user_id, session_id, message, trace_id, turn_count)
 
     async def _run(
         self,
@@ -79,6 +81,7 @@ class LangGraphSupervisor:
         session_id: UUID,
         message: str,
         trace_id: str | None,
+        turn_count: int = 1,
     ) -> AsyncGenerator[SSEFrame, None]:
         yield SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
 
@@ -87,6 +90,7 @@ class LangGraphSupervisor:
             "user_id": user_id,
             "message": message,
             "trace_id": trace_id,
+            "turn_count": turn_count,
             "personal_memory": [],
             "intent": None,
             "intent_analyzed_entities": {},
@@ -166,7 +170,7 @@ class LangGraphSupervisor:
             session_id=state["session_id"],
             user_id=state["user_id"],
             messages=[{"role": "user", "content": state["message"]}],
-            turn_count=1,
+            turn_count=state["turn_count"],
             mode=AgentMode.GENERAL,
             personal_memory=state["personal_memory"],
             execution_status=ExecutionStatus.RUNNING,
@@ -178,7 +182,7 @@ class LangGraphSupervisor:
             personal_memory=state["personal_memory"],
             payload={
                 "action": "update_memory",
-                "turn_count": 1,
+                "turn_count": state["turn_count"],
                 "session_summary": None,
                 "workflow": None,
             },
@@ -204,7 +208,7 @@ class LangGraphSupervisor:
             session_id=state["session_id"],
             user_id=state["user_id"],
             messages=[{"role": "user", "content": state["message"]}],
-            turn_count=1,
+            turn_count=state["turn_count"],
             mode=mode,
             personal_memory=state["personal_memory"],
             execution_status=ExecutionStatus.RUNNING,

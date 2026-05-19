@@ -92,6 +92,7 @@ class OrchestratorAgent:
                         session_id=req.session_id,
                         message=req.payload.get("message", ""),
                         trace_id=req.trace_id,
+                        turn_count=req.state.turn_count,
                     ):
                         resp = AgentProtocolResponse(
                             frames=[frame],
