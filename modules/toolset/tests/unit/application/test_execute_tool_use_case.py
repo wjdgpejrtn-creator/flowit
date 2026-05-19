@@ -37,7 +37,7 @@ def make_use_case(
 ):
     if tool_registry is None:
         reg = ToolRegistryAdapter()
-        reg.register_tool(DummyTool(), tool_id=uuid4(), category="test")
+        reg.register_tool(DummyTool(), tool_id=uuid4())
         tool_registry = reg
 
     return ExecuteToolUseCase(
@@ -104,7 +104,7 @@ class TestCredentialLifecycle:
                 raise ValueError("External API down")
 
         reg = ToolRegistryAdapter()
-        reg.register_tool(FailingTool(), tool_id=uuid4(), category="test")
+        reg.register_tool(FailingTool(), tool_id=uuid4())
 
         cred_svc = AsyncMock()
         cred_svc.inject.return_value = mock_credential
@@ -140,7 +140,7 @@ class TestPermissionGating:
     @pytest.mark.asyncio
     async def test_restricted_tool_with_high_ceiling_raises_authorization_error(self):
         reg = ToolRegistryAdapter()
-        reg.register_tool(RestrictedDummyTool(), tool_id=uuid4(), category="test")
+        reg.register_tool(RestrictedDummyTool(), tool_id=uuid4())
         uc = make_use_case(tool_registry=reg)
 
         with pytest.raises(AuthorizationError):
@@ -164,7 +164,7 @@ class TestNonDomainExceptionWrapping:
                 raise RuntimeError("unexpected crash")
 
         reg = ToolRegistryAdapter()
-        reg.register_tool(CrashTool(), tool_id=uuid4(), category="test")
+        reg.register_tool(CrashTool(), tool_id=uuid4())
         uc = make_use_case(tool_registry=reg)
 
         with pytest.raises(ToolExecutionError) as exc_info:

@@ -9,7 +9,7 @@ from common_schemas.enums import RiskLevel
 
 @dataclass
 class NodeDefinition:
-    """54종 노드 타입의 카탈로그 엔티티.
+    """53종 노드 타입의 카탈로그 엔티티.
 
     H-4 합의: REQ-002 CredentialInjectionService가 get_by_id() 후
     risk_level, required_connections, service_type 필드에 직접 접근한다.

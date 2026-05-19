@@ -1,11 +1,6 @@
 """Personalization — 세션 시작 시 사용자 memory 로드.
 
-GCS PersonalSkill → MemoryEntry 변환 후 Orchestrator AgentState에 주입.
-skill_type → memory_type 매핑:
-    user       → preference
-    feedback   → correction
-    project    → workflow_pattern
-    reference  → summary
+Orchestrator가 세션 시작 시 호출해 AgentState.personal_memory에 주입.
 """
 from __future__ import annotations
 
@@ -13,10 +8,10 @@ from uuid import UUID
 
 from common_schemas import MemoryEntry, MemoryType
 
-from ai_agent.domain.entities.personal_skill import PersonalSkill
-from ai_agent.domain.ports.personal_memory_store import PersonalMemoryStore
+from ....domain.entities.memory_file import MemoryFile
+from ....domain.ports.personal_memory_store import PersonalMemoryStore
 
-_SKILL_TO_MEMORY_TYPE: dict[str, MemoryType] = {
+_MD_TYPE_TO_MEMORY_TYPE: dict[str, MemoryType] = {
     "user": "preference",
     "feedback": "correction",
     "project": "workflow_pattern",
@@ -24,24 +19,32 @@ _SKILL_TO_MEMORY_TYPE: dict[str, MemoryType] = {
 }
 
 
+def _to_memory_entry(user_id: UUID, file: MemoryFile) -> MemoryEntry:
+    memory_type: MemoryType = _MD_TYPE_TO_MEMORY_TYPE.get(file.memory_type, "summary")
+    return MemoryEntry(
+        user_id=user_id,
+        memory_type=memory_type,
+        content=file.body,
+        metadata={"filename": file.filename, "name": file.name, "description": file.description},
+    )
+
+
 class LoadUserMemoryUseCase:
+    """GCS MEMORY.md 인덱스 → 개별 .md 파일 로드 → MemoryEntry 목록 반환.
+
+    파일 로드 실패(FileNotFoundError)는 무시하고 로드 가능한 항목만 반환한다.
+    """
+
     def __init__(self, memory_store: PersonalMemoryStore) -> None:
         self._store = memory_store
 
     async def execute(self, user_id: UUID) -> list[MemoryEntry]:
-        skills = await self._store.list_entries(user_id)
-        return [_to_memory_entry(skill) for skill in skills]
-
-
-def _to_memory_entry(skill: PersonalSkill) -> MemoryEntry:
-    content = f"## {skill.name}\n{skill.description}\n\n{skill.body}".strip()
-    return MemoryEntry(
-        user_id=skill.user_id,
-        memory_type=_SKILL_TO_MEMORY_TYPE[skill.skill_type],
-        content=content,
-        metadata={
-            "skill_name": skill.name,
-            "skill_type": skill.skill_type,
-            "updated_at": skill.updated_at.isoformat(),
-        },
-    )
+        refs = await self._store.load_index(user_id)
+        entries: list[MemoryEntry] = []
+        for ref in refs:
+            try:
+                file = await self._store.load_file(user_id, ref.filename)
+                entries.append(_to_memory_entry(user_id, file))
+            except FileNotFoundError:
+                pass
+        return entries

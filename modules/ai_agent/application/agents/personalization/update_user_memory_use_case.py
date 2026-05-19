@@ -1,102 +1,139 @@
-"""Personalization — 워크플로우 완료 후 사용자 memory 갱신.
-
-LLM이 session_summary + workflow에서 패턴을 추출하여 GCS .md 파일로 저장/갱신.
-MEMORY.md 인덱스도 함께 갱신한다.
-"""
+"""Personalization — 워크플로우 완료 후 사용자 memory 갱신."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID
 
-from common_schemas import WorkflowSchema
-from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from pydantic import BaseModel
 
-from ai_agent.domain.entities.personal_skill import PersonalSkill
-from ai_agent.domain.ports.llm_port import LLMPort
-from ai_agent.domain.ports.personal_memory_store import PersonalMemoryStore
+from common_schemas import WorkflowSchema
 
-_EXTRACT_PROMPT = """\
-사용자 워크플로우 세션이 완료되었습니다.
-아래 세션 요약과 완성된 워크플로우를 분석하여 사용자 패턴을 추출하세요.
+from ....domain.entities.memory_file import MemoryFile, MemoryFileRef, MemoryFileType
+from ....domain.ports.llm_port import LLMPort
+from ....domain.ports.personal_memory_store import PersonalMemoryStore
 
-세션 요약:
-{session_summary}
-
-완성된 워크플로우:
-{workflow_json}
-
-추출 기준:
-- user: 사용자 역할, 목표, 도메인 지식
-- feedback: 사용자가 수정하거나 선호한 방향
-- project: 진행 중인 프로젝트나 업무 컨텍스트
-- reference: 자주 참조하는 시스템, 도구, 데이터 소스
-
-패턴이 없으면 빈 리스트를 반환하세요.
-각 패턴의 body는 "WHY: ...\\nHow to apply: ..." 형식으로 작성하세요.
-"""
+_DEFAULT_DEBOUNCE = timedelta(minutes=30)
+_TURN_COUNT_THRESHOLD = 3
 
 
-class _SkillItem(BaseModel):
+class _MemoryUpdateSpec(BaseModel):
+    action: Literal["create", "update", "skip"]
+    filename: str
     name: str
     description: str
-    skill_type: Literal["user", "feedback", "project", "reference"]
+    memory_type: MemoryFileType
     body: str
 
 
-class _SkillExtraction(BaseModel):
-    skills: list[_SkillItem]
+class _MemoryUpdateResult(BaseModel):
+    updates: list[_MemoryUpdateSpec]
+
+
+def _build_prompt(
+    session_summary: str | None,
+    existing: list[MemoryFile],
+    workflow: WorkflowSchema | None,
+) -> str:
+    existing_md = "\n\n".join(
+        f"### {f.filename}\ntype: {f.memory_type}\n{f.body}" for f in existing
+    ) or "(없음)"
+    workflow_section = ""
+    if workflow and workflow.nodes:
+        node_types = ", ".join(str(n.node_id) for n in workflow.nodes[:10])
+        workflow_section = f"\n\n## 완료된 워크플로우\n노드: {node_types}"
+    summary_text = session_summary or "(요약 없음)"
+    return (
+        "당신은 사용자 개인 워크플로우 패턴을 관리하는 메모리 에이전트입니다.\n\n"
+        "## 현재 저장된 메모리\n"
+        f"{existing_md}\n\n"
+        "## 이번 세션 요약\n"
+        f"{summary_text}"
+        f"{workflow_section}\n\n"
+        "## 지시사항\n"
+        "위 세션 요약에서 사용자의 워크플로우 패턴/선호도/피드백을 추출하세요.\n"
+        "각 항목에 대해 아래 중 하나를 선택하세요:\n"
+        "- action=create: 새 .md 파일 생성\n"
+        "- action=update: 기존 파일 내용 갱신\n"
+        "- action=skip: 변경 없음\n\n"
+        "memory_type은 user(역할/목표)/feedback(패턴/피드백)/project(진행중 작업)/reference(참조 링크) 중 하나.\n"
+        "filename은 snake_case.md 형식. body는 한국어로 작성.\n"
+        "의미 있는 새 정보가 없으면 모든 항목을 skip으로 반환하세요."
+    )
 
 
 class UpdateUserMemoryUseCase:
+    """LLM이 세션 요약에서 패턴 추출 → 변경된 .md만 선택적으로 저장.
+
+    Debounce: 마지막 저장으로부터 debounce_window 미만이면 저장 건너뜀.
+    Incremental Save: 변경된 항목만 GCS에 write (MEMORY.md도 변경 시만 갱신).
+    저장 조건: turn_count >= threshold, workflow 존재 및 노드 1개 이상.
+    """
+
     def __init__(
         self,
         memory_store: PersonalMemoryStore,
         llm: LLMPort,
-        embedder: EmbedderPort,
+        debounce_window: timedelta = _DEFAULT_DEBOUNCE,
+        turn_count_threshold: int = _TURN_COUNT_THRESHOLD,
     ) -> None:
         self._store = memory_store
         self._llm = llm
-        self._embedder = embedder
+        self._debounce_window = debounce_window
+        self._turn_count_threshold = turn_count_threshold
+        self._last_updated: dict[UUID, datetime] = {}
 
     async def execute(
         self,
         user_id: UUID,
-        session_summary: dict,
-        workflow: WorkflowSchema,
-    ) -> None:
-        prompt = _EXTRACT_PROMPT.format(
-            session_summary=session_summary,
-            workflow_json=workflow.model_dump_json(indent=2),
-        )
-        extraction = await self._llm.generate_structured(prompt, _SkillExtraction)
+        turn_count: int,
+        session_summary: str | None,
+        workflow: WorkflowSchema | None,
+    ) -> bool:
+        """반환: True=저장됨, False=조건 미달 또는 debounce로 건너뜀."""
+        if turn_count < self._turn_count_threshold:
+            return False
+        if workflow is None or not workflow.nodes:
+            return False
 
-        for item in extraction.skills:
-            embedding = await self._embedder.embed(
-                f"{item.name} {item.description} {item.body}"
+        now = datetime.now(timezone.utc)
+        last = self._last_updated.get(user_id)
+        if last is not None and (now - last) < self._debounce_window:
+            return False
+
+        refs = await self._store.load_index(user_id)
+        existing: dict[str, MemoryFile] = {}
+        for ref in refs:
+            try:
+                existing[ref.filename] = await self._store.load_file(user_id, ref.filename)
+            except FileNotFoundError:
+                pass
+
+        prompt = _build_prompt(session_summary, list(existing.values()), workflow)
+        result: _MemoryUpdateResult = await self._llm.generate_structured(prompt, _MemoryUpdateResult)
+
+        index_map: dict[str, MemoryFileRef] = {ref.filename: ref for ref in refs}
+        changed = False
+        for spec in result.updates:
+            if spec.action == "skip":
+                continue
+            file = MemoryFile(
+                filename=spec.filename,
+                name=spec.name,
+                description=spec.description,
+                memory_type=spec.memory_type,
+                body=spec.body,
             )
-            skill = PersonalSkill(
-                user_id=user_id,
-                skill_type=item.skill_type,
-                name=item.name,
-                description=item.description,
-                body=item.body,
-                embedding=embedding,
+            await self._store.save_file(user_id, file)
+            index_map[spec.filename] = MemoryFileRef(
+                filename=spec.filename,
+                name=spec.name,
+                description=spec.description,
             )
-            await self._store.save_entry(user_id, skill)
+            changed = True
 
-        if extraction.skills:
-            await self._update_index(user_id, extraction.skills)
+        if changed:
+            await self._store.save_index(user_id, list(index_map.values()))
+            self._last_updated[user_id] = now
 
-    async def _update_index(self, user_id: UUID, new_items: list[_SkillItem]) -> None:
-        current = await self._store.load_index(user_id)
-        lines = current.splitlines() if current else ["# Memory Index", ""]
-        existing_names = {
-            line.split("](")[0].lstrip("- [")
-            for line in lines
-            if line.startswith("- [")
-        }
-        for item in new_items:
-            if item.name not in existing_names:
-                lines.append(f"- [{item.name}]({item.name}.md) — {item.description}")
-        await self._store.save_index(user_id, "\n".join(lines))
+        return changed

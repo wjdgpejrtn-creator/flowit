@@ -1,64 +1,73 @@
+from __future__ import annotations
+
+import pytest
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import pytest
-
-from ai_agent.application.agents.personalization import LoadUserMemoryUseCase
-from ai_agent.domain.entities.personal_skill import PersonalSkill
+from ai_agent.application.agents.personalization.load_user_memory_use_case import (
+    LoadUserMemoryUseCase,
+)
+from ai_agent.domain.entities.memory_file import MemoryFile, MemoryFileRef
 from ai_agent.domain.ports.personal_memory_store import PersonalMemoryStore
 
 
-def _skill(skill_type: str, user_id=None) -> PersonalSkill:
-    return PersonalSkill(
-        user_id=user_id or uuid4(),
-        skill_type=skill_type,
-        name=f"{skill_type}_skill",
-        description=f"{skill_type} 설명",
-        body="본문",
+def _make_ref(name: str) -> MemoryFileRef:
+    return MemoryFileRef(filename=f"{name}.md", name=name, description=f"{name} desc")
+
+
+def _make_file(name: str, memory_type: str = "feedback") -> MemoryFile:
+    return MemoryFile(
+        filename=f"{name}.md",
+        name=name,
+        description=f"{name} desc",
+        memory_type=memory_type,  # type: ignore[arg-type]
+        body=f"{name} 내용",
     )
 
 
 class TestLoadUserMemoryUseCase:
     @pytest.mark.asyncio
-    async def test_returns_empty_for_no_skills(self):
+    async def test_empty_index_returns_empty(self):
         store = AsyncMock(spec=PersonalMemoryStore)
-        store.list_entries = AsyncMock(return_value=[])
-        result = await LoadUserMemoryUseCase(store).execute(uuid4())
+        store.load_index.return_value = []
+        uc = LoadUserMemoryUseCase(store)
+        result = await uc.execute(uuid4())
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_skill_type_mapped_to_memory_type(self):
-        mapping = {
-            "user": "preference",
-            "feedback": "correction",
-            "project": "workflow_pattern",
-            "reference": "summary",
-        }
+    async def test_loads_all_files_from_index(self):
         store = AsyncMock(spec=PersonalMemoryStore)
-        for skill_type, expected in mapping.items():
-            store.list_entries = AsyncMock(return_value=[_skill(skill_type)])
-            result = await LoadUserMemoryUseCase(store).execute(uuid4())
-            assert result[0].memory_type == expected
+        uid = uuid4()
+        store.load_index.return_value = [_make_ref("user_role"), _make_ref("workflow_patterns")]
+        store.load_file.side_effect = [
+            _make_file("user_role", "user"),
+            _make_file("workflow_patterns", "feedback"),
+        ]
+        uc = LoadUserMemoryUseCase(store)
+        result = await uc.execute(uid)
+        assert len(result) == 2
 
     @pytest.mark.asyncio
-    async def test_content_contains_name_and_body(self):
-        skill = PersonalSkill(
-            user_id=uuid4(),
-            skill_type="user",
-            name="my_role",
-            description="역할 설명",
-            body="데이터 엔지니어입니다",
-        )
+    async def test_missing_file_is_skipped(self):
         store = AsyncMock(spec=PersonalMemoryStore)
-        store.list_entries = AsyncMock(return_value=[skill])
-        result = await LoadUserMemoryUseCase(store).execute(skill.user_id)
-        assert "my_role" in result[0].content
-        assert "데이터 엔지니어입니다" in result[0].content
+        uid = uuid4()
+        store.load_index.return_value = [_make_ref("missing"), _make_ref("present")]
+        store.load_file.side_effect = [
+            FileNotFoundError,
+            _make_file("present"),
+        ]
+        uc = LoadUserMemoryUseCase(store)
+        result = await uc.execute(uid)
+        assert len(result) == 1
+        assert "present" in result[0].metadata.get("name", "")
 
     @pytest.mark.asyncio
-    async def test_multiple_skills_all_converted(self):
-        skills = [_skill(t) for t in ("user", "feedback", "project", "reference")]
+    async def test_content_maps_to_memory_entry(self):
         store = AsyncMock(spec=PersonalMemoryStore)
-        store.list_entries = AsyncMock(return_value=skills)
-        result = await LoadUserMemoryUseCase(store).execute(uuid4())
-        assert len(result) == 4
+        uid = uuid4()
+        store.load_index.return_value = [_make_ref("workflow_patterns")]
+        store.load_file.return_value = _make_file("workflow_patterns", "feedback")
+        uc = LoadUserMemoryUseCase(store)
+        result = await uc.execute(uid)
+        assert len(result) == 1
+        assert result[0].content == "workflow_patterns 내용"

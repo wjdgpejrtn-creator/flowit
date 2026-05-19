@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from toolset.adapters.tools.api.graphql_tool import GraphqlTool
-from toolset.adapters.tools.api.http_request_tool import HttpRequestTool
-from toolset.adapters.tools.api.rest_api_tool import RestApiTool
-from toolset.adapters.tools.api.webhook_tool import WebhookTool
+from toolset.adapters.internal.api.graphql_tool import GraphqlTool
+from toolset.adapters.internal.api.http_request_tool import HttpRequestTool
+from toolset.adapters.internal.api.rest_api_tool import RestApiTool
+from toolset.adapters.internal.api.webhook_tool import WebhookTool
 from toolset.domain.exceptions import ToolExecutionError
 from toolset.domain.value_objects.connector_response import ConnectorResponse
 

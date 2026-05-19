@@ -2,7 +2,7 @@ import common_schemas
 
 
 def test_all_exports():
-    assert len(common_schemas.__all__) == 49
+    assert len(common_schemas.__all__) == 52
 
 
 def test_key_symbols_importable():
@@ -17,9 +17,12 @@ def test_key_symbols_importable():
         Edge,
         HandoffPayload,
         IntentType,
+        LLMResponse,
         MemoryEntry,
+        Message,
         NodeConfig,
         PermissionSource,
+        ToolCall,
         ValidationErrorResponse,
         WorkflowSchema,
     )
@@ -34,8 +37,11 @@ def test_key_symbols_importable():
     assert Edge is not None
     assert HandoffPayload is not None
     assert IntentType is not None
+    assert LLMResponse is not None
     assert MemoryEntry is not None
+    assert Message is not None
     assert NodeConfig is not None
     assert PermissionSource is not None
+    assert ToolCall is not None
     assert ValidationErrorResponse is not None
     assert WorkflowSchema is not None

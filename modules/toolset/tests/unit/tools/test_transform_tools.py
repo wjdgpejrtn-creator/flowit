@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from toolset.adapters.tools.transform.data_mapping_tool import DataMappingTool
-from toolset.adapters.tools.transform.json_transform_tool import JsonTransformTool
-from toolset.adapters.tools.transform.text_template_tool import TextTemplateTool
+from toolset.adapters.internal.transform.data_mapping_tool import DataMappingTool
+from toolset.adapters.internal.transform.json_transform_tool import JsonTransformTool
+from toolset.adapters.internal.transform.text_template_tool import TextTemplateTool
 from toolset.domain.exceptions import ToolExecutionError
 
 

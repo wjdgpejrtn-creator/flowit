@@ -7,6 +7,30 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.5.0] - 2026-05-19
+
+### Added — ADR-0015 §D4 LLM tool-use transport SSOT
+- `transport/llm.py` 신설 — `Message`, `ToolCall`, `LLMResponse` 3개 Pydantic 모델. ADR-0015 호출 경로 B (LLM tool-use) 인프라의 기반 타입. `LLMPort.generate(messages: list[Message], tools=...) -> LLMResponse` 시그니처가 본 타입을 사용 (F2 신정혜 PR-A 의존).
+- `Message`: `role: Literal["system","user","assistant","tool"], content: str, tool_call_id: str|None, name: str|None`
+- `ToolCall`: `id: str, name: str, arguments: dict[str, Any]` — LLM이 요청한 도구 호출 직렬화
+- `LLMResponse`: `content: str|None, tool_calls: list[ToolCall], finish_reason: Literal["stop","tool_calls","length"]`
+- 신규 테스트 `test_transport_llm.py` — Message 3건 + ToolCall 2건 + LLMResponse 3건 (총 8건)
+
+### Changed — transport 모듈 구조
+- `transport.py` (71줄 단일 파일) → `transport/` 디렉토리로 마이그레이션
+  - `transport/sse.py` — 기존 SSE 프레임 7개 + `AnySSEFrame` discriminated union (내용 변경 없음)
+  - `transport/llm.py` — 신규 LLM tool-use 타입 (위)
+  - `transport/__init__.py` — 둘 다 re-export
+- **외부 import 호환성 유지**: `from common_schemas.transport import SSEFrame` / `from common_schemas import SSEFrame` 모두 그대로 동작. 변경 사항 0.
+
+### Symbols
+- 49 → 52 (+3: `LLMResponse`, `Message`, `ToolCall`)
+
+### Migration notes
+- 기존 `from common_schemas.transport import SSEFrame` (또는 다른 SSE 프레임) 무영향.
+- 신규 코드 권장 패턴: `from common_schemas import LLMResponse, Message, ToolCall` (또는 `from common_schemas.transport import ...`).
+- `transport.py` 파일은 삭제되었으나 `transport/__init__.py`가 동일 symbol을 re-export하므로 import 경로 변경 불필요.
+
 ## [0.4.0] - 2026-05-18
 
 ### Added

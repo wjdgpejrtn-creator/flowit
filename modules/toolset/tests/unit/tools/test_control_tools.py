@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from toolset.adapters.tools.control.conditional_tool import ConditionalTool
-from toolset.adapters.tools.control.loop_tool import LoopTool
+from toolset.adapters.internal.control.conditional_tool import ConditionalTool
+from toolset.adapters.internal.control.loop_tool import LoopTool
 from toolset.domain.exceptions import ToolExecutionError
 
 

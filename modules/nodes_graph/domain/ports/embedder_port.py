@@ -16,5 +16,5 @@ class EmbedderPort(ABC):
 
     @abstractmethod
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """배치 임베딩. Plugin discovery 시 54종 노드 일괄 임베딩에 사용."""
+        """배치 임베딩. Plugin discovery 시 53종 노드 일괄 임베딩에 사용."""
         ...

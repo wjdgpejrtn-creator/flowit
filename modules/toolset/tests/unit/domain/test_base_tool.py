@@ -2,6 +2,7 @@ import pytest
 from common_schemas.enums import RiskLevel
 
 from toolset.domain.base_tool import BaseTool
+from toolset.domain.entities.tool_metadata import ToolCategory
 
 
 class TestBaseToolAbstractInterface:
@@ -19,6 +20,8 @@ class TestBaseToolAbstractInterface:
             description = "ok tool"
             version = "1.0.0"
             risk_level = RiskLevel.LOW
+            category = ToolCategory.TRANSFORM
+            capabilities = ["test"]
             input_schema = {"type": "object"}
             output_schema = {"type": "object"}
             async def execute(self, input_data, **kwargs):
@@ -29,3 +32,5 @@ class TestBaseToolAbstractInterface:
         assert tool.description == "ok tool"
         assert tool.version == "1.0.0"
         assert tool.risk_level == RiskLevel.LOW
+        assert tool.category == ToolCategory.TRANSFORM
+        assert tool.capabilities == ["test"]

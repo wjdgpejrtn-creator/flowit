@@ -8,6 +8,11 @@ Deploy:
 
 Health:
     curl https://dhwang0803--agent-composer-agentcomposer-fastapi.modal.run/v1/health
+
+Secrets:
+    GCP Secret Manager가 SSOT (2026-05-19 마이그레이션). Modal에 남는 secret은
+    `cloudsql-iam-sa` 1개 — GCP ADC root credential. 나머지 환경변수는 boot()
+    에서 services.common.gcp_secrets.load_secrets_to_env로 런타임 pull한다.
 """
 from __future__ import annotations
 
@@ -15,7 +20,6 @@ import modal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-app_secret = modal.Secret.from_name("agent-composer-secret")
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
 
 image = (
@@ -32,10 +36,15 @@ image = (
         "modal>=0.73",
         "protobuf>=4.25",
         "jsonschema>=4.0",
+        "google-cloud-secret-manager>=2.20",
     )
-    .env({"PYTHONPATH": "/app/modules:/app/common_schemas_src"})
+    .env({
+        "PYTHONPATH": "/app/modules:/app/common_schemas_src:/repo",
+        "GOOGLE_CLOUD_PROJECT": "<GCP_PROJECT_ID>",
+    })
     .add_local_dir("modules", remote_path="/app/modules")
     .add_local_dir("packages/common_schemas/python", remote_path="/app/common_schemas_src")
+    .add_local_dir("services/common", remote_path="/repo/services/common")
 )
 
 app = modal.App("agent-composer")
@@ -43,7 +52,7 @@ app = modal.App("agent-composer")
 
 @app.cls(
     image=image,
-    secrets=[app_secret, gcp_secret],
+    secrets=[gcp_secret],
     timeout=600,
     scaledown_window=300,
 )
@@ -58,11 +67,22 @@ class AgentComposer:
         from pathlib import Path
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-        # GCP SA JSON → 임시 파일 → ADC 환경변수
+        from services.common.gcp_secrets import load_secrets_to_env
+
+        # 1) GCP SA JSON → 임시 파일 → ADC 환경변수
         sa_payload = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
         sa_path = Path(tempfile.gettempdir()) / "gcp-sa.json"
         sa_path.write_text(sa_payload, encoding="utf-8")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
+
+        # 2) GCP Secret Manager → 환경변수 주입
+        load_secrets_to_env({
+            "cloud-sql-instance": "CLOUD_SQL_INSTANCE",
+            "db-iam-user":        "DB_IAM_USER",
+            "db-name":            "DB_NAME",
+            "llm-base-url":       "LLM_BASE_URL",
+            "embedding-base-url": "EMBEDDING_BASE_URL",
+        })
 
         # Connector를 getconn() 안에서 lazy 초기화 + 명시적 loop 바인딩
         # storage/orm/session_factory.py 동일 패턴 — ConnectorLoopError 해결

@@ -14,7 +14,7 @@ from toolset.tests.fixtures import DummyTool
 @pytest.fixture
 def use_case():
     reg = ToolRegistryAdapter()
-    reg.register_tool(DummyTool(), tool_id=uuid4(), category="test")
+    reg.register_tool(DummyTool(), tool_id=uuid4())
     return ValidateToolConfigUseCase(tool_registry=reg, validator=RuntimeValidator())
 
 
