@@ -1,8 +1,9 @@
-# ADR-0014: Personalization GCS MemoryStore — Port 소유권 · 저장 경로 · Embedding 분리
+# ADR-0016: Personalization GCS MemoryStore — Port 소유권 · 저장 경로 · Embedding 분리
 
 - **Status**: Accepted
 - **Date**: 2026-05-18
-- **Deciders**: @billionaireahreum (박아름), @이가원
+- **Deciders**: @이가원
+- **Reviewers/Informed**: @billionaireahreum (박아름)
 - **Tags**: area/personalization, layer/adapter
 
 ## Context
@@ -67,6 +68,6 @@ gs://{GCS_PERSONAL_BUCKET}/users/{user_id}/
 
 ## References
 
-- PR #71 (`feature/req-005-toolset`) — GCSMemoryStore 구현 + embedding 분리 반영
+- PR #76 (`feature/req-004-personalization`) — GCSMemoryStore 구현 + embedding 분리 반영
 - `docs/specs/REQ-004-ai-agent.md` §6 — GCS 저장 패턴 명세
 - ADR-0013 — EmbedderPort SSOT (ai_agent 어댑터 예외 패턴과 유사한 맥락)
