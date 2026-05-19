@@ -289,6 +289,25 @@ export interface HandoffPayload {
   correlation_id: string;
 }
 
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface LLMResponse {
+  content: unknown;
+  tool_calls: Array<ToolCall>;
+  finish_reason: "stop" | "tool_calls" | "length";
+}
+
+export interface Message {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  tool_call_id?: unknown;
+  name?: unknown;
+}
+
 export interface NodeExecutionState {
   node_instance_id: string;
   status: "pending" | "running" | "succeeded" | "failed" | "retrying" | "cancelled";
