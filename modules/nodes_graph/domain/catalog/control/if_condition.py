@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -41,7 +42,7 @@ class IfConditionNode(BaseNode[IfConditionInput, IfConditionOutput]):
     input_schema = IfConditionInput
     output_schema = IfConditionOutput
 
-    async def process(self, input: IfConditionInput) -> IfConditionOutput:
+    async def process(self, input: IfConditionInput, context: NodeContext) -> IfConditionOutput:
         match input.operator:
             case "eq":
                 result = input.left == input.right

@@ -4,6 +4,7 @@ import string
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -37,7 +38,7 @@ class StringTemplateNode(BaseNode[StringTemplateInput, StringTemplateOutput]):
     input_schema = StringTemplateInput
     output_schema = StringTemplateOutput
 
-    async def process(self, input: StringTemplateInput) -> StringTemplateOutput:
+    async def process(self, input: StringTemplateInput, context: NodeContext) -> StringTemplateOutput:
         result = string.Template(input.template).safe_substitute(input.variables)
         return StringTemplateOutput(result=result)
 

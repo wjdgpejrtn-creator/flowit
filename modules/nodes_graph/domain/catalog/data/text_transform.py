@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -36,7 +37,7 @@ class TextTransformNode(BaseNode[TextTransformInput, TextTransformOutput]):
     input_schema = TextTransformInput
     output_schema = TextTransformOutput
 
-    async def process(self, input: TextTransformInput) -> TextTransformOutput:
+    async def process(self, input: TextTransformInput, context: NodeContext) -> TextTransformOutput:
         match input.operation:
             case "upper":
                 result = input.text.upper()

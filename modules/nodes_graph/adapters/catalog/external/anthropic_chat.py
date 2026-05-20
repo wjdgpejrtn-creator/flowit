@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -47,7 +48,7 @@ class AnthropicChatNode(BaseNode[AnthropicChatInput, AnthropicChatOutput]):
     input_schema = AnthropicChatInput
     output_schema = AnthropicChatOutput
 
-    async def process(self, input: AnthropicChatInput) -> AnthropicChatOutput:
+    async def process(self, input: AnthropicChatInput, context: NodeContext) -> AnthropicChatOutput:
         raise NotImplementedError(
             "Anthropic API 호출은 REQ-005 toolset connector를 통해 처리. "
             "API key 주입은 REQ-002 CredentialInjectionService 담당."

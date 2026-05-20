@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -37,7 +38,7 @@ class LoopCountNode(BaseNode[LoopCountInput, LoopCountOutput]):
     input_schema = LoopCountInput
     output_schema = LoopCountOutput
 
-    async def process(self, input: LoopCountInput) -> LoopCountOutput:
+    async def process(self, input: LoopCountInput, context: NodeContext) -> LoopCountOutput:
         indices = list(range(input.start, input.start + input.count))
         return LoopCountOutput(count=input.count, indices=indices)
 

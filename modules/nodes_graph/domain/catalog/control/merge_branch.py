@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -38,7 +39,7 @@ class MergeBranchNode(BaseNode[MergeBranchInput, MergeBranchOutput]):
     input_schema = MergeBranchInput
     output_schema = MergeBranchOutput
 
-    async def process(self, input: MergeBranchInput) -> MergeBranchOutput:
+    async def process(self, input: MergeBranchInput, context: NodeContext) -> MergeBranchOutput:
         match input.strategy:
             case "list":
                 result: Any = list(input.branches)

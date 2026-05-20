@@ -6,7 +6,10 @@ gemma_chat은 시스템 내장 Gemma 4 LLM wrapper — prompt 동적 입력 + �
 """
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from nodes_graph.adapters.catalog.external.gemma_chat import (
@@ -14,6 +17,8 @@ from nodes_graph.adapters.catalog.external.gemma_chat import (
     GemmaChatNode,
     get_node_definition,
 )
+
+NODE_CTX = NodeContext(execution_id=uuid4(), user_id=uuid4())
 
 
 def test_node_definition_identity_fields():
@@ -68,5 +73,5 @@ async def test_process_raises_not_implemented_delegates_to_req004():
     node = GemmaChatNode()
     input = GemmaChatInput(prompt="테스트 prompt")
     with pytest.raises(NotImplementedError) as exc_info:
-        await node.process(input)
+        await node.process(input, NODE_CTX)
     assert "ModalLLMAdapter" in str(exc_info.value)

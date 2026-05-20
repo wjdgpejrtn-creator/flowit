@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -38,7 +39,7 @@ class JsonTransformNode(BaseNode[JsonTransformInput, JsonTransformOutput]):
     input_schema = JsonTransformInput
     output_schema = JsonTransformOutput
 
-    async def process(self, input: JsonTransformInput) -> JsonTransformOutput:
+    async def process(self, input: JsonTransformInput, context: NodeContext) -> JsonTransformOutput:
         raise NotImplementedError(
             "JSON 변환은 REQ-005 toolset.JsonTransformTool을 통해 처리. "
             "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -39,7 +40,7 @@ class DataMappingNode(BaseNode[DataMappingInput, DataMappingOutput]):
     input_schema = DataMappingInput
     output_schema = DataMappingOutput
 
-    async def process(self, input: DataMappingInput) -> DataMappingOutput:
+    async def process(self, input: DataMappingInput, context: NodeContext) -> DataMappingOutput:
         raise NotImplementedError(
             "데이터 매핑은 REQ-005 toolset.DataMappingTool을 통해 처리. "
             "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "

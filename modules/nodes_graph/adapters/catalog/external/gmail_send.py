@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -44,7 +45,7 @@ class GmailSendNode(BaseNode[GmailSendInput, GmailSendOutput]):
     input_schema = GmailSendInput
     output_schema = GmailSendOutput
 
-    async def process(self, input: GmailSendInput) -> GmailSendOutput:
+    async def process(self, input: GmailSendInput, context: NodeContext) -> GmailSendOutput:
         raise NotImplementedError(
             "외부 서비스 호출은 REQ-005 toolset connector를 통해 처리. "
             "OAuth credential 주입은 REQ-002 CredentialInjectionService 담당."

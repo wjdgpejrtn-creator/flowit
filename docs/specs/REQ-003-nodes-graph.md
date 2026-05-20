@@ -15,6 +15,7 @@
 | `NodeConfig` | `common_schemas.workflow` | 노드 설정 스키마. NodeDefinition의 상위 구조 참조 |
 | `Edge` | `common_schemas.workflow` | 노드 간 연결. WorkflowSchema.connections의 요소 |
 | `Position` | `common_schemas.workflow` | 캔버스 좌표 (x, y). NodeInstance.position 타입 |
+| `NodeContext` | `common_schemas.node` | 노드 1회 실행 컨텍스트 (connection 토큰 + 실행 메타). `BaseNode.process()` 인자 (ADR-0018) |
 | `RiskLevel` | `common_schemas.enums` | 노드 위험 등급 (Low/Medium/High/Restricted) |
 | `ErrorCode` | `common_schemas.enums` | 그래프 검증 에러 코드 (E_CYCLE_DETECTED, E_ISOLATED_NODE 등) |
 | `ValidationError` | `common_schemas.exceptions` | 스키마 검증 실패 시 raise |
@@ -24,7 +25,7 @@
 
 ```python
 from common_schemas import (
-    WorkflowSchema, NodeInstance, NodeConfig, Edge, Position,
+    WorkflowSchema, NodeInstance, NodeConfig, NodeContext, Edge, Position,
     ValidationErrorItem, ValidationErrorResponse,
 )
 from common_schemas.enums import RiskLevel, ErrorCode
@@ -116,6 +117,8 @@ class NodeMetadata:
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
+from common_schemas import NodeContext
+
 TInput = TypeVar("TInput")
 TOutput = TypeVar("TOutput")
 
@@ -129,8 +132,13 @@ class BaseNode(Generic[TInput, TOutput], ABC):
     output_schema: type[TOutput]
     
     @abstractmethod
-    async def process(self, input: TInput) -> TOutput:
-        """노드 로직 실행. Input → Output 변환."""
+    async def process(self, input: TInput, context: NodeContext) -> TOutput:
+        """노드 로직 실행. Input → Output 변환.
+        
+        context — 실행 컨텍스트(connection 토큰 + 실행 메타, ADR-0018).
+        connection이 필요 없는 노드는 무시. connection_token을 소비하는
+        노드 범위는 ADR-0018 Decision 4 참조.
+        """
         ...
 ```
 

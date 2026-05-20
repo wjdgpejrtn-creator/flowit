@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -43,7 +44,7 @@ class SlackPostMessageNode(BaseNode[SlackPostMessageInput, SlackPostMessageOutpu
     input_schema = SlackPostMessageInput
     output_schema = SlackPostMessageOutput
 
-    async def process(self, input: SlackPostMessageInput) -> SlackPostMessageOutput:
+    async def process(self, input: SlackPostMessageInput, context: NodeContext) -> SlackPostMessageOutput:
         raise NotImplementedError(
             "외부 서비스 호출은 REQ-005 toolset connector를 통해 처리. "
             "OAuth credential 주입은 REQ-002 CredentialInjectionService 담당."

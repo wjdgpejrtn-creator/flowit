@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -39,7 +40,7 @@ class SwitchCaseNode(BaseNode[SwitchCaseInput, SwitchCaseOutput]):
     input_schema = SwitchCaseInput
     output_schema = SwitchCaseOutput
 
-    async def process(self, input: SwitchCaseInput) -> SwitchCaseOutput:
+    async def process(self, input: SwitchCaseInput, context: NodeContext) -> SwitchCaseOutput:
         str_value = str(input.value)
         matched = str_value if str_value in input.cases else input.default_case
         return SwitchCaseOutput(matched_case=matched, value=input.value)

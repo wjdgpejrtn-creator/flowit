@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -38,7 +39,7 @@ class LoopListNode(BaseNode[LoopListInput, LoopListOutput]):
     input_schema = LoopListInput
     output_schema = LoopListOutput
 
-    async def process(self, input: LoopListInput) -> LoopListOutput:
+    async def process(self, input: LoopListInput, context: NodeContext) -> LoopListOutput:
         return LoopListOutput(items=list(input.items), count=len(input.items))
 
 
