@@ -53,17 +53,20 @@ class InMemoryOAuthRepository(OAuthConnectionRepository):
 
     async def create(self, user_id, service, tokens: dict) -> OAuthConnection:
         oid = uuid4()
+        # credentials row를 backing으로 갖는 경우 tokens로 credential_id 전달 —
+        # 없으면 oauth_id를 그대로 사용 (기존 호출자 호환).
+        credential_id = tokens.get("credential_id", oid)
         conn = OAuthConnection(
             oauth_id=oid,
             user_id=user_id,
             service=service,
-            credential_id=oid,
+            credential_id=credential_id,
             access_token_encrypted=tokens["access_token_encrypted"],
             refresh_token_encrypted=tokens.get("refresh_token_encrypted"),
             scopes=tokens.get("scopes", []),
             connected_at=datetime.now(UTC),
         )
-        self._store[str(conn.oauth_id)] = conn
+        self._store[str(credential_id)] = conn
         return conn
 
     async def get_by_credential_id(self, credential_id):

@@ -54,7 +54,7 @@ from auth.application.use_cases import (
 | 서비스 | 메서드 | 설명 |
 |--------|--------|------|
 | `PermissionResolver` | `resolve(user_id: UUID, role: Literal["User","Admin"], department_id: UUID, session_id: UUID, current_workflow_id: Optional[UUID], current_skill_id: Optional[UUID]) → PermissionSource` | 6차원 권한 모델 기반 컨텍스트 생성 |
-| `CredentialInjectionService` | `async inject(credential_id: UUID, node_id: UUID) → PlaintextCredential` | 노드 실행 시 자격증명 복호화. `NodeDefinitionRepository.get_by_id(node_id)` → `risk_level`, `required_connections`, `service_type` 필드 접근 후 검증 (H-4 합의) |
+| `CredentialInjectionService` | `async inject(credential_id: UUID, node_id: UUID) → PlaintextCredential` | 노드 실행 시 자격증명 복호화 (ADR-0018). `credentials` 테이블(SSOT) 조회 후 `credential_kind` 분기 — `oauth_token`은 `oauth_connections` enrich + service 검증, `api_key` 등은 `encrypted_data` 직접 복호화. `NodeDefinitionRepository.get_by_id(node_id)`로 `risk_level`/`required_connections`/`service_type` 검증 (H-4 합의). 생성자에 `CredentialRepository` 의존 |
 
 ### domain/ports (인터페이스 — 구현체는 `modules/storage`)
 
