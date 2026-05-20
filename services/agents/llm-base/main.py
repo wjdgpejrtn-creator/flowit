@@ -16,8 +16,9 @@ Layout:
     * `generate()` Modal Cls method (RPC) — text + vision (mmproj engages
       when `images` kwarg is passed) + grammar-level JSON enforcement when
       `format="json"`. Single OpenAI-compat code path via /v1/chat/completions.
-    * `fastapi()` ASGI for /v1/embed, /v1/embed_batch, /v1/health.
+    * `fastapi()` ASGI for /v1/embed, /v1/embed_batch, /v1/health, /v1/generate.
       The health endpoint combines llama-server + BGE liveness; 503 on degrade.
+      /v1/generate is the HTTP path for `generate` (nodes_graph gemma_chat node).
 
 Deploy:
     PYTHONUTF8=1 modal deploy services/agents/llm-base/main.py
@@ -38,7 +39,6 @@ from pathlib import Path
 
 import modal
 from pydantic import BaseModel
-
 
 # Gemma 4 vision-mode chat-template leak. `enable_thinking=False` +
 # `reasoning_format=none` strip the <think> trace in text mode, but the vision
@@ -66,6 +66,17 @@ class EmbedReq(BaseModel):
 
 class EmbedBatchReq(BaseModel):
     texts: list[str]
+
+
+class GenerateReq(BaseModel):
+    """POST /v1/generate body — nodes_graph gemma_chat 노드가 호출."""
+
+    prompt: str
+    max_tokens: int = 512
+    temperature: float | None = None
+    system: str | None = None
+    format: str | None = None  # "json" 지정 시 grammar-level JSON 강제
+    json_schema: dict | None = None
 
 
 APP_NAME = "llm-base"
@@ -231,8 +242,17 @@ class LLMBase:
 
     # --- LLM RPC (LLMPort contract) ---------------------------------------
     @modal.method()
-    def generate(self, prompt: str, **kwargs: object) -> dict[str, str]:
-        """Gemma 4 completion (text + optional vision). Returns {"generated_text": str}.
+    def generate(self, prompt: str, **kwargs: object) -> dict[str, object]:
+        """Gemma 4 completion — Modal RPC entrypoint. Delegates to `_run_generate`.
+
+        HTTP 동등 경로: `fastapi()`의 POST /v1/generate (nodes_graph gemma_chat 노드용).
+        """
+        return self._run_generate(prompt, **kwargs)
+
+    def _run_generate(self, prompt: str, **kwargs: object) -> dict[str, object]:
+        """Gemma 4 completion (text + optional vision). Modal RPC와 /v1/generate가 공유.
+
+        Returns {"generated_text": str, "finish_reason": str, "usage": {...}}.
 
         Always routes through llama-server's OpenAI-compatible
         /v1/chat/completions endpoint so the mmproj projector is engaged
@@ -328,9 +348,18 @@ class LLMBase:
         # knobs. Vision-mode responses additionally carry a leading channel-
         # tag prefix that the chat-template parser leaves in place — strip it
         # before returning.
-        message = body_json.get("choices", [{}])[0].get("message", {})
+        choice = body_json.get("choices", [{}])[0]
+        message = choice.get("message", {})
         raw = message.get("content") or message.get("reasoning_content") or ""
-        return {"generated_text": _strip_channel_leak(raw)}
+        usage = body_json.get("usage", {})
+        return {
+            "generated_text": _strip_channel_leak(raw),
+            "finish_reason": choice.get("finish_reason", ""),
+            "usage": {
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+            },
+        }
 
     # --- Embedding ASGI (EmbeddingPort contract) --------------------------
     @modal.asgi_app()
@@ -391,5 +420,22 @@ class LLMBase:
         def embed_batch(req: EmbedBatchReq = Body(...)) -> dict[str, list[list[float]]]:
             vecs = self._bge.encode(req.texts, normalize_embeddings=True)
             return {"embeddings": [v.tolist() for v in vecs]}
+
+        @api.post("/v1/generate")
+        def generate_http(req: GenerateReq = Body(...)) -> dict[str, object]:
+            """Gemma 4 추론 HTTP 경로 — Modal RPC `generate`와 동일 로직.
+
+            nodes_graph gemma_chat 노드가 LLM_BASE_URL 기반으로 호출한다
+            (Modal SDK 의존 없이 httpx만으로 시스템 내장 LLM 사용)."""
+            kwargs: dict[str, object] = {"max_tokens": req.max_tokens}
+            if req.temperature is not None:
+                kwargs["temperature"] = req.temperature
+            if req.system:
+                kwargs["system"] = req.system
+            if req.format:
+                kwargs["format"] = req.format
+            if req.json_schema:
+                kwargs["json_schema"] = req.json_schema
+            return self._run_generate(req.prompt, **kwargs)
 
         return api
