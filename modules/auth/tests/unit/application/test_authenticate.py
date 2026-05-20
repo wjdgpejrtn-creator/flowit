@@ -1,4 +1,6 @@
+import os
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from auth.application.use_cases.authenticate_use_case import AuthenticateUseCase
@@ -153,3 +155,25 @@ async def test_jit_falls_back_to_email_prefix_when_name_missing(
     user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "no_name_sub")
     created = await user_repo.find_by_id(user_id)
     assert created.name == "alice.kim"
+
+
+# ── session TTL (REQ-002 후속, refresh 작동 회복) ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_session_expires_at_aligns_with_refresh_token_ttl(
+    session_repo, oauth_repo, user_repo, credential_repo, cipher
+):
+    """session expires_at은 access TTL이 아닌 refresh_token TTL(access*7)에 맞춰야
+    access 만료 후에도 refresh가 session 만료로 막히지 않는다."""
+    jwt = FakeJWT()
+    uc = AuthenticateUseCase(session_repo, oauth_repo, user_repo, credential_repo, cipher, FakeGoogleOAuth(), jwt)
+    pair = await uc.execute("code_ttl")
+
+    session_hash = jwt.decode(pair.access_token)["session_hash"]
+    session = await session_repo.find_by_hash(session_hash)
+
+    access_ttl = int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))
+    lifetime = (session.expires_at - datetime.now(UTC)).total_seconds()
+    assert lifetime > access_ttl, "session이 access TTL보다 길어야 refresh 가능"
+    assert lifetime == pytest.approx(access_ttl * 7, abs=30)
