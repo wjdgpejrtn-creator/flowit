@@ -15,10 +15,8 @@ Secrets:
     `cloudsql-iam-sa` 1개 — GCP ADC root credential. sub-agent URL + LLM URL은
     boot()에서 services.common.gcp_secrets.load_secrets_to_env로 런타임 pull.
 """
-from __future__ import annotations
-
 import modal
-from fastapi import FastAPI, Request
+from fastapi import Body, FastAPI
 from fastapi.responses import StreamingResponse
 
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
@@ -108,8 +106,7 @@ class OrchestratorAgent:
             return {"status": "ok"}
 
         @api.post("/v1/agent/route")
-        async def route(request: Request):
-            req = AgentProtocolRequest.model_validate(await request.json())
+        async def route(req: AgentProtocolRequest = Body(...)):
             async def generate():
                 try:
                     async for frame in await self._graph.stream(
