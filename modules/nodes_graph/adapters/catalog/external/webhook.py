@@ -1,19 +1,25 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+import httpx
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
+from ._url_guard import validate_outbound_url
 
 _NODE_TYPE = "webhook"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+_MAX_TIMEOUT_SECONDS = 60  # input_schema의 timeout_seconds maximum과 정합
 
 
 @dataclass
@@ -43,10 +49,25 @@ class WebhookNode(BaseNode[WebhookInput, WebhookOutput]):
     output_schema = WebhookOutput
 
     async def process(self, input: WebhookInput, context: NodeContext) -> WebhookOutput:
-        raise NotImplementedError(
-            "Webhook 발송은 REQ-005 toolset.WebhookTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
+        await validate_outbound_url(input.url)
+
+        headers = {"Content-Type": "application/json", **input.headers}
+        # credential 노드일 때 해결된 토큰을 Bearer로 주입 (ADR-0018).
+        if context.connection_token and not any(k.lower() == "authorization" for k in headers):
+            headers["Authorization"] = f"Bearer {context.connection_token}"
+        body_bytes = json.dumps(input.payload).encode()
+
+        if input.secret:
+            signature = hmac.new(input.secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+            headers["X-Webhook-Signature"] = f"sha256={signature}"
+
+        timeout = min(input.timeout_seconds, _MAX_TIMEOUT_SECONDS)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(input.url, content=body_bytes, headers=headers)
+
+        return WebhookOutput(
+            status_code=response.status_code,
+            delivered=response.status_code < 300,
         )
 
 

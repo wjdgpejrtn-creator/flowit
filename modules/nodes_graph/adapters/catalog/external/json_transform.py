@@ -4,13 +4,16 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+import jmespath
+import jmespath.exceptions
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "json_transform"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -40,11 +43,13 @@ class JsonTransformNode(BaseNode[JsonTransformInput, JsonTransformOutput]):
     output_schema = JsonTransformOutput
 
     async def process(self, input: JsonTransformInput, context: NodeContext) -> JsonTransformOutput:
-        raise NotImplementedError(
-            "JSON 변환은 REQ-005 toolset.JsonTransformTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
-        )
+        if not input.expression.strip():
+            raise ValidationError("expression must not be empty")
+        try:
+            result = jmespath.search(input.expression, input.data)
+        except jmespath.exceptions.JMESPathError as e:
+            raise ValidationError(f"Invalid JMESPath expression '{input.expression}': {e}") from e
+        return JsonTransformOutput(result=result, matched=result is not None)
 
 
 def get_node_definition() -> NodeDefinition:
