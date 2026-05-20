@@ -22,9 +22,9 @@ pass_flag must be true if and only if score >= 8.
 """
 
 
+# LLM 응답 전용 — pass_flag는 _THRESHOLD.is_pass(score)로 재계산하므로 수신 불필요.
 class _EvalResponse(BaseModel):
     score: float
-    pass_flag: bool
     reason: str = ""
     feedback: str = ""
 

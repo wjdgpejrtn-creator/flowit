@@ -24,6 +24,8 @@ Only use nodes from the provided candidate list.
 """
 
 
+# LLM 응답 전용 — common_schemas.WorkflowSchema의 owner_user_id/workflow_id 제외 부분집합.
+# WorkflowSchema 필드 추가 시 이 모델도 확인 필요 (silent drift 방지).
 class _NodeDraft(BaseModel):
     node_type: str
     parameters: dict[str, Any] = {}
@@ -36,6 +38,7 @@ class _DraftResponse(BaseModel):
     scope: str = "private"
     is_draft: bool = True
     nodes: list[_NodeDraft] = []
+    # TODO(REQ-004): edge 생성 미구현 — connections는 _build()에서 항상 []로 고정
     connections: list[Any] = []
 
 
