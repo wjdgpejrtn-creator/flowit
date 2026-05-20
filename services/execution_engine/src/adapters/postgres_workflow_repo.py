@@ -38,10 +38,13 @@ class PostgresWorkflowRepository(WorkflowRepositoryPort):
         nodes = [NodeInstance.model_validate(n) for n in row["nodes"]]
         connections = [Edge.model_validate(e) for e in row["connections"]]
 
+        # pg8000은 PostgreSQL UUID 컬럼을 이미 uuid.UUID 객체로 반환한다.
+        # UUID(UUID객체)는 생성자가 hex str로 간주해 .replace() 호출 → AttributeError.
+        # str()을 거쳐 pg8000(UUID 반환)/psycopg2(str 반환) 양쪽에서 안전하게 파싱.
         owner_user_id_raw = row.get("user_id")
         return WorkflowSchema(
-            workflow_id=UUID(row["workflow_id"]),
-            owner_user_id=UUID(owner_user_id_raw) if owner_user_id_raw else None,
+            workflow_id=UUID(str(row["workflow_id"])),
+            owner_user_id=UUID(str(owner_user_id_raw)) if owner_user_id_raw else None,
             name=row["name"],
             description=row.get("description"),
             scope=row["scope"],
@@ -50,7 +53,7 @@ class PostgresWorkflowRepository(WorkflowRepositoryPort):
             connections=connections,
             version=row.get("version"),
             sha256=row.get("sha256"),
-            created_via_session_id=UUID(row["created_via_session_id"])
+            created_via_session_id=UUID(str(row["created_via_session_id"]))
                 if row.get("created_via_session_id")
                 else None,
         )
@@ -66,7 +69,7 @@ class PostgresWorkflowRepository(WorkflowRepositoryPort):
             raise NotFoundError(f"NodeConfig {node_id} not found")
 
         return NodeConfig(
-            node_id=UUID(row["node_id"]),
+            node_id=UUID(str(row["node_id"])),
             node_type=row["node_type"],
             name=row["name"],
             category=row["category"],
