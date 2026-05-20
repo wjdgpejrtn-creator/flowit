@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -40,7 +41,7 @@ class StopWorkflowNode(BaseNode[StopWorkflowInput, StopWorkflowOutput]):
     input_schema = StopWorkflowInput
     output_schema = StopWorkflowOutput
 
-    async def process(self, input: StopWorkflowInput) -> StopWorkflowOutput:
+    async def process(self, input: StopWorkflowInput, context: NodeContext) -> StopWorkflowOutput:
         raise StopWorkflowError(input.reason)
 
 

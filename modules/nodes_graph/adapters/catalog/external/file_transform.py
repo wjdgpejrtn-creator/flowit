@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -40,7 +41,7 @@ class FileTransformNode(BaseNode[FileTransformInput, FileTransformOutput]):
     input_schema = FileTransformInput
     output_schema = FileTransformOutput
 
-    async def process(self, input: FileTransformInput) -> FileTransformOutput:
+    async def process(self, input: FileTransformInput, context: NodeContext) -> FileTransformOutput:
         raise NotImplementedError(
             "파일 형식 변환은 REQ-005 toolset.FileTransformTool을 통해 처리. "
             "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "

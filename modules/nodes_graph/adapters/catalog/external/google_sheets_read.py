@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -43,7 +44,7 @@ class GoogleSheetsReadNode(BaseNode[GoogleSheetsReadInput, GoogleSheetsReadOutpu
     input_schema = GoogleSheetsReadInput
     output_schema = GoogleSheetsReadOutput
 
-    async def process(self, input: GoogleSheetsReadInput) -> GoogleSheetsReadOutput:
+    async def process(self, input: GoogleSheetsReadInput, context: NodeContext) -> GoogleSheetsReadOutput:
         raise NotImplementedError(
             "외부 서비스 호출은 REQ-005 toolset connector를 통해 처리. "
             "OAuth credential 주입은 REQ-002 CredentialInjectionService 담당."

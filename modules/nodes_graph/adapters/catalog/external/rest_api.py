@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -44,7 +45,7 @@ class RestApiNode(BaseNode[RestApiInput, RestApiOutput]):
     input_schema = RestApiInput
     output_schema = RestApiOutput
 
-    async def process(self, input: RestApiInput) -> RestApiOutput:
+    async def process(self, input: RestApiInput, context: NodeContext) -> RestApiOutput:
         raise NotImplementedError(
             "REST API 호출은 REQ-005 toolset.RestApiTool을 통해 처리. "
             "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "

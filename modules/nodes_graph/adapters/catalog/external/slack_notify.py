@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -40,7 +41,7 @@ class SlackNotifyNode(BaseNode[SlackNotifyInput, SlackNotifyOutput]):
     input_schema = SlackNotifyInput
     output_schema = SlackNotifyOutput
 
-    async def process(self, input: SlackNotifyInput) -> SlackNotifyOutput:
+    async def process(self, input: SlackNotifyInput, context: NodeContext) -> SlackNotifyOutput:
         raise NotImplementedError(
             "Slack 알림은 REQ-005 toolset.SlackNotifyTool을 통해 처리. "
             "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "

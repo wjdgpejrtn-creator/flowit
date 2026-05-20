@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -42,7 +43,7 @@ class GraphqlNode(BaseNode[GraphqlInput, GraphqlOutput]):
     input_schema = GraphqlInput
     output_schema = GraphqlOutput
 
-    async def process(self, input: GraphqlInput) -> GraphqlOutput:
+    async def process(self, input: GraphqlInput, context: NodeContext) -> GraphqlOutput:
         raise NotImplementedError(
             "GraphQL 호출은 REQ-005 toolset.GraphqlTool을 통해 처리. "
             "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "

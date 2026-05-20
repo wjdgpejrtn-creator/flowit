@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -40,7 +41,7 @@ class FileReadNode(BaseNode[FileReadInput, FileReadOutput]):
     input_schema = FileReadInput
     output_schema = FileReadOutput
 
-    async def process(self, input: FileReadInput) -> FileReadOutput:
+    async def process(self, input: FileReadInput, context: NodeContext) -> FileReadOutput:
         raise NotImplementedError(
             "파일 읽기는 REQ-005 toolset.FileReadTool을 통해 처리. "
             "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "

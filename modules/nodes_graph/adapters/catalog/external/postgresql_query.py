@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -41,7 +42,7 @@ class PostgresqlQueryNode(BaseNode[PostgresqlQueryInput, PostgresqlQueryOutput])
     input_schema = PostgresqlQueryInput
     output_schema = PostgresqlQueryOutput
 
-    async def process(self, input: PostgresqlQueryInput) -> PostgresqlQueryOutput:
+    async def process(self, input: PostgresqlQueryInput, context: NodeContext) -> PostgresqlQueryOutput:
         raise NotImplementedError(
             "DB 연결은 REQ-005 toolset connector를 통해 처리. "
             "연결 정보(host/port/user/password)는 REQ-002 CredentialInjectionService 담당."

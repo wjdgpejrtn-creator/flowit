@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -41,7 +42,7 @@ class GemmaChatNode(BaseNode[GemmaChatInput, GemmaChatOutput]):
     input_schema = GemmaChatInput
     output_schema = GemmaChatOutput
 
-    async def process(self, input: GemmaChatInput) -> GemmaChatOutput:
+    async def process(self, input: GemmaChatInput, context: NodeContext) -> GemmaChatOutput:
         raise NotImplementedError(
             "Gemma 4 추론은 REQ-004 ai_agent ModalLLMAdapter를 통해 처리. "
             "Modal llm-base RPC 호출 (자격증명 불필요 — 시스템 내장 LLM)."

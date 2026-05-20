@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -38,7 +39,7 @@ class JsonExtractNode(BaseNode[JsonExtractInput, JsonExtractOutput]):
     input_schema = JsonExtractInput
     output_schema = JsonExtractOutput
 
-    async def process(self, input: JsonExtractInput) -> JsonExtractOutput:
+    async def process(self, input: JsonExtractInput, context: NodeContext) -> JsonExtractOutput:
         current: Any = input.data
         for key in input.path.split("."):
             if current is None:

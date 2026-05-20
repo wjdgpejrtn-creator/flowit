@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -43,7 +44,7 @@ class DateFormatNode(BaseNode[DateFormatInput, DateFormatOutput]):
     input_schema = DateFormatInput
     output_schema = DateFormatOutput
 
-    async def process(self, input: DateFormatInput) -> DateFormatOutput:
+    async def process(self, input: DateFormatInput, context: NodeContext) -> DateFormatOutput:
         dt = datetime.strptime(input.date_str, input.input_format)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)

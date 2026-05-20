@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -40,7 +41,7 @@ class FileWatchTriggerNode(BaseNode[FileWatchTriggerInput, FileWatchTriggerOutpu
     input_schema = FileWatchTriggerInput
     output_schema = FileWatchTriggerOutput
 
-    async def process(self, input: FileWatchTriggerInput) -> FileWatchTriggerOutput:
+    async def process(self, input: FileWatchTriggerInput, context: NodeContext) -> FileWatchTriggerOutput:
         return FileWatchTriggerOutput(
             file_path=input.file_path,
             event_type=input.event_type,

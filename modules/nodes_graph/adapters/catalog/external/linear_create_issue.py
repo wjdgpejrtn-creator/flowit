@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -48,7 +49,7 @@ class LinearCreateIssueNode(BaseNode[LinearCreateIssueInput, LinearCreateIssueOu
     input_schema = LinearCreateIssueInput
     output_schema = LinearCreateIssueOutput
 
-    async def process(self, input: LinearCreateIssueInput) -> LinearCreateIssueOutput:
+    async def process(self, input: LinearCreateIssueInput, context: NodeContext) -> LinearCreateIssueOutput:
         raise NotImplementedError(
             "Linear API 호출은 REQ-005 toolset connector를 통해 처리. "
             "API key 주입은 REQ-002 CredentialInjectionService 담당."

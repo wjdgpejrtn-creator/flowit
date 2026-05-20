@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -42,7 +43,7 @@ class CsvParseNode(BaseNode[CsvParseInput, CsvParseOutput]):
     input_schema = CsvParseInput
     output_schema = CsvParseOutput
 
-    async def process(self, input: CsvParseInput) -> CsvParseOutput:
+    async def process(self, input: CsvParseInput, context: NodeContext) -> CsvParseOutput:
         reader = csv.DictReader(io.StringIO(input.csv_string), delimiter=input.delimiter)
         if input.has_header:
             rows = [dict(row) for row in reader]

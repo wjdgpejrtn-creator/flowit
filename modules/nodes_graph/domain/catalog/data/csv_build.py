@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -40,7 +41,7 @@ class CsvBuildNode(BaseNode[CsvBuildInput, CsvBuildOutput]):
     input_schema = CsvBuildInput
     output_schema = CsvBuildOutput
 
-    async def process(self, input: CsvBuildInput) -> CsvBuildOutput:
+    async def process(self, input: CsvBuildInput, context: NodeContext) -> CsvBuildOutput:
         if not input.rows:
             return CsvBuildOutput(csv_string="", row_count=0)
         buf = io.StringIO()

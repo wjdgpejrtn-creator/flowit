@@ -9,39 +9,56 @@ process()는 NotImplementedError stub. category는 DB CHECK 영문 8종 매핑.
 """
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from nodes_graph.adapters.catalog.external.anthropic_chat import (
     AnthropicChatInput,
     AnthropicChatNode,
+)
+from nodes_graph.adapters.catalog.external.anthropic_chat import (
     get_node_definition as anthropic_chat_def,
 )
 from nodes_graph.adapters.catalog.external.bigquery_query import (
     BigqueryQueryInput,
     BigqueryQueryNode,
+)
+from nodes_graph.adapters.catalog.external.bigquery_query import (
     get_node_definition as bigquery_query_def,
 )
 from nodes_graph.adapters.catalog.external.google_calendar_create_event import (
     GoogleCalendarCreateEventInput,
     GoogleCalendarCreateEventNode,
+)
+from nodes_graph.adapters.catalog.external.google_calendar_create_event import (
     get_node_definition as gcal_create_def,
 )
 from nodes_graph.adapters.catalog.external.linear_create_issue import (
     LinearCreateIssueInput,
     LinearCreateIssueNode,
+)
+from nodes_graph.adapters.catalog.external.linear_create_issue import (
     get_node_definition as linear_create_def,
 )
 from nodes_graph.adapters.catalog.external.mysql_query import (
     MysqlQueryInput,
     MysqlQueryNode,
+)
+from nodes_graph.adapters.catalog.external.mysql_query import (
     get_node_definition as mysql_query_def,
 )
 from nodes_graph.adapters.catalog.external.postgresql_query import (
     PostgresqlQueryInput,
     PostgresqlQueryNode,
+)
+from nodes_graph.adapters.catalog.external.postgresql_query import (
     get_node_definition as postgresql_query_def,
 )
+
+NODE_CTX = NodeContext(execution_id=uuid4(), user_id=uuid4())
 
 
 # ----------------------------------------------------------------------
@@ -62,7 +79,7 @@ def test_postgresql_query_definition_fields():
 async def test_postgresql_query_process_raises_not_implemented():
     node = PostgresqlQueryNode()
     with pytest.raises(NotImplementedError, match="toolset connector"):
-        await node.process(PostgresqlQueryInput(query="SELECT 1"))
+        await node.process(PostgresqlQueryInput(query="SELECT 1"), NODE_CTX)
 
 
 def test_mysql_query_definition_fields():
@@ -78,7 +95,7 @@ def test_mysql_query_definition_fields():
 async def test_mysql_query_process_raises_not_implemented():
     node = MysqlQueryNode()
     with pytest.raises(NotImplementedError):
-        await node.process(MysqlQueryInput(query="SELECT 1"))
+        await node.process(MysqlQueryInput(query="SELECT 1"), NODE_CTX)
 
 
 def test_bigquery_query_definition_fields():
@@ -94,7 +111,7 @@ def test_bigquery_query_definition_fields():
 async def test_bigquery_query_process_raises_not_implemented():
     node = BigqueryQueryNode()
     with pytest.raises(NotImplementedError):
-        await node.process(BigqueryQueryInput(project_id="p", query="SELECT 1"))
+        await node.process(BigqueryQueryInput(project_id="p", query="SELECT 1"), NODE_CTX)
 
 
 # ----------------------------------------------------------------------
@@ -118,7 +135,7 @@ async def test_anthropic_chat_process_raises_not_implemented():
         await node.process(AnthropicChatInput(
             model="claude-opus-4-7",
             messages=[{"role": "user", "content": "hi"}],
-        ))
+        ), NODE_CTX)
 
 
 # ----------------------------------------------------------------------
@@ -144,7 +161,7 @@ async def test_google_calendar_create_event_process_raises_not_implemented():
             summary="meeting",
             start="2026-05-11T09:00:00+09:00",
             end="2026-05-11T10:00:00+09:00",
-        ))
+        ), NODE_CTX)
 
 
 def test_linear_create_issue_definition_fields():
@@ -160,7 +177,7 @@ def test_linear_create_issue_definition_fields():
 async def test_linear_create_issue_process_raises_not_implemented():
     node = LinearCreateIssueNode()
     with pytest.raises(NotImplementedError):
-        await node.process(LinearCreateIssueInput(team_id="t1", title="task"))
+        await node.process(LinearCreateIssueInput(team_id="t1", title="task"), NODE_CTX)
 
 
 # ----------------------------------------------------------------------

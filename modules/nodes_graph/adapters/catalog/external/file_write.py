@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -41,7 +42,7 @@ class FileWriteNode(BaseNode[FileWriteInput, FileWriteOutput]):
     input_schema = FileWriteInput
     output_schema = FileWriteOutput
 
-    async def process(self, input: FileWriteInput) -> FileWriteOutput:
+    async def process(self, input: FileWriteInput, context: NodeContext) -> FileWriteOutput:
         raise NotImplementedError(
             "파일 쓰기는 REQ-005 toolset.FileWriteTool을 통해 처리. "
             "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -46,7 +47,7 @@ class BigqueryQueryNode(BaseNode[BigqueryQueryInput, BigqueryQueryOutput]):
     input_schema = BigqueryQueryInput
     output_schema = BigqueryQueryOutput
 
-    async def process(self, input: BigqueryQueryInput) -> BigqueryQueryOutput:
+    async def process(self, input: BigqueryQueryInput, context: NodeContext) -> BigqueryQueryOutput:
         raise NotImplementedError(
             "BigQuery 호출은 REQ-005 toolset connector를 통해 처리. "
             "GCP 자격증명(service account)은 REQ-002 CredentialInjectionService 담당."

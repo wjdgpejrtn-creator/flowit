@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -43,7 +44,7 @@ class EmailSendNode(BaseNode[EmailSendInput, EmailSendOutput]):
     input_schema = EmailSendInput
     output_schema = EmailSendOutput
 
-    async def process(self, input: EmailSendInput) -> EmailSendOutput:
+    async def process(self, input: EmailSendInput, context: NodeContext) -> EmailSendOutput:
         raise NotImplementedError(
             "이메일 발송은 REQ-005 toolset.EmailSendTool을 통해 처리. "
             "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "

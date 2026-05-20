@@ -32,7 +32,7 @@ from nodes_graph.application.use_cases import (
 |--------|----------|------|
 | `NodeDefinition` | `node_id: UUID`, `node_type: str`, `name: str`, `category: str`, `version: str`, `input_schema: dict`, `output_schema: dict`, `parameter_schema: dict`, `risk_level: RiskLevel`, `required_connections: list[str]`, `description: str`, `is_mvp: bool`, `service_type: Optional[str]`, `embedding: Optional[list[float]]` | NodeConfig(REQ-012) 확장. REQ-002가 `risk_level`, `required_connections`, `service_type`을 필드 접근으로 사용 (H-4 합의) |
 | `NodeMetadata` | `node_id: UUID`, `name: str`, `category: str`, `risk_level: RiskLevel`, `is_mvp: bool` | BaseNode의 메타데이터 (frozen) |
-| `BaseNode` | `metadata: NodeMetadata`, `input_schema: type[TInput]`, `output_schema: type[TOutput]` | 모든 노드의 ABC. `Generic[TInput, TOutput]`. `async process(input: TInput) → TOutput` 구현 필요 |
+| `BaseNode` | `metadata: NodeMetadata`, `input_schema: type[TInput]`, `output_schema: type[TOutput]` | 모든 노드의 ABC. `Generic[TInput, TOutput]`. `async process(input: TInput, context: NodeContext) → TOutput` 구현 필요 (`context` = ADR-0018 실행 컨텍스트, common_schemas) |
 
 ### domain/services
 

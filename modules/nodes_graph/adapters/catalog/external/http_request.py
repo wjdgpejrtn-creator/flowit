@@ -5,6 +5,7 @@ from typing import Any
 from uuid import uuid5
 
 import httpx
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -45,7 +46,7 @@ class HttpRequestNode(BaseNode[HttpRequestInput, HttpRequestOutput]):
     input_schema = HttpRequestInput
     output_schema = HttpRequestOutput
 
-    async def process(self, input: HttpRequestInput) -> HttpRequestOutput:
+    async def process(self, input: HttpRequestInput, context: NodeContext) -> HttpRequestOutput:
         async with httpx.AsyncClient(timeout=input.timeout) as client:
             response = await client.request(
                 method=input.method.upper(),
