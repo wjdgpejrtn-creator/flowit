@@ -86,6 +86,17 @@ async def dispose_db_engine(handle: DbHandle) -> None:
 
 
 async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
+    """Request 단위 트랜잭션 — 핸들러 정상 종료 시 commit, 예외 시 rollback.
+
+    Repository들은 `flush()`만 호출하므로(commit 없음) 본 dependency가 트랜잭션
+    경계를 책임진다. 한 request 안의 여러 write(JIT user → credential → oauth →
+    session create 등)가 같은 session을 공유해 단일 transaction으로 atomic 보장.
+    """
     session_factory: async_sessionmaker[AsyncSession] = request.app.state.db_session_factory
     async with session_factory() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise

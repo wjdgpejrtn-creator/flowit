@@ -242,9 +242,11 @@ class CredentialInjectionService:
 
 | Input | Output | 설명 |
 |-------|--------|------|
-| OAuth authorization code, redirect_uri | `TokenPair` | Google OAuth 코드 교환 → **users 테이블 JIT auto-provisioning (없으면 INSERT)** → 세션 생성 → JWT 발급 |
+| OAuth authorization code, redirect_uri | `TokenPair` | Google OAuth 코드 교환 → **users 테이블 JIT auto-provisioning (없으면 INSERT)** → `credentials` row 생성(`oauth_token` kind) → `oauth_connections` 연결 → 세션 생성 → JWT 발급 |
 
-의존성: `SessionRepository`, `OAuthConnectionRepository`, `UserRepository`, `CipherPort`, 외부 Google OAuth 클라이언트
+의존성: `SessionRepository`, `OAuthConnectionRepository`, `UserRepository`, `CredentialRepository`, `CipherPort`, 외부 Google OAuth 클라이언트
+
+`CredentialRepository`(PR #99): `oauth_connections.credential_id`는 `credentials` 테이블 FK(NOT NULL UNIQUE)이므로, OAuth connection을 만들기 전에 `credentials` row를 먼저 생성하고 그 `credential_id`로 연결한다. 재로그인 시 `credential_repo.update_data` + `oauth_repo.update_tokens`를 같은 트랜잭션에서 호출. (토큰이 `credentials.encrypted_data`와 `oauth_connections.access_token_encrypted` 양쪽에 저장되는 스키마 redundancy는 알려진 부채 — 후속 ADR에서 SSOT 일원화 검토.)
 
 JIT auto-provisioning 동작:
 1. `user_id = uuid5(NAMESPACE_DNS, google_sub)` (결정적 UUID 파생)
