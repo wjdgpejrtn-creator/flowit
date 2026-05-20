@@ -35,7 +35,7 @@ class TableDetector:
             # 찰칵📸
     """
 
-    def __init__(self, broken_char_threshold: float = 0.3) -> None:
+    def __init__(self, broken_char_threshold: float = 0.1) -> None:
         self._broken_char_threshold = broken_char_threshold
 
     def detect(self, block: ContentBlock) -> VisionType | None:

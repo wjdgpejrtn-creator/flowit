@@ -4,16 +4,16 @@ REQ-006 doc_parser — adapters/interleaving_parser.py
 InterleavingParser
 텍스트 파싱 + 비전 모드 인터리빙 지휘자
 
-수정 방향:
-    - DOCX는 기본적으로 XML 기반 DocxParser 결과를 신뢰한다.
-    - DOCX를 "전체 1장 찰칵" 대상으로 넣지 않는다.
-    - HWP만 full-page fallback 대상으로 유지한다.
-    - PDF/HWPX/PPTX는 감지 후 선택적으로 비전 호출한다.
-    - CSV/MD는 비전 스킵한다.
+처리 전략:
+    - CSV/MD: 비전 스킵 (구조적 텍스트로 충분)
+    - 나머지 전부: _parse_interleaving() 하나로 통일
+        TableDetector가 블록 보고 TABLE / GRAPH / CHART / CORRUPTED 판단
+        감지 없으면 텍스트 그대로 통과
 
-중요:
-    DOCX는 내부적으로 고정 page 개념이 없으므로 page 기반 vision을 기본으로 쓰지 않는다.
-    DOCX에서 비전이 필요하면 별도 deep-mode 또는 image/object fallback으로 분리하는 것이 안전하다.
+포맷별 비전 불필요 판단 (포맷 분기 없이 자연스럽게 처리):
+    - DOCX: XML 순회로 본문/표 추출 → 텍스트 블록으로 흘러오므로 비전 감지 없음
+    - HWP: hwp5html/hwp5txt로 추출 → 동일하게 텍스트 블록으로 흘러옴
+    - XLSX: 3층 구조 파서가 처리 → 차트/이미지는 CHART 타입으로 감지
 """
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ from common_schemas.document import (
 )
 
 from doc_parser.adapters.vision.table_detector import TableDetector
-from doc_parser.domain.entities.vision_type import VisionType
 from doc_parser.domain.ports.parser_port import ParserPort
 from doc_parser.domain.ports.vision_port import VisionPort
 
@@ -35,20 +34,6 @@ _VISION_SKIP_MIME = {
     "text/csv",
     "text/markdown",
 }
-
-# 전체 페이지 찰칵 포맷
-# NOTE:
-#   DOCX는 여기서 제거한다.
-#   DOCX는 python-docx XML 순회로 본문/표를 모두 긁어오는 것이 기본 전략이다.
-_FULL_PAGE_MIME = {
-    "application/x-hwp",
-}
-
-# DOCX MIME
-_DOCX_MIME = (
-    "application/vnd.openxmlformats-officedocument"
-    ".wordprocessingml.document"
-)
 
 
 class InterleavingParser(ParserPort):
@@ -79,19 +64,7 @@ class InterleavingParser(ParserPort):
         # 1. BaseParser로 텍스트/구조 추출
         base_doc = self._base_parser.parse(file_path, file_meta)
 
-        # DOCX:
-        #   page 기반 vision을 기본으로 붙이지 않는다.
-        #   DocxParser가 문단/표를 원문 순서대로 뽑는 것이 우선이다.
-        if mime_type == _DOCX_MIME:
-            return self._rebuild_doc(base_doc, list(base_doc.blocks), file_meta)
-
-        # HWP:
-        #   현재 HWP는 구조 파싱이 까다로우므로 full-page fallback 유지
-        if mime_type in _FULL_PAGE_MIME:
-            return self._parse_full_page(file_path, file_meta, base_doc)
-
-        # PDF/HWPX/PPTX:
-        #   감지 후 선택적으로 비전 호출
+        # 2. 블록 스트림 흘리며 비전 필요 시 찰칵
         return self._parse_interleaving(file_path, file_meta, base_doc)
 
     def supports(self, mime_type: str) -> bool:
@@ -139,47 +112,6 @@ class InterleavingParser(ParserPort):
                 result_blocks.append(vision_block)
             else:
                 result_blocks.append(block)
-
-        return self._rebuild_doc(base_doc, result_blocks, file_meta)
-
-    def _parse_full_page(
-        self,
-        file_path: str,
-        file_meta: FileMeta,
-        base_doc: DocumentBlock,
-    ) -> DocumentBlock:
-        """전체 페이지 fallback.
-
-        HWP 전략:
-            - base parser 텍스트 결과는 유지
-            - 가능하면 PDF 변환 후 전체 페이지 vision block 추가
-            - extract_all_pages가 없거나 실패하면 기존 page=1 fallback 사용
-        """
-        result_blocks: list[ContentBlock] = list(base_doc.blocks)
-
-        # VisionExtractor가 전체 페이지 추출을 지원하면 우선 사용
-        if hasattr(self._vision_extractor, "extract_all_pages"):
-            vision_blocks = self._vision_extractor.extract_all_pages(
-                file_path=file_path,
-                vision_type=VisionType.FULL_PAGE,
-                start_block_index=len(result_blocks),
-                max_pages=None,
-            )
-
-            if vision_blocks:
-                result_blocks.extend(vision_blocks)
-                return self._rebuild_doc(base_doc, result_blocks, file_meta)
-
-        # fallback: 기존 1페이지 방식
-        vision_block = self._vision_extractor.extract(
-            file_path=file_path,
-            vision_type=VisionType.FULL_PAGE,
-            page_num=1,
-            block_index=len(result_blocks),
-        )
-
-        if vision_block:
-            result_blocks.append(vision_block)
 
         return self._rebuild_doc(base_doc, result_blocks, file_meta)
 

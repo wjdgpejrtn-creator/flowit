@@ -5,7 +5,7 @@ VisionPort
 비전 추출기 인터페이스 (ABC)
 
 구현체:
-    adapters/vision/vision_extractor.py — LibreOffice + Gemma4 구현
+    adapters/vision/vision_extractor.py — fitz(PyMuPDF) + Gemma4 구현
 """
 from __future__ import annotations
 
