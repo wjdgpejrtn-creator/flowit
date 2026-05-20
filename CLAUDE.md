@@ -11,7 +11,7 @@
 | 담당자 | 담당 REQ | 모듈/서비스 | Sprint 3 sub-agent 분장 |
 |--------|----------|------------|------------------------|
 | 황대원 (조장) | REQ-001, 007, 008, 009, 010, 011, 012 | database, execution_engine, storage, api_server, frontend, infra, common_schemas | — |
-| 박아름 (리포 오너) | REQ-002, 003, **013** | auth, nodes_graph, **skills_marketplace** (ADR-0012/0017, 2026-05-20 박아름 이관 — 조장 협의 진행 중) | **Skills Builder Agent** |
+| 박아름 (리포 오너) | REQ-002, 003, **013** | auth, nodes_graph, **skills_marketplace** (ADR-0012/0017, 2026-05-20 박아름 이관 확정) | **Skills Builder Agent** |
 | 신정혜 | REQ-004 | ai_agent | **Main Orchestrator + Workflow Composer + LLM base** |
 | 햄햄 (이가원) | REQ-005 | toolset | **Personalization Agent** |
 | 김진형 | REQ-006 | doc_parser | — (SSOT 이관) |
