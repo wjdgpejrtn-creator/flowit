@@ -26,9 +26,15 @@ async def init_redis(settings: Settings) -> aioredis.Redis | None:
             url[:40],
         )
         return None
-    client = aioredis.from_url(url, decode_responses=True)
+    # `rediss://`(TLS) 사용 시 Memorystore SERVER_AUTHENTICATION cert는 Google 사설 CA로 서명되어
+    # 컨테이너 system trust store에 없음. ssl_cert_reqs=None으로 cert 검증 skip — TLS encryption은
+    # 유지. production에서는 server-ca-cert를 image에 COPY하는 정공법 적용 권장 ([[cloud_run_worker_deploy]]).
+    kwargs: dict = {"decode_responses": True}
+    if url.startswith("rediss://"):
+        kwargs["ssl_cert_reqs"] = None
+    client = aioredis.from_url(url, **kwargs)
     await client.ping()
-    logger.info("Redis connected: %s", url)
+    logger.info("Redis connected: %s", url[:40])
     return client
 
 

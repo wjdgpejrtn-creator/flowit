@@ -32,13 +32,14 @@ locals {
   # 별도 CI SA가 추가될 때 var.artifact_registry_writers를 채워 의미 분리.
   ar_writers = length(var.artifact_registry_writers) > 0 ? var.artifact_registry_writers : var.agent_secret_accessors
 
-  # GCP Secret Manager `secretAccessor` 멤버 — 기존 5명/Modal SA + Cloud Run SA(설정된 경우)
-  # api_server / worker SA는 본 PR에서 변수로 노출 → enable 시점에 자동 포함
-  effective_secret_accessors = compact(concat(
+  # GCP Secret Manager `secretAccessor` 멤버 — 기존 5명/Modal SA + Cloud Run SA(설정된 경우).
+  # api_server / worker SA가 같은 공용 SA(cloudsql-iam-modal)를 재활용할 수 있으므로 distinct()
+  # 처리 — for_each duplicate key 방지.
+  effective_secret_accessors = distinct(compact(concat(
     var.agent_secret_accessors,
     var.api_server_service_account != "" ? ["serviceAccount:${var.api_server_service_account}"] : [],
     var.execution_engine_worker_service_account != "" ? ["serviceAccount:${var.execution_engine_worker_service_account}"] : [],
-  ))
+  )))
 }
 
 # ---------------------------------------------------------------------------
