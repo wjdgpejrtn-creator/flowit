@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from ..entities.skill_document import SkillDocument
+from common_schemas import SkillDocument
 
 
 class SkillDocumentStore(ABC):

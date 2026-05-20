@@ -18,7 +18,7 @@
 | `MarketplaceTeamSkill` | `domain/entities/marketplace_team_skill.py` | ✅ 완료 |
 | `MarketplaceCompanySkill` | `domain/entities/marketplace_company_skill.py` | ✅ 완료 |
 | `ApprovalWorkflow` | `domain/entities/approval_workflow.py` | ✅ 완료 (storage 이전) |
-| `SkillDocument` | `domain/entities/skill_document.py` | ✅ 완료 (ADR-0017 소유권 ai_agent → skills_marketplace 정정) |
+| `SkillDocument` | `common_schemas/skill_document.py` (shim: `domain/entities/`) | ✅ common_schemas SSOT 재노출 shim (PR #111 승격, ADR-0017 재정정 — 생산 ai_agent + 저장 skills_marketplace 공유 타입) |
 | `SkillScope` (Enum) | `domain/value_objects/skill_scope.py` | ✅ 완료 |
 | `SkillState` (Enum) | `domain/value_objects/skill_state.py` | ✅ 완료 (셀프 리뷰 GAP 정정 — services에서 분리) |
 | `PromotionService` | `domain/services/promotion_service.py` | ✅ 완료 (범위 승격) |
