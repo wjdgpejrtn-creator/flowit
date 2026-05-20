@@ -108,7 +108,7 @@ from common_schemas import (
 | `PostgresExecutionRepository` | `ExecutionRepositoryPort` | 실행 결과/노드 상태 PostgreSQL 저장 |
 | `SSEEventPublisher` | `EventPublisherPort` | Redis Pub/Sub -> SSE 스트림으로 상태 전파 |
 
-> **노드 실행 가능 범위 (ADR-0018 단계화)**: `CatalogNodeExecutor`는 53종을 동일 경로(`node_type → BaseNode.process()`)로 호출하나, `process()` 실구현 여부는 단계별로 다르다. **즉시 실행 가능 30종** = domain 28종 + external `http_request`·`pdf_generate`. **나머지 external 23종**(rest_api·graphql·webhook·email_send·slack_notify·slack_post_message·gmail_send·google_* 4·anthropic_chat·gemma_chat·bigquery/mysql/postgresql_query·linear_create_issue·data_mapping·json_transform·text_template·file_read/write/transform)은 `process()` 미구현 → 실행 시 `NotImplementedError`. ADR-0018 Phase 3에서 실구현 예정.
+> **노드 실행 가능 범위 (ADR-0018 단계화)**: `CatalogNodeExecutor`는 53종을 동일 경로(`node_type → BaseNode.process()`)로 호출하나, `process()` 실구현 여부는 단계별로 다르다. **실행 가능 36종** = domain 28종 + external `http_request`·`pdf_generate` + Phase 3a 6종(`json_transform`·`data_mapping`·`text_template`·`rest_api`·`graphql`·`webhook` — REQ-005 toolset `BaseTool` 로직 포팅). **나머지 external 17종**(email_send·slack_notify·slack_post_message·gmail_send·google_* 4·anthropic_chat·gemma_chat·bigquery/mysql/postgresql_query·linear_create_issue·file_read/write/transform)은 `process()` 미구현 → 실행 시 `NotImplementedError`. ADR-0018 Phase 3 후속 배치에서 실구현 예정.
 
 #### dependencies/ (DI 컨테이너)
 

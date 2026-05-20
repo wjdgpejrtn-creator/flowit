@@ -106,12 +106,12 @@ class TestCatalogNodeExecutorErrors:
             )
 
     def test_external_stub_raises_not_implemented(self, executor):
-        """external 25종은 Phase 1에서 NotImplementedError 스텁 — 예외가 그대로 전파."""
+        """미구현 external 노드(ADR-0018 Phase 3 후속)는 NotImplementedError를 그대로 전파."""
         with pytest.raises(NotImplementedError):
             executor.execute(
                 node=_node(),
-                config=_config("rest_api"),
-                inputs={"base_url": "https://example.com"},
+                config=_config("bigquery_query"),
+                inputs={"project_id": "p", "query": "SELECT 1"},
                 context=_ctx(),
             )
 

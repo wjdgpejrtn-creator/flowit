@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+import httpx
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "webhook"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -43,10 +47,19 @@ class WebhookNode(BaseNode[WebhookInput, WebhookOutput]):
     output_schema = WebhookOutput
 
     async def process(self, input: WebhookInput, context: NodeContext) -> WebhookOutput:
-        raise NotImplementedError(
-            "Webhook 발송은 REQ-005 toolset.WebhookTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
+        headers = {"Content-Type": "application/json", **input.headers}
+        body_bytes = json.dumps(input.payload).encode()
+
+        if input.secret:
+            signature = hmac.new(input.secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+            headers["X-Webhook-Signature"] = f"sha256={signature}"
+
+        async with httpx.AsyncClient(timeout=input.timeout_seconds) as client:
+            response = await client.post(input.url, content=body_bytes, headers=headers)
+
+        return WebhookOutput(
+            status_code=response.status_code,
+            delivered=response.status_code < 300,
         )
 
 

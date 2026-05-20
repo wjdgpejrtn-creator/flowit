@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from string import Formatter
 from typing import Any
 from uuid import uuid5
 
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "text_template"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -39,11 +41,20 @@ class TextTemplateNode(BaseNode[TextTemplateInput, TextTemplateOutput]):
     output_schema = TextTemplateOutput
 
     async def process(self, input: TextTemplateInput, context: NodeContext) -> TextTemplateOutput:
-        raise NotImplementedError(
-            "텍스트 템플릿 렌더링은 REQ-005 toolset.TextTemplateTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
-        )
+        variables = input.variables or {}
+        required_keys = {
+            field_name
+            for _, field_name, _, _ in Formatter().parse(input.template)
+            if field_name is not None
+        }
+        missing = required_keys - variables.keys()
+        if missing:
+            raise ValidationError(f"Template variables missing: {sorted(missing)}")
+        try:
+            rendered = input.template.format_map(variables)
+        except (KeyError, ValueError, IndexError) as e:
+            raise ValidationError(f"Template rendering failed: {e}") from e
+        return TextTemplateOutput(rendered=rendered)
 
 
 def get_node_definition() -> NodeDefinition:

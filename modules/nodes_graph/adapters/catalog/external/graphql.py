@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+import httpx
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ExecutionError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "graphql"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -44,10 +47,28 @@ class GraphqlNode(BaseNode[GraphqlInput, GraphqlOutput]):
     output_schema = GraphqlOutput
 
     async def process(self, input: GraphqlInput, context: NodeContext) -> GraphqlOutput:
-        raise NotImplementedError(
-            "GraphQL 호출은 REQ-005 toolset.GraphqlTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
+        payload: dict[str, Any] = {"query": input.query}
+        if input.variables:
+            payload["variables"] = input.variables
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            **input.headers,
+        }
+
+        async with httpx.AsyncClient(timeout=input.timeout_seconds) as client:
+            response = await client.post(input.endpoint, json=payload, headers=headers)
+
+        try:
+            result = json.loads(response.content)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise ExecutionError(f"GraphQL response is not valid JSON: {e}") from e
+
+        errors = result.get("errors") or []
+        return GraphqlOutput(
+            data=result.get("data"),
+            errors=errors,
+            ok=response.status_code < 300 and not errors,
         )
 
 

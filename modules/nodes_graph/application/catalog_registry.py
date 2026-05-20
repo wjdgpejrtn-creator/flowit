@@ -80,7 +80,7 @@ def get_all_node_definitions() -> list[NodeDefinition]:
 
     Note: 중복 3종(http_request_tool=external/http_request, conditional=domain/control/if_condition,
     loop=domain/control/loop_list)은 카탈로그에서 제거. 실행 흐름은
-    execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출.
+    execution_engine.CatalogNodeExecutor가 node_type으로 BaseNode.process()를 직접 호출 (ADR-0018).
     """
     return [
         *get_domain_node_definitions(),
@@ -118,8 +118,9 @@ def get_all_node_classes() -> dict[str, type[BaseNode]]:
     """카탈로그 전체 53종 node_type → BaseNode 클래스.
 
     execution_engine.CatalogNodeExecutor가 node_type으로 노드를 조회·실행한다 (ADR-0018).
-    domain 28종 + external http_request·pdf_generate = 30종 즉시 실행 가능.
-    나머지 external 23종은 process() 미구현 → 실행 시 NotImplementedError (ADR-0018 Phase 3).
+    domain 28종 + external http_request·pdf_generate + Phase 3a 6종(json_transform·
+    data_mapping·text_template·rest_api·graphql·webhook) = 36종 실행 가능.
+    나머지 external 17종은 process() 미구현 → 실행 시 NotImplementedError (ADR-0018 Phase 3 후속).
     """
     return {
         **get_domain_node_classes(),
