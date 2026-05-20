@@ -14,10 +14,8 @@ Secrets:
     `cloudsql-iam-sa` 1개 — GCP ADC root credential. 나머지 환경변수는 boot()
     에서 services.common.gcp_secrets.load_secrets_to_env로 런타임 pull한다.
 """
-from __future__ import annotations
-
 import modal
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
@@ -148,7 +146,6 @@ class AgentComposer:
 
     @modal.asgi_app()
     def fastapi(self):
-        import json
         from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 
         api = FastAPI(title="agent-composer", version="1.0")
@@ -170,8 +167,7 @@ class AgentComposer:
             return {"status": "ok", "db": "iam-connected"}
 
         @api.post("/v1/agent/route")
-        async def route(request: Request):
-            req = AgentProtocolRequest.model_validate(await request.json())
+        async def route(req: AgentProtocolRequest = Body(...)):
             async def generate():
                 try:
                     async with self._session_factory() as session:
