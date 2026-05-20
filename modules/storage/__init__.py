@@ -1,5 +1,6 @@
 from .repositories import (
     PgAgentMemoryRepository,
+    PgCredentialRepository,
     PgDocumentRepository,
     PgExecutionRepository,
     PgNodeDefinitionRepository,
@@ -12,6 +13,7 @@ from .repositories import (
 
 __all__ = [
     "PgAgentMemoryRepository",
+    "PgCredentialRepository",
     "PgDocumentRepository",
     "PgExecutionRepository",
     "PgNodeDefinitionRepository",

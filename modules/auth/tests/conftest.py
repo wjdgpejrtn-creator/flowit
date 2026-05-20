@@ -4,10 +4,12 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from auth.domain.entities.credential import Credential
 from auth.domain.entities.oauth_connection import OAuthConnection
 from auth.domain.entities.session import Session
 from auth.domain.entities.user import User, UserRole
 from auth.domain.ports.cipher_port import CipherPort
+from auth.domain.ports.credential_repository import CredentialRepository
 from auth.domain.ports.oauth_connection_repository import OAuthConnectionRepository
 from auth.domain.ports.session_repository import SessionRepository
 from auth.domain.ports.user_repository import UserRepository
@@ -144,9 +146,44 @@ class InMemoryUserRepository(UserRepository):
             )
 
 
+class InMemoryCredentialRepository(CredentialRepository):
+    def __init__(self) -> None:
+        self._store: dict = {}
+
+    async def create(self, user_id, name, credential_kind, encrypted_data, metadata=None) -> Credential:
+        now = datetime.now(UTC)
+        cred = Credential(
+            credential_id=uuid4(),
+            user_id=user_id,
+            name=name,
+            credential_kind=credential_kind,
+            encrypted_data=encrypted_data,
+            metadata=metadata or {},
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        self._store[cred.credential_id] = cred
+        return cred
+
+    async def get_by_id(self, credential_id) -> Credential | None:
+        return self._store.get(credential_id)
+
+    async def update_data(self, credential_id, encrypted_data: bytes) -> None:
+        if credential_id in self._store:
+            self._store[credential_id] = self._store[credential_id].model_copy(
+                update={"encrypted_data": encrypted_data, "updated_at": datetime.now(UTC)}
+            )
+
+
 @pytest.fixture
 def session_repo() -> InMemorySessionRepository:
     return InMemorySessionRepository()
+
+
+@pytest.fixture
+def credential_repo() -> InMemoryCredentialRepository:
+    return InMemoryCredentialRepository()
 
 
 @pytest.fixture

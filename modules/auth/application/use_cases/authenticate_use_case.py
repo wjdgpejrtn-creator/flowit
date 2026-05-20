@@ -6,6 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from ...domain.ports.cipher_port import CipherPort
+from ...domain.ports.credential_repository import CredentialRepository
 from ...domain.ports.oauth_client_port import OAuthClientPort
 from ...domain.ports.oauth_connection_repository import OAuthConnectionRepository
 from ...domain.ports.session_repository import SessionRepository
@@ -19,6 +20,7 @@ class AuthenticateUseCase:
         session_repo: SessionRepository,
         oauth_repo: OAuthConnectionRepository,
         user_repo: UserRepository,
+        credential_repo: CredentialRepository,
         cipher: CipherPort,
         google_oauth: OAuthClientPort,
         jwt_adapter: object,
@@ -26,6 +28,7 @@ class AuthenticateUseCase:
         self._session_repo = session_repo
         self._oauth_repo = oauth_repo
         self._user_repo = user_repo
+        self._credential_repo = credential_repo
         self._cipher = cipher
         self._google_oauth = google_oauth
         self._jwt_adapter = jwt_adapter
@@ -53,18 +56,28 @@ class AuthenticateUseCase:
         enc_refresh = self._cipher.encrypt(user_info.get("refresh_token", "").encode())
         scopes: list[str] = user_info.get("scopes", [])
 
-        # Upsert OAuth connection (revoke old, create new)
+        # Upsert OAuth connection. oauth_connections.credential_id는 credentials FK(NOT NULL)이므로
+        # credentials row를 먼저 생성/갱신한 뒤 그 credential_id로 oauth_connection을 연결한다.
         existing = await self._oauth_repo.get_active_for_user(user_id, "google")
         if existing is not None:
+            await self._credential_repo.update_data(existing.credential_id, enc_access)
             await self._oauth_repo.update_tokens(
-                existing.oauth_id,
+                existing.credential_id,
                 new_tokens={"access_token_encrypted": enc_access, "refresh_token_encrypted": enc_refresh},
             )
         else:
+            credential = await self._credential_repo.create(
+                user_id=user_id,
+                name="Google OAuth",
+                credential_kind="oauth_token",
+                encrypted_data=enc_access,
+                metadata={"service": "google", "scopes": scopes},
+            )
             await self._oauth_repo.create(
                 user_id=user_id,
                 service="google",
                 tokens={
+                    "credential_id": credential.credential_id,
                     "access_token_encrypted": enc_access,
                     "refresh_token_encrypted": enc_refresh,
                     "scopes": scopes,
