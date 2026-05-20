@@ -6,6 +6,10 @@ environment = "staging"
 # Cloud Run 배포 — Phase F 풀스택 smoke 완료 시점 staging 상태 (2026-05-20)
 # 이 파일은 git 추적됨 (.gitignore 예외) — apply를 -var 없이 해도 drift 없도록 영속화.
 # 이미지 tag 갱신 시 이 파일도 함께 commit.
+#
+# ⚠️ 비밀값 추가 금지 — 이 파일은 `*.tfvars` gitignore 예외라 commit 시 자동 추적·push된다.
+#    DB 비밀번호 / API 토큰 / SA 키 등은 절대 넣지 말 것. GCP Secret Manager 경유.
+#    허용: image tag, SA email(식별자), bool, project_id/region 같은 비-비밀 식별자만.
 # ---------------------------------------------------------------------------
 enable_cloud_run               = true
 enable_execution_engine_worker = true
