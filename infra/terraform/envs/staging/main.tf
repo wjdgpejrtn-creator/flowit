@@ -267,6 +267,9 @@ module "execution_engine_worker" {
 
   # PR #80 GCP Secret Manager에서 직접 주입 — load_secrets_to_env 우회.
   # container.create_container()가 boot 시 KeyError 없이 모든 env를 읽는다.
+  # ENCRYPTION_KEY: ADR-0018 Phase 2b — CatalogNodeExecutor가 credential 노드 실행 시
+  # AESGCMCipher로 encrypted_data/access_token을 복호화한다. worker SA는
+  # effective_secret_accessors에 포함되어 encryption-key accessor를 이미 보유.
   secret_env_vars = {
     REDIS_URL          = { secret_id = "redis-url", version = "latest" }
     CLOUD_SQL_INSTANCE = { secret_id = "cloud-sql-instance", version = "latest" }
@@ -274,6 +277,7 @@ module "execution_engine_worker" {
     DB_NAME            = { secret_id = "db-name", version = "latest" }
     LLM_BASE_URL       = { secret_id = "llm-base-url", version = "latest" }
     EMBEDDING_BASE_URL = { secret_id = "embedding-base-url", version = "latest" }
+    ENCRYPTION_KEY     = { secret_id = "encryption-key", version = "latest" }
   }
 
   labels = merge(local.common_labels, { role = "execution-worker" })

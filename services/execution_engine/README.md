@@ -29,7 +29,7 @@ from execution_engine.src.domain.services import (
 )
 from execution_engine.src.domain.ports import (
     WorkflowRepositoryPort, ExecutionRepositoryPort, NodeExecutorPort,
-    TaskQueuePort, CredentialProviderPort, EventPublisherPort,
+    TaskQueuePort, EventPublisherPort,
 )
 from execution_engine.src.application.use_cases import (
     ExecuteWorkflowUseCase, DispatchNodeUseCase, HandleHandoffUseCase,
@@ -74,7 +74,6 @@ from execution_engine.src.application.use_cases import (
 | `NodeExecutorPort` | `execute(node: NodeInstance, config: NodeConfig, inputs: dict, context: NodeContext) → dict` | `adapters/catalog_node_executor.py` |
 | `TaskQueuePort` | `dispatch(task_name: str, args: dict) → str` | `adapters/celery_adapter.py` |
 | | `dispatch_chord(tasks: list[dict], callback: str) → str` | |
-| `CredentialProviderPort` | `get_credential(credential_id: UUID, user_id: UUID) → dict[str, str]` | `adapters/vault_credential_provider.py` |
 | `EventPublisherPort` | `publish_status(execution_id: UUID, status: ExecutionStatus) → None` | `adapters/sse_event_publisher.py` |
 | | `publish_node_complete(execution_id: UUID, node_result: NodeResult) → None` | |
 
@@ -83,7 +82,7 @@ from execution_engine.src.application.use_cases import (
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
 | `ExecuteWorkflowUseCase` | `workflow_id: UUID, context: ExecutionContext → ExecutionResult` | 전체 오케스트레이션: 조회→DAG검증→위상정렬→레벨별실행→저장 |
-| `DispatchNodeUseCase` | `node: NodeInstance, config: NodeConfig, inputs: dict → NodeResult` | 단일 노드: credential주입→NodeExecutor호출→재시도→결과 |
+| `DispatchNodeUseCase` | `node: NodeInstance, config: NodeConfig, inputs: dict → NodeResult` | 단일 노드: NodeExecutor호출→재시도→결과 (credential 주입은 CatalogNodeExecutor가 담당, ADR-0018 Phase 2b) |
 | `HandleHandoffUseCase` | `payload: HandoffPayload → ExecutionResult` | REQ-004 QA 통과 후 핸드오프 수신 → ExecuteWorkflowUseCase 위임 |
 | `PauseResumeUseCase` | `execution_id: UUID, action: Literal["pause","resume"], approval: Optional[dict] → None` | HITL 노드 일시 중지/재개 |
 | `EvaluateAndRefineUseCase` | `execution_id: UUID, evaluation: EvaluationResult → Optional[ExecutionResult]` | QA score < 8 시 Self-Refine 재실행 (최대 3회) |
@@ -102,7 +101,7 @@ from execution_engine.src.application.use_cases import (
 Upstream (이 서비스가 의존):
   ├── common_schemas (REQ-012) → WorkflowSchema, ExecutionStatus, HandoffPayload 등
   ├── nodes_graph (REQ-003)    → GraphValidator (실행 전 재검증) + get_all_node_classes (노드 실행)
-  ├── auth (REQ-002)           → CredentialStore (자격증명 복호화)
+  ├── auth (REQ-002)           → CredentialInjectionService (노드 실행용 credential 해결) + AESGCMCipher
   └── storage (REQ-008)        → WorkflowRepository, ExecutionRepository
 
 Downstream (이 서비스에 의존):
@@ -122,6 +121,7 @@ Downstream (이 서비스에 의존):
 | `DB_NAME` | Y | DB 이름 |
 | `CELERY_CONCURRENCY` | N | 워커 동시성 (기본: 4) |
 | `NODE_EXECUTION_TIMEOUT` | N | 노드 실행 타임아웃 (기본: 300s) |
+| `ENCRYPTION_KEY` | Y | AES-GCM 복호화 키 (base64 32바이트) — credential 노드 실행용 (ADR-0018 Phase 2b) |
 
 ## Celery 큐 아키텍처
 

@@ -1,11 +1,9 @@
 from .catalog_node_executor import CatalogNodeExecutor
 from .sse_event_publisher import SSEEventPublisher
-from .vault_credential_provider import VaultCredentialProvider
 
 __all__ = [
     "CatalogNodeExecutor",
     "SSEEventPublisher",
-    "VaultCredentialProvider",
 ]
 
 try:
