@@ -87,30 +87,65 @@ class Container:
 _container: Container | None = None
 
 
+def _build_redis_client():
+    """Redis 클라이언트 — rediss://(TLS) 시 Memorystore SERVER_AUTHENTICATION cert가
+    컨테이너 trust store에 없어 cert verify skip. TLS encryption은 유지."""
+    import redis
+
+    redis_url = os.getenv("REDIS_URL")
+    if not redis_url:
+        return redis.Redis()
+    kwargs: dict = {}
+    if redis_url.startswith("rediss://"):
+        kwargs["ssl_cert_reqs"] = None
+    return redis.Redis.from_url(redis_url, **kwargs)
+
+
+def _build_db_engine():
+    """Cloud SQL IAM 인증 sync engine — [[sub_agent_cloud_sql_iam]] 표준.
+
+    pg8000(순수 Python driver) + cloud-sql-python-connector. 비밀번호 DSN 금지.
+    Celery worker는 sync이므로 async connector 대신 sync `Connector`를 사용한다.
+    """
+    from google.cloud.sql.connector import Connector, IPTypes
+    from sqlalchemy import create_engine
+
+    instance = os.getenv("CLOUD_SQL_INSTANCE")
+    iam_user = os.getenv("DB_IAM_USER")
+    db_name = os.getenv("DB_NAME")
+    if not (instance and iam_user and db_name):
+        raise RuntimeError(
+            "execution_engine DB engine은 CLOUD_SQL_INSTANCE / DB_IAM_USER / DB_NAME "
+            "환경변수를 요구한다 (Cloud SQL IAM auth). secret_env_vars 바인딩 확인."
+        )
+
+    connector = Connector()
+
+    def getconn():
+        return connector.connect(
+            instance,
+            "pg8000",
+            user=iam_user,
+            db=db_name,
+            enable_iam_auth=True,
+            ip_type=IPTypes.PUBLIC,
+        )
+
+    return create_engine("postgresql+pg8000://", creator=getconn, pool_pre_ping=True)
+
+
 def create_container() -> Container:
     global _container
     if _container is not None:
         return _container
 
-    import redis
+    from sqlalchemy.orm import sessionmaker
 
     from ..adapters.postgres_execution_repo import PostgresExecutionRepository
     from ..adapters.postgres_workflow_repo import PostgresWorkflowRepository
 
-    redis_url = os.getenv("REDIS_URL")
-    redis_client = redis.Redis.from_url(redis_url) if redis_url else redis.Redis()
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    db_host = os.getenv("DB_HOST")
-    db_port = int(os.getenv("DB_PORT", "5432"))
-    db_user = os.getenv("DB_USER")
-    db_password = os.getenv("DB_PASSWORD")
-    db_name = os.getenv("DB_NAME")
-    database_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-
-    engine = create_engine(database_url, pool_pre_ping=True)
+    redis_client = _build_redis_client()
+    engine = _build_db_engine()
     session_factory = sessionmaker(bind=engine)
 
     workflow_repo = PostgresWorkflowRepository(session_factory)
