@@ -113,6 +113,8 @@ class LangGraphSupervisor:
                 async for event in self._graph.astream(initial, stream_mode="updates"):
                     for node_name, updates in event.items():
                         await queue.put(AgentNodeFrame(agent_node_name=node_name))
+                        if not isinstance(updates, dict):
+                            continue
                         if node_name not in _RELAY_NODES:
                             for frame in updates.get("collected_frames", []):
                                 await queue.put(frame)
