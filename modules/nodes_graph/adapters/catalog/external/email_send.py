@@ -16,6 +16,7 @@ from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
+from ._url_guard import validate_outbound_host
 
 _NODE_TYPE = "email_send"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -53,6 +54,8 @@ class EmailSendNode(BaseNode[EmailSendInput, EmailSendOutput]):
     async def process(self, input: EmailSendInput, context: NodeContext) -> EmailSendOutput:
         if not input.to_addresses:
             raise ValidationError("email_send requires at least one recipient")
+        # SSRF — smtp_host가 내부/예약 대역이면 차단 (slack_notify 웹훅 가드와 대칭).
+        await validate_outbound_host(input.smtp_host, input.smtp_port)
 
         username: str | None = None
         password: str | None = None

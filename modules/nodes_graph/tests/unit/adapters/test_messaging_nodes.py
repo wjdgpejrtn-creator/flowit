@@ -72,7 +72,7 @@ def fake_smtp(monkeypatch):
 
 def _email_input(**overrides) -> EmailSendInput:
     base = dict(
-        smtp_host="smtp.example.com",
+        smtp_host="93.184.216.34",  # 공인 IP 리터럴 — SSRF 가드 통과 (네트워크 없이 public 분류)
         from_address="bot@example.com",
         to_addresses=["a@example.com", "b@example.com"],
         subject="제목",
@@ -107,6 +107,14 @@ async def test_email_send_bad_credential_format_raises(fake_smtp):
 async def test_email_send_empty_recipients_raises(fake_smtp):
     with pytest.raises(ValidationError, match="recipient"):
         await EmailSendNode().process(_email_input(to_addresses=[]), NODE_CTX)
+
+
+@pytest.mark.asyncio
+async def test_email_send_blocks_internal_smtp_host(fake_smtp):
+    """smtp_host가 내부 대역이면 SSRF 가드가 SMTP 연결 전에 차단 (slack 경로와 대칭)."""
+    with pytest.raises(ValidationError, match="SSRF"):
+        await EmailSendNode().process(_email_input(smtp_host="169.254.169.254"), NODE_CTX)
+    assert fake_smtp == []  # smtplib 미호출
 
 
 # ----------------------------------------------------------------------

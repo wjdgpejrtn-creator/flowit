@@ -348,6 +348,21 @@ class CatalogRegistry:
 > 호출한다 (`ToolsetExecutor` 경로 폐기). `process()` 실구현은 단계화 — Phase 3b까지 external 11종
 > 완료(`http_request`·`pdf_generate` + transform/api 6종 + messaging 3종), 잔여 14종은 `NotImplementedError` 스텁.
 
+#### 노드별 `connection_token` 기대 형식 (ADR-0018)
+
+`CredentialInjectionService`가 해결한 `NodeContext.connection_token`(`Optional[str]`)을
+노드가 해석하는 규약. 작성자가 노드에 맞지 않는 credential을 연결하면 노드의
+입력 검증(`ValidationError`)이 안전망으로 동작한다. `credential_kind`는 REQ-002
+`Credential`(`api_key`/`oauth_token`/`password`/`certificate`/`custom`) 기준.
+
+| 노드 | `connection_token` 기대 형식 | 권장 `credential_kind` |
+|------|------------------------------|------------------------|
+| `slack_post_message` | Slack Bot OAuth 토큰 (`xoxb-…`) → `Authorization: Bearer` | `oauth_token` |
+| `gmail_send`·`google_*`(후속) | Google OAuth access token | `oauth_token` |
+| `slack_notify` | Slack Incoming Webhook URL | `api_key` |
+| `email_send` | `username:password` (SMTP 인증) | `password` |
+| `rest_api`·`graphql`·`webhook` | Bearer 토큰 (선택 — 있으면 `Authorization: Bearer`) | `api_key` |
+
 #### ports/embedder_port.py — `EmbedderPort` (ABC)
 
 ```python
