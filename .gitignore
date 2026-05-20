@@ -221,6 +221,8 @@ out/
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+# staging tfvars는 추적 — secret 없음(image tag/SA email/bool), 단일 환경 IaC 영속화 (drift 방지)
+!infra/terraform/envs/staging/terraform.tfvars
 .terraform.lock.hcl
 
 # Docker

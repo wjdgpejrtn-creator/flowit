@@ -1,3 +1,14 @@
 project_id  = "<GCP_PROJECT_ID>"
 region      = "asia-northeast3"
 environment = "staging"
+
+# Cloud Run 배포 토글 — 이미지 빌드 + secret 등록 완료 후 true.
+# 실제 staging 값은 git 추적되는 terraform.tfvars 참조 (본 example은 형식 안내용).
+enable_cloud_run               = false
+enable_execution_engine_worker = false
+
+api_server_image              = ""  # AR 이미지 경로:TAG
+execution_engine_worker_image = ""
+
+api_server_service_account              = ""  # 런타임 SA 이메일
+execution_engine_worker_service_account = ""
