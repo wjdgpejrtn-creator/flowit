@@ -41,7 +41,7 @@ def execute_workflow_task(self, workflow_id: str, context_data: dict) -> dict:
     acks_late=True,
 )
 def cancel_execution_task(self, execution_id: str) -> dict:
-    from common_schemas.exceptions import ExecutionError
+    from common_schemas.exceptions import DomainError
 
     from ..dependencies.container import create_container
 
@@ -49,10 +49,12 @@ def cancel_execution_task(self, execution_id: str) -> dict:
     use_case = container.pause_resume_use_case
     try:
         use_case.execute(UUID(execution_id), action="cancel")
-    except ExecutionError as exc:
-        # 이미 종료된(completed/failed/cancelled) execution을 cancel하는 것은
-        # 사용자 입력 오류이지 시스템 장애가 아니다. task를 ERROR로 실패 처리하면
-        # 로그 노이즈 + task 실패율이 왜곡되므로 graceful skip 결과를 반환한다.
+    except DomainError as exc:
+        # 도메인 계층 오류는 사용자 입력 범주 → graceful skip. 종료된 execution을
+        # cancel(ExecutionError, invalid transition)이든 존재하지 않는 execution
+        # (NotFoundError)이든 입력 오류이지 시스템 장애가 아니다 — task를 ERROR로
+        # 올리면 로그 노이즈 + task 실패율이 왜곡된다. broker 장애 등 비-DomainError
+        # 예외는 그대로 전파해 task 실패로 노출한다.
         return {
             "execution_id": execution_id,
             "action": "cancel",
@@ -69,7 +71,7 @@ def cancel_execution_task(self, execution_id: str) -> dict:
     acks_late=True,
 )
 def resume_execution_task(self, execution_id: str) -> dict:
-    from common_schemas.exceptions import ExecutionError
+    from common_schemas.exceptions import DomainError
 
     from ..dependencies.container import create_container
 
@@ -77,9 +79,10 @@ def resume_execution_task(self, execution_id: str) -> dict:
     use_case = container.pause_resume_use_case
     try:
         use_case.execute(UUID(execution_id), action="resume")
-    except ExecutionError as exc:
-        # 종료/실행중 등 resume 불가 상태에 대한 resume 요청은 사용자 입력 오류 —
-        # task ERROR가 아닌 graceful skip으로 처리한다. (cancel_execution_task 참고)
+    except DomainError as exc:
+        # 도메인 계층 오류(resume 불가 상태 ExecutionError / 존재하지 않는 execution
+        # NotFoundError 등)는 사용자 입력 범주 → graceful skip. 비-DomainError 예외는
+        # 그대로 전파한다. (cancel_execution_task 참고)
         return {
             "execution_id": execution_id,
             "action": "resume",

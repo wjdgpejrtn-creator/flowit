@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from common_schemas.exceptions import ExecutionError
+from common_schemas.exceptions import ExecutionError, NotFoundError
 from src.adapters import celery_tasks
 
 
@@ -49,8 +49,20 @@ class TestCancelTask:
         assert result["status"] == "cancelled"
         assert result["action"] == "cancel"
 
-    def test_non_execution_error_still_propagates(self, monkeypatch):
-        """시스템 장애(ExecutionError 외)는 swallow하지 않고 task 실패로 올린다."""
+    def test_returns_skipped_on_missing_execution(self, monkeypatch):
+        """존재하지 않는 execution_id → NotFoundError도 graceful skip (DomainError 범주)."""
+        exc = NotFoundError("ExecutionResult abc not found")
+        _patch_container(monkeypatch, _container(execute_side_effect=exc))
+        execution_id = str(uuid4())
+
+        result = celery_tasks.cancel_execution_task.run(execution_id)
+
+        assert result["status"] == "skipped"
+        assert result["action"] == "cancel"
+        assert "not found" in result["reason"]
+
+    def test_non_domain_error_still_propagates(self, monkeypatch):
+        """시스템 장애(비-DomainError)는 swallow하지 않고 task 실패로 올린다."""
         _patch_container(monkeypatch, _container(execute_side_effect=RuntimeError("broker down")))
 
         with pytest.raises(RuntimeError, match="broker down"):
@@ -82,7 +94,19 @@ class TestResumeTask:
         assert result["status"] == "running"
         assert result["action"] == "resume"
 
-    def test_non_execution_error_still_propagates(self, monkeypatch):
+    def test_returns_skipped_on_missing_execution(self, monkeypatch):
+        """존재하지 않는 execution_id → NotFoundError도 graceful skip."""
+        exc = NotFoundError("ExecutionResult abc not found")
+        _patch_container(monkeypatch, _container(execute_side_effect=exc))
+        execution_id = str(uuid4())
+
+        result = celery_tasks.resume_execution_task.run(execution_id)
+
+        assert result["status"] == "skipped"
+        assert result["action"] == "resume"
+        assert "not found" in result["reason"]
+
+    def test_non_domain_error_still_propagates(self, monkeypatch):
         _patch_container(monkeypatch, _container(execute_side_effect=RuntimeError("broker down")))
 
         with pytest.raises(RuntimeError, match="broker down"):
