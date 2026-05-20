@@ -7,6 +7,30 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.7.0] - 2026-05-20
+
+### Added — `NodeContext` 노드 실행 컨텍스트 (ADR-0018 Phase 1)
+- `node.py` 모듈 신설 (기존엔 placeholder) — `NodeContext` Pydantic 모델 1종.
+- `NodeContext`: `execution_id: UUID`, `user_id: UUID`, `connection_token: Optional[str] = None`.
+  - ADR-0018에 따라 워크플로우 노드 실행 경로가 `BaseNode.process(input, context)`로 확장될 때 `CatalogNodeExecutor`가 노드에 전달하는 1회 실행분 컨텍스트.
+  - `connection_token`은 해결된 connection 토큰 — connection이 필요한 external 노드만 사용, domain 28종은 무시.
+  - `frozen=False` + `wipe()` 메서드 — `process()` 종료 후 평문 토큰 제거 (`PlaintextCredential`과 동일 패턴, ADR-0018 Decision 5).
+- 신규 테스트 `test_node.py` — `NodeContext` 6건.
+
+### Changed
+- `typescript/package.json` version `0.3.0` → `0.7.0` — Python 패키지 버전과 drift 누적분 재동기화 (0.4.0~0.6.2 동안 미반영). 이후 두 곳 동시 bump 유지.
+
+### Symbols
+- 57 → 58 (+1: `NodeContext`)
+
+### Migration notes
+- 추가만 있는 변경 — 기존 코드 무영향.
+- 본 PR은 타입 정의만 추가한다. `BaseNode.process()` 시그니처 확장(nodes_graph, REQ-003 박아름) + `CatalogNodeExecutor` 신규(execution_engine, REQ-007)는 ADR-0018 Phase 1 후속 작업.
+- 신규 사용 패턴:
+  ```python
+  from common_schemas import NodeContext
+  ```
+
 ## [0.6.2] - 2026-05-19
 
 ### Added — broker task name 상수 모듈 (PR #75 리뷰 #4 반영)
