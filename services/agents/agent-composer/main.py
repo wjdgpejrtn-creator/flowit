@@ -125,20 +125,18 @@ class AgentComposer:
         llm = ModalLLMAdapter()
         embedder = ModalEmbeddingAdapter()
 
-        node_repo = PgNodeDefinitionRepository(self._session_factory)
-        workflow_repo = PgWorkflowRepository(self._session_factory)
-        node_registry = NodeRegistryAdapter(node_repo, embedder)
-        graph_validator = GraphValidator(node_repo)
+        self._node_repo_cls = PgNodeDefinitionRepository
+        self._workflow_repo_cls = PgWorkflowRepository
+        self._embedder = embedder
+        self._node_registry_cls = NodeRegistryAdapter
+        self._graph_validator_cls = GraphValidator
+        self._intent_analyzer = IntentAnalyzerService(llm)
+        self._drafter = DrafterService(llm)
+        self._qa_evaluator = QAEvaluatorService(llm)
+        self._slot_filler = SlotFillingService()
+        self._orchestrator_cls = LangGraphOrchestrator
 
-        self._graph = LangGraphOrchestrator(
-            intent_analyzer=IntentAnalyzerService(llm),
-            drafter=DrafterService(llm),
-            qa_evaluator=QAEvaluatorService(llm),
-            slot_filler=SlotFillingService(),
-            node_registry=node_registry,
-            workflow_repo=workflow_repo,
-            graph_validator=graph_validator,
-        )
+        # 그래프는 요청마다 세션을 새로 생성해서 주입 — _get_graph() 참조
 
     @modal.exit()
     def shutdown(self) -> None:
@@ -176,18 +174,32 @@ class AgentComposer:
             req = AgentProtocolRequest.model_validate(await request.json())
             async def generate():
                 try:
-                    async for frame in await self._graph.stream(
-                        user_id=req.user_id,
-                        session_id=req.session_id,
-                        message=req.payload.get("message", ""),
-                        personal_memory=list(req.personal_memory),
-                    ):
-                        resp = AgentProtocolResponse(
-                            frames=[frame],
-                            state_delta={},
-                            next_action="continue",
+                    async with self._session_factory() as session:
+                        node_repo = self._node_repo_cls(session)
+                        workflow_repo = self._workflow_repo_cls(session)
+                        node_registry = self._node_registry_cls(node_repo, self._embedder)
+                        graph_validator = self._graph_validator_cls(node_repo)
+                        graph = self._orchestrator_cls(
+                            intent_analyzer=self._intent_analyzer,
+                            drafter=self._drafter,
+                            qa_evaluator=self._qa_evaluator,
+                            slot_filler=self._slot_filler,
+                            node_registry=node_registry,
+                            workflow_repo=workflow_repo,
+                            graph_validator=graph_validator,
                         )
-                        yield f"data: {resp.model_dump_json()}\n\n"
+                        async for frame in await graph.stream(
+                            user_id=req.user_id,
+                            session_id=req.session_id,
+                            message=req.payload.get("message", ""),
+                            personal_memory=list(req.personal_memory),
+                        ):
+                            resp = AgentProtocolResponse(
+                                frames=[frame],
+                                state_delta={},
+                                next_action="continue",
+                            )
+                            yield f"data: {resp.model_dump_json()}\n\n"
                 except Exception as exc:
                     err = AgentProtocolResponse(
                         frames=[],
