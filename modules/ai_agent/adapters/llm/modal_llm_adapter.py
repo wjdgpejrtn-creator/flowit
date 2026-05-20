@@ -50,6 +50,7 @@ class ModalLLMAdapter(LLMPort):
         return result["generated_text"]
 
     async def generate_structured(self, prompt: str, schema: type[T]) -> T:
+        import re
         schema_json = schema.model_json_schema()
         augmented = (
             f"{prompt}\n\n"
@@ -63,7 +64,14 @@ class ModalLLMAdapter(LLMPort):
             json_schema=schema_json,
         )
         raw: str = result["generated_text"]
-        return schema.model_validate_json(raw)
+        if not raw.strip():
+            # grammar constraint가 빈 응답 반환 시 — 프롬프트 지시만으로 재시도
+            result = await self._modal_instance().generate.remote.aio(prompt=augmented)
+            raw = result["generated_text"]
+        # 마크다운 코드 펜스 제거
+        raw = re.sub(r"^```(?:json)?\s*\n?", "", raw.strip())
+        raw = re.sub(r"\n?```\s*$", "", raw)
+        return schema.model_validate_json(raw.strip())
 
     async def aclose(self) -> None:
         await self._client.aclose()
