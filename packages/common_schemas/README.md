@@ -37,6 +37,7 @@ from common_schemas import (
     AnalysisResult,
     PermissionSource, PlaintextCredential,
     HandoffPayload, EvaluationResult,
+    SkillDocument,
 )
 from common_schemas.enums import AgentMode, ExecutionStatus, RiskLevel, ErrorCode, IntentType
 from common_schemas.exceptions import DomainError, ValidationError, NotFoundError
@@ -58,6 +59,7 @@ from common_schemas.transport import (
 | `security` | PermissionSource, PlaintextCredential |
 | `transport` | SSE frame 타입(`transport/sse.py`) + LLM tool-use 타입(`transport/llm.py`, ADR-0015 §D4) |
 | `handoff` | HandoffPayload, EvaluationResult |
+| `skill_document` | SkillDocument (스킬 지침서 SKILL.md, ADR-0017) |
 | `enums` | AgentMode, ExecutionStatus, RiskLevel, ErrorCode, IntentType |
 | `exceptions` | DomainError 계층 (Validation, Authorization, NotFound, Conflict, Integrity) |
 | `validation` | ValidationErrorItem, ValidationErrorResponse |
@@ -143,6 +145,12 @@ from common_schemas.transport import (
 |--------|------|
 | `HandoffPayload` | REQ-004 → REQ-007 전달 페이로드 |
 | `EvaluationResult` | QA 평가 결과 (score, pass_flag, reason) |
+
+### skill_document.py — 스킬 지침서
+
+| 클래스 | 설명 |
+|--------|------|
+| `SkillDocument` | 스킬 SKILL.md 지침서 (skill_id, name, description, instructions, scripts, templates) — ADR-0017 이중 저장의 "지침서" 측. 생산자 ai_agent / 저장자 skills_marketplace |
 
 ### enums.py — 공유 열거형
 

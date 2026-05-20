@@ -371,6 +371,15 @@ export interface SSEFrame {
   frame_type: string;
 }
 
+export interface SkillDocument {
+  skill_id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  scripts: Array<Record<string, unknown>>;
+  templates: Array<Record<string, unknown>>;
+}
+
 export interface ValidationErrorItem {
   code: ErrorCode;
   message: string;
