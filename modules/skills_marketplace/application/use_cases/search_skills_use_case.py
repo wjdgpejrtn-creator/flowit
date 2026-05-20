@@ -15,8 +15,8 @@ class SearchSkillsUseCase:
     사용자 의도(intent) 파악 후 노드 탐색 타이밍에 스킬도 동시 탐색해서 유사 후보를 옵션 제시
     (CLAUDE.md L148 `ai_agent → skills_marketplace.application.use_cases`).
 
-    NOTE: 깊이 1(뼈대) — 시그니처 + wiring만. embedding 생성은 호출측(Composer, EmbedderPort)이
-    담당, 본 use case는 query_embedding을 받아 repo.search 위임. 실제 결과 랭킹/필터는 PR-2d 구현.
+    embedding 생성은 호출측(Composer, EmbedderPort)이 담당하고, 본 use case는 query_embedding을
+    받아 repo.search에 위임한다 (하이브리드 검색 구현은 SkillRepository 어댑터 — storage PR-2d).
     """
 
     def __init__(self, repo: SkillRepository) -> None:
@@ -28,8 +28,5 @@ class SearchSkillsUseCase:
         scope: SkillScope = SkillScope.COMPANY,
         limit: int = 10,
     ) -> list[SkillResult]:
-        """scope 범위 내 query_embedding 유사도 top-k 스킬 후보 반환.
-
-        PR-2d 구현 예정: repo.search 결과 + 키워드 매칭 결합(하이브리드) + 랭킹.
-        """
-        raise NotImplementedError("PR-2d 구현 예정 (깊이 1 뼈대)")
+        """scope 범위 내 query_embedding 유사도 top-k 스킬 후보 반환."""
+        return await self._repo.search(query_embedding, scope, limit)

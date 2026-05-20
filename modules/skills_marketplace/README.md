@@ -4,7 +4,7 @@
 >
 > 설계 결정 → [`ADR-0012`](../../docs/context/adr/ADR-0012-database-storage-module-boundary.md) (모듈 분리), [`ADR-0017`](../../docs/context/adr/ADR-0017-skills-builder-skill-document-dual-storage.md) (NodeDefinition + SkillDocument 이중 저장)
 >
-> **현재 상태: 깊이 1 (뼈대)** — 구조 + Port ABC + entity 정의 + README. 구현 로직 / storage 코드 이전 / DB DDL은 PR-2d/2e 후속.
+> **현재 상태: PR-2d (use case 구현 + 게시 도메인 복사)** — promote/search/approve/publish use case 구현 + storage 게시 도메인(SkillLifecycle/ApprovalWorkflow) 복사. storage 원본 삭제 + `SkillRepository` storage 구현은 조장 후속. DB DDL은 PR-2e.
 
 ## 역할
 
@@ -65,7 +65,14 @@ from skills_marketplace.application.use_cases import (
 
 | 서비스 | 메서드 | 설명 |
 |--------|--------|------|
-| `PromotionService` | `can_promote(current, target) → bool`, `next_scope(current) → SkillScope \| None` | 승격 전이 규칙 (순수 로직, 의존성 없음). 단방향 1단계만 허용 |
+| `PromotionService` | `can_promote(current, target) → bool`, `next_scope(current) → SkillScope \| None` | 범위 승격 전이 규칙 (순수 로직). 단방향 1단계만 허용 |
+| `SkillLifecycle` | `can_transition(current, target) → bool`, `transition(current, target) → SkillState` | 게시 상태 전이 (draft→review→approved→published→archived). storage에서 이전 (옵션 A 공존) |
+
+### domain/entities (게시)
+
+| 클래스 | 설명 |
+|--------|------|
+| `ApprovalWorkflow` | 게시 승인 워크플로우 항목 (storage에서 이전). 리뷰어 승인 추적 |
 
 ### domain/ports (인터페이스 — 구현체는 `modules/storage`)
 
@@ -79,9 +86,11 @@ from skills_marketplace.application.use_cases import (
 
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
-| `PromoteToTeamUseCase` | `personal_skill_id, team_id → UUID` | 개인 → 팀 승격 (뼈대, PR-2d 구현) |
-| `PromoteToCompanyUseCase` | `team_skill_id → UUID` | 팀 → 전사 승격 (뼈대, PR-2d 구현) |
-| `SearchSkillsUseCase` | `query_embedding, scope, limit → list[Skill]` | 하이브리드 검색 — ai_agent Composer 호출 (뼈대, PR-2d 구현) |
+| `PromoteToTeamUseCase` | `personal_skill_id, team_id → UUID` | 개인 → 팀 승격 (메타/게시상태 승계 + promoted_from 추적) |
+| `PromoteToCompanyUseCase` | `team_skill_id → UUID` | 팀 → 전사 승격 |
+| `SearchSkillsUseCase` | `query_embedding, scope, limit → list[Skill]` | 하이브리드 검색 — ai_agent Composer 호출 (repo.search 위임) |
+| `ApproveSkillUseCase` | `skill_id, scope, reviewer_id, approved` | 게시 승인 REVIEW → APPROVED/DRAFT (storage 이전 + SkillRepository ABC 정정) |
+| `PublishSkillUseCase` | `skill_id, scope` | 게시 APPROVED → PUBLISHED (storage 이전) |
 
 ## 의존 관계
 
