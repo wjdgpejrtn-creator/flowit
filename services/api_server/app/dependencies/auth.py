@@ -58,13 +58,16 @@ def get_user_repository(session: AsyncSession = Depends(get_db)) -> UserReposito
 def get_authenticate_use_case(
     session_repo: SessionRepository = Depends(get_session_repository),
     oauth_repo: OAuthConnectionRepository = Depends(get_oauth_repository),
+    user_repo: UserRepository = Depends(get_user_repository),
     cipher: CipherPort = Depends(get_cipher),
     google_oauth: OAuthClientPort = Depends(get_google_oauth),
     jwt_adapter: JWTAdapter = Depends(get_jwt_adapter),
 ) -> AuthenticateUseCase:
+    # user_repo는 REQ-002 JIT auto-provisioning(PR #88) — 첫 SSO 로그인 시 users INSERT.
     return AuthenticateUseCase(
         session_repo=session_repo,
         oauth_repo=oauth_repo,
+        user_repo=user_repo,
         cipher=cipher,
         google_oauth=google_oauth,
         jwt_adapter=jwt_adapter,
