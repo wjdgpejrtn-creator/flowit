@@ -337,6 +337,12 @@ export interface Message {
   name?: unknown;
 }
 
+export interface NodeContext {
+  execution_id: string;
+  user_id: string;
+  connection_token?: string | null;
+}
+
 export interface NodeExecutionState {
   node_instance_id: string;
   status: "pending" | "running" | "succeeded" | "failed" | "retrying" | "cancelled";

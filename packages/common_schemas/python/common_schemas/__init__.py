@@ -20,6 +20,7 @@ from .exceptions import (
     ValidationError,
 )
 from .handoff import EvaluationResult, HandoffPayload
+from .node import NodeContext
 from .security import PermissionSource, PlaintextCredential
 from .transport import (
     AgentNodeFrame,
@@ -63,6 +64,8 @@ __all__ = [
     "NodeInstance",
     "Position",
     "WorkflowSchema",
+    # node — 노드 실행 컨텍스트 (ADR-0018)
+    "NodeContext",
     # document
     "AnalysisResult",
     "BBox",

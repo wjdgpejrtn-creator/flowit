@@ -2,7 +2,7 @@ import common_schemas
 
 
 def test_all_exports():
-    assert len(common_schemas.__all__) == 57
+    assert len(common_schemas.__all__) == 58
 
 
 def test_key_symbols_importable():
@@ -22,6 +22,7 @@ def test_key_symbols_importable():
         MemoryEntry,
         Message,
         NodeConfig,
+        NodeContext,
         PermissionSource,
         PipelineStatusFrame,
         QAMetricFrame,
@@ -46,6 +47,7 @@ def test_key_symbols_importable():
     assert MemoryEntry is not None
     assert Message is not None
     assert NodeConfig is not None
+    assert NodeContext is not None
     assert PermissionSource is not None
     assert PipelineStatusFrame is not None
     assert QAMetricFrame is not None
