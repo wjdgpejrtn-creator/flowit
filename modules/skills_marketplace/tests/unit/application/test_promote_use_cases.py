@@ -12,7 +12,7 @@ from skills_marketplace.domain.entities import (
     MarketplacePersonalSkill,
     MarketplaceTeamSkill,
 )
-from skills_marketplace.domain.services import SkillState
+from skills_marketplace.domain.value_objects import SkillState
 from skills_marketplace.domain.value_objects import SkillScope
 
 

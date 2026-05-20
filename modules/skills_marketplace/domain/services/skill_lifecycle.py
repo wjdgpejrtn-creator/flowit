@@ -1,22 +1,8 @@
 from __future__ import annotations
 
-from enum import Enum
-
 from common_schemas.exceptions import ValidationError
 
-
-class SkillState(str, Enum):
-    """스킬 게시 상태 (storage/marketplace에서 이전 — ADR-0012 PR-2d 복사).
-
-    범위 승격(SkillScope: personal→team→company)과는 별개 축인 게시 lifecycle.
-    str 상속으로 JSON 직렬화 호환.
-    """
-
-    DRAFT = "draft"
-    REVIEW = "review"
-    APPROVED = "approved"
-    PUBLISHED = "published"
-    ARCHIVED = "archived"
+from ..value_objects.skill_state import SkillState
 
 
 _TRANSITIONS: dict[SkillState, list[SkillState]] = {

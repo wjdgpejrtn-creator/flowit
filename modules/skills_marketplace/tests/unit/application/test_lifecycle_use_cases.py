@@ -5,7 +5,7 @@ import pytest
 from common_schemas.exceptions import ValidationError
 from skills_marketplace.application.use_cases import ApproveSkillUseCase, PublishSkillUseCase
 from skills_marketplace.domain.entities import MarketplacePersonalSkill
-from skills_marketplace.domain.services import SkillState
+from skills_marketplace.domain.value_objects import SkillState
 from skills_marketplace.domain.value_objects import SkillScope
 
 

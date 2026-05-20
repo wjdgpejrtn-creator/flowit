@@ -60,6 +60,7 @@ from skills_marketplace.application.use_cases import (
 | 클래스 | 설명 |
 |--------|------|
 | `SkillScope` | `str` Enum — `PERSONAL` / `TEAM` / `COMPANY`. 승격 단방향: PERSONAL → TEAM → COMPANY |
+| `SkillState` | `str` Enum — `draft`/`review`/`approved`/`published`/`archived`. 게시 상태 (전이 규칙은 `SkillLifecycle` service) |
 
 ### domain/services
 

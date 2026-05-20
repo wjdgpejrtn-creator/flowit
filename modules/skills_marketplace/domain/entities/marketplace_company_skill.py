@@ -6,7 +6,7 @@ from uuid import UUID
 from common_schemas.types import UtcDatetime
 from pydantic import BaseModel, Field
 
-from ..services.skill_lifecycle import SkillState
+from ..value_objects.skill_state import SkillState
 
 
 class MarketplaceCompanySkill(BaseModel):
