@@ -15,9 +15,11 @@ from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
+from ._url_guard import validate_outbound_url
 
 _NODE_TYPE = "webhook"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+_MAX_TIMEOUT_SECONDS = 60  # input_schema의 timeout_seconds maximum과 정합
 
 
 @dataclass
@@ -47,14 +49,20 @@ class WebhookNode(BaseNode[WebhookInput, WebhookOutput]):
     output_schema = WebhookOutput
 
     async def process(self, input: WebhookInput, context: NodeContext) -> WebhookOutput:
+        await validate_outbound_url(input.url)
+
         headers = {"Content-Type": "application/json", **input.headers}
+        # credential 노드일 때 해결된 토큰을 Bearer로 주입 (ADR-0018).
+        if context.connection_token and not any(k.lower() == "authorization" for k in headers):
+            headers["Authorization"] = f"Bearer {context.connection_token}"
         body_bytes = json.dumps(input.payload).encode()
 
         if input.secret:
             signature = hmac.new(input.secret.encode(), body_bytes, hashlib.sha256).hexdigest()
             headers["X-Webhook-Signature"] = f"sha256={signature}"
 
-        async with httpx.AsyncClient(timeout=input.timeout_seconds) as client:
+        timeout = min(input.timeout_seconds, _MAX_TIMEOUT_SECONDS)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(input.url, content=body_bytes, headers=headers)
 
         return WebhookOutput(

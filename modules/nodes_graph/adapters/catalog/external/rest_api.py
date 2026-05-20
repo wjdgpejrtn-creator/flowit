@@ -13,9 +13,11 @@ from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
+from ._url_guard import validate_outbound_url
 
 _NODE_TYPE = "rest_api"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+_MAX_TIMEOUT_SECONDS = 300  # input_schema의 timeout_seconds maximum과 정합
 
 
 @dataclass
@@ -51,14 +53,21 @@ class RestApiNode(BaseNode[RestApiInput, RestApiOutput]):
         base_url = input.base_url.rstrip("/")
         path = input.path.lstrip("/")
         url = f"{base_url}/{path}" if path else base_url
+        await validate_outbound_url(url)
+
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
             **input.headers,
         }
+        # credential 노드일 때 해결된 토큰을 Bearer로 주입 (ADR-0018). 작성자가 명시한
+        # Authorization 헤더가 있으면 그대로 둔다.
+        if context.connection_token and not any(k.lower() == "authorization" for k in headers):
+            headers["Authorization"] = f"Bearer {context.connection_token}"
         content = json.dumps(input.body).encode() if input.body is not None else None
+        timeout = min(input.timeout_seconds, _MAX_TIMEOUT_SECONDS)
 
-        async with httpx.AsyncClient(timeout=input.timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.request(
                 method=input.method.upper(),
                 url=url,
