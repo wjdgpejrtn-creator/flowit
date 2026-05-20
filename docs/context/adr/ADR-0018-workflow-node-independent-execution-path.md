@@ -1,8 +1,8 @@
 # ADR-0018: 워크플로우 노드 독립 실행 경로 — ToolsetExecutor 폐기, BaseNode.process() 직접 실행
 
-- **Status**: Proposed
-- **Date**: 2026-05-20 (초안 — 조장 방향 제시 + 영향평가)
-- **Deciders**: @dhwang0803-glitch (조장), @billionaireahreum (박아름), @gawon714-gif (햄햄) — **합의 대기**
+- **Status**: Accepted
+- **Date**: 2026-05-20 (초안 — 조장 방향 제시 + 영향평가; PR #105로 Proposed 등록), 2026-05-21 (PR #119 — Phase 1~3 구현 완료 후 Accepted 전환)
+- **Deciders**: @dhwang0803-glitch (조장), @billionaireahreum (박아름), @gawon714-gif (햄햄) — 박아름·햄햄 방향 승인 (PR #105)
 - **Tags**: area/execution_engine, area/nodes_graph, area/toolset, area/auth, layer/adapter, catalog
 
 ## Context
