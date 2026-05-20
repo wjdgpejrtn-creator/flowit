@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from pydantic import BaseModel
+
 from common_schemas import DraftSpec, EvaluationResult, WorkflowSchema
 from common_schemas.exceptions import ExecutionError
 
@@ -16,10 +18,15 @@ Score the workflow on a scale of 0-10 based on:
 - Correctness: nodes are logically connected
 - Safety: no high-risk nodes used without justification
 
-Respond ONLY with JSON:
-{"score": <0-10>, "pass_flag": <true/false>, "reason": "<string>", "feedback": "<string>"}
 pass_flag must be true if and only if score >= 8.
 """
+
+
+# LLM 응답 전용 — pass_flag는 _THRESHOLD.is_pass(score)로 재계산하므로 수신 불필요.
+class _EvalResponse(BaseModel):
+    score: float
+    reason: str = ""
+    feedback: str = ""
 
 
 class QAEvaluatorService:
@@ -32,18 +39,13 @@ class QAEvaluatorService:
             + f"\nDraftSpec intent: {spec.natural_language_intent}"
             + f"\nWorkflow: {json.dumps(workflow.model_dump(mode='json'), ensure_ascii=False)}"
         )
-        response = await self._llm.generate(prompt)
-        return self._parse(response)
-
-    def _parse(self, response: str) -> EvaluationResult:
         try:
-            data = json.loads(response)
-            score = float(data["score"])
-            return EvaluationResult(
-                score=score,
-                pass_flag=_THRESHOLD.is_pass(score),
-                reason=data.get("reason", ""),
-                feedback=data.get("feedback", ""),
-            )
+            result = await self._llm.generate_structured(prompt, _EvalResponse)
         except Exception as e:
             raise ExecutionError(f"EvaluationResult 파싱 실패: {e}", code="E_QA_PARSE")
+        return EvaluationResult(
+            score=result.score,
+            pass_flag=_THRESHOLD.is_pass(result.score),
+            reason=result.reason,
+            feedback=result.feedback,
+        )
