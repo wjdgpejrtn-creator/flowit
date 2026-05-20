@@ -84,7 +84,6 @@ from common_schemas import (
 | | `dispatch_chord(tasks: list[dict], callback: str) -> str` | 병렬 그룹 + 콜백 (chord) |
 | | `dispatch_workflow(*, execution_id: UUID, workflow_id: UUID, user_id: UUID \| None, trigger_type: Literal["manual","scheduled","handoff","resume"], parameters: dict \| None = None) -> str` | **의미적** 메서드. application 레이어가 broker-specific task name/queue를 몰라야 함 — adapter가 직렬화 책임. 반환 = 새 `task_queue_id` |
 | | `revoke(task_id: str, *, terminate: bool = True) -> None` | 발행된 task 취소. Celery 어댑터는 `app.control.revoke(task_id, terminate=..., signal="SIGTERM")` 호출 |
-| `CredentialProviderPort` | `get_credential(credential_id: UUID, user_id: UUID) -> dict[str, str]` | REQ-002 자격증명 주입 (복호화된 credential 반환) |
 | `EventPublisherPort` | `publish_status(execution_id: UUID, status: ExecutionStatus) -> None` | SSE로 프론트엔드에 상태 전파 |
 | | `publish_node_complete(execution_id: UUID, node_result: NodeResult) -> None` | 노드 완료 이벤트 발행 |
 
@@ -93,7 +92,7 @@ from common_schemas import (
 | 유스케이스 | Input -> Output | 설명 |
 |-----------|----------------|------|
 | `ExecuteWorkflowUseCase` | `(workflow_id: UUID, context: ExecutionContext) -> ExecutionResult` | 전체 오케스트레이션: 워크플로우 조회 -> DAG 검증 -> 위상 정렬 -> 레벨별 실행 -> 결과 저장. `context.task_queue_id`는 첫 `ExecutionResult` 인스턴스 생성 시 그대로 전달 → 단일 transaction 영속화 |
-| `DispatchNodeUseCase` | `(node: NodeInstance, config: NodeConfig, inputs: dict, user_id: UUID, execution_id: UUID) -> NodeResult` | 단일 노드 실행: NodeContext 생성 + credential 주입 -> NodeExecutor 호출 -> 재시도 처리 -> 결과 반환 |
+| `DispatchNodeUseCase` | `(node: NodeInstance, config: NodeConfig, inputs: dict, user_id: UUID, execution_id: UUID) -> NodeResult` | 단일 노드 실행: NodeContext 생성 -> NodeExecutor 호출 -> 재시도 처리 -> 결과 반환. credential 주입은 `CatalogNodeExecutor`가 담당 (ADR-0018 Phase 2b — 평문 노출 구간을 `process()` 전후로 최소화) |
 | `HandleHandoffUseCase` | `(payload: HandoffPayload) -> ExecutionResult` | REQ-004 QA 통과 후 핸드오프 수신: WorkflowSchema 조회 -> ExecuteWorkflowUseCase 위임 |
 | `PauseResumeUseCase` | `(execution_id: UUID, action: Literal["pause", "resume", "cancel"], approval: Optional[dict]) -> None` | 일시 중지 / 재개 / 취소. `cancel` 시 `task_queue.revoke()` 호출 후 status=CANCELLED 마킹. `resume` 시 `task_queue.dispatch_workflow()` → 새 task_queue_id로 갱신해 옛 task에 대한 revoke를 방지 |
 | `EvaluateAndRefineUseCase` | `(execution_id: UUID, evaluation: EvaluationResult) -> Optional[ExecutionResult]` | QA score < 8 시 Self-Refine 재실행 (최대 3회) |
@@ -104,10 +103,9 @@ from common_schemas import (
 |-------------|----------|------|
 | `CeleryAdapter` | `TaskQueuePort` | Celery task 등록, dispatch, chord 실행 |
 | `CeleryWorkerTasks` | -- | `@app.task` 데코레이터 태스크 정의 (execute_workflow, execute_node) |
-| `CatalogNodeExecutor` | `NodeExecutorPort` | node_type → `BaseNode.process(input, context)` 직접 실행 (ADR-0018). 53종 단일 경로, sync worker ↔ async 브리지 |
+| `CatalogNodeExecutor` | `NodeExecutorPort` | node_type → `BaseNode.process(input, context)` 직접 실행 (ADR-0018). 53종 단일 경로, sync worker ↔ async 브리지. `credential_id` 있는 노드는 `process()` 직전 auth `CredentialInjectionService`로 토큰 해결 → `NodeContext.connection_token` 적재, 종료 후 `wipe()` (ADR-0018 Phase 2b) |
 | `PostgresWorkflowRepository` | `WorkflowRepositoryPort` | PostgreSQL에서 WorkflowSchema 조회 |
 | `PostgresExecutionRepository` | `ExecutionRepositoryPort` | 실행 결과/노드 상태 PostgreSQL 저장 |
-| `VaultCredentialProvider` | `CredentialProviderPort` | REQ-002 CredentialStore 연동 (AES-256 복호화) |
 | `SSEEventPublisher` | `EventPublisherPort` | Redis Pub/Sub -> SSE 스트림으로 상태 전파 |
 
 > **노드 실행 가능 범위 (ADR-0018 단계화)**: `CatalogNodeExecutor`는 53종을 동일 경로(`node_type → BaseNode.process()`)로 호출하나, `process()` 실구현 여부는 단계별로 다르다. **즉시 실행 가능 30종** = domain 28종 + external `http_request`·`pdf_generate`. **나머지 external 23종**(rest_api·graphql·webhook·email_send·slack_notify·slack_post_message·gmail_send·google_* 4·anthropic_chat·gemma_chat·bigquery/mysql/postgresql_query·linear_create_issue·data_mapping·json_transform·text_template·file_read/write/transform)은 `process()` 미구현 → 실행 시 `NotImplementedError`. ADR-0018 Phase 3에서 실구현 예정.
@@ -127,7 +125,7 @@ from common_schemas import (
 | `DAGScheduler` -> `TopologicalScheduler` 개명 | DAG는 자료구조명이지 알고리즘이 아님. Kahn's algorithm 기반이므로 TopologicalScheduler로 확정 | HIGH-002 교차분석 + 팀 투표 확정 |
 | LangGraph StateGraph + Celery 2-Tier 구조 | 워크플로우 실행(사용자 정의)은 Celery 태스크, AI Agent 내부 그래프(REQ-004)는 LangGraph. 역할 분리 확정 | HIGH-003 아키텍처 결정 |
 | 핸드오프 수신 인터페이스 추가 | REQ-004 QA 통과 후 HandoffPayload -> WorkflowRepository.get() -> 디스패치 흐름 확정 | HIGH-004 |
-| credential_id -> REQ-002 주입 | NodeInstance.credential_id를 통해 CredentialProviderPort가 런타임에 복호화된 자격증명 주입 | MEDIUM-001 |
+| credential_id -> REQ-002 주입 | `NodeInstance.credential_id`를 통해 `CatalogNodeExecutor`가 auth `CredentialInjectionService`로 토큰 해결 → `NodeContext.connection_token` 적재 → `process()` 종료 후 `wipe()`. credential 노드 실행 1회당 async engine을 fresh 생성·dispose(`asyncio.run()` 루프 스코프 — long-lived engine cross-loop 충돌 방지). connector 생성 비용이 노드당 누적되므로 credential 노드가 많은 워크플로우는 후속 최적화(worker-level engine + loop 재사용) 여지 있음 | MEDIUM-001 / ADR-0018 Phase 2b |
 | `ExecutionStatus` enum common_schemas 사용 | 자체 정의 삭제, common_schemas의 ExecutionStatus(RUNNING/PAUSED/COMPLETED/FAILED) 사용 | HIGH-001 SSOT |
 | WorkflowSchema.validate_graph() 활용 | 실행 전 재검증 시 WorkflowSchema 내장 validate_graph() 호출 + TopologicalScheduler.validate_dag() 보완 | MEDIUM-005 |
 
@@ -140,7 +138,7 @@ services/execution_engine
 ├── depends on ─────────────────────────────────────────────────────────────
 │   ├── packages/common_schemas   (WorkflowSchema, NodeInstance, Edge, ExecutionStatus, HandoffPayload, EvaluationResult, ErrorCode)
 │   ├── modules/nodes_graph       (REQ-003: GraphValidator 실행 전 재검증 + get_all_node_classes 노드 실행)
-│   ├── modules/auth              (REQ-002: CredentialStore -- 자격증명 복호화)
+│   ├── modules/auth              (REQ-002: CredentialInjectionService -- 노드 실행용 credential 해결 + AESGCMCipher)
 │   └── modules/storage           (REQ-001: WorkflowRepository, ExecutionRepository)
 │
 ├── depended by ────────────────────────────────────────────────────────────
@@ -198,7 +196,6 @@ services/execution_engine/
 │   │       ├── execution_repository_port.py
 │   │       ├── node_executor_port.py
 │   │       ├── task_queue_port.py
-│   │       ├── credential_provider_port.py
 │   │       └── event_publisher_port.py
 │   ├── application/
 │   │   ├── __init__.py
@@ -216,7 +213,6 @@ services/execution_engine/
 │   │   ├── catalog_node_executor.py     ← CatalogNodeExecutor
 │   │   ├── postgres_workflow_repo.py    ← PostgresWorkflowRepository
 │   │   ├── postgres_execution_repo.py   ← PostgresExecutionRepository
-│   │   ├── vault_credential_provider.py ← VaultCredentialProvider
 │   │   └── sse_event_publisher.py       ← SSEEventPublisher
 │   └── dependencies/
 │       ├── __init__.py
@@ -248,9 +244,9 @@ services/execution_engine/
 9.          -> TaskQueuePort.dispatch_chord(level.nodes)
 10.         -> For each node (병렬):
 11.             -> DispatchNodeUseCase.execute(node, config, inputs)
-12.                -> CredentialProviderPort.get_credential(credential_id)
-13.                -> NodeContext 생성 + NodeExecutorPort.execute(node, config, inputs, context)
-14.                   -> CatalogNodeExecutor: node_type → BaseNode.process(input, context)
+12.                -> NodeContext 생성 + NodeExecutorPort.execute(node, config, inputs, context)
+13.                   -> CatalogNodeExecutor: credential_id 있으면 CredentialInjectionService.inject() → NodeContext.connection_token 적재
+14.                   -> node_type → BaseNode.process(input, context) → 종료 후 평문 토큰 wipe()
 15.                -> RetryManager (실패 시 재시도 판정)
 16.             -> EventPublisherPort.publish_node_complete()
 17.         -> 레벨 완료 대기
