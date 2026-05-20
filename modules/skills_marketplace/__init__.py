@@ -10,8 +10,9 @@ from .domain.entities import (
     MarketplaceCompanySkill,
     MarketplacePersonalSkill,
     MarketplaceTeamSkill,
+    SkillDocument,
 )
-from .domain.ports import SkillRepository
+from .domain.ports import SkillDocumentStore, SkillRepository
 from .domain.services import PromotionService, SkillLifecycle
 from .domain.value_objects import SkillScope, SkillState
 
@@ -20,11 +21,13 @@ __all__ = [
     "MarketplaceTeamSkill",
     "MarketplaceCompanySkill",
     "ApprovalWorkflow",
+    "SkillDocument",
     "SkillScope",
     "SkillState",
     "PromotionService",
     "SkillLifecycle",
     "SkillRepository",
+    "SkillDocumentStore",
     "PromoteToTeamUseCase",
     "PromoteToCompanyUseCase",
     "SearchSkillsUseCase",

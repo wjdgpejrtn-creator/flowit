@@ -42,6 +42,7 @@
 | `MarketplaceTeamSkill` | + `team_id`, `author_id`, `promoted_from` (personal skill_id) | 팀 범위. PromoteToTeam으로 승격 |
 | `MarketplaceCompanySkill` | + `author_id`, `promoted_from` (team skill_id) | 전사 범위. PromoteToCompany로 승격 |
 | `ApprovalWorkflow` | `approval_id`, `skill_id`, `reviewer_id`, `status`, `comment`, `reviewed_at`, `created_at` | 게시 승인 워크플로우 (storage에서 이전) |
+| `SkillDocument` | `skill_id`, `name`, `description`, `instructions`, `scripts`, `templates` | 스킬 지침서 (SKILL.md 레퍼런스). ADR-0017 이중 저장 중 GCS 측. ai_agent가 아닌 skills_marketplace 소유 (2026-05-20 박아름 정정 — DDD 응집도) |
 
 ### 2.2 domain/value_objects
 
@@ -62,6 +63,7 @@
 | 포트(ABC) | 주요 메서드 | 구현 위치 |
 |-----------|-------------|----------|
 | `SkillRepository` | `save_personal/save_team/save_company`, `get_personal/get_team/get_company`, `search(query_embedding, scope, limit)` | `storage/repositories/` (ADR-0017 + 5/20 합의 — Port는 skills_marketplace, 구현은 storage) |
+| `SkillDocumentStore` | `save(skill_id, document)`, `load(skill_id)` | GCS adapter (위치 PR-2d/2e 결정). SkillDocument(markdown) GCS 저장. Port는 skills_marketplace 소유 (2026-05-20 정정) |
 
 ### 2.5 application/use_cases
 

@@ -18,11 +18,13 @@
 | `MarketplaceTeamSkill` | `domain/entities/marketplace_team_skill.py` | ✅ 완료 |
 | `MarketplaceCompanySkill` | `domain/entities/marketplace_company_skill.py` | ✅ 완료 |
 | `ApprovalWorkflow` | `domain/entities/approval_workflow.py` | ✅ 완료 (storage 이전) |
+| `SkillDocument` | `domain/entities/skill_document.py` | ✅ 완료 (ADR-0017 소유권 ai_agent → skills_marketplace 정정) |
 | `SkillScope` (Enum) | `domain/value_objects/skill_scope.py` | ✅ 완료 |
 | `SkillState` (Enum) | `domain/value_objects/skill_state.py` | ✅ 완료 (셀프 리뷰 GAP 정정 — services에서 분리) |
 | `PromotionService` | `domain/services/promotion_service.py` | ✅ 완료 (범위 승격) |
 | `SkillLifecycle` | `domain/services/skill_lifecycle.py` | ✅ 완료 (게시 전이, storage 이전) |
 | `SkillRepository` (ABC) | `domain/ports/skill_repository.py` | ✅ 완료 — 구현은 storage |
+| `SkillDocumentStore` (ABC) | `domain/ports/skill_document_store.py` | ✅ 완료 — GCS adapter 후속 (위치 PR-2d/2e 결정) |
 
 ### Application Layer
 

@@ -75,11 +75,18 @@ from skills_marketplace.application.use_cases import (
 |--------|------|
 | `ApprovalWorkflow` | 게시 승인 워크플로우 항목 (storage에서 이전). 리뷰어 승인 추적 |
 
-### domain/ports (인터페이스 — 구현체는 `modules/storage`)
+### domain/entities (지침서)
+
+| 클래스 | 설명 |
+|--------|------|
+| `SkillDocument` | 스킬 지침서 (SKILL.md 레퍼런스): `skill_id`, `name`, `description`(frontmatter) + `instructions`(markdown body) + `scripts`/`templates`(선택). ADR-0017 이중 저장 중 GCS 측 |
+
+### domain/ports (인터페이스 — 구현체는 `modules/storage` / 후속)
 
 | 포트 (ABC) | 메서드 | 구현 위치 |
 |------------|--------|----------|
 | `SkillRepository` | `async save_personal/save_team/save_company`, `async get_personal/get_team/get_company`, `async search(query_embedding, scope, limit)` | `storage/repositories/` (PR-2d 후속) |
+| `SkillDocumentStore` | `async save(skill_id, document)`, `async load(skill_id)` | GCS adapter (위치 PR-2d/2e 결정). SkillDocument(markdown) GCS 저장 |
 
 > **Port 소유권** (ADR-0017 + 5/20 박아름·조장 합의): Port 정의는 skills_marketplace(소비 모듈)가 소유, 구현체는 storage가 제공 (auth/nodes_graph 일반 패턴). CLAUDE.md L146 정정 반영.
 
