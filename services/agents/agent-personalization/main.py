@@ -9,9 +9,10 @@ Actions (payload["action"]):
 
 Deploy:
     PYTHONUTF8=1 modal deploy services/agents/agent-personalization/main.py
-"""
-from __future__ import annotations
 
+Health:
+    curl https://dhwang0803--agent-personalization-personalizationagent-fastapi.modal.run/v1/health
+"""
 import os
 from pathlib import Path
 
@@ -30,21 +31,26 @@ image = (
         "pgvector>=0.3",
         "cloud-sql-python-connector[asyncpg]>=1.12",
         "google-cloud-storage>=2.0",
-        "python-frontmatter>=1.0",
+        "google-cloud-secret-manager>=2.20",
+        "modal>=0.73",
         "protobuf>=4.25",
-        "fpdf2>=2.7",
         "PyJWT>=2.8",
+        "jsonschema>=4.0",
+        "jmespath>=1.0",
     )
-    .env({"PYTHONPATH": "/pkg/common_schemas:/pkg"})
+    .env({
+        "PYTHONPATH": "/pkg/common_schemas:/pkg:/repo",
+        "GOOGLE_CLOUD_PROJECT": "<GCP_PROJECT_ID>",
+    })
     .add_local_dir("packages/common_schemas/python", remote_path="/pkg/common_schemas", copy=True)
     .add_local_dir("modules/auth", remote_path="/pkg/auth", copy=True)
     .add_local_dir("modules/nodes_graph", remote_path="/pkg/nodes_graph", copy=True)
     .add_local_dir("modules/storage", remote_path="/pkg/storage", copy=True)
     .add_local_dir("modules/ai_agent", remote_path="/pkg/ai_agent", copy=True)
     .add_local_dir("modules/toolset", remote_path="/pkg/toolset", copy=True)
+    .add_local_dir("services/common", remote_path="/repo/services/common", copy=True)
 )
 
-app_secret = modal.Secret.from_name("agent-personalization-secret")
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
 
 app = modal.App(APP_NAME)
@@ -52,7 +58,7 @@ app = modal.App(APP_NAME)
 
 @app.cls(
     image=image,
-    secrets=[app_secret, gcp_secret],
+    secrets=[gcp_secret],
     timeout=600,
     scaledown_window=300,
 )
@@ -62,20 +68,33 @@ class PersonalizationAgent:
     @modal.enter()
     def boot(self) -> None:
         import tempfile
-
-        from google.cloud.sql.connector import Connector, IPTypes
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from services.common.gcp_secrets import load_secrets_to_env
 
-        # GCP SA JSON → 임시 파일로 풀어 ADC 설정
+        # GCP SA JSON → 임시 파일 → ADC 환경변수
         sa_payload = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
         sa_path = Path(tempfile.gettempdir()) / "gcp-sa.json"
         sa_path.write_text(sa_payload, encoding="utf-8")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
 
-        # Cloud SQL IAM 인증
-        self._connector = Connector()
+        # GCP Secret Manager → 환경변수 주입
+        load_secrets_to_env({
+            "cloud-sql-instance":  "CLOUD_SQL_INSTANCE",
+            "db-iam-user":         "DB_IAM_USER",
+            "db-name":             "DB_NAME",
+            "llm-base-url":        "LLM_BASE_URL",
+            "embedding-base-url":  "EMBEDDING_BASE_URL",
+            "gcs-personal-bucket": "GCS_PERSONAL_BUCKET",
+        })
+
+        # Connector를 getconn() 안에서 lazy 초기화 — ConnectorLoopError 방지
+        self._connector = None
 
         async def getconn():
+            import asyncio
+            from google.cloud.sql.connector import Connector, IPTypes
+            if self._connector is None:
+                self._connector = Connector(loop=asyncio.get_running_loop())
             return await self._connector.connect_async(
                 os.environ["CLOUD_SQL_INSTANCE"],
                 "asyncpg",
@@ -119,12 +138,11 @@ class PersonalizationAgent:
             asyncio.run(self._connector.close_async())
 
     @modal.asgi_app()
-    def fastapi_app(self) -> "FastAPI":
+    def fastapi(self) -> "FastAPI":
         from fastapi import Body, FastAPI, HTTPException
-
         from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 
-        api = FastAPI(title=APP_NAME)
+        api = FastAPI(title=APP_NAME, debug=os.getenv("DEBUG") == "1")
 
         @api.post("/v1/agent/route", response_model=AgentProtocolResponse)
         async def route(req: AgentProtocolRequest = Body(...)) -> AgentProtocolResponse:
@@ -160,11 +178,11 @@ class PersonalizationAgent:
                 from ai_agent.application.agents.personalization import RecallPersonalSkillsUseCase
 
                 skills = await RecallPersonalSkillsUseCase(
-                    self._memory_store, self._embedder
+                    self._memory_store, self._embedder,
+                    top_k=req.payload.get("limit", 5),
                 ).execute(
                     req.user_id,
                     query=req.payload["query"],
-                    limit=req.payload.get("limit", 5),
                 )
                 return AgentProtocolResponse(
                     frames=[],

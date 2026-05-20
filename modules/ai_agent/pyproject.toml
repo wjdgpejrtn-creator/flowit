@@ -7,7 +7,6 @@ dependencies = [
     "common_schemas",
     "pydantic>=2.0",
     "google-cloud-storage>=2.0",
-    "python-frontmatter>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -26,3 +25,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["ai_agent*"]
+
+[tool.pytest.ini_options]
+norecursedirs = ["tests/manual"]
