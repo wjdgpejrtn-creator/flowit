@@ -69,7 +69,7 @@ class GemmaChatNode(BaseNode[GemmaChatInput, GemmaChatOutput]):
 
         if response.status_code >= 400:
             raise ExecutionError(
-                f"llm-base /v1/generate 오류 {response.status_code}: {response.text[:500]}"
+                f"llm-base /v1/generate 오류 {response.status_code}: {response.text[:200]}"
             )
 
         data = response.json()

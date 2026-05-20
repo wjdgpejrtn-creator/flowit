@@ -82,7 +82,7 @@ class AnthropicChatNode(BaseNode[AnthropicChatInput, AnthropicChatOutput]):
 
         if response.status_code >= 400:
             raise ExecutionError(
-                f"Anthropic API 오류 {response.status_code}: {response.text[:500]}"
+                f"Anthropic API 오류 {response.status_code}: {response.text[:200]}"
             )
 
         data = response.json()
