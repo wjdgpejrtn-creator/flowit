@@ -127,6 +127,7 @@ def _make_extracted(
     risk_level: str = "Medium",
     required_connections: list[str] | None = None,
     service_type: str | None = "slack",
+    instructions: str = "## When to use\n고객 문의 접수 시.\n## Steps\n1. Slack 채널 확인\n2. 알림 발송",
 ) -> _ExtractedSkillNode:
     """LLM이 추출한 가상 SkillNode 1건."""
     return _ExtractedSkillNode(
@@ -146,6 +147,7 @@ def _make_extracted(
         },
         required_connections=required_connections or ["slack"],
         service_type=service_type,
+        instructions=instructions,
     )
 
 
@@ -395,6 +397,7 @@ async def test_embedder_failure_isolated_other_nodes_continue():
             outputs={"type": "object", "properties": {}},
             required_connections=["slack"],
             service_type="slack",
+            instructions="## When to use\n1시간 미응답 시.\n## Steps\n1. 매니저에게 에스컬레이션",
         ),
     ]))
     use_case = BuildFromSOPUseCase(repo, embedder, llm)
@@ -615,3 +618,80 @@ async def test_few_shot_example_categories_are_valid():
     for example_node in parsed["few_shot_example"]["expected_output"]["skill_nodes"]:
         assert example_node["category"] in allowed
         assert example_node["risk_level"] in {"Low", "Medium", "High", "Restricted"}
+
+
+# ----------------------------------------------------------------------
+# SkillDocument 생성 (ADR-0017 — LLM이 instructions(SKILL.md) 동시 생성)
+# ----------------------------------------------------------------------
+
+
+def test_extracted_skill_node_has_instructions_field():
+    """_ExtractedSkillNode에 instructions(SKILL.md markdown body) 필드 존재 (ADR-0017)."""
+    ext = _make_extracted(instructions="## When to use\n환불 요청 시.\n## Steps\n1. 검증")
+    assert ext.instructions == "## When to use\n환불 요청 시.\n## Steps\n1. 검증"
+
+
+@pytest.mark.asyncio
+async def test_prompt_requests_skill_document_instructions():
+    """프롬프트가 LLM에 instructions(markdown 지침서) 생성을 요청 (ADR-0017 이중 저장)."""
+    import json as _json
+
+    repo = _InMemoryRepo()
+    llm = _FakeLLM(structured_response=_ExtractedSkillNodeList(skill_nodes=[_make_extracted()]))
+    use_case = BuildFromSOPUseCase(repo, _FakeEmbedder(), llm)
+
+    _ = [f async for f in use_case.execute(uuid4(), _make_document())]
+
+    parsed = _json.loads(llm.received_prompts[0])
+    # output_schema의 SkillNode item에 instructions 필드 명시
+    item_schema = parsed["output_schema"]["properties"]["skill_nodes"]["items"]
+    assert "instructions" in item_schema["properties"]
+    assert "instructions" in item_schema["required"]
+    # instruction 텍스트에 지침서/SKILL.md 생성 지시 포함
+    instruction_text = parsed["instruction"]
+    assert "instructions" in instruction_text or "지침서" in instruction_text or "SKILL.md" in instruction_text
+
+
+@pytest.mark.asyncio
+async def test_result_payload_includes_skill_documents():
+    """ResultFrame.payload['skill_documents']에 upsert 성공 노드의 SkillDocument 데이터 (ADR-0017)."""
+    repo = _InMemoryRepo()
+    embedder = _FakeEmbedder()
+    llm = _FakeLLM(structured_response=_ExtractedSkillNodeList(skill_nodes=[
+        _make_extracted(node_type="sop_alert", instructions="## When to use\nA\n## Steps\n1. x"),
+        _make_extracted(node_type="sop_escalate", instructions="## When to use\nB"),
+    ]))
+    use_case = BuildFromSOPUseCase(repo, embedder, llm)
+
+    frames = [f async for f in use_case.execute(uuid4(), _make_document())]
+
+    result = frames[-1]
+    assert isinstance(result, ResultFrame)
+    docs = result.payload["skill_documents"]
+    assert len(docs) == 2
+    by_type = {d["node_type"]: d for d in docs}
+    # SkillDocument 데이터 = node_type 매핑 + name/description/instructions
+    assert by_type["sop_alert"]["instructions"] == "## When to use\nA\n## Steps\n1. x"
+    assert by_type["sop_escalate"]["instructions"] == "## When to use\nB"
+    assert "name" in by_type["sop_alert"]
+    assert "description" in by_type["sop_alert"]
+
+
+@pytest.mark.asyncio
+async def test_skill_documents_exclude_failed_nodes():
+    """upsert 실패 노드는 skill_documents에서 제외 (NodeDefinition 저장 실패 = 스킬 미성립)."""
+    repo = _FailingRepo(fail_on_node_type="sop_fail")
+    embedder = _FakeEmbedder()
+    llm = _FakeLLM(structured_response=_ExtractedSkillNodeList(skill_nodes=[
+        _make_extracted(node_type="sop_ok"),
+        _make_extracted(node_type="sop_fail"),
+    ]))
+    use_case = BuildFromSOPUseCase(repo, embedder, llm)
+
+    frames = [f async for f in use_case.execute(uuid4(), _make_document())]
+
+    result = frames[-1]
+    docs = result.payload["skill_documents"]
+    doc_types = {d["node_type"] for d in docs}
+    assert "sop_ok" in doc_types
+    assert "sop_fail" not in doc_types

@@ -92,6 +92,11 @@ class _ExtractedSkillNode(BaseModel):
 
     LLM 응답 검증용 — Pydantic이 자동 validate.
     NodeDefinition 변환 시 추가 메타(node_id/version/parameter_schema/embedding)는 use case가 채움.
+
+    `instructions`는 ADR-0017 이중 저장 중 SkillDocument(SKILL.md) 지침서 본문 —
+    LLM이 NodeDefinition 메타와 함께 동시 생성한다 (사용자 대화 중 옵션 제시용 사람이 읽는 형식).
+    skills_marketplace.SkillDocument를 직접 import하지 않고 dict 데이터로 반환 (조장 리뷰 #98
+    "ai_agent는 use case 경유" 결정 — 저장 wiring은 후속 GCS adapter + skills_marketplace use case).
     """
     model_config = ConfigDict(frozen=True)
 
@@ -104,6 +109,7 @@ class _ExtractedSkillNode(BaseModel):
     outputs: dict[str, Any] = Field(default_factory=dict)
     required_connections: list[str] = Field(default_factory=list)
     service_type: str | None = None
+    instructions: str = Field(min_length=1)  # SkillDocument(SKILL.md) markdown body — ADR-0017
 
 
 class _ExtractedSkillNodeList(BaseModel):
@@ -202,6 +208,7 @@ class BuildFromSOPUseCase:
         #   다른 노드 계속. ResultFrame.failed_node_types에 기록.
         # - uuid5 deterministic(같은 SOP·node_type) → 부분 실패 후 재실행 안전.
         upserted_node_types: list[str] = []
+        skill_documents: list[dict[str, str]] = []
         failed_node_types: list[dict] = []
 
         for ext in extracted.skill_nodes:
@@ -247,6 +254,15 @@ class BuildFromSOPUseCase:
                 continue
 
             upserted_node_types.append(node_def.node_type)
+            # ADR-0017: NodeDefinition upsert 성공분만 SkillDocument 데이터 수집.
+            # skills_marketplace.SkillDocument를 직접 import하지 않고 dict로 반환 (조장 리뷰 #98
+            # "ai_agent는 use case 경유" 결정). 실제 GCS 저장은 후속 SkillDocumentStore 구현 + use case wiring.
+            skill_documents.append({
+                "node_type": node_def.node_type,
+                "name": node_def.name,
+                "description": node_def.description,
+                "instructions": ext.instructions,
+            })
 
         # 5. 결과 프레임
         yield ResultFrame(
@@ -258,6 +274,7 @@ class BuildFromSOPUseCase:
                 "upserted_count": len(upserted_node_types),
                 "failed_count": len(failed_node_types),
                 "node_types": upserted_node_types,
+                "skill_documents": skill_documents,
                 "failed_node_types": failed_node_types,
                 "user_id": str(user_id),
             },
@@ -296,7 +313,8 @@ class BuildFromSOPUseCase:
             "당신은 사내 업무 자동화 SOP 문서를 분석해 워크플로우 노드(SkillNode)를 추출하는 어시스턴트입니다. "
             "SOP 문서의 단계별 작업 중 외부 시스템 호출/조건 분기/데이터 변환이 들어가는 단위를 "
             "SkillNode로 정의해주세요.\n\n"
-            "출력은 **반드시 JSON** 형식이며, XML/Markdown 사용 금지입니다. "
+            "출력 전체는 **반드시 JSON** 형식입니다 (XML 금지). "
+            "단 instructions 필드의 *값*은 사람이 읽는 markdown 문자열입니다.\n"
             "각 SkillNode 필드:\n"
             "  - node_type: snake_case 식별자 (e.g. 'send_approval_email')\n"
             "  - name: 사람이 읽을 수 있는 한글 이름\n"
@@ -306,7 +324,9 @@ class BuildFromSOPUseCase:
             "  - inputs: JSON Schema (type=object + properties)\n"
             "  - outputs: JSON Schema\n"
             "  - required_connections: list[str] (e.g. ['slack', 'google'])\n"
-            "  - service_type: str | null (e.g. 'slack', 'google_workspace')\n\n"
+            "  - service_type: str | null (e.g. 'slack', 'google_workspace')\n"
+            "  - instructions: 이 스킬의 SKILL.md 지침서 본문 (markdown 문자열). 사용자가 대화 중 읽고 "
+            "선택할 수 있도록 '## When to use', '## Steps', '## Inputs/Outputs' 섹션을 포함한 설명 (ADR-0017)\n\n"
             "사용자의 personal_memory와 작업 패턴을 참고해 도메인 맥락 반영. "
             "추출 결과가 없으면 빈 배열 반환."
         )
@@ -337,6 +357,13 @@ class BuildFromSOPUseCase:
                         },
                         "required_connections": ["slack"],
                         "service_type": "slack",
+                        "instructions": (
+                            "## When to use\n환불 요청이 접수되어 담당 매니저에게 즉시 알려야 할 때.\n"
+                            "## Steps\n1. 환불 요청 정보(refund_id, amount) 확인\n"
+                            "2. 지정 Slack 채널에 알림 메시지 발송\n"
+                            "## Inputs/Outputs\n- 입력: refund_id, amount, channel\n"
+                            "- 출력: message_ts (메시지 타임스탬프)"
+                        ),
                     },
                     {
                         "node_type": "refund_amount_threshold_check",
@@ -360,6 +387,12 @@ class BuildFromSOPUseCase:
                         },
                         "required_connections": [],
                         "service_type": None,
+                        "instructions": (
+                            "## When to use\n환불 금액에 따라 자동 승인 가능 여부를 분기해야 할 때.\n"
+                            "## Steps\n1. 환불 금액과 임계값(기본 5만원) 비교\n"
+                            "2. 초과 시 승인 대기, 이하면 자동 진행 플래그 설정\n"
+                            "## Inputs/Outputs\n- 입력: amount, threshold\n- 출력: requires_approval (boolean)"
+                        ),
                     },
                 ],
             },
@@ -383,10 +416,11 @@ class BuildFromSOPUseCase:
                             "outputs": {"type": "object"},
                             "required_connections": {"type": "array", "items": {"type": "string"}},
                             "service_type": {"type": ["string", "null"]},
+                            "instructions": {"type": "string"},
                         },
                         "required": [
                             "node_type", "name", "description", "category",
-                            "risk_level", "inputs", "outputs", "required_connections",
+                            "risk_level", "inputs", "outputs", "required_connections", "instructions",
                         ],
                     },
                 },
