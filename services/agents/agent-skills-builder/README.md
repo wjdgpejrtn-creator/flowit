@@ -13,34 +13,26 @@
 - [ ] `PgNodeDefinitionRepository` 머지 완료 (REQ-001/REQ-003 — 이미 development에 있음)
 - [ ] Windows: `PYTHONUTF8=1` 환경 변수 (modal CLI cp949 이슈)
 
-## 1. Modal Secret 등록 (1회 또는 토큰 갱신 시)
+## 1. Modal Secret 등록 (5/19 GCP Secret Manager 마이그레이션 후)
 
-본 app은 단일 시크릿 `agent-skills-builder-secret` 1개를 사용한다. 다음 4개 환경 변수를 묶어서 등록:
+PR #80/#81(2026-05-19) 마이그레이션으로 **Modal Secret은 `cloudsql-iam-sa` 1개만 마운트**한다. 나머지 환경 변수(`LLM_BASE_URL` / `EMBEDDING_BASE_URL` / `CLOUD_SQL_INSTANCE` / `DB_IAM_USER` / `DB_NAME`)는 `boot()`에서 `services.common.gcp_secrets.load_secrets_to_env`로 GCP Secret Manager에서 런타임 pull.
 
-| key | 출처 |
-|-----|------|
-| `MODAL_TOKEN_ID` | `.env` (Google Drive) |
-| `MODAL_TOKEN_SECRET` | `.env` |
-| `LLM_BASE_URL` | llm-base 배포 후 출력되는 ASGI URL (`https://<workspace>--llm-base-llmbase-fastapi.modal.run`) |
-| `EMBEDDING_BASE_URL` | 보통 `LLM_BASE_URL`과 동일 (llm-base는 LLM + Embed colocation) |
-| `DATABASE_URL` | PostgreSQL DSN (`postgresql+asyncpg://user:pass@host:5432/db`) |
+| Modal Secret | 키 | 등록자 |
+|--------------|----|--------|
+| `cloudsql-iam-sa` | `GOOGLE_APPLICATION_CREDENTIALS_JSON` (공용 GCP SA JSON) | 조장 1회 등록 |
 
-`.env` 일괄 등록:
+sub-agent 담당자가 할 일 = **GCP IAM 권한 확인 1개**:
 
-```bash
-python scripts/sync_modal_secrets.py agent-skills-builder-secret
+```powershell
+gcloud secrets get-iam-policy llm-base-url --project=<GCP_PROJECT_ID> `
+  --format="json(bindings[].members)"
 ```
 
-또는 Modal CLI 직접:
+출력에 본인 `user:<email>` 포함되어야 함. 없으면 조장에게 IAM 추가 요청 — `infra/terraform/envs/staging/variables.tf`의 `agent_secret_accessors` 리스트 추가 + `terraform apply`.
 
-```bash
-modal secret create agent-skills-builder-secret \
-  MODAL_TOKEN_ID=... \
-  MODAL_TOKEN_SECRET=... \
-  LLM_BASE_URL=... \
-  EMBEDDING_BASE_URL=... \
-  DATABASE_URL=...
-```
+신규 secret이 필요하면 `agent_secret_names`에 추가 + `terraform apply` + `gcloud secrets versions add` + `main.py boot()`의 `load_secrets_to_env({...})` 매핑 추가.
+
+상세 가이드: [`docs/guides/sub_agent_modal_deploy.md`](../../../docs/guides/sub_agent_modal_deploy.md) §3.1 (image 4종) + §3.2 (boot 패턴).
 
 ## 2. Modal Deploy
 
@@ -107,10 +99,10 @@ class AgentProtocolResponse:
 ### 3.4 Health endpoint — `GET /v1/health`
 
 ```json
-{"status": "ok", "app": "agent-skills-builder"}
+{"status": "ok", "app": "agent-skills-builder", "db": "iam-connected"}
 ```
 
-DB(`SELECT 1`) 또는 embedder 어댑터 초기화 실패 시 503 + degrade detail 반환.
+DB(`SELECT 1`, Cloud SQL IAM 인증) 또는 embedder 어댑터 초기화 실패 시 503 + degrade detail 반환 (errors 객체에 `db` / `embedder` 키별 사유).
 
 ## 4. 흐름 요약
 
@@ -147,15 +139,17 @@ Orchestrator 수신 (async for response in client.send(...))
 # tests/integration/test_agent_skills_builder.py — SSE 직렬화 + source_type 분기 검증
 ```
 
-## 7. 알려진 의존성 / 차단 사항
+## 7. 알려진 의존성 / 차단 사항 (5/20 시점 갱신)
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `scripts/setup_modal_token.py` | ❌ repo 미 push | 조장 5/12 카톡 안내, 별도 push 대기 |
-| dhwang0803 Modal workspace 권한 | ⏳ 박아름 권한 확인 필요 | 조장에게 요청 |
-| Modal Secret `agent-skills-builder-secret` | ⏳ 미등록 | `.env` 수령 후 sync 스크립트 실행 |
-| llm-base Modal app | ✅ 배포 완료 (2026-05-12, 신정혜) | `LLM_BASE_URL` 환경변수로 주입 |
+| `scripts/setup_modal_token.py` | ✅ 머지 완료 | 박아름 1회 실행으로 dhwang0803 인증 완료 |
+| dhwang0803 Modal workspace 권한 | ✅ 확인 완료 | |
+| Modal Secret `cloudsql-iam-sa` | ✅ 등록 완료 (조장 1회) | 5/19 PR #80/#81 마이그레이션 후 단일 secret |
+| GCP `secretmanager.secretAccessor` IAM (박아름) | ✅ 부여 완료 | Terraform `agent_secret_accessors` 등재 |
+| llm-base Modal app | ✅ 배포 완료 (2026-05-12, 신정혜) | `LLM_BASE_URL` GCP Secret Manager에 등록됨 |
 | `PgNodeDefinitionRepository` | ✅ 머지 완료 | `modules/storage/repositories/pg_node_definition_repository.py` |
+| FastAPI Body(...) 정석 패턴 | ✅ 마이그레이션 완료 (PR #93, 5/20) | route(req: AgentProtocolRequest = Body(...)) — 우회 패턴 폐기 |
 
 ## 8. 관련 문서
 

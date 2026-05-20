@@ -47,8 +47,6 @@ sub_agent_modal_deploy.md §3.2 + §5 참조).
 - ModalEmbeddingAdapter는 httpx 호출이라 즉시 동작.
 - PgNodeDefinitionRepository는 황대원 5/15 PR에 머지된 구현체 그대로 사용.
 """
-from __future__ import annotations
-
 import json
 import os
 from typing import Any, AsyncIterator, Literal
@@ -244,7 +242,7 @@ class SkillsBuilderAgent:
     def fastapi(self):
         import asyncio
 
-        from fastapi import FastAPI, HTTPException
+        from fastapi import Body, FastAPI, HTTPException
         from fastapi.responses import StreamingResponse
 
         from common_schemas.agent_protocol import AgentProtocolRequest
@@ -289,21 +287,14 @@ class SkillsBuilderAgent:
             return {"status": "ok", "app": APP_NAME, "db": "iam-connected"}
 
         @api.post("/v1/agent/route")
-        async def route(raw: dict[str, Any]) -> StreamingResponse:
+        async def route(req: AgentProtocolRequest = Body(...)) -> StreamingResponse:
             """AgentProtocolRequest → source_type 분기 → SSE 스트리밍.
 
             HTTPSubAgentClient.send()와 짝을 이루는 endpoint. 응답은 SSE 텍스트
             스트림 ("data: <json>\\n\\n"). 각 SSEFrame을 AgentProtocolResponse로
             래핑해서 직렬화. DB session은 _stream 내부에서 instance-scoped
             self._session_factory()로 생성.
-
-            note: route 시그니처를 `dict[str, Any]`로 받고 명시적 `model_validate`로
-            변환하는 이유 — `from __future__ import annotations` + nested
-            ForwardRef(AgentState/MemoryEntry)가 fastapi의 Pydantic type adapter
-            생성 시 PydanticUserError("not fully defined") 발생 (model_rebuild로도
-            해결 안 됨, route 함수 정의가 먼저 일어남). 안전한 우회.
             """
-            req = AgentProtocolRequest.model_validate(raw)
             return StreamingResponse(
                 self._stream(req),
                 media_type="text/event-stream",
