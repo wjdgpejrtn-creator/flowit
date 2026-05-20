@@ -1,4 +1,4 @@
-# Sprint 3 Week 2 — 박아름 agent-skills-builder FastAPI 정석 패턴 마이그레이션 Status (2026-05-20)
+# Sprint 3 Week 2 — 2026-05-20 (수) 박아름 Skills Builder 진척 보고
 
 ## 작업 요약
 
