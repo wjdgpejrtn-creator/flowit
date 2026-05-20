@@ -14,6 +14,7 @@ from uuid import uuid4
 import pytest
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
 from nodes_graph.adapters.catalog.external.anthropic_chat import (
     AnthropicChatInput,
@@ -129,9 +130,11 @@ def test_anthropic_chat_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_anthropic_chat_process_raises_not_implemented():
+async def test_anthropic_chat_process_requires_credential():
+    """anthropic_chat은 ADR-0018 Phase 3c 실구현 — credential(API key) 없이 ValidationError.
+    실행 경로 전체는 test_llm_linear_nodes.py 참조."""
     node = AnthropicChatNode()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValidationError, match="credential"):
         await node.process(AnthropicChatInput(
             model="claude-opus-4-7",
             messages=[{"role": "user", "content": "hi"}],
@@ -174,9 +177,11 @@ def test_linear_create_issue_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_linear_create_issue_process_raises_not_implemented():
+async def test_linear_create_issue_process_requires_credential():
+    """linear_create_issue는 ADR-0018 Phase 3c 실구현 — credential(API key) 없이 ValidationError.
+    실행 경로 전체는 test_llm_linear_nodes.py 참조."""
     node = LinearCreateIssueNode()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValidationError, match="credential"):
         await node.process(LinearCreateIssueInput(team_id="t1", title="task"), NODE_CTX)
 
 

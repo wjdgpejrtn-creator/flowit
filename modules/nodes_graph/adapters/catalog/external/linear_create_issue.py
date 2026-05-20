@@ -1,18 +1,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 from uuid import uuid5
 
+import httpx
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ExecutionError, ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "linear_create_issue"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+_LINEAR_API_URL = "https://api.linear.app/graphql"
+_TIMEOUT_SECONDS = 30
+_ISSUE_CREATE_MUTATION = """
+mutation IssueCreate($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    success
+    issue { id identifier url title state { name } createdAt }
+  }
+}
+""".strip()
 
 
 @dataclass
@@ -50,9 +63,51 @@ class LinearCreateIssueNode(BaseNode[LinearCreateIssueInput, LinearCreateIssueOu
     output_schema = LinearCreateIssueOutput
 
     async def process(self, input: LinearCreateIssueInput, context: NodeContext) -> LinearCreateIssueOutput:
-        raise NotImplementedError(
-            "Linear API 호출은 REQ-005 toolset connector를 통해 처리. "
-            "API key 주입은 REQ-002 CredentialInjectionService 담당."
+        # connection_token = Linear API key (Authorization 헤더에 그대로).
+        if not context.connection_token:
+            raise ValidationError("linear_create_issue는 credential(Linear API key)이 필요하다")
+
+        issue_input: dict[str, Any] = {
+            "teamId": input.team_id,
+            "title": input.title,
+            "description": input.description,
+            "priority": input.priority,
+        }
+        if input.assignee_id:
+            issue_input["assigneeId"] = input.assignee_id
+        if input.label_ids:
+            issue_input["labelIds"] = input.label_ids
+        if input.project_id:
+            issue_input["projectId"] = input.project_id
+        if input.state_id:
+            issue_input["stateId"] = input.state_id
+        if input.due_date:
+            issue_input["dueDate"] = input.due_date
+
+        payload = {"query": _ISSUE_CREATE_MUTATION, "variables": {"input": issue_input}}
+        headers = {
+            "Authorization": context.connection_token,
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            response = await client.post(_LINEAR_API_URL, json=payload, headers=headers)
+
+        data = response.json()
+        if data.get("errors"):
+            raise ExecutionError(f"Linear GraphQL 오류: {data['errors']}")
+        result = (data.get("data") or {}).get("issueCreate") or {}
+        if not result.get("success") or not result.get("issue"):
+            raise ExecutionError(f"Linear issueCreate 실패: {data}")
+
+        issue = result["issue"]
+        return LinearCreateIssueOutput(
+            issue_id=issue["id"],
+            identifier=issue["identifier"],
+            url=issue["url"],
+            title=issue["title"],
+            state=(issue.get("state") or {}).get("name", ""),
+            created_at=issue["createdAt"],
         )
 
 

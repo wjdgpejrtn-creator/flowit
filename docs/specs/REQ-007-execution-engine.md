@@ -108,7 +108,7 @@ from common_schemas import (
 | `PostgresExecutionRepository` | `ExecutionRepositoryPort` | 실행 결과/노드 상태 PostgreSQL 저장 |
 | `SSEEventPublisher` | `EventPublisherPort` | Redis Pub/Sub -> SSE 스트림으로 상태 전파 |
 
-> **노드 실행 가능 범위 (ADR-0018 단계화)**: `CatalogNodeExecutor`는 53종을 동일 경로(`node_type → BaseNode.process()`)로 호출하나, `process()` 실구현 여부는 단계별로 다르다. **실행 가능 39종** = domain 28종 + external 11종(`http_request`·`pdf_generate` + Phase 3a transform/api 6종 + Phase 3b messaging 3종 `email_send`·`slack_notify`·`slack_post_message`). **나머지 external 14종**(gmail_send·google_* 4·anthropic_chat·gemma_chat·bigquery/mysql/postgresql_query·linear_create_issue·file_read/write/transform)은 `process()` 미구현 → 실행 시 `NotImplementedError`. ADR-0018 Phase 3 후속 배치에서 실구현 예정.
+> **노드 실행 가능 범위 (ADR-0018 단계화)**: `CatalogNodeExecutor`는 53종을 동일 경로(`node_type → BaseNode.process()`)로 호출하나, `process()` 실구현 여부는 단계별로 다르다. **실행 가능 42종** = domain 28종 + external 14종(`http_request`·`pdf_generate` + Phase 3a transform/api 6종 + Phase 3b messaging 3종 + Phase 3c LLM/Linear 3종 `anthropic_chat`·`gemma_chat`·`linear_create_issue`). **나머지 external 11종**(gmail_send·google_* 4·bigquery/mysql/postgresql_query·file_read/write/transform)은 `process()` 미구현 → 실행 시 `NotImplementedError`. ADR-0018 Phase 3 후속 배치에서 실구현 예정.
 
 #### dependencies/ (DI 컨테이너)
 
