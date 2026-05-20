@@ -154,7 +154,7 @@ class LangGraphOrchestrator:
 
     # 1. compress_node — turn_count >= 25 시 메시지 압축
     async def _compress_node(self, state: _State) -> dict:
-        TurnLimit.validate(state["turn_count"])
+        TurnLimit().validate(state["turn_count"])
         # 압축: 마지막 메시지만 보존
         compressed = state["messages"][-1:]
         return {"messages": compressed, "turn_count": 1}
