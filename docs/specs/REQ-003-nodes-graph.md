@@ -364,8 +364,8 @@ class CatalogRegistry:
 | `rest_api`·`graphql`·`webhook` | Bearer 토큰 (선택 — 있으면 `Authorization: Bearer`) | `api_key` |
 | `anthropic_chat` | Anthropic API key → `x-api-key` 헤더 | `api_key` |
 | `linear_create_issue` | Linear API key → `Authorization` 헤더 (Bearer 접두사 없음) | `api_key` |
-| `postgresql_query` | PostgreSQL 연결 DSN (`postgresql://user:pass@host:port/db`) | `password` |
-| `mysql_query` | MySQL 연결 URL (`mysql://user:pass@host:port/db`) | `password` |
+| `postgresql_query` | PostgreSQL 연결 DSN (`postgresql://user:pass@host:port/db`) | `custom` (단일 비밀번호가 아닌 복합 연결 문자열) |
+| `mysql_query` | MySQL 연결 URL (`mysql://user:pass@host:port/db`) | `custom` (단일 비밀번호가 아닌 복합 연결 문자열) |
 | `gemma_chat` | (불필요 — 시스템 내장 LLM, `LLM_BASE_URL` 기반 호출) | — |
 | `file_read`·`file_write`·`file_transform` | (불필요 — `NODE_FILE_BASE_DIR` 샌드박스 로컬 FS) | — |
 
