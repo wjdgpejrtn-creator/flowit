@@ -4,9 +4,10 @@
 
 햄햄(이가원) PR #85 발견 본질 채택. `agent-skills-builder/main.py`가 사용하던 우회 패턴(`route(raw: dict[str, Any])` + 명시 `model_validate`)을 FastAPI 정석 `route(req: AgentProtocolRequest = Body(...))` 시그니처로 정정. 박아름 4 sub-agent 통일 흐름의 시작.
 
-- **PR**: [#91 refactor(agent-skills-builder): FastAPI Body(...) 정석 패턴 — anti-pattern 제거](https://github.com/billionaireahreum/Workflow_Automation/pull/91)
-- **branch**: `feature/req-004-skills-builder-fastapi-standard` → base=`development`
-- **commit**: `36f3bd1`
+- **PR**: [#93 refactor(agent-skills-builder): FastAPI Body(...) 정석 패턴 — anti-pattern 제거](https://github.com/billionaireahreum/Workflow_Automation/pull/93)
+- **branch**: `feature/req-004-skills-builder` → base=`development` ([[feedback_branch_strategy]] 룰 정합)
+- **commits**: `a9b9263` (refactor) + `bda0bf4` (report 신규) + `65386ef` (파일명 정정) + `704d59e` (제목 정정) + `8db2698` (README 일괄 정정)
+- **note**: PR #91(close) → PR #93 재생성 — sub-branch 룰 위반 정정 사이클
 
 ## 본질
 
@@ -85,7 +86,7 @@
 ```
 5/20 09:00 햄햄 카톡 — sub-agent 4개 패턴 통일 제안 (PR #85 발견)
 5/20 점심대 박아름 점검 — 우회 패턴 = anti-pattern 인정, 햄햄 본질 발견 확인
-5/20 PR #91 박아름 정석 마이그레이션 + 셀프 리뷰 ← 본 보고서
+5/20 PR #93 박아름 정석 마이그레이션 + 셀프 리뷰 ← 본 보고서 (PR #91 close 후 재생성)
 5/20 09:39 신정혜 — composer + orchestrator 정석 교체 완료 (별도 PR 예상)
 [대기] PR #85 머지 시 personalization 정석 통일
 [대기] 신정혜 별도 PR 머지 시 4 sub-agent 모두 정석
