@@ -345,8 +345,8 @@ class CatalogRegistry:
 > 5/15 햄햄·박아름 합의 + 5/19 조장 안 반영. toolset 14종(http_request_tool/conditional/loop 중복 3종 제외)
 > 모두 `adapters/catalog/external/`에 개별 BaseNode 파일로 등록. 실행 흐름은 ADR-0018에 따라
 > `services/execution_engine.CatalogNodeExecutor`가 `node_type`으로 `BaseNode.process()`를 직접
-> 호출한다 (`ToolsetExecutor` 경로 폐기). `process()` 실구현은 단계화 — Phase 3a까지 external 8종
-> 완료(`http_request`·`pdf_generate` + transform 3 + api 3), 잔여 17종은 `NotImplementedError` 스텁.
+> 호출한다 (`ToolsetExecutor` 경로 폐기). `process()` 실구현은 단계화 — Phase 3b까지 external 11종
+> 완료(`http_request`·`pdf_generate` + transform/api 6종 + messaging 3종), 잔여 14종은 `NotImplementedError` 스텁.
 
 #### ports/embedder_port.py — `EmbedderPort` (ABC)
 
@@ -477,4 +477,4 @@ modules/nodes_graph/
 | `utility` | 2 | (박아름 1주차엔 utility 분류 없음) | + `file_read`, `file_write` |
 | **합계** | **53** | **42** (28 domain + 14 external, gemma_chat 포함) | **+11** (toolset 연동) |
 
-각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. 신규 11종은 `modules/nodes_graph/adapters/catalog/external/` 아래 개별 파일로 등록된다. `BaseNode.process()` 실행은 ADR-0018에 따라 `services/execution_engine.CatalogNodeExecutor`가 `node_type`으로 직접 호출한다 (`ToolsetExecutor`·`toolset.execute_tool()` 경로 폐기). `process()` 실구현은 단계화 — Phase 3a까지 external 8종 완료(`http_request`·`pdf_generate` + transform 3 + api 3), 잔여 17종은 후속 배치에서 구현.
+각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. 신규 11종은 `modules/nodes_graph/adapters/catalog/external/` 아래 개별 파일로 등록된다. `BaseNode.process()` 실행은 ADR-0018에 따라 `services/execution_engine.CatalogNodeExecutor`가 `node_type`으로 직접 호출한다 (`ToolsetExecutor`·`toolset.execute_tool()` 경로 폐기). `process()` 실구현은 단계화 — Phase 3b까지 external 11종 완료(`http_request`·`pdf_generate` + transform/api 6종 + messaging 3종), 잔여 14종은 후속 배치에서 구현.

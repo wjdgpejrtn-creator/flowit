@@ -64,7 +64,7 @@ from nodes_graph.application.use_cases import (
 
 | 어댑터 | 설명 |
 |--------|------|
-| `catalog/external/*` | 25종 NodeDefinition + BaseNode 파일. `process()` 실구현은 ADR-0018 단계화 — `http_request`·`pdf_generate` + Phase 3a 6종(`json_transform`·`data_mapping`·`text_template`·`rest_api`·`graphql`·`webhook`) 완료, 나머지 17종은 `NotImplementedError` 스텁 |
+| `catalog/external/*` | 25종 NodeDefinition + BaseNode 파일. `process()` 실구현은 ADR-0018 단계화 — 11종 완료(`http_request`·`pdf_generate` + Phase 3a transform/api 6종 + Phase 3b messaging 3종 `email_send`·`slack_notify`·`slack_post_message`), 나머지 14종은 `NotImplementedError` 스텁 |
 | `catalog/registry.py` | Plugin discovery 진입점 (`discover_and_register`) |
 
 > **`ToolToNodeWrapper` 제거 — 2026-05-19 박아름 toolset 정리 PR**: 5/15 햄햄·박아름 합의 + 5/19 조장 안. toolset 14종 중 중복 3종(`http_request_tool`/`conditional`/`loop`)은 양쪽 제거, 나머지 11종은 `external/`에 개별 파일로 직접 등록.
