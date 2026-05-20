@@ -144,6 +144,8 @@ class LangGraphOrchestrator:
         async for event in self._graph.astream(initial, stream_mode="updates"):
             for node_name, updates in event.items():
                 yield AgentNodeFrame(agent_node_name=node_name)
+                if not isinstance(updates, dict):
+                    continue
                 for frame in updates.get("collected_frames", []):
                     yield frame
                 if updates.get("error"):
