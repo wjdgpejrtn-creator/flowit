@@ -105,15 +105,9 @@ class TestCatalogNodeExecutorErrors:
                 context=_ctx(),
             )
 
-    def test_external_stub_raises_not_implemented(self, executor):
-        """미구현 external 노드(ADR-0018 Phase 3 후속)는 NotImplementedError를 그대로 전파."""
-        with pytest.raises(NotImplementedError):
-            executor.execute(
-                node=_node(),
-                config=_config("bigquery_query"),
-                inputs={"project_id": "p", "query": "SELECT 1"},
-                context=_ctx(),
-            )
+    # ADR-0018 Phase 3d로 external 53종 전부 process() 실구현 완료 — NotImplementedError
+    # 스텁 노드가 더 이상 없다. process() 예외 전파는 test_wipes_credential_when_process_raises
+    # 가 커버한다.
 
 
 # --- credential 주입 (Phase 2b) -------------------------------------------------

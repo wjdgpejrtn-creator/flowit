@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
 from nodes_graph.adapters.catalog.external.google_docs_write import (
     GoogleDocsWriteInput,
@@ -53,9 +54,11 @@ def test_drive_read_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_drive_read_process_raises_not_implemented():
+async def test_drive_read_process_requires_credential():
+    """ADR-0018 Phase 3d 실구현 — credential 없이 ValidationError.
+    실행 경로 전체는 test_db_file_google_nodes.py 참조."""
     node = GoogleDriveReadNode()
-    with pytest.raises(NotImplementedError, match="toolset connector"):
+    with pytest.raises(ValidationError, match="credential"):
         await node.process(GoogleDriveReadInput(file_id="abc"), NODE_CTX)
 
 
@@ -74,10 +77,13 @@ def test_sheets_read_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_sheets_read_process_raises_not_implemented():
+async def test_sheets_read_process_requires_credential():
+    """ADR-0018 Phase 3d 실구현 — credential 없이 ValidationError."""
     node = GoogleSheetsReadNode()
-    with pytest.raises(NotImplementedError, match="toolset connector"):
-        await node.process(GoogleSheetsReadInput(spreadsheet_id="ssid", range_a1="Sheet1!A1:B2"), NODE_CTX)
+    with pytest.raises(ValidationError, match="credential"):
+        await node.process(
+            GoogleSheetsReadInput(spreadsheet_id="ssid", range_a1="Sheet1!A1:B2"), NODE_CTX
+        )
 
 
 # ----------------------------------------------------------------------
@@ -95,9 +101,10 @@ def test_docs_write_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_docs_write_process_raises_not_implemented():
+async def test_docs_write_process_requires_credential():
+    """ADR-0018 Phase 3d 실구현 — credential 없이 ValidationError."""
     node = GoogleDocsWriteNode()
-    with pytest.raises(NotImplementedError, match="toolset connector"):
+    with pytest.raises(ValidationError, match="credential"):
         await node.process(GoogleDocsWriteInput(title="t", content="c"), NODE_CTX)
 
 

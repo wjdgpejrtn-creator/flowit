@@ -118,9 +118,8 @@ def get_all_node_classes() -> dict[str, type[BaseNode]]:
     """카탈로그 전체 53종 node_type → BaseNode 클래스.
 
     execution_engine.CatalogNodeExecutor가 node_type으로 노드를 조회·실행한다 (ADR-0018).
-    domain 28종 + external 14종(http_request·pdf_generate + Phase 3a transform/api 6종
-    + Phase 3b messaging 3종 + Phase 3c LLM/Linear 3종) = 42종 실행 가능.
-    나머지 external 11종은 process() 미구현 → 실행 시 NotImplementedError (ADR-0018 Phase 3 후속).
+    Phase 3d 완료로 domain 28종 + external 25종 = 53종 전부 process() 실구현 —
+    NotImplementedError 스텁 없음.
     """
     return {
         **get_domain_node_classes(),
