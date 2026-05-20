@@ -110,6 +110,8 @@ from common_schemas import (
 | `VaultCredentialProvider` | `CredentialProviderPort` | REQ-002 CredentialStore 연동 (AES-256 복호화) |
 | `SSEEventPublisher` | `EventPublisherPort` | Redis Pub/Sub -> SSE 스트림으로 상태 전파 |
 
+> **노드 실행 가능 범위 (ADR-0018 단계화)**: `CatalogNodeExecutor`는 53종을 동일 경로(`node_type → BaseNode.process()`)로 호출하나, `process()` 실구현 여부는 단계별로 다르다. **즉시 실행 가능 30종** = domain 28종 + external `http_request`·`pdf_generate`. **나머지 external 23종**(rest_api·graphql·webhook·email_send·slack_notify·slack_post_message·gmail_send·google_* 4·anthropic_chat·gemma_chat·bigquery/mysql/postgresql_query·linear_create_issue·data_mapping·json_transform·text_template·file_read/write/transform)은 `process()` 미구현 → 실행 시 `NotImplementedError`. ADR-0018 Phase 3에서 실구현 예정.
+
 #### dependencies/ (DI 컨테이너)
 
 | 클래스 | 설명 |
