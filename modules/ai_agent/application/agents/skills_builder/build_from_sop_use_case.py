@@ -258,9 +258,9 @@ class BuildFromSOPUseCase:
             # skills_marketplace.SkillDocument를 직접 import하지 않고 dict로 반환 (조장 리뷰 #98
             # "ai_agent는 use case 경유" 결정). 실제 GCS 저장은 후속 SkillDocumentStore 구현 + use case wiring.
             skill_documents.append({
-                "node_type": ext.node_type,
-                "name": ext.name,
-                "description": ext.description,
+                "node_type": node_def.node_type,
+                "name": node_def.name,
+                "description": node_def.description,
                 "instructions": ext.instructions,
             })
 

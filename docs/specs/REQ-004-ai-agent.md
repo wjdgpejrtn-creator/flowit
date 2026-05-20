@@ -150,6 +150,8 @@ LLM 자유 생성 산업 default는 v2(Sprint 4+) 이연.
 | `NodeDefinition` (메타) | pydantic + JSON Schema (`input_schema`/`output_schema`) | `skills_marketplace` 테이블 (PostgreSQL) | `execution_engine` (워크플로우 노드 실행, JSON Schema 재사용) |
 | `SkillDocument` (지침서) | markdown frontmatter(`name`/`description`) + body(`instructions`) | GCS 버킷 (별도 파일 저장) | Main Agent (사용자 대화 중 노드 탐색 + 옵션 제시) |
 
+> **현 구현 단계 (PR #106)**: SOP/functional/industry use case는 `ResultFrame.payload["skill_documents"]`에 SkillDocument 데이터(`{node_type, name, description, instructions}`)를 담아 반환한다. `SkillDocument`를 `common_schemas`로 승격하는 후속(조장 PR #106 리뷰 결정)에서 dict → type-safe 객체로 전환하고, `SkillDocumentStore.save()` 직접 wiring(GCS adapter + skills_marketplace use case 경유)도 후속. functional/industry는 seed에 `instructions`가 있을 때만 수집(선택) — **seed instructions 채우기 전까지 일부 seed 스킬은 SkillDocument가 비어 있을 수 있다** (의도된 갭, 후속 seed 작업으로 해소).
+
 **Composer 검색 흐름 (5/20 조장 확정)**:
 1. 사용자 입력 → `IntentAnalyzerService`로 intent 파악
 2. `Workflow Composer`가 노드 탐색 타이밍에 `skills_marketplace` 동시 탐색
