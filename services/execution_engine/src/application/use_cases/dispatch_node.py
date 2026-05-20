@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from common_schemas import NodeContext
 from common_schemas.workflow import NodeConfig, NodeExecutionState, NodeInstance
 
 from ...domain.entities.execution_result import NodeResult
@@ -44,11 +45,12 @@ class DispatchNodeUseCase:
         attempt = 0
         last_error: Exception | None = None
 
+        context = NodeContext(execution_id=execution_id, user_id=user_id)
         enriched_inputs = self._inject_credentials(node, inputs, user_id)
 
         while True:
             try:
-                output = self._executor.execute(node, config, enriched_inputs)
+                output = self._executor.execute(node, config, enriched_inputs, context)
                 return NodeResult(
                     node_instance_id=node.instance_id,
                     status="succeeded",

@@ -4,9 +4,9 @@ import os
 from functools import cached_property
 from typing import Any
 
+from ..adapters.catalog_node_executor import CatalogNodeExecutor
 from ..adapters.celery_adapter import CeleryAdapter
 from ..adapters.sse_event_publisher import SSEEventPublisher
-from ..adapters.toolset_executor import ToolsetExecutor
 from ..adapters.vault_credential_provider import VaultCredentialProvider
 from ..application.use_cases.dispatch_node import DispatchNodeUseCase
 from ..application.use_cases.evaluate_and_refine import EvaluateAndRefineUseCase
@@ -139,6 +139,7 @@ def create_container() -> Container:
     if _container is not None:
         return _container
 
+    from nodes_graph.application.catalog_registry import get_all_node_classes
     from sqlalchemy.orm import sessionmaker
 
     from ..adapters.postgres_execution_repo import PostgresExecutionRepository
@@ -152,7 +153,7 @@ def create_container() -> Container:
     execution_repo = PostgresExecutionRepository(session_factory)
     event_publisher = SSEEventPublisher(redis_client)
     credential_provider = VaultCredentialProvider(credential_store=_noop_credential_store)
-    node_executor = ToolsetExecutor(execute_tool=_noop_tool_executor)
+    node_executor = CatalogNodeExecutor(get_all_node_classes())
 
     from .._celery_app import celery_app
 
@@ -175,7 +176,3 @@ class _NoopCredentialStore:
 
 
 _noop_credential_store = _NoopCredentialStore()
-
-
-def _noop_tool_executor(tool_name, input_data, credential_id=None, credentials=None, user_id=None):
-    raise NotImplementedError("ToolsetExecutor not wired — provide toolset module adapter")
