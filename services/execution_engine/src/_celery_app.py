@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import ssl
 
 from celery import Celery
 from kombu import Queue
@@ -13,6 +14,10 @@ celery_app = Celery(
     backend=redis_url,
 )
 
+# Memorystore SERVER_AUTHENTICATION cert가 컨테이너 trust store에 없음 → cert verify skip.
+# TLS encryption은 유지. production은 server-ca-cert image COPY로 강화 권장.
+_tls_ssl_opts: dict = {"ssl_cert_reqs": ssl.CERT_NONE} if redis_url.startswith("rediss://") else {}
+
 celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
@@ -22,6 +27,8 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    broker_use_ssl=_tls_ssl_opts,
+    redis_backend_use_ssl=_tls_ssl_opts,
     task_routes={
         "execution_engine.execute_workflow": {"queue": "default"},
         "execution_engine.cancel_execution": {"queue": "default"},
