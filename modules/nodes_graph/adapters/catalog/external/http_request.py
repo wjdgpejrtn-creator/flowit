@@ -8,10 +8,11 @@ import httpx
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
+from ._url_guard import validate_outbound_url
 
 _NODE_TYPE = "http_request"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -47,6 +48,7 @@ class HttpRequestNode(BaseNode[HttpRequestInput, HttpRequestOutput]):
     output_schema = HttpRequestOutput
 
     async def process(self, input: HttpRequestInput, context: NodeContext) -> HttpRequestOutput:
+        await validate_outbound_url(input.url)
         async with httpx.AsyncClient(timeout=input.timeout) as client:
             response = await client.request(
                 method=input.method.upper(),
