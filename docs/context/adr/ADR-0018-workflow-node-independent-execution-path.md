@@ -2,7 +2,7 @@
 
 - **Status**: Proposed
 - **Date**: 2026-05-20 (초안 — 조장 방향 제시 + 영향평가)
-- **Deciders**: @dhwang0803-glitch (조장), @billionaireahreum (박아름), @rooot0xyz (햄햄) — **합의 대기**
+- **Deciders**: @dhwang0803-glitch (조장), @billionaireahreum (박아름), @gawon714-gif (햄햄) — **합의 대기**
 - **Tags**: area/execution_engine, area/nodes_graph, area/toolset, area/auth, layer/adapter, catalog
 
 ## Context
