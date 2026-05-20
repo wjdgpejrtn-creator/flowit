@@ -71,7 +71,7 @@ from execution_engine.src.application.use_cases import (
 | `ExecutionRepositoryPort` | `save(result: ExecutionResult) → None` | `adapters/postgres_execution_repo.py` |
 | | `get(execution_id: UUID) → ExecutionResult` | |
 | | `update_node_state(execution_id: UUID, state: NodeExecutionState) → None` | |
-| `NodeExecutorPort` | `execute(node: NodeInstance, config: NodeConfig, inputs: dict) → dict` | `adapters/` (Toolset/LangGraph/Sandbox) |
+| `NodeExecutorPort` | `execute(node: NodeInstance, config: NodeConfig, inputs: dict, context: NodeContext) → dict` | `adapters/catalog_node_executor.py` |
 | `TaskQueuePort` | `dispatch(task_name: str, args: dict) → str` | `adapters/celery_adapter.py` |
 | | `dispatch_chord(tasks: list[dict], callback: str) → str` | |
 | `CredentialProviderPort` | `get_credential(credential_id: UUID, user_id: UUID) → dict[str, str]` | `adapters/vault_credential_provider.py` |
@@ -93,9 +93,7 @@ from execution_engine.src.application.use_cases import (
 | 어댑터 | 설명 |
 |--------|------|
 | `CeleryAdapter` | Celery task 등록/dispatch/chord. `TaskQueuePort` 구현 |
-| `SandboxExecutor` | gVisor/nsjail 코드 실행 샌드박스. `NodeExecutorPort` 부분 구현 |
-| `LangGraphDispatcher` | REQ-004 AI 에이전트 노드 실행. `NodeExecutorPort` 부분 구현 |
-| `ToolsetExecutor` | REQ-005 ExecuteToolUseCase 연동. `NodeExecutorPort` 부분 구현 |
+| `CatalogNodeExecutor` | node_type → `BaseNode.process(input, context)` 직접 실행 (ADR-0018). 53종 단일 경로, sync worker ↔ async 브리지. `NodeExecutorPort` 구현 |
 | `SSEEventPublisher` | Redis Pub/Sub → SSE 스트림 상태 전파. `EventPublisherPort` 구현 |
 
 ## 의존 관계
@@ -103,9 +101,7 @@ from execution_engine.src.application.use_cases import (
 ```
 Upstream (이 서비스가 의존):
   ├── common_schemas (REQ-012) → WorkflowSchema, ExecutionStatus, HandoffPayload 등
-  ├── nodes_graph (REQ-003)    → GraphValidator (실행 전 재검증)
-  ├── toolset (REQ-005)        → ExecuteToolUseCase (외부 도구 실행)
-  ├── ai_agent (REQ-004)       → LangGraph 에이전트 노드 실행
+  ├── nodes_graph (REQ-003)    → GraphValidator (실행 전 재검증) + get_all_node_classes (노드 실행)
   ├── auth (REQ-002)           → CredentialStore (자격증명 복호화)
   └── storage (REQ-008)        → WorkflowRepository, ExecutionRepository
 
