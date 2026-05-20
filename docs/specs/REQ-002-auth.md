@@ -238,6 +238,8 @@ class CredentialInjectionService:
         ...
 ```
 
+**service-match 정책 (의도적 — 보안 판단)**: `required_connections ↔ service` 검증은 `oauth_token` credential에만 적용한다. OAuth access token은 특정 provider 스코프에 묶여 있어 provider 불일치 주입(google 토큰을 slack 노드에) 차단이 필요하다. 반면 `api_key`는 워크플로우 작성자가 `node.credential_id`로 명시 선택하는 author-scoped 자원이라 provider 스코핑 대상이 아니다 — `credentials`에 service 컬럼이 없는 것은 이 정책의 결과이지 원인이 아니다. 두 경로 모두 RESTRICTED 위험도 게이트 + credential 활성 검증은 동일 적용된다. (api_key를 노드 service에 묶고 싶으면 `Credential.metadata["service"]` 기반 검증을 후속 도입할 수 있다 — 현재는 미적용.)
+
 ---
 
 ### Application Layer (`modules/auth/application/`)

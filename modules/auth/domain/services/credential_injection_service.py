@@ -16,8 +16,14 @@ class CredentialInjectionService:
     `credentials` 테이블을 해결 SSOT로 둔다. `credential_kind` 기반 분기:
     - `oauth_token`: `oauth_connections`로 enrich — service ↔ `required_connections`
       검증 후 access_token 복호화.
-    - `api_key` 등: `credentials.encrypted_data` 직접 복호화 (service-match 비적용 —
-      `credentials`에 service 컬럼이 없고, 검증은 OAuth 스코핑 전용).
+    - `api_key` 등: `credentials.encrypted_data` 직접 복호화.
+
+    service-match 정책 (조장 결정, 의도적): `required_connections ↔ service` 검증은
+    OAuth credential에만 적용한다. OAuth access token은 특정 provider 스코프에 묶여
+    있어 provider 불일치(google 토큰을 slack 노드에) 차단이 필요하지만, api_key는
+    워크플로우 작성자가 `node.credential_id`로 명시 선택하는 author-scoped 자원이라
+    provider 스코핑 대상이 아니다. 두 경로 모두 RESTRICTED 위험도 게이트 + credential
+    활성 검증은 동일하게 거친다.
     """
 
     def __init__(
