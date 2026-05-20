@@ -1,4 +1,5 @@
 from .pg_agent_memory_repository import PgAgentMemoryRepository
+from .pg_credential_repository import PgCredentialRepository
 from .pg_document_repository import PgDocumentRepository
 from .pg_execution_repository import PgExecutionRepository
 from .pg_node_definition_repository import PgNodeDefinitionRepository
@@ -11,6 +12,7 @@ from .pg_workflow_repository import PgWorkflowRepository
 
 __all__ = [
     "PgAgentMemoryRepository",
+    "PgCredentialRepository",
     "PgDocumentRepository",
     "PgExecutionRepository",
     "PgNodeDefinitionRepository",
