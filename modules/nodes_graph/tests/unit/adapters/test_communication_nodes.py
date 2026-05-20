@@ -81,9 +81,11 @@ def test_gmail_node_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_gmail_process_raises_not_implemented():
+async def test_gmail_process_requires_credential():
+    """gmail_send는 ADR-0018 Phase 3d 실구현 — credential(Google OAuth 토큰) 없이
+    ValidationError. 실행 경로 전체는 test_db_file_google_nodes.py 참조."""
     node = GmailSendNode()
-    with pytest.raises(NotImplementedError, match="toolset connector"):
+    with pytest.raises(ValidationError, match="credential"):
         await node.process(GmailSendInput(to=["a@b.com"], subject="s", body="b"), NODE_CTX)
 
 

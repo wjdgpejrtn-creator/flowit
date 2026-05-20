@@ -77,9 +77,11 @@ def test_postgresql_query_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_postgresql_query_process_raises_not_implemented():
+async def test_postgresql_query_process_requires_credential():
+    """ADR-0018 Phase 3d 실구현 — credential(DSN) 없이 ValidationError.
+    실행 경로 전체는 test_db_file_google_nodes.py 참조."""
     node = PostgresqlQueryNode()
-    with pytest.raises(NotImplementedError, match="toolset connector"):
+    with pytest.raises(ValidationError, match="credential"):
         await node.process(PostgresqlQueryInput(query="SELECT 1"), NODE_CTX)
 
 
@@ -93,9 +95,10 @@ def test_mysql_query_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_mysql_query_process_raises_not_implemented():
+async def test_mysql_query_process_requires_credential():
+    """ADR-0018 Phase 3d 실구현 — credential(연결 URL) 없이 ValidationError."""
     node = MysqlQueryNode()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValidationError, match="credential"):
         await node.process(MysqlQueryInput(query="SELECT 1"), NODE_CTX)
 
 
@@ -109,9 +112,10 @@ def test_bigquery_query_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_bigquery_query_process_raises_not_implemented():
+async def test_bigquery_query_process_requires_credential():
+    """ADR-0018 Phase 3d 실구현 — credential(Google OAuth 토큰) 없이 ValidationError."""
     node = BigqueryQueryNode()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValidationError, match="credential"):
         await node.process(BigqueryQueryInput(project_id="p", query="SELECT 1"), NODE_CTX)
 
 
@@ -156,9 +160,10 @@ def test_google_calendar_create_event_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_google_calendar_create_event_process_raises_not_implemented():
+async def test_google_calendar_create_event_process_requires_credential():
+    """ADR-0018 Phase 3d 실구현 — credential(Google OAuth 토큰) 없이 ValidationError."""
     node = GoogleCalendarCreateEventNode()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValidationError, match="credential"):
         await node.process(GoogleCalendarCreateEventInput(
             calendar_id="primary",
             summary="meeting",

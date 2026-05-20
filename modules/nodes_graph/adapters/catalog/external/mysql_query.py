@@ -1,19 +1,29 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import unquote, urlparse
 from uuid import uuid5
 
+import aiomysql
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
+from ._url_guard import validate_outbound_host
 
 _NODE_TYPE = "mysql_query"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+
+
+def _jsonable(row: dict[str, Any]) -> dict[str, Any]:
+    """datetime·Decimal 등 비-JSON 타입을 str로 강제 — 결과 영속화/SSE 호환."""
+    return json.loads(json.dumps(dict(row), default=str))
 
 
 @dataclass
@@ -43,10 +53,38 @@ class MysqlQueryNode(BaseNode[MysqlQueryInput, MysqlQueryOutput]):
     output_schema = MysqlQueryOutput
 
     async def process(self, input: MysqlQueryInput, context: NodeContext) -> MysqlQueryOutput:
-        raise NotImplementedError(
-            "DB 연결은 REQ-005 toolset connector를 통해 처리. "
-            "연결 정보(host/port/user/password)는 REQ-002 CredentialInjectionService 담당."
+        # connection_token = MySQL 연결 URL (mysql://user:pass@host:port/db).
+        if not context.connection_token:
+            raise ValidationError("mysql_query는 credential(연결 URL)이 필요하다")
+        parsed = urlparse(context.connection_token)
+        if not parsed.hostname:
+            raise ValidationError("mysql 연결 URL 형식 오류 (mysql://user:pass@host:port/db)")
+        await validate_outbound_host(parsed.hostname, parsed.port or 3306)  # SSRF
+
+        conn = await aiomysql.connect(
+            host=parsed.hostname,
+            port=parsed.port or 3306,
+            user=unquote(parsed.username or ""),
+            password=unquote(parsed.password or ""),
+            db=parsed.path.lstrip("/") or None,
+            connect_timeout=input.timeout_seconds,
         )
+        try:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(input.query, tuple(input.parameters) or None)
+                if input.fetch_mode == "none":
+                    await conn.commit()
+                    return MysqlQueryOutput(rows=[], row_count=cursor.rowcount, fields=[])
+
+                if input.fetch_mode == "one":
+                    row = await cursor.fetchone()
+                    rows = [_jsonable(row)] if row else []
+                else:
+                    rows = [_jsonable(r) for r in await cursor.fetchall()]
+                fields = [d[0] for d in cursor.description] if cursor.description else []
+                return MysqlQueryOutput(rows=rows, row_count=len(rows), fields=fields)
+        finally:
+            conn.close()
 
 
 def get_node_definition() -> NodeDefinition:

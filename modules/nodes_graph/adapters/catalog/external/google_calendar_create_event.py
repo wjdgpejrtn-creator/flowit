@@ -2,18 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid5
 
+import httpx
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ExecutionError, ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "google_calendar_create_event"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+_TIMEOUT_SECONDS = 60
 
 
 @dataclass
@@ -53,9 +57,49 @@ class GoogleCalendarCreateEventNode(BaseNode[GoogleCalendarCreateEventInput, Goo
     async def process(
         self, input: GoogleCalendarCreateEventInput, context: NodeContext
     ) -> GoogleCalendarCreateEventOutput:
-        raise NotImplementedError(
-            "Calendar API 호출은 REQ-005 toolset connector를 통해 처리. "
-            "Google OAuth 자격증명 주입은 REQ-002 CredentialInjectionService 담당."
+        # connection_token = Google OAuth access token. Calendar events.insert.
+        if not context.connection_token:
+            raise ValidationError("google_calendar_create_event는 credential(Google OAuth 토큰)이 필요하다")
+
+        body: dict[str, Any] = {
+            "summary": input.summary,
+            "start": {"dateTime": input.start, "timeZone": input.timezone},
+            "end": {"dateTime": input.end, "timeZone": input.timezone},
+        }
+        if input.description:
+            body["description"] = input.description
+        if input.location:
+            body["location"] = input.location
+        if input.attendees:
+            body["attendees"] = [{"email": email} for email in input.attendees]
+        if input.reminders:
+            body["reminders"] = {"useDefault": False, "overrides": input.reminders}
+
+        url = (
+            f"https://www.googleapis.com/calendar/v3/calendars/"
+            f"{quote(input.calendar_id, safe='')}/events"
+        )
+        headers = {
+            "Authorization": f"Bearer {context.connection_token}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                url, params={"sendUpdates": input.send_updates}, json=body, headers=headers
+            )
+
+        if response.status_code >= 400:
+            raise ExecutionError(
+                f"Google Calendar API 오류 {response.status_code}: {response.text[:200]}"
+            )
+
+        data = response.json()
+        return GoogleCalendarCreateEventOutput(
+            event_id=data.get("id", ""),
+            html_link=data.get("htmlLink", ""),
+            ical_uid=data.get("iCalUID", ""),
+            status=data.get("status", ""),
+            created=data.get("created", ""),
         )
 
 

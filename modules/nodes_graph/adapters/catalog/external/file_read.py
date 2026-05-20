@@ -6,11 +6,13 @@ from uuid import uuid5
 
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
+from ._file_sandbox import resolve_sandboxed_path
 
 _NODE_TYPE = "file_read"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -42,10 +44,18 @@ class FileReadNode(BaseNode[FileReadInput, FileReadOutput]):
     output_schema = FileReadOutput
 
     async def process(self, input: FileReadInput, context: NodeContext) -> FileReadOutput:
-        raise NotImplementedError(
-            "파일 읽기는 REQ-005 toolset.FileReadTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
+        file_path = resolve_sandboxed_path(input.path)
+        if not file_path.is_file():
+            raise ValidationError(f"파일을 찾을 수 없음: {input.path!r}")
+
+        if input.binary:
+            content: Any = file_path.read_bytes().hex()
+        else:
+            content = file_path.read_text(encoding=input.encoding)
+        return FileReadOutput(
+            content=content,
+            size_bytes=file_path.stat().st_size,
+            path=str(file_path),
         )
 
 
