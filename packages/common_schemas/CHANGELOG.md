@@ -7,6 +7,33 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.8.0] - 2026-05-20
+
+### Added — `SkillDocument` 스킬 지침서 (ADR-0017, PR #106 리뷰)
+- `skill_document.py` 모듈 신설 — `SkillDocument` Pydantic 모델 1종.
+- `SkillDocument`: `skill_id: UUID`, `name: str`, `description: str`, `instructions: str`, `scripts: list[dict] = []`, `templates: list[dict] = []`.
+  - 한 스킬의 ADR-0017 이중 저장 중 "지침서"(SKILL.md) 측. 메타는 `NodeDefinition` + `SkillRepository`.
+  - LLM(Main Agent)이 사용자에게 옵션 제시 시 자연어로 읽는 markdown 문서. 저장: GCS `gs://{bucket}/skills/{skill_id}/SKILL.md` via `SkillDocumentStore`.
+  - `frozen=True` — 불변 데이터 캐리어 (common_schemas 모델 표준 컨벤션).
+- 신규 테스트 `test_skill_document.py` — `SkillDocument` 8건.
+
+### Changed — `SkillDocument` SSOT 위치 정정
+- PR #106 리뷰에서 지적: `SkillDocument`는 **생산자 ai_agent(Skills Builder) + 저장자 skills_marketplace(SkillDocumentStore)** 양쪽이 쓰는 공유 타입.
+  ADR-0017의 skills_marketplace 도메인 소유로는 ai_agent가 import 규칙상 직접 참조 불가 → PR #106은 dict로 우회(type 안전성 상실).
+- `common_schemas`로 승격하면 모든 모듈이 import 가능 → import 규칙 위반 없이 type-safe 공유. SSOT 위치를 skills_marketplace → common_schemas로 정정.
+
+### Symbols
+- 58 → 59 (+1: `SkillDocument`)
+
+### Migration notes
+- common_schemas 측은 추가만 있는 변경 — 기존 코드 무영향.
+- 신규 사용 패턴:
+  ```python
+  from common_schemas import SkillDocument
+  ```
+- **후속 (박아름, 별도 PR)**: `modules/skills_marketplace/domain/entities/skill_document.py`를 common_schemas 재노출 shim으로 전환 + `SkillDocumentStore` Port가 `common_schemas.SkillDocument` 사용. ai_agent 3 use case의 `skill_documents` dict → `SkillDocument` 객체로 정정 (type-safe). ADR-0017 소유권 문구 정정.
+- skills_marketplace 측 `SkillDocument`(PR #98)는 필드 동일 — shim 전환 시 기존 테스트 무변경 통과.
+
 ## [0.7.0] - 2026-05-20
 
 ### Added — `NodeContext` 노드 실행 컨텍스트 (ADR-0018 Phase 1)
