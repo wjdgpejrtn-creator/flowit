@@ -2,18 +2,14 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+
 from skills_marketplace.application.use_cases import (
     PromoteToCompanyUseCase,
     PromoteToTeamUseCase,
     SearchSkillsUseCase,
 )
-from skills_marketplace.domain.entities import (
-    MarketplaceCompanySkill,
-    MarketplacePersonalSkill,
-    MarketplaceTeamSkill,
-)
-from skills_marketplace.domain.value_objects import SkillState
-from skills_marketplace.domain.value_objects import SkillScope
+from skills_marketplace.domain.entities import MarketplacePersonalSkill
+from skills_marketplace.domain.value_objects import SkillScope, SkillState
 
 
 class _InMemorySkillRepo:
@@ -45,9 +41,21 @@ class _InMemorySkillRepo:
     async def get_company(self, skill_id):
         return self.company.get(skill_id)
 
-    async def search(self, query_embedding, scope, limit=10):
-        store = {SkillScope.PERSONAL: self.personal, SkillScope.TEAM: self.team, SkillScope.COMPANY: self.company}[scope]
-        return list(store.values())[:limit]
+    async def search(self, query_embedding, scope, limit=10, include_promoted=False):
+        store = {
+            SkillScope.PERSONAL: self.personal,
+            SkillScope.TEAM: self.team,
+            SkillScope.COMPANY: self.company,
+        }[scope]
+        results = list(store.values())
+        if not include_promoted:
+            results = [
+                s
+                for s in results
+                if getattr(s, "promoted_to_team_id", None) is None
+                and getattr(s, "promoted_to_company_id", None) is None
+            ]
+        return results[:limit]
 
 
 def _personal(skill_id, owner_id):
@@ -79,10 +87,34 @@ async def test_promote_personal_to_team_creates_team_skill():
     assert team is not None
     assert team.team_id == team_id
     assert team.author_id == owner          # 원작성자 승계
-    assert team.promoted_from == pid         # 승격 추적
+    assert team.promoted_from == pid         # 승격 역추적
     assert team.name == "환불 자동화"        # 메타 승계
-    assert team.lifecycle_state == SkillState.PUBLISHED  # 게시상태 승계
+    assert team.lifecycle_state == SkillState.DRAFT  # 승격 = 재심사 리셋 (게시상태 비승계, 조장 리뷰 #98)
     assert team.tags == ["refund", "cs"]
+
+    # 승격 = 복제(원본 유지) — 원본 personal에 promoted_to_team_id 마킹
+    origin = await repo.get_personal(pid)
+    assert origin is not None
+    assert origin.promoted_to_team_id == new_id
+
+
+@pytest.mark.asyncio
+async def test_search_excludes_promoted_origin_by_default():
+    """승격 완료 원본은 search 기본값(include_promoted=False)에서 제외 (중복 노출 방지, 조장 리뷰 #98)."""
+    repo = _InMemorySkillRepo()
+    pid, owner, team_id = uuid4(), uuid4(), uuid4()
+    await repo.save_personal(_personal(pid, owner))
+
+    # 승격 전: personal 검색에 노출
+    before = await repo.search([0.1] * 768, SkillScope.PERSONAL)
+    assert len(before) == 1
+
+    await PromoteToTeamUseCase(repo).execute(pid, team_id)
+
+    # 승격 후: 기본 검색에서 원본 제외 / include_promoted=True면 포함
+    after = await repo.search([0.1] * 768, SkillScope.PERSONAL)
+    assert after == []
+    assert len(await repo.search([0.1] * 768, SkillScope.PERSONAL, include_promoted=True)) == 1
 
 
 @pytest.mark.asyncio
@@ -98,6 +130,11 @@ async def test_promote_team_to_company_creates_company_skill():
     assert company is not None
     assert company.author_id == owner
     assert company.promoted_from == team_skill_id
+    assert company.lifecycle_state == SkillState.DRAFT  # 재심사 리셋
+    # 원본 team에 promoted_to_company_id 마킹 (검색 기본 제외)
+    origin_team = await repo.get_team(team_skill_id)
+    assert origin_team is not None
+    assert origin_team.promoted_to_company_id == company_id
 
 
 @pytest.mark.asyncio

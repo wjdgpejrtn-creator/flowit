@@ -14,8 +14,11 @@ class SkillDocumentStore(ABC):
     제공한다 (2026-05-20 박아름 소유권 결정 — ADR-0017 정정. SkillRepository와 일관 +
     스킬 aggregate 완결).
 
-    ai_agent(Skills Builder)는 `from skills_marketplace.domain.ports import SkillDocumentStore`로
-    주입받아 생성만 한다 (생성 주체 ≠ 소유 도메인).
+    ai_agent(Skills Builder)는 이 Port를 직접 import하지 않고 skills_marketplace의
+    application/use_cases(후속 RegisterSkillUseCase 등)를 경유해 접근한다 — CLAUDE.md
+    "modules 간 허용된 교차 import" 표가 `ai_agent → skills_marketplace/application/use_cases`만
+    등재하므로 domain/ports 직접 의존을 만들지 않기 위함 (조장 리뷰 #98). 구현체 DI 주입은
+    skills_marketplace use case 생성자에서 받는다.
 
     NOTE: GCS adapter 구현 위치(storage/adapters vs skills_marketplace/adapters)는
     PR-2d/2e 후속 결정. 경로 패턴: `gs://{bucket}/skills/{skill_id}/SKILL.md`.

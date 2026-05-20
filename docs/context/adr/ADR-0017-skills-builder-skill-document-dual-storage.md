@@ -1,6 +1,6 @@
 # ADR-0017: Skills Builder 산출물 = NodeDefinition + SkillDocument 이중 저장 (`skills_marketplace` = 사내 SkillsMP 역할)
 
-- **Status**: Proposed
+- **Status**: Accepted (PR #98 머지 = Accept — 조장 리뷰 #98 권고 반영, 2026-05-20)
 - **Date**: 2026-05-20
 - **Deciders**: @dhwang0803-glitch (조장, REQ-001/008/009/skills_marketplace) + @billionaireahreum (박아름, REQ-002/003/004 Skills Builder)
 - **Tags**: area/skills_builder, area/skills_marketplace, layer/domain, layer/storage

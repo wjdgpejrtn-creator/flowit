@@ -56,10 +56,15 @@ class SkillRepository(ABC):
         query_embedding: list[float],
         scope: SkillScope,
         limit: int = 10,
+        include_promoted: bool = False,
     ) -> list[MarketplacePersonalSkill | MarketplaceTeamSkill | MarketplaceCompanySkill]:
         """하이브리드 검색 — scope 범위 내 embedding 유사도 top-k.
 
         ai_agent Workflow Composer가 사용자 의도(intent)와 유사한 스킬 후보를 옵션 제시할 때 호출
         (CLAUDE.md L148, ADR-0017 §Composer 검색 흐름).
+
+        include_promoted=False(기본): 상위 scope로 승격 완료된 원본(`promoted_to_*` 존재)은
+        검색 결과에서 제외 — 같은 스킬이 personal+team 중복 노출되는 것을 방지 (승격=복제 정책,
+        조장 리뷰 #98). 실제 WHERE 필터(`promoted_to_* IS NULL`)는 storage 구현 시 적용.
         """
         ...

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from ..value_objects.skill_scope import SkillScope
 
-
 # 승격 단방향 전이 규칙 (ADR-0012 v3): PERSONAL → TEAM → COMPANY
 _PROMOTION_PATH: dict[SkillScope, SkillScope] = {
     SkillScope.PERSONAL: SkillScope.TEAM,

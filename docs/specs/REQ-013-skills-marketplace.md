@@ -19,6 +19,19 @@
 
 한 스킬이 두 축을 동시에 가진다 (예: scope=team + lifecycle_state=published).
 
+### 승격 의미론 — 복제(원본 유지) (2026-05-20 조장 리뷰 #98 반영)
+
+scope 승격(`PromoteToTeam`/`PromoteToCompany`)은 **이동(원본 비활성)이 아니라 복제(원본 유지)**로 정의한다.
+
+| 항목 | 규칙 | 근거 |
+|------|------|------|
+| 원본 처리 | **유지** (삭제/비활성 안 함) — 이력 보존 | 이동 시 원본 이력 소실 |
+| 양방향 추적 | 신규: `promoted_from` (← 원본) / 원본: `promoted_to_team_id`·`promoted_to_company_id` (→ 신규) | 조장: "원본 측 promoted_to 없음" 보완 |
+| 검색 중복 방지 | `search(include_promoted=False)` 기본 — 승격 완료 원본(`promoted_to_* IS NOT NULL`) 제외 | 같은 스킬이 personal+team 중복 노출 방지 |
+| **게시상태 재심사** | 승격 시 `lifecycle_state` 승계 안 함 → **DRAFT 리셋**. 넓은 scope는 재승인(`approve`→`publish`) 경유 | 노출 범위 확대 = 거버넌스 재심사 (ADR-0012 lifecycle 정책 정합) |
+
+> 실제 검색 WHERE 필터(`promoted_to_* IS NULL`)는 `SkillRepository` storage 구현(조장 영역, PR-2d 후속) 시 적용. 본 모듈은 entity 필드 + Port 시그니처 + use case 마킹까지 제공.
+
 ---
 
 ## 1. common_schemas에서 import할 클래스
@@ -38,9 +51,9 @@
 
 | 클래스 | 주요 필드 | 설명 |
 |--------|----------|------|
-| `MarketplacePersonalSkill` | `skill_id`, `owner_user_id`, `name`, `description`, `node_definition_id`, `lifecycle_state`, `skill_document_uri`, `embedding`, `workflow_id`, `tags`, `version`, `metadata`, `created_at`, `updated_at` | 개인 범위. `ai_agent.PersonalSkill`(메모리)과 도메인 다름 — `Marketplace` 접두사로 충돌 회피 (ADR-0012) |
-| `MarketplaceTeamSkill` | + `team_id`, `author_id`, `promoted_from` (personal skill_id) | 팀 범위. PromoteToTeam으로 승격 |
-| `MarketplaceCompanySkill` | + `author_id`, `promoted_from` (team skill_id) | 전사 범위. PromoteToCompany로 승격 |
+| `MarketplacePersonalSkill` | `skill_id`, `owner_user_id`, `name`, `description`, `node_definition_id`, `lifecycle_state`, `skill_document_uri`, `embedding`, `workflow_id`, `tags`, `version`, `metadata`, `promoted_to_team_id`, `created_at`, `updated_at` | 개인 범위. `ai_agent.PersonalSkill`(메모리)과 도메인 다름 — `Marketplace` 접두사로 충돌 회피 (ADR-0012). `promoted_to_team_id` = 팀 승격 완료 마킹 (검색 기본 제외) |
+| `MarketplaceTeamSkill` | + `team_id`, `author_id`, `promoted_from` (원본 personal skill_id, 역추적), `promoted_to_company_id` (전사 승격 완료 마킹) | 팀 범위. PromoteToTeam으로 승격 |
+| `MarketplaceCompanySkill` | + `author_id`, `promoted_from` (원본 team skill_id, 역추적) | 전사 범위(최종). PromoteToCompany로 승격 |
 | `ApprovalWorkflow` | `approval_id`, `skill_id`, `reviewer_id`, `status`, `comment`, `reviewed_at`, `created_at` | 게시 승인 워크플로우 (storage에서 이전) |
 | `SkillDocument` | `skill_id`, `name`, `description`, `instructions`, `scripts`, `templates` | 스킬 지침서 (SKILL.md 레퍼런스). ADR-0017 이중 저장 중 GCS 측. ai_agent가 아닌 skills_marketplace 소유 (2026-05-20 박아름 정정 — DDD 응집도) |
 
@@ -62,16 +75,16 @@
 
 | 포트(ABC) | 주요 메서드 | 구현 위치 |
 |-----------|-------------|----------|
-| `SkillRepository` | `save_personal/save_team/save_company`, `get_personal/get_team/get_company`, `search(query_embedding, scope, limit)` | `storage/repositories/` (ADR-0017 + 5/20 합의 — Port는 skills_marketplace, 구현은 storage) |
+| `SkillRepository` | `save_personal/save_team/save_company`, `get_personal/get_team/get_company`, `search(query_embedding, scope, limit, include_promoted=False)` | `storage/repositories/` (ADR-0017 + 5/20 합의 — Port는 skills_marketplace, 구현은 storage). `include_promoted=False` 기본 = 승격 완료 원본(`promoted_to_*`) 제외 |
 | `SkillDocumentStore` | `save(skill_id, document)`, `load(skill_id)` | GCS adapter (위치 PR-2d/2e 결정). SkillDocument(markdown) GCS 저장. Port는 skills_marketplace 소유 (2026-05-20 정정) |
 
 ### 2.5 application/use_cases
 
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
-| `PromoteToTeamUseCase` | `personal_skill_id, team_id → UUID` | 개인 → 팀 승격 (메타/게시상태 승계 + promoted_from) |
-| `PromoteToCompanyUseCase` | `team_skill_id → UUID` | 팀 → 전사 승격 |
-| `SearchSkillsUseCase` | `query_embedding, scope, limit → list[Skill]` | 하이브리드 검색 — ai_agent Composer 호출 (repo.search 위임) |
+| `PromoteToTeamUseCase` | `personal_skill_id, team_id → UUID` | 개인 → 팀 승격 (복제: 메타 승계 + 게시상태 DRAFT 재심사 + promoted_from 역추적 + 원본에 promoted_to_team_id 마킹) |
+| `PromoteToCompanyUseCase` | `team_skill_id → UUID` | 팀 → 전사 승격 (복제: 동일 정책, 원본 team에 promoted_to_company_id 마킹) |
+| `SearchSkillsUseCase` | `query_embedding, scope, limit → list[Skill]` | 하이브리드 검색 — ai_agent Composer 호출 (repo.search 위임, 승격 완료 원본 기본 제외) |
 | `ApproveSkillUseCase` | `skill_id, scope, reviewer_id, approved` | 게시 승인 REVIEW → APPROVED/DRAFT |
 | `PublishSkillUseCase` | `skill_id, scope` | 게시 APPROVED → PUBLISHED |
 

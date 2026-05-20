@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 from uuid import UUID
 
 from common_schemas.types import UtcDatetime
@@ -19,6 +19,6 @@ class ApprovalWorkflow(BaseModel):
     skill_id: UUID
     reviewer_id: UUID
     status: Literal["pending", "approved", "rejected"]
-    comment: Optional[str] = None
-    reviewed_at: Optional[UtcDatetime] = None
+    comment: str | None = None
+    reviewed_at: UtcDatetime | None = None
     created_at: UtcDatetime

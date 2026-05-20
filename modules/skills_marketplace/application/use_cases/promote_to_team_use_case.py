@@ -9,13 +9,17 @@ from ...domain.entities.marketplace_team_skill import MarketplaceTeamSkill
 from ...domain.ports.skill_repository import SkillRepository
 from ...domain.services.promotion_service import PromotionService
 from ...domain.value_objects.skill_scope import SkillScope
+from ...domain.value_objects.skill_state import SkillState
 
 
 class PromoteToTeamUseCase:
-    """개인 스킬 → 팀 스킬 승격 (ADR-0012 v3 lifecycle).
+    """개인 스킬 → 팀 스킬 승격 (ADR-0012 v3 lifecycle, 승격=복제 정책).
 
     PromotionService로 PERSONAL → TEAM 전이 검증 후 MarketplaceTeamSkill 생성.
-    원본 personal skill의 메타/게시상태를 승계하고 promoted_from으로 추적.
+    승격 = 복제(원본 유지) 정책 (조장 리뷰 #98):
+    - 원본 personal의 메타는 승계하되 게시상태는 DRAFT로 재심사 리셋 (넓은 scope = 재승인 경유)
+    - promoted_from으로 신규 team이 원본을 역추적
+    - 원본 personal에 promoted_to_team_id 마킹 → search(include_promoted=False) 기본 제외 (중복 노출 방지)
     """
 
     def __init__(self, repo: SkillRepository) -> None:
@@ -42,7 +46,7 @@ class PromoteToTeamUseCase:
             name=personal.name,
             description=personal.description,
             node_definition_id=personal.node_definition_id,
-            lifecycle_state=personal.lifecycle_state,
+            lifecycle_state=SkillState.DRAFT,        # 승격 = 재심사 리셋 (게시상태 비승계, 조장 리뷰 #98)
             skill_document_uri=personal.skill_document_uri,
             embedding=personal.embedding,
             workflow_id=personal.workflow_id,
@@ -54,4 +58,8 @@ class PromoteToTeamUseCase:
             updated_at=now,
         )
         await self._repo.save_team(team_skill)
+        # 승격 = 복제(원본 유지) — 원본 personal에 promoted_to 마킹 → 검색 기본 제외 (중복 노출 방지)
+        await self._repo.save_personal(
+            personal.model_copy(update={"promoted_to_team_id": new_skill_id, "updated_at": now})
+        )
         return new_skill_id

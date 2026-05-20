@@ -44,6 +44,13 @@
 - `lifecycle_state` (게시): `SkillState` draft → review → approved → published → archived — `SkillLifecycle`
 - 한 스킬이 두 축 동시 보유
 
+### 승격 의미론 = 복제(원본 유지) (조장 리뷰 #98 반영, 2026-05-20)
+
+- scope 승격 = **복제**(원본 유지, 이동 X) — `promoted_from`(역) + `promoted_to_team_id`/`promoted_to_company_id`(순) 양방향 추적
+- `search(include_promoted=False)` 기본 → 승격 완료 원본 제외 (중복 노출 방지, WHERE 필터는 storage 구현)
+- 게시상태는 승격 시 **DRAFT 재심사 리셋** (넓은 scope = 재승인 경유)
+- 상세 → `docs/specs/REQ-013-skills-marketplace.md` §승격 의미론
+
 ---
 
 ## 구현 단계

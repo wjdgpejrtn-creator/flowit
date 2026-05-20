@@ -49,11 +49,13 @@ from skills_marketplace.application.use_cases import (
 
 | 클래스 | 주요 필드 | 설명 |
 |--------|----------|------|
-| `MarketplacePersonalSkill` | `skill_id`, `owner_user_id`, `name`, `description`, `node_definition_id`, `skill_document_uri`, `embedding`, `created_at`, `updated_at` | 개인 범위 스킬. `ai_agent.PersonalSkill`(메모리)과 도메인 다름 — `Marketplace` 접두사로 충돌 회피 |
-| `MarketplaceTeamSkill` | + `team_id`, `promoted_from` (personal skill_id) | 팀 범위. PromoteToTeam으로 승격 |
-| `MarketplaceCompanySkill` | + `promoted_from` (team skill_id) | 전사 범위. PromoteToCompany로 승격 |
+| `MarketplacePersonalSkill` | `skill_id`, `owner_user_id`, `name`, `description`, `node_definition_id`, `skill_document_uri`, `embedding`, `promoted_to_team_id`, `created_at`, `updated_at` | 개인 범위 스킬. `ai_agent.PersonalSkill`(메모리)과 도메인 다름 — `Marketplace` 접두사로 충돌 회피 |
+| `MarketplaceTeamSkill` | + `team_id`, `promoted_from` (← 원본 personal), `promoted_to_company_id` (→ 전사 승격 마킹) | 팀 범위. PromoteToTeam으로 승격 |
+| `MarketplaceCompanySkill` | + `promoted_from` (← 원본 team) | 전사 범위(최종). PromoteToCompany로 승격 |
 
 > **NOTE**: 필드는 깊이 1(뼈대) 기준. 실제 컬럼/제약은 PR-2e schema 마이그레이션 시 확정.
+>
+> **승격 의미론 = 복제(원본 유지)** (조장 리뷰 #98): scope 승격은 원본을 유지(이동 X)하고 신규 생성한다. ① 양방향 추적 `promoted_from`(역) + `promoted_to_*`(순), ② `search(include_promoted=False)` 기본으로 승격 완료 원본 제외(중복 노출 방지), ③ 게시상태는 **DRAFT 재심사 리셋**(넓은 scope = 재승인 경유). 상세 → REQ-013 spec §승격 의미론.
 
 ### domain/value_objects
 
@@ -85,7 +87,7 @@ from skills_marketplace.application.use_cases import (
 
 | 포트 (ABC) | 메서드 | 구현 위치 |
 |------------|--------|----------|
-| `SkillRepository` | `async save_personal/save_team/save_company`, `async get_personal/get_team/get_company`, `async search(query_embedding, scope, limit)` | `storage/repositories/` (PR-2d 후속) |
+| `SkillRepository` | `async save_personal/save_team/save_company`, `async get_personal/get_team/get_company`, `async search(query_embedding, scope, limit, include_promoted=False)` | `storage/repositories/` (PR-2d 후속) |
 | `SkillDocumentStore` | `async save(skill_id, document)`, `async load(skill_id)` | GCS adapter (위치 PR-2d/2e 결정). SkillDocument(markdown) GCS 저장 |
 
 > **Port 소유권** (ADR-0017 + 5/20 박아름·조장 합의): Port 정의는 skills_marketplace(소비 모듈)가 소유, 구현체는 storage가 제공 (auth/nodes_graph 일반 패턴). CLAUDE.md L146 정정 반영.
@@ -94,8 +96,8 @@ from skills_marketplace.application.use_cases import (
 
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
-| `PromoteToTeamUseCase` | `personal_skill_id, team_id → UUID` | 개인 → 팀 승격 (메타/게시상태 승계 + promoted_from 추적) |
-| `PromoteToCompanyUseCase` | `team_skill_id → UUID` | 팀 → 전사 승격 |
+| `PromoteToTeamUseCase` | `personal_skill_id, team_id → UUID` | 개인 → 팀 승격 (복제: 메타 승계 + DRAFT 재심사 + promoted_from 역추적 + 원본 promoted_to_team_id 마킹) |
+| `PromoteToCompanyUseCase` | `team_skill_id → UUID` | 팀 → 전사 승격 (복제: 동일 정책, 원본 promoted_to_company_id 마킹) |
 | `SearchSkillsUseCase` | `query_embedding, scope, limit → list[Skill]` | 하이브리드 검색 — ai_agent Composer 호출 (repo.search 위임) |
 | `ApproveSkillUseCase` | `skill_id, scope, reviewer_id, approved` | 게시 승인 REVIEW → APPROVED/DRAFT (storage 이전 + SkillRepository ABC 정정) |
 | `PublishSkillUseCase` | `skill_id, scope` | 게시 APPROVED → PUBLISHED (storage 이전) |

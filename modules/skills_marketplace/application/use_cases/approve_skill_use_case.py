@@ -7,8 +7,8 @@ from common_schemas.exceptions import NotFoundError
 
 from ...domain.ports.skill_repository import SkillRepository
 from ...domain.services.skill_lifecycle import SkillLifecycle
-from ...domain.value_objects.skill_state import SkillState
 from ...domain.value_objects.skill_scope import SkillScope
+from ...domain.value_objects.skill_state import SkillState
 
 
 class ApproveSkillUseCase:

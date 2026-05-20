@@ -33,6 +33,7 @@ class MarketplaceTeamSkill(BaseModel):
     tags: list[str] = Field(default_factory=list)
     version: str = "0.1.0"
     metadata: dict[str, Any] = Field(default_factory=dict)
-    promoted_from: UUID | None = None                # 원본 MarketplacePersonalSkill.skill_id (승격 추적)
+    promoted_from: UUID | None = None                # 원본 MarketplacePersonalSkill.skill_id (승격 역추적)
+    promoted_to_company_id: UUID | None = None       # 전사 승격 완료 마킹 (검색 기본 제외 — 승격=복제)
     created_at: UtcDatetime
     updated_at: UtcDatetime

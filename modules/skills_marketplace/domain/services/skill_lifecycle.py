@@ -4,7 +4,6 @@ from common_schemas.exceptions import ValidationError
 
 from ..value_objects.skill_state import SkillState
 
-
 _TRANSITIONS: dict[SkillState, list[SkillState]] = {
     SkillState.DRAFT: [SkillState.REVIEW],
     SkillState.REVIEW: [SkillState.APPROVED, SkillState.DRAFT],

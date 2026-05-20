@@ -9,13 +9,17 @@ from ...domain.entities.marketplace_company_skill import MarketplaceCompanySkill
 from ...domain.ports.skill_repository import SkillRepository
 from ...domain.services.promotion_service import PromotionService
 from ...domain.value_objects.skill_scope import SkillScope
+from ...domain.value_objects.skill_state import SkillState
 
 
 class PromoteToCompanyUseCase:
-    """팀 스킬 → 전사 스킬 승격 (ADR-0012 v3 lifecycle).
+    """팀 스킬 → 전사 스킬 승격 (ADR-0012 v3 lifecycle, 승격=복제 정책).
 
     PromotionService로 TEAM → COMPANY 전이 검증 후 MarketplaceCompanySkill 생성.
-    원본 team skill의 메타/게시상태를 승계하고 promoted_from으로 추적.
+    승격 = 복제(원본 유지) 정책 (조장 리뷰 #98):
+    - 원본 team의 메타는 승계하되 게시상태는 DRAFT로 재심사 리셋
+    - promoted_from으로 신규 company가 원본을 역추적
+    - 원본 team에 promoted_to_company_id 마킹 → search(include_promoted=False) 기본 제외
     """
 
     def __init__(self, repo: SkillRepository) -> None:
@@ -41,7 +45,7 @@ class PromoteToCompanyUseCase:
             name=team.name,
             description=team.description,
             node_definition_id=team.node_definition_id,
-            lifecycle_state=team.lifecycle_state,
+            lifecycle_state=SkillState.DRAFT,        # 승격 = 재심사 리셋 (게시상태 비승계, 조장 리뷰 #98)
             skill_document_uri=team.skill_document_uri,
             embedding=team.embedding,
             workflow_id=team.workflow_id,
@@ -53,4 +57,8 @@ class PromoteToCompanyUseCase:
             updated_at=now,
         )
         await self._repo.save_company(company_skill)
+        # 승격 = 복제(원본 유지) — 원본 team에 promoted_to 마킹 → 검색 기본 제외
+        await self._repo.save_team(
+            team.model_copy(update={"promoted_to_company_id": new_skill_id, "updated_at": now})
+        )
         return new_skill_id
