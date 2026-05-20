@@ -15,7 +15,7 @@ enable_cloud_run               = true
 enable_execution_engine_worker = true
 
 api_server_image              = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/api-server:phase-f-5"
-execution_engine_worker_image = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/execution-engine-worker:adr-0018-2"
+execution_engine_worker_image = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/execution-engine-worker:adr-0018-2b"
 
 # staging은 공용 SA 재활용 ([[sub_agent_cloud_sql_iam]] — Cloud SQL IAM + Secret Manager 권한 보유).
 # production 이관 시 서비스별 SA 분리.

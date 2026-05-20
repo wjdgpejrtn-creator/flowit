@@ -20,6 +20,16 @@ RUN pip install --no-cache-dir -e /app/packages/common_schemas/python
 COPY modules/nodes_graph /app/modules/nodes_graph
 RUN pip install --no-cache-dir -e /app/modules/nodes_graph
 
+# auth + storage — ADR-0018 Phase 2b: credential_id가 있는 노드 실행 시
+# CatalogNodeExecutor가 CredentialInjectionService(auth) + Pg*Repository(storage)로
+# 자격증명을 해결한다. nodes_graph와 동일 패턴 — pip install -e는 의존성 설치용
+# (auth: cryptography / storage: asyncpg·sqlalchemy[asyncio]·cloud-sql-connector[asyncpg]),
+# 패키지 import는 아래 PYTHONPATH /app/modules로 해결한다.
+COPY modules/auth /app/modules/auth
+RUN pip install --no-cache-dir -e /app/modules/auth
+COPY modules/storage /app/modules/storage
+RUN pip install --no-cache-dir -e /app/modules/storage
+
 # execution_engine 본 패키지 + 의존성 (celery, redis, sqlalchemy, pg8000)
 COPY services/execution_engine /app/services/execution_engine
 RUN pip install --no-cache-dir -e /app/services/execution_engine[worker]
