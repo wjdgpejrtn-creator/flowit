@@ -41,11 +41,24 @@ def execute_workflow_task(self, workflow_id: str, context_data: dict) -> dict:
     acks_late=True,
 )
 def cancel_execution_task(self, execution_id: str) -> dict:
+    from common_schemas.exceptions import ExecutionError
+
     from ..dependencies.container import create_container
 
     container = create_container()
     use_case = container.pause_resume_use_case
-    use_case.execute(UUID(execution_id), action="cancel")
+    try:
+        use_case.execute(UUID(execution_id), action="cancel")
+    except ExecutionError as exc:
+        # 이미 종료된(completed/failed/cancelled) execution을 cancel하는 것은
+        # 사용자 입력 오류이지 시스템 장애가 아니다. task를 ERROR로 실패 처리하면
+        # 로그 노이즈 + task 실패율이 왜곡되므로 graceful skip 결과를 반환한다.
+        return {
+            "execution_id": execution_id,
+            "action": "cancel",
+            "status": "skipped",
+            "reason": str(exc),
+        }
     return {"execution_id": execution_id, "action": "cancel", "status": "cancelled"}
 
 
@@ -56,11 +69,23 @@ def cancel_execution_task(self, execution_id: str) -> dict:
     acks_late=True,
 )
 def resume_execution_task(self, execution_id: str) -> dict:
+    from common_schemas.exceptions import ExecutionError
+
     from ..dependencies.container import create_container
 
     container = create_container()
     use_case = container.pause_resume_use_case
-    use_case.execute(UUID(execution_id), action="resume")
+    try:
+        use_case.execute(UUID(execution_id), action="resume")
+    except ExecutionError as exc:
+        # 종료/실행중 등 resume 불가 상태에 대한 resume 요청은 사용자 입력 오류 —
+        # task ERROR가 아닌 graceful skip으로 처리한다. (cancel_execution_task 참고)
+        return {
+            "execution_id": execution_id,
+            "action": "resume",
+            "status": "skipped",
+            "reason": str(exc),
+        }
     return {"execution_id": execution_id, "action": "resume", "status": "running"}
 
 
