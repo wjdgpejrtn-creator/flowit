@@ -31,7 +31,7 @@ ADR-0014는 두 가지를 동시에 결정했다.
 3. **`BaseNode.process()` 시그니처 확장** — `process(self, input)` → `process(self, input, context: NodeContext)`. `NodeContext`는 해결된 connection 토큰 + 실행 메타(execution_id, user_id)를 담는다. 53종 전체 적용(domain 28종은 context 무시). `NodeContext`는 nodes_graph·execution_engine 공유 타입이므로 `common_schemas`에 정의.
 
 4. **external 25종 `process()` 실구현** — "connections > app" 구조로 구현. domain 28종은 기구현이라 (2)만으로 즉시 실행 가능.
-   - **toolset 중복 11종** (rest_api·graphql·webhook·file_read·file_write·file_transform·email_send·slack_notify·data_mapping·json_transform·text_template) — toolset `BaseTool` 로직을 node `process()`로 **포팅**. toolset `SecureConnectorPort`(`connector`) 추상은 폐기하고 httpx 직접 호출(`RestApiTool`의 connector-less 경로가 이미 그 형태). credential은 `kwargs["credential"].value` → `context.connection_token` 1:1 치환 — 이식 비용은 "dict→dataclass 변환" 수준.
+   - **toolset 중복 11종** (rest_api·graphql·webhook·file_read·file_write·file_transform·email_send·slack_notify·data_mapping·json_transform·text_template) — toolset `BaseTool` 로직을 node `process()`로 **포팅**. 포팅 시 toolset `SecureConnectorPort`(`connector`)는 **nodes_graph 측 구현에서 사용하지 않고** httpx 직접 호출(`RestApiTool`의 connector-less 경로가 이미 그 형태). toolset의 `SecureConnectorPort` Port·어댑터 자체는 그대로 유지 — agent 경로용, **toolset 모듈 무변경**. credential은 `kwargs["credential"].value` → `context.connection_token` 1:1 치환 — 이식 비용은 "dict→dataclass 변환" 수준.
      - transform 3 + file 3: connection 미사용 → 순수 로직 이식(`context` 무시).
      - api 3 + notification 2: `context` connection 토큰 사용.
    - **비-toolset 14종** (anthropic_chat·gemma_chat·http_request·bigquery/mysql/postgresql_query·gmail_send·google_* 4·linear_create_issue·pdf_generate·slack_post_message) — 참고 구현 없음, connections+app 구조로 그린필드 신규 구현.
@@ -39,6 +39,7 @@ ADR-0014는 두 가지를 동시에 결정했다.
 5. **connection 주입 = `auth.CredentialInjectionService` 재사용.** node 위험도(RESTRICTED) 게이트 + `required_connections` 검증 + 복호화를 한 묶음으로 수행. `CatalogNodeExecutor`가 `inject(node.credential_id, node.node_id)` 호출 → `NodeContext`에 적재 → `process()` 종료 후 `PlaintextCredential.wipe()`.
 
 6. **credential resolver 통합** — `credentials` 테이블(DDL 002, 통합 vault)을 해결 SSOT로 둔다. `CredentialInjectionService`는 현재 `oauth_connections`만 조회 → OAuth 앱만 지원. API-key 방식 앱(Anthropic, DB query 등)도 해결하도록 `credentials.credential_kind` 기반 분기를 추가한다. OAuth 앱은 `oauth_connections` 메타로 enrich.
+   - **Port 소유 경계**: resolver는 `auth`가 **이미 소유한** `CredentialRepository` Port(`auth/domain/ports/credential_repository.py`, `get_by_id`)에 의존 — 신규 Port 불필요(`AuthenticateUseCase`가 이미 사용 중). 경계는 기존 Clean Architecture 그대로: Port 계약 = auth, 구현 = storage(`pg_credential_repository`, PR #99), `credentials` 테이블 DDL = database(DDL 002).
 
 7. **toolset 11종 `BaseTool` 유지** — agent 호출 경로(ADR-0014 경로 B)용. toolset 모듈은 본 ADR로 변경 없음.
 
@@ -84,7 +85,7 @@ ADR-0014는 두 가지를 동시에 결정했다.
 ### (C) 11종을 toolset `BaseTool`에서 nodes_graph `process()`로 포팅 (완전 분리 — 본 ADR 채택)
 
 - 현재 toolset 중복 11종의 동작 로직은 **toolset `BaseTool`에만 존재**하고, nodes_graph `external/` 측 `process()`는 `NotImplementedError` 스텁이다("toolset.X을 통해 처리, `process()` 직접 호출 X" 메시지).
-- 본 ADR은 toolset `BaseTool` 로직을 nodes_graph `process()`로 포팅한다(Decision 4). `SecureConnectorPort` 추상은 폐기 — toolset 도구가 이미 connector-less httpx 경로를 갖고 있어 이식이 기계적이다.
+- 본 ADR은 toolset `BaseTool` 로직을 nodes_graph `process()`로 포팅한다(Decision 4). nodes_graph 측 구현은 `SecureConnectorPort`를 사용하지 않고 httpx 직접 호출 — toolset 도구가 이미 connector-less 경로를 갖고 있어 이식이 기계적이다. toolset의 `SecureConnectorPort` Port는 유지(toolset 무변경).
 - 결과적으로 동작 로직이 toolset(agent용)과 nodes_graph(canvas용) 양쪽에 의도적으로 존재하게 되며, 양측은 이후 독립 진화한다. toolset 측 11종은 변경하지 않는다(agent 경로 유지).
 
 ## Related ADRs
