@@ -1,4 +1,5 @@
 from .agent_memory_mapper import AgentMemoryMapper
+from .credential_mapper import CredentialMapper
 from .document_mapper import DocumentMapper
 from .execution_mapper import ExecutionMapper, ExecutionRow
 from .node_definition_mapper import NodeDefinitionMapper
@@ -12,6 +13,7 @@ from .workflow_mapper import WorkflowMapper
 
 __all__ = [
     "AgentMemoryMapper",
+    "CredentialMapper",
     "DocumentMapper",
     "ExecutionMapper",
     "ExecutionRow",

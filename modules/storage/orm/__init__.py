@@ -1,5 +1,6 @@
 from .agent_memory_model import AgentMemoryModel
 from .base import Base
+from .credential_model import CredentialModel
 from .document_model import DocumentChunkModel, DocumentModel, QualityLogModel
 from .execution_model import ExecutionModel, NodeResultModel
 from .node_definition_model import NodeDefinitionModel
@@ -14,6 +15,7 @@ from .workflow_model import WorkflowModel
 __all__ = [
     "Base",
     "AgentMemoryModel",
+    "CredentialModel",
     "DocumentChunkModel",
     "DocumentModel",
     "ExecutionModel",
