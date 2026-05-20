@@ -8,8 +8,11 @@ dependencies = [
     "pydantic>=2.7.0",
     "redis>=5.0.0",
     "sqlalchemy>=2.0.30",
-    "asyncpg>=0.29.0",
     "langgraph>=0.2.0",
+    # Cloud SQL IAM sync 연결 — Celery worker는 sync이므로 pg8000(순수 Python driver) 사용.
+    # asyncpg는 worker가 async DB 경로를 쓰지 않아 제거 (dead dependency).
+    "cloud-sql-python-connector>=1.10.0",
+    "pg8000>=1.31.0",
 ]
 
 [project.optional-dependencies]

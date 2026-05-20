@@ -298,6 +298,36 @@ async def test():
 
     await engine.dispose()
     await connector.close_async()
+```
+
+### async vs sync 컴포넌트 — connector 선택
+
+| 실행 모델 | Connector | driver | engine |
+|-----------|-----------|--------|--------|
+| async (FastAPI api_server, Modal sub-agent) | `create_async_connector()` + `connect_async()` | `asyncpg` | `create_async_engine(..., async_creator=)` |
+| **sync** (Celery worker — execution_engine) | `Connector()` + `connect()` | `pg8000` (순수 Python, psycopg2 컴파일 의존성 회피) | `create_engine(..., creator=)` |
+
+Celery worker는 sync 실행 모델이므로 `asyncpg`/`create_async_engine`을 쓸 수 없다. sync
+`Connector` + `pg8000` driver를 사용한다 (REQ-007 `execution_engine/dependencies/container.py`).
+
+```python
+# sync worker 패턴
+from google.cloud.sql.connector import Connector, IPTypes
+from sqlalchemy import create_engine
+
+connector = Connector()
+
+def getconn():
+    return connector.connect(
+        "<PROJECT_ID>:asia-northeast3:workflow-dev",
+        "pg8000",
+        user="<SA 또는 이메일>",
+        db="workflow_automation",
+        enable_iam_auth=True,
+        ip_type=IPTypes.PUBLIC,  # workflow-dev는 public IP만 — private IP 없음
+    )
+
+engine = create_engine("postgresql+pg8000://", creator=getconn, pool_pre_ping=True)
 
 
 asyncio.run(test())
