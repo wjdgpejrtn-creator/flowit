@@ -1,4 +1,6 @@
-type StatusType = 'pending' | 'running' | 'succeeded' | 'failed' | 'retrying' | 'paused' | 'cancelled';
+import { ExecutionStatus, NodeExecutionState } from '@common/generated';
+
+type StatusType = `${ExecutionStatus}` | NodeExecutionState['status'];
 
 interface StatusPillProps {
   status?: StatusType;
@@ -6,23 +8,25 @@ interface StatusPillProps {
 }
 
 const COLORS: Record<StatusType, string> = {
-  pending: 'var(--color-status-pending)',
-  running: 'var(--color-status-running)',
-  succeeded: 'var(--color-status-succeeded)',
-  failed: 'var(--color-status-failed)',
-  retrying: 'var(--color-status-retrying)',
-  paused: 'var(--color-status-paused)',
+  pending:   'var(--color-status-pending)',
+  running:   'var(--color-status-running)',
+  paused:    'var(--color-status-paused)',
+  completed: 'var(--color-status-completed)',
+  failed:    'var(--color-status-failed)',
   cancelled: 'var(--color-status-cancelled)',
+  succeeded: 'var(--color-status-succeeded)',
+  retrying:  'var(--color-status-retrying)',
 };
 
 const LABELS: Record<StatusType, string> = {
-  pending: '대기',
-  running: '실행 중',
-  succeeded: '성공',
-  failed: '실패',
-  retrying: '재시도',
-  paused: '일시정지',
+  pending:   '대기',
+  running:   '실행 중',
+  paused:    '일시정지',
+  completed: '완료',
+  failed:    '실패',
   cancelled: '취소됨',
+  succeeded: '성공',
+  retrying:  '재시도',
 };
 
 export default function StatusPill({ status = 'pending', label }: StatusPillProps) {

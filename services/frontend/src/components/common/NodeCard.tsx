@@ -1,5 +1,6 @@
-type RiskLevel = 'low' | 'med' | 'high' | 'restricted';
-type NodeStatus = 'running' | 'succeeded' | 'failed' | 'pending';
+import { RiskLevel, NodeExecutionState } from '@common/generated';
+
+type NodeStatus = NodeExecutionState['status'];
 
 interface NodeCardProps {
   icon?: string;
@@ -12,20 +13,22 @@ interface NodeCardProps {
 }
 
 const RISK_COLORS: Record<RiskLevel, string> = {
-  low: 'var(--color-risk-low)',
-  med: 'var(--color-risk-med)',
-  high: 'var(--color-risk-high)',
-  restricted: 'var(--color-risk-restricted)',
+  [RiskLevel.LOW]: 'var(--color-risk-low)',
+  [RiskLevel.MEDIUM]: 'var(--color-risk-med)',
+  [RiskLevel.HIGH]: 'var(--color-risk-high)',
+  [RiskLevel.RESTRICTED]: 'var(--color-risk-restricted)',
 };
 
 const STATUS_SHADOWS: Record<NodeStatus, string> = {
-  running: '0 0 0 2px var(--color-status-running), 2px 3px 0 var(--color-ink4)',
+  running:   '0 0 0 2px var(--color-status-running), 2px 3px 0 var(--color-ink4)',
   succeeded: '0 0 0 2px var(--color-status-succeeded), 2px 3px 0 var(--color-ink4)',
-  failed: '0 0 0 2px var(--color-status-failed), 2px 3px 0 var(--color-ink4)',
-  pending: '2px 3px 0 var(--color-ink4)',
+  failed:    '0 0 0 2px var(--color-status-failed), 2px 3px 0 var(--color-ink4)',
+  retrying:  '0 0 0 2px var(--color-status-retrying), 2px 3px 0 var(--color-ink4)',
+  pending:   '2px 3px 0 var(--color-ink4)',
+  cancelled: '2px 3px 0 var(--color-ink4)',
 };
 
-export default function NodeCard({ icon = 'N', name, risk = 'low', status, locked = false, meta, style }: NodeCardProps) {
+export default function NodeCard({ icon = 'N', name, risk = RiskLevel.LOW, status, locked = false, meta, style }: NodeCardProps) {
   const riskColor = RISK_COLORS[risk];
   const boxShadow = status ? STATUS_SHADOWS[status] : '2px 3px 0 var(--color-ink4)';
   const isAnimating = status === 'failed';

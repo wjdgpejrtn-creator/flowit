@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { RiskLevel } from '@common/generated';
 
 export type WorkspaceMode = 'wizard' | 'edit' | 'run';
 
@@ -21,7 +22,7 @@ export interface ChatMessage {
 export interface SlotFillQuestion {
   fieldName: string;
   label: string;
-  risk: 'low' | 'med' | 'high' | 'restricted';
+  risk: RiskLevel;
 }
 
 export interface AgentSession {

@@ -1,4 +1,6 @@
-type Scope = 'private' | 'team' | 'public';
+import { WorkflowSchema } from '@common/generated';
+
+type Scope = WorkflowSchema['scope'];
 
 interface ScopePillProps {
   scope?: Scope;

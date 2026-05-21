@@ -3,21 +3,24 @@ import StatusPill from '@/components/common/StatusPill';
 import NodeCard from '@/components/common/NodeCard';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import Btn from '@/components/common/Btn';
+import { RiskLevel, NodeExecutionState } from '@common/generated';
 
-const TIMELINE = [
-  { time: '09:00:00.124', name: 'Cron Trigger', status: 'succeeded' as const, elapsed: '+12ms' },
-  { time: '09:00:00.236', name: 'Sheets Read',  status: 'succeeded' as const, elapsed: '+842ms' },
-  { time: '09:00:01.078', name: 'Aggregate',    status: 'running'   as const, elapsed: '…' },
-  { time: '09:00:??',     name: 'Drive Save',   status: 'pending'   as const, elapsed: '—' },
-  { time: '09:00:??',     name: 'Slack Post',   status: 'pending'   as const, elapsed: '—' },
+type NodeStatus = NodeExecutionState['status'];
+
+const TIMELINE: Array<{ time: string; name: string; status: NodeStatus; elapsed: string }> = [
+  { time: '09:00:00.124', name: 'Cron Trigger', status: 'succeeded', elapsed: '+12ms' },
+  { time: '09:00:00.236', name: 'Sheets Read',  status: 'succeeded', elapsed: '+842ms' },
+  { time: '09:00:01.078', name: 'Aggregate',    status: 'running',   elapsed: '…' },
+  { time: '09:00:??',     name: 'Drive Save',   status: 'pending',   elapsed: '—' },
+  { time: '09:00:??',     name: 'Slack Post',   status: 'pending',   elapsed: '—' },
 ];
 
-const CANVAS_NODES = [
-  { icon: '⏰', name: 'Cron',      risk: 'low'  as const, status: 'succeeded' as const, x: 24,  y: 80 },
-  { icon: '📊', name: 'Sheets',   risk: 'low'  as const, status: 'succeeded' as const, x: 160, y: 80 },
-  { icon: 'Σ',  name: 'Aggregate',risk: 'low'  as const, status: 'running'   as const, x: 296, y: 80 },
-  { icon: '📦', name: 'Drive',    risk: 'med'  as const, status: 'pending'   as const, x: 296, y: 190 },
-  { icon: '#',  name: 'Slack',    risk: 'high' as const, status: 'pending'   as const, x: 432, y: 80 },
+const CANVAS_NODES: Array<{ icon: string; name: string; risk: RiskLevel; status: NodeStatus; x: number; y: number }> = [
+  { icon: '⏰', name: 'Cron',       risk: RiskLevel.LOW,    status: 'succeeded', x: 24,  y: 80 },
+  { icon: '📊', name: 'Sheets',    risk: RiskLevel.LOW,    status: 'succeeded', x: 160, y: 80 },
+  { icon: 'Σ',  name: 'Aggregate', risk: RiskLevel.LOW,    status: 'running',   x: 296, y: 80 },
+  { icon: '📦', name: 'Drive',     risk: RiskLevel.MEDIUM, status: 'pending',   x: 296, y: 190 },
+  { icon: '#',  name: 'Slack',     risk: RiskLevel.HIGH,   status: 'pending',   x: 432, y: 80 },
 ];
 
 export default function WorkflowDetailPage({ params }: { params: { id: string } }) {

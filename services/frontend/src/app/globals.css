@@ -40,6 +40,7 @@
   /* 실행 상태 */
   --color-status-running: #4F46E5;
   --color-status-succeeded: #10B981;
+  --color-status-completed: #10B981;
   --color-status-failed: #EF4444;
   --color-status-retrying: #F59E0B;
   --color-status-paused: #64748B;

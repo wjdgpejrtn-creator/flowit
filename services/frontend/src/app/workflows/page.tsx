@@ -5,24 +5,25 @@ import RiskPill from '@/components/common/RiskPill';
 import StatusPill from '@/components/common/StatusPill';
 import ScopePill from '@/components/common/ScopePill';
 import Skel from '@/components/common/Skel';
+import { RiskLevel, ExecutionStatus } from '@common/generated';
 
 type WorkflowItem = {
   id: string;
   name: string;
-  status: 'succeeded' | 'running' | 'failed' | 'paused' | 'pending';
-  risk: 'low' | 'med' | 'high' | 'restricted';
+  status: `${ExecutionStatus}`;
+  risk: RiskLevel;
   scope: 'private' | 'team' | 'public';
   nodes: number;
   when: string;
 };
 
 const ITEMS: WorkflowItem[] = [
-  { id: '1', name: '주간 회의록 요약',  status: 'succeeded', risk: 'high',       scope: 'private', nodes: 4, when: '3시간 전' },
-  { id: '2', name: '견적 PDF 분류',    status: 'running',   risk: 'med',        scope: 'team',    nodes: 6, when: '진행 중' },
-  { id: '3', name: 'CS 티켓 라우팅',   status: 'failed',    risk: 'restricted', scope: 'team',    nodes: 8, when: '12분 전' },
-  { id: '4', name: 'OKR 주간 요약',    status: 'succeeded', risk: 'low',        scope: 'public',  nodes: 5, when: '어제' },
-  { id: '5', name: '예산 알림 봇',     status: 'paused',    risk: 'med',        scope: 'team',    nodes: 3, when: '2일 전' },
-  { id: '6', name: '뉴스 클리핑',      status: 'succeeded', risk: 'low',        scope: 'public',  nodes: 7, when: '3일 전' },
+  { id: '1', name: '주간 회의록 요약',  status: ExecutionStatus.COMPLETED, risk: RiskLevel.HIGH,       scope: 'private', nodes: 4, when: '3시간 전' },
+  { id: '2', name: '견적 PDF 분류',    status: ExecutionStatus.RUNNING,   risk: RiskLevel.MEDIUM,     scope: 'team',    nodes: 6, when: '진행 중' },
+  { id: '3', name: 'CS 티켓 라우팅',   status: ExecutionStatus.FAILED,    risk: RiskLevel.RESTRICTED, scope: 'team',    nodes: 8, when: '12분 전' },
+  { id: '4', name: 'OKR 주간 요약',    status: ExecutionStatus.COMPLETED, risk: RiskLevel.LOW,        scope: 'public',  nodes: 5, when: '어제' },
+  { id: '5', name: '예산 알림 봇',     status: ExecutionStatus.PAUSED,    risk: RiskLevel.MEDIUM,     scope: 'team',    nodes: 3, when: '2일 전' },
+  { id: '6', name: '뉴스 클리핑',      status: ExecutionStatus.COMPLETED, risk: RiskLevel.LOW,        scope: 'public',  nodes: 7, when: '3일 전' },
 ];
 
 const TABLE_HEAD = ['이름', 'SCOPE', '위험도', '노드', '마지막 실행', '수정'];

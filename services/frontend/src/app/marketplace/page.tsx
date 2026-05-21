@@ -2,23 +2,24 @@ import AppBar from '@/components/common/AppBar';
 import RiskPill from '@/components/common/RiskPill';
 import ScopePill from '@/components/common/ScopePill';
 import Btn from '@/components/common/Btn';
+import { RiskLevel } from '@common/generated';
 
 type SkillItem = {
   name: string;
   cat: string;
-  risk: 'low' | 'med' | 'high' | 'restricted';
+  risk: RiskLevel;
   scope: 'private' | 'team' | 'public';
   users: number;
   official?: boolean;
 };
 
 const SKILLS: SkillItem[] = [
-  { name: '주간 OKR 요약',      cat: '리포트',  risk: 'low',  scope: 'team',   users: 12, official: false },
-  { name: 'CS 분류기',          cat: 'AI 분류', risk: 'med',  scope: 'team',   users: 34, official: true  },
-  { name: '예산 알림',          cat: '알림',    risk: 'high', scope: 'team',   users: 7,  official: false },
-  { name: '견적서 자동 응답',    cat: '문서',    risk: 'med',  scope: 'public', users: 22, official: true  },
-  { name: '회의록 요약봇',       cat: 'AI 분류', risk: 'low',  scope: 'public', users: 58, official: true  },
-  { name: '인사 온보딩 자동화',  cat: '인사',    risk: 'low',  scope: 'team',   users: 9,  official: false },
+  { name: '주간 OKR 요약',      cat: '리포트',  risk: RiskLevel.LOW,        scope: 'team',   users: 12, official: false },
+  { name: 'CS 분류기',          cat: 'AI 분류', risk: RiskLevel.MEDIUM,     scope: 'team',   users: 34, official: true  },
+  { name: '예산 알림',          cat: '알림',    risk: RiskLevel.HIGH,       scope: 'team',   users: 7,  official: false },
+  { name: '견적서 자동 응답',    cat: '문서',    risk: RiskLevel.MEDIUM,     scope: 'public', users: 22, official: true  },
+  { name: '회의록 요약봇',       cat: 'AI 분류', risk: RiskLevel.LOW,        scope: 'public', users: 58, official: true  },
+  { name: '인사 온보딩 자동화',  cat: '인사',    risk: RiskLevel.LOW,        scope: 'team',   users: 9,  official: false },
 ];
 
 const TABS = ['🪴 Personal', '👥 Team', '🏢 Company'] as const;

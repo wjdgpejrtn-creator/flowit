@@ -3,10 +3,11 @@ import AppBar from '@/components/common/AppBar';
 import RiskPill from '@/components/common/RiskPill';
 import StatusPill from '@/components/common/StatusPill';
 import WarnBanner from '@/components/common/WarnBanner';
+import { RiskLevel, NodeExecutionState } from '@common/generated';
 
-const RECENT_WORKFLOWS = [
-  { name: '주간 회의록 요약', status: 'running' as const, risk: 'high' as const },
-  { name: '견적 PDF 분류', status: 'succeeded' as const, risk: 'med' as const },
+const RECENT_WORKFLOWS: Array<{ name: string; status: NodeExecutionState['status']; risk: RiskLevel }> = [
+  { name: '주간 회의록 요약', status: 'running',   risk: RiskLevel.HIGH },
+  { name: '견적 PDF 분류',   status: 'succeeded', risk: RiskLevel.MEDIUM },
 ];
 
 const QUICK_CHIPS = ['📈 광고 리포트', '📄 PDF 처리', '💬 Slack 알림', '📅 캘린더 동기화'];

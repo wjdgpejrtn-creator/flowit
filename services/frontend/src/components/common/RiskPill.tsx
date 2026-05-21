@@ -1,4 +1,4 @@
-type RiskLevel = 'low' | 'med' | 'high' | 'restricted';
+import { RiskLevel } from '@common/generated';
 
 interface RiskPillProps {
   level?: RiskLevel;
@@ -7,20 +7,20 @@ interface RiskPillProps {
 }
 
 const COLORS: Record<RiskLevel, string> = {
-  low: 'var(--color-risk-low)',
-  med: 'var(--color-risk-med)',
-  high: 'var(--color-risk-high)',
-  restricted: 'var(--color-risk-restricted)',
+  [RiskLevel.LOW]: 'var(--color-risk-low)',
+  [RiskLevel.MEDIUM]: 'var(--color-risk-med)',
+  [RiskLevel.HIGH]: 'var(--color-risk-high)',
+  [RiskLevel.RESTRICTED]: 'var(--color-risk-restricted)',
 };
 
 const LABELS: Record<RiskLevel, string> = {
-  low: 'Low',
-  med: 'Medium',
-  high: 'High',
-  restricted: 'Restricted',
+  [RiskLevel.LOW]: 'Low',
+  [RiskLevel.MEDIUM]: 'Medium',
+  [RiskLevel.HIGH]: 'High',
+  [RiskLevel.RESTRICTED]: 'Restricted',
 };
 
-export default function RiskPill({ level = 'low', fill = false, label }: RiskPillProps) {
+export default function RiskPill({ level = RiskLevel.LOW, fill = false, label }: RiskPillProps) {
   const color = COLORS[level];
   return (
     <span

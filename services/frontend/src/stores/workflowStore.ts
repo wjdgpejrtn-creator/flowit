@@ -1,11 +1,12 @@
 import { create } from 'zustand';
+import { RiskLevel, ExecutionStatus, NodeExecutionState, WorkflowSchema } from '@common/generated';
 
 export interface WorkflowNode {
   id: string;
   name: string;
   icon: string;
-  risk: 'low' | 'med' | 'high' | 'restricted';
-  status?: 'pending' | 'running' | 'succeeded' | 'failed';
+  risk: RiskLevel;
+  status?: NodeExecutionState['status'];
   meta?: string;
   position: { x: number; y: number };
 }
@@ -21,11 +22,11 @@ export interface WorkflowEdge {
 export interface Workflow {
   id: string;
   name: string;
-  scope: 'private' | 'team' | 'public';
+  scope: WorkflowSchema['scope'];
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
-  riskLevel: 'low' | 'med' | 'high' | 'restricted';
-  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'paused';
+  riskLevel: RiskLevel;
+  status: `${ExecutionStatus}`;
   nodeCount: number;
   updatedAt: string;
 }
