@@ -12,10 +12,14 @@ spec §3.2 Workflow Composer 내부 StateGraph 구현. LangGraph는 adapters/에
 """
 from __future__ import annotations
 
+import logging
 import operator
 import time
+from datetime import datetime, timezone
 from typing import Annotated, Any, AsyncGenerator, Optional, TypedDict
 from uuid import UUID, uuid4
+
+_logger = logging.getLogger(__name__)
 
 from langgraph.graph import END, StateGraph
 
@@ -38,7 +42,9 @@ from common_schemas.transport import (
 from common_schemas.workflow import NodeConfig, WorkflowSchema
 from nodes_graph.domain.services.graph_validator import GraphValidator
 
+from ...domain.entities.session_ref import SessionRef
 from ...domain.ports.node_registry import NodeRegistry
+from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.workflow_repository import WorkflowRepository
 from ...domain.services.drafter_service import DrafterService
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
@@ -95,6 +101,7 @@ class LangGraphOrchestrator:
         node_registry: NodeRegistry,
         workflow_repo: WorkflowRepository,
         graph_validator: GraphValidator,
+        session_frame_store: SessionFrameStore | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -103,6 +110,7 @@ class LangGraphOrchestrator:
         self._node_registry = node_registry
         self._workflow_repo = workflow_repo
         self._graph_validator = graph_validator
+        self._session_frame_store = session_frame_store
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -124,7 +132,9 @@ class LangGraphOrchestrator:
         message: str,
         personal_memory: list[MemoryEntry],
     ) -> AsyncGenerator[SSEFrame, None]:
-        yield SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
+        session_frame = SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
+        yield session_frame
+        all_frames: list[AnySSEFrame] = [session_frame]
 
         initial: _State = {
             "session_id": session_id,
@@ -147,14 +157,53 @@ class LangGraphOrchestrator:
 
         async for event in self._graph.astream(initial, stream_mode="updates"):
             for node_name, updates in event.items():
-                yield AgentNodeFrame(agent_node_name=node_name)
+                node_frame = AgentNodeFrame(agent_node_name=node_name)
+                yield node_frame
+                all_frames.append(node_frame)
                 if not isinstance(updates, dict):
                     continue
                 for frame in updates.get("collected_frames", []):
                     yield frame
+                    all_frames.append(frame)
                 if updates.get("error"):
-                    yield ErrorFrame(code="E_COMPOSER", message=updates["error"])
+                    error_frame = ErrorFrame(code="E_COMPOSER", message=updates["error"])
+                    yield error_frame
+                    all_frames.append(error_frame)
+                    await self._try_save_session(session_id, user_id, message, all_frames)
                     return
+
+        await self._try_save_session(session_id, user_id, message, all_frames)
+
+    async def _try_save_session(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        message: str,
+        frames: list[AnySSEFrame],
+    ) -> None:
+        if self._session_frame_store is None:
+            return
+        workflow_id: UUID | None = None
+        for frame in frames:
+            if isinstance(frame, ResultFrame):
+                wid_str = frame.payload.get("workflow_id")
+                if wid_str:
+                    try:
+                        workflow_id = UUID(wid_str)
+                    except Exception:
+                        pass
+                break
+        ref = SessionRef(
+            session_id=session_id,
+            user_id=user_id,
+            workflow_id=workflow_id,
+            created_at=datetime.now(timezone.utc),
+            message_preview=message[:100],
+        )
+        try:
+            await self._session_frame_store.save_session(ref, frames)
+        except Exception as exc:
+            _logger.warning("session frame 저장 실패 (non-fatal): %s", exc)
 
     # ------------------------------------------------------------------ nodes (13)
 
