@@ -267,6 +267,8 @@ export interface ContentBlock {
   source_ref?: SourceRef | null;
   token_estimate?: number | null;
   importance_score?: number | null;
+  metadata?: Record<string, unknown> | null;
+  is_corrupted: boolean;
 }
 
 export interface SheetMeta {
@@ -300,6 +302,8 @@ export interface DocumentBlock {
   file_meta: FileMeta;
   parser?: ParserMeta | null;
   blocks: Array<ContentBlock>;
+  vision_block_count: number;
+  failed_block_count: number;
 }
 
 export interface EvaluationResult {
