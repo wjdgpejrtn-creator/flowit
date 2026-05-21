@@ -29,6 +29,7 @@ This project follows [Semantic Versioning](https://semver.org/):
   - `InterleavingParser._rebuild_doc()` — `vision_block_count` / `failed_block_count` 채워서 `DocumentBlock` 생성.
   - `QualityGate._calc_coverage()` — `vision_blocks=0` / `failed_blocks=0` 하드코딩(TODO)을 `document.vision_block_count` / `document.failed_block_count`로 교체.
   - `QualityGate._calc_valid_table_ratio()` — XLSX 분기를 `ContentBlock.metadata` 기반으로 정리.
+  - `ContentBlock.metadata` 키 규약(XLSX 병합셀 `data_rows` / `normalized_headers` 등) — 생산자(xlsx_parser) ↔ 소비자(QualityGate) drift 방지 위해 `TypedDict` 또는 별도 모델로 명문화 검토 (PR #120 리뷰 🟢 LOW). `metadata` 자체는 범용 확장 슬롯이므로 `dict[str, Any]` 유지, 키 규약만 doc_parser 측에서 명문화.
   - `tests/conftest.py`의 `common_schemas` stub 제거 (common_schemas 0.9.0 머지 후).
 
 ## [0.8.0] - 2026-05-20
