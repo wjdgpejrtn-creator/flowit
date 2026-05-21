@@ -3,10 +3,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from uuid import UUID
 
+from ..entities.approval_workflow import ApprovalWorkflow
 from ..entities.marketplace_company_skill import MarketplaceCompanySkill
 from ..entities.marketplace_personal_skill import MarketplacePersonalSkill
 from ..entities.marketplace_team_skill import MarketplaceTeamSkill
 from ..value_objects.skill_scope import SkillScope
+from ..value_objects.skill_state import SkillState
 
 
 class SkillRepository(ABC):
@@ -57,6 +59,7 @@ class SkillRepository(ABC):
         scope: SkillScope,
         limit: int = 10,
         include_promoted: bool = False,
+        lifecycle_state: SkillState | None = None,
     ) -> list[MarketplacePersonalSkill | MarketplaceTeamSkill | MarketplaceCompanySkill]:
         """하이브리드 검색 — scope 범위 내 embedding 유사도 top-k.
 
@@ -66,5 +69,18 @@ class SkillRepository(ABC):
         include_promoted=False(기본): 상위 scope로 승격 완료된 원본(`promoted_to_*` 존재)은
         검색 결과에서 제외 — 같은 스킬이 personal+team 중복 노출되는 것을 방지 (승격=복제 정책,
         조장 리뷰 #98). 실제 WHERE 필터(`promoted_to_* IS NULL`)는 storage 구현 시 적용.
+
+        lifecycle_state(ADR-0020 (b)): 지정 시 해당 게시 상태만 반환(예: PUBLISHED). None이면
+        전체 상태. Composer 노드 후보 검색은 PUBLISHED만 보도록 SearchSkillsUseCase가 PUBLISHED를
+        전달한다(미검토 DRAFT/REVIEW 오염 방지). 실제 WHERE 필터는 storage 구현 시 적용.
+        """
+        ...
+
+    @abstractmethod
+    async def save_approval(self, approval: ApprovalWorkflow) -> ApprovalWorkflow:
+        """게시 승인 워크플로우 레코드 저장 (ADR-0020 + 감사 추적).
+
+        `ApproveSkillUseCase`가 REVIEW→APPROVED/DRAFT 전이 시 reviewer_id/status/comment를
+        레코드로 남긴다. 저장 대상 = skill_approvals 테이블(PR-2e DDL). 구현은 storage.
         """
         ...
