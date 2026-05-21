@@ -1,4 +1,4 @@
-# ADR-0019: Skills Builder 산출물 게시 lifecycle 게이트 + scope별 진입 (Option B)
+# ADR-0020: Skills Builder 산출물 게시 lifecycle 게이트 + scope별 진입 (Option B)
 
 - **Status**: Proposed
 - **Date**: 2026-05-21
