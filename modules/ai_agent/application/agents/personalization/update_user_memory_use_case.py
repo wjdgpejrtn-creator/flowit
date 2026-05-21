@@ -97,6 +97,10 @@ class UpdateUserMemoryUseCase:
 
         now = datetime.now(timezone.utc)
 
+        # CAS 선점 — LLM 호출 전에 debounce 윈도우 확보 (claim-first)
+        if not await self._store.claim_debounce_window(user_id, now, self._debounce_window):
+            return False
+
         refs = await self._store.load_index(user_id)
         existing: dict[str, MemoryFile] = {}
         for ref in refs:
@@ -104,11 +108,6 @@ class UpdateUserMemoryUseCase:
                 existing[ref.filename] = await self._store.load_file(user_id, ref.filename)
             except FileNotFoundError:
                 pass
-
-        if existing:
-            most_recent = max(f.updated_at for f in existing.values())
-            if (now - most_recent) < self._debounce_window:
-                return False
 
         prompt = _build_prompt(session_summary, list(existing.values()), workflow)
         result: _MemoryUpdateResult = await self._llm.generate_structured(prompt, _MemoryUpdateResult)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from ..entities.memory_file import MemoryFile, MemoryFileRef
@@ -49,6 +50,16 @@ class PersonalMemoryStore(ABC):
     @abstractmethod
     async def save_embedding(self, user_id: UUID, name: str, embedding: list[float]) -> None:
         """{name}.emb.json 저장. if_generation_match로 동시성 제어."""
+        ...
+
+    @abstractmethod
+    async def claim_debounce_window(self, user_id: UUID, now: datetime, window: timedelta) -> bool:
+        """debounce 윈도우를 CAS로 선점.
+
+        - 마지막 claim으로부터 window 이내면 False (아직 윈도우 내)
+        - 다른 인스턴스가 동시에 선점해 CAS 경쟁에서 패하면 False
+        - 선점 성공 시 True
+        """
         ...
 
     async def cleanup(self, user_id: UUID) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from google.cloud.storage import Bucket
 
 _INDEX_FILENAME = "MEMORY.md"
+_DEBOUNCE_FILENAME = ".debounce.json"
 _INDEX_LINE_RE = re.compile(r"^- \[([^\]]+)\]\(([^)]+)\) — (.+)$")
 
 
@@ -229,6 +230,36 @@ class GCSMemoryStore(PersonalMemoryStore):
         emb_filename = f"{name}.emb.json"
         data = json.dumps({"embedding": embedding}, ensure_ascii=False).encode("utf-8")
         await self._upload(user_id, emb_filename, data)
+
+    # ── debounce claim ──────────────────────────────────────────────────────
+
+    async def claim_debounce_window(self, user_id: UUID, now: datetime, window: timedelta) -> bool:
+        bucket = self._get_bucket()
+        key = self._blob_key(user_id, _DEBOUNCE_FILENAME)
+        blob = bucket.blob(key)
+
+        try:
+            blob.reload()
+            generation = blob.generation
+            raw = blob.download_as_bytes()
+            data = json.loads(raw.decode("utf-8"))
+            claimed_at = _parse_updated_at(data.get("claimed_at", ""))
+            if (now - claimed_at) < window:
+                return False  # 아직 윈도우 내 — debounce
+        except Exception:
+            generation = 0  # blob 없음 (신규 유저)
+
+        try:
+            from google.api_core.exceptions import PreconditionFailed
+
+            blob.upload_from_string(
+                json.dumps({"claimed_at": now.isoformat()}).encode("utf-8"),
+                content_type="application/json",
+                if_generation_match=generation,
+            )
+            return True
+        except PreconditionFailed:
+            return False  # 동시 요청이 먼저 선점
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 
