@@ -187,7 +187,6 @@ class AgentComposer:
                             node_registry=node_registry,
                             workflow_repo=workflow_repo,
                             graph_validator=graph_validator,
-                            embedder=self._embedder,
                             session_frame_store=self._session_frame_store,
                         )
                         async for frame in await graph.stream(

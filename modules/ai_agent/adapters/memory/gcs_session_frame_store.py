@@ -5,9 +5,8 @@ import os
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from pydantic import TypeAdapter
-
 from common_schemas.transport import AnySSEFrame
+from pydantic import TypeAdapter
 
 from ...domain.entities.session_ref import SessionRef
 from ...domain.ports.session_frame_store import SessionFrameStore

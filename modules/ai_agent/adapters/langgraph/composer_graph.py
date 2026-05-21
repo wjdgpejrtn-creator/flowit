@@ -15,16 +15,13 @@ from __future__ import annotations
 import logging
 import operator
 import time
-from datetime import datetime, timezone
-from typing import Annotated, Any, AsyncGenerator, Optional, TypedDict
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Annotated, Any, TypedDict
 from uuid import UUID, uuid4
 
-_logger = logging.getLogger(__name__)
-
-from langgraph.graph import END, StateGraph
-
 from common_schemas.agent import DraftSpec, MemoryEntry, SlotFillingState
-from common_schemas.enums import ExecutionStatus, IntentType
+from common_schemas.enums import IntentType
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
@@ -40,6 +37,7 @@ from common_schemas.transport import (
     WorkflowDraftFrame,
 )
 from common_schemas.workflow import NodeConfig, WorkflowSchema
+from langgraph.graph import END, StateGraph
 from nodes_graph.domain.services.graph_validator import GraphValidator
 
 from ...domain.entities.session_ref import SessionRef
@@ -51,8 +49,9 @@ from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 from ...domain.services.qa_evaluator_service import QAEvaluatorService
 from ...domain.services.slot_filling_service import SlotFillingService
 from ...domain.services.workflow_layout_service import WorkflowLayoutService
-from ...domain.value_objects.quality_threshold import QualityThreshold
 from ...domain.value_objects.turn_limit import TurnLimit
+
+_logger = logging.getLogger(__name__)
 
 _QA_MAX_RETRY = 3
 
@@ -75,9 +74,9 @@ class _State(TypedDict):
     personal_memory: list[MemoryEntry]
     intent: str | None
     intent_analyzed_entities: dict[str, Any]
-    draft_spec: Optional[DraftSpec]
+    draft_spec: DraftSpec | None
     node_candidates: list[NodeConfig]
-    workflow_draft: Optional[WorkflowSchema]
+    workflow_draft: WorkflowSchema | None
     qa_attempts: int
     qa_score: float
     pass_flag: bool
@@ -197,7 +196,7 @@ class LangGraphOrchestrator:
             session_id=session_id,
             user_id=user_id,
             workflow_id=workflow_id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             message_preview=message[:100],
         )
         try:

@@ -8,13 +8,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import operator
-from datetime import datetime, timezone
-from typing import Annotated, Any, AsyncGenerator, TypedDict
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Annotated, Any, TypedDict
 from uuid import UUID, uuid4
-
-_logger = logging.getLogger(__name__)
-
-from langgraph.graph import END, StateGraph
 
 from common_schemas.agent import AgentState, MemoryEntry
 from common_schemas.agent_protocol import AgentProtocolRequest
@@ -27,11 +24,14 @@ from common_schemas.transport import (
     SessionFrame,
     SSEFrame,
 )
+from langgraph.graph import END, StateGraph
 
 from ...domain.entities.session_ref import SessionRef
 from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.sub_agent_client import SubAgentClient
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
+
+_logger = logging.getLogger(__name__)
 
 _COMPOSER = "composer"
 _SKILLS = "skills"
@@ -114,7 +114,7 @@ class LangGraphSupervisor:
         # relay 노드(_COMPOSER, _SKILLS)는 _relay()가 직접 Queue에 put하므로
         # run_graph에서는 collected_frames를 중복 emit하지 않음.
         # 나머지 노드(load_memory, intent, finalize, update_memory)는 여기서 emit.
-        _RELAY_NODES = {_COMPOSER, _SKILLS}
+        _relay_nodes = {_COMPOSER, _SKILLS}
 
         async def _run_graph() -> None:
             try:
@@ -123,7 +123,7 @@ class LangGraphSupervisor:
                         await queue.put(AgentNodeFrame(agent_node_name=node_name))
                         if not isinstance(updates, dict):
                             continue
-                        if node_name not in _RELAY_NODES:
+                        if node_name not in _relay_nodes:
                             for frame in updates.get("collected_frames", []):
                                 await queue.put(frame)
                         if updates.get("error"):
@@ -137,7 +137,7 @@ class LangGraphSupervisor:
 
         asyncio.create_task(_run_graph())
 
-        all_frames: list[SSEFrame] = []
+        all_frames: list[AnySSEFrame] = []
         while True:
             frame = await queue.get()
             if frame is None:
@@ -298,7 +298,7 @@ class LangGraphSupervisor:
                 session_id=session_id,
                 user_id=user_id,
                 workflow_id=workflow_id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
                 message_preview=message[:100],
             )
             await self._session_frame_store.save_session(ref, frames)  # type: ignore[union-attr]
