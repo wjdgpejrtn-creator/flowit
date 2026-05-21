@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from common_schemas import NodeContext
 from common_schemas.workflow import NodeConfig, NodeInstance
 
 
@@ -14,5 +15,6 @@ class NodeExecutorPort(ABC):
         node: NodeInstance,
         config: NodeConfig,
         inputs: dict[str, Any],
+        context: NodeContext,
     ) -> dict[str, Any]:
         ...

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 from fpdf import FPDF
 
@@ -40,7 +41,7 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
     input_schema = PdfGenerateInput
     output_schema = PdfGenerateOutput
 
-    async def process(self, input: PdfGenerateInput) -> PdfGenerateOutput:
+    async def process(self, input: PdfGenerateInput, context: NodeContext) -> PdfGenerateOutput:
         pdf = FPDF(margin=input.margin)
         pdf.add_page()
         pdf.set_font("Helvetica", "B", size=input.font_size + 4)

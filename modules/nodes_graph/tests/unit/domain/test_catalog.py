@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
+from common_schemas import NodeContext
 
 from nodes_graph.application.catalog_registry import get_all_node_definitions
 from nodes_graph.domain.catalog.trigger.api_poll_trigger import ApiPollTriggerInput, ApiPollTriggerNode
 from nodes_graph.domain.catalog.trigger.manual_trigger import ManualTriggerInput, ManualTriggerNode
 from nodes_graph.domain.catalog.trigger.schedule_trigger import ScheduleTriggerInput, ScheduleTriggerNode
 from nodes_graph.domain.catalog.trigger.webhook_trigger import WebhookTriggerInput, WebhookTriggerNode
+
+NODE_CTX = NodeContext(execution_id=uuid4(), user_id=uuid4())
 
 
 def test_catalog_count():
@@ -58,7 +63,7 @@ def test_catalog_all_have_required_fields():
 @pytest.mark.asyncio
 async def test_schedule_trigger_passthrough():
     node = ScheduleTriggerNode()
-    out = await node.process(ScheduleTriggerInput(cron="0 9 * * 1-5", triggered_at="2026-05-08T09:00:00Z"))
+    out = await node.process(ScheduleTriggerInput(cron="0 9 * * 1-5", triggered_at="2026-05-08T09:00:00Z"), NODE_CTX)
     assert out.cron == "0 9 * * 1-5"
     assert out.triggered_at == "2026-05-08T09:00:00Z"
 
@@ -66,7 +71,7 @@ async def test_schedule_trigger_passthrough():
 @pytest.mark.asyncio
 async def test_webhook_trigger_passthrough():
     node = WebhookTriggerNode()
-    out = await node.process(WebhookTriggerInput(payload={"event": "push"}, method="POST"))
+    out = await node.process(WebhookTriggerInput(payload={"event": "push"}, method="POST"), NODE_CTX)
     assert out.payload == {"event": "push"}
     assert out.method == "POST"
 
@@ -74,7 +79,7 @@ async def test_webhook_trigger_passthrough():
 @pytest.mark.asyncio
 async def test_manual_trigger_passthrough():
     node = ManualTriggerNode()
-    out = await node.process(ManualTriggerInput(payload={"key": "val"}, triggered_by="아름"))
+    out = await node.process(ManualTriggerInput(payload={"key": "val"}, triggered_by="아름"), NODE_CTX)
     assert out.triggered_by == "아름"
 
 
@@ -84,7 +89,7 @@ async def test_api_poll_trigger_diff():
     out = await node.process(ApiPollTriggerInput(
         response={"status": "active", "count": 5},
         previous_response={"status": "active", "count": 3},
-    ))
+    ), NODE_CTX)
     assert out.changed is True
     assert "count" in out.diff_keys
 
@@ -95,6 +100,6 @@ async def test_api_poll_trigger_no_diff():
     out = await node.process(ApiPollTriggerInput(
         response={"status": "active"},
         previous_response={"status": "active"},
-    ))
+    ), NODE_CTX)
     assert out.changed is False
     assert out.diff_keys == []

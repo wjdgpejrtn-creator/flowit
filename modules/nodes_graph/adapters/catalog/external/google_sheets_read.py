@@ -2,17 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid5
 
+import httpx
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ExecutionError, ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "google_sheets_read"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+_TIMEOUT_SECONDS = 60
 
 
 @dataclass
@@ -43,10 +48,36 @@ class GoogleSheetsReadNode(BaseNode[GoogleSheetsReadInput, GoogleSheetsReadOutpu
     input_schema = GoogleSheetsReadInput
     output_schema = GoogleSheetsReadOutput
 
-    async def process(self, input: GoogleSheetsReadInput) -> GoogleSheetsReadOutput:
-        raise NotImplementedError(
-            "외부 서비스 호출은 REQ-005 toolset connector를 통해 처리. "
-            "OAuth credential 주입은 REQ-002 CredentialInjectionService 담당."
+    async def process(self, input: GoogleSheetsReadInput, context: NodeContext) -> GoogleSheetsReadOutput:
+        # connection_token = Google OAuth access token. spreadsheets.values.get.
+        if not context.connection_token:
+            raise ValidationError("google_sheets_read는 credential(Google OAuth 토큰)이 필요하다")
+
+        url = (
+            f"https://sheets.googleapis.com/v4/spreadsheets/{input.spreadsheet_id}"
+            f"/values/{quote(input.range_a1, safe='')}"
+        )
+        params = {
+            "valueRenderOption": input.value_render_option,
+            "dateTimeRenderOption": input.date_time_render_option,
+            "majorDimension": input.major_dimension,
+        }
+        headers = {"Authorization": f"Bearer {context.connection_token}"}
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            response = await client.get(url, params=params, headers=headers)
+
+        if response.status_code >= 400:
+            raise ExecutionError(
+                f"Google Sheets API 오류 {response.status_code}: {response.text[:200]}"
+            )
+
+        data = response.json()
+        values: list[list[Any]] = data.get("values", [])
+        return GoogleSheetsReadOutput(
+            range_resolved=data.get("range", input.range_a1),
+            major_dimension=data.get("majorDimension", input.major_dimension),
+            values=values,
+            row_count=len(values),
         )
 
 
@@ -92,7 +123,7 @@ def get_node_definition() -> NodeDefinition:
         parameter_schema={},
         risk_level=RiskLevel.MEDIUM,
         required_connections=["google"],
-        description="Google Sheets에서 지정 범위(A1 표기) 값 읽기 (spreadsheets.values.get). Google OAuth 자격증명 필요",
+        description="Google Sheets 지정 범위(A1 표기) 값 읽기 (values.get). Google OAuth 자격증명 필요",
         is_mvp=True,
         service_type="google_workspace",
     )

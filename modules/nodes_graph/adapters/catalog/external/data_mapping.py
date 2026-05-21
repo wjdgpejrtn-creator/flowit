@@ -4,12 +4,14 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "data_mapping"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -39,12 +41,18 @@ class DataMappingNode(BaseNode[DataMappingInput, DataMappingOutput]):
     input_schema = DataMappingInput
     output_schema = DataMappingOutput
 
-    async def process(self, input: DataMappingInput) -> DataMappingOutput:
-        raise NotImplementedError(
-            "데이터 매핑은 REQ-005 toolset.DataMappingTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
-        )
+    async def process(self, input: DataMappingInput, context: NodeContext) -> DataMappingOutput:
+        if not isinstance(input.data, dict):
+            raise ValidationError("'data' must be a JSON object")
+        result: dict[str, Any] = {}
+        mapped_count = 0
+        for key, value in input.data.items():
+            if key in input.mapping:
+                result[input.mapping[key]] = value
+                mapped_count += 1
+            elif not input.drop_unmapped:
+                result[key] = value
+        return DataMappingOutput(result=result, mapped_count=mapped_count)
 
 
 def get_node_definition() -> NodeDefinition:

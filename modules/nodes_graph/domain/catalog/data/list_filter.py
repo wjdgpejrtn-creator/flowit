@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -40,7 +41,7 @@ class ListFilterNode(BaseNode[ListFilterInput, ListFilterOutput]):
     input_schema = ListFilterInput
     output_schema = ListFilterOutput
 
-    async def process(self, input: ListFilterInput) -> ListFilterOutput:
+    async def process(self, input: ListFilterInput, context: NodeContext) -> ListFilterOutput:
         items = list(input.items)
         match input.operation:
             case "filter_none":

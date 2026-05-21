@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -36,7 +37,7 @@ class DelayNode(BaseNode[DelayInput, DelayOutput]):
     input_schema = DelayInput
     output_schema = DelayOutput
 
-    async def process(self, input: DelayInput) -> DelayOutput:
+    async def process(self, input: DelayInput, context: NodeContext) -> DelayOutput:
         await asyncio.sleep(input.seconds)
         return DelayOutput(elapsed_seconds=input.seconds)
 

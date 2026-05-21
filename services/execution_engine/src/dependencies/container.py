@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import cached_property
 from typing import Any
 
+from ..adapters.catalog_node_executor import CatalogNodeExecutor
 from ..adapters.celery_adapter import CeleryAdapter
 from ..adapters.sse_event_publisher import SSEEventPublisher
-from ..adapters.toolset_executor import ToolsetExecutor
-from ..adapters.vault_credential_provider import VaultCredentialProvider
 from ..application.use_cases.dispatch_node import DispatchNodeUseCase
 from ..application.use_cases.evaluate_and_refine import EvaluateAndRefineUseCase
 from ..application.use_cases.execute_workflow import ExecuteWorkflowUseCase
@@ -25,14 +26,12 @@ class Container:
         workflow_repo: Any,
         execution_repo: Any,
         node_executor: Any,
-        credential_provider: Any,
         event_publisher: Any,
         task_queue: Any | None = None,
     ) -> None:
         self._workflow_repo = workflow_repo
         self._execution_repo = execution_repo
         self._node_executor = node_executor
-        self._credential_provider = credential_provider
         self._event_publisher = event_publisher
         self._task_queue = task_queue
 
@@ -44,7 +43,6 @@ class Container:
     def dispatch_node_use_case(self) -> DispatchNodeUseCase:
         return DispatchNodeUseCase(
             node_executor=self._node_executor,
-            credential_provider=self._credential_provider,
             event_publisher=self._event_publisher,
             retry_manager=self._retry_manager,
         )
@@ -87,37 +85,152 @@ class Container:
 _container: Container | None = None
 
 
+def _build_redis_client():
+    """Redis 클라이언트 — rediss://(TLS) 시 Memorystore SERVER_AUTHENTICATION cert가
+    컨테이너 trust store에 없어 cert verify skip. TLS encryption은 유지."""
+    import redis
+
+    redis_url = os.getenv("REDIS_URL")
+    if not redis_url:
+        return redis.Redis()
+    kwargs: dict = {}
+    if redis_url.startswith("rediss://"):
+        kwargs["ssl_cert_reqs"] = None
+    return redis.Redis.from_url(redis_url, **kwargs)
+
+
+def _build_db_engine():
+    """Cloud SQL IAM 인증 sync engine — [[sub_agent_cloud_sql_iam]] 표준.
+
+    pg8000(순수 Python driver) + cloud-sql-python-connector. 비밀번호 DSN 금지.
+    Celery worker는 sync이므로 async connector 대신 sync `Connector`를 사용한다.
+    """
+    from google.cloud.sql.connector import Connector, IPTypes
+    from sqlalchemy import create_engine
+
+    instance = os.getenv("CLOUD_SQL_INSTANCE")
+    iam_user = os.getenv("DB_IAM_USER")
+    db_name = os.getenv("DB_NAME")
+    if not (instance and iam_user and db_name):
+        raise RuntimeError(
+            "execution_engine DB engine은 CLOUD_SQL_INSTANCE / DB_IAM_USER / DB_NAME "
+            "환경변수를 요구한다 (Cloud SQL IAM auth). secret_env_vars 바인딩 확인."
+        )
+
+    connector = Connector()
+
+    def getconn():
+        return connector.connect(
+            instance,
+            "pg8000",
+            user=iam_user,
+            db=db_name,
+            enable_iam_auth=True,
+            ip_type=IPTypes.PUBLIC,
+        )
+
+    return create_engine("postgresql+pg8000://", creator=getconn, pool_pre_ping=True)
+
+
+def _build_credential_service_factory():
+    """credential 해결용 async 리소스 팩토리 (ADR-0018 Phase 2b).
+
+    `CredentialInjectionService` + storage repository는 전부 `AsyncSession`(asyncpg)
+    기반인데, sync Celery worker는 `_build_db_engine()`의 sync engine만 보유한다.
+    `CatalogNodeExecutor`가 노드 실행 1회당 `asyncio.run()`으로 새 이벤트 루프를
+    생성하므로, 워커 수명 동안 단일 async engine/connector를 보유하면 cross-loop로
+    깨진다(asyncpg connection·Cloud SQL connector 모두 생성 루프에 바인딩).
+
+    → credential 주입이 필요한 노드 실행 1회당 connector + async engine을 fresh
+    생성하고 종료 시 dispose한다(`NullPool` — 단일 세션 1회용). credential_id가
+    없는 노드는 본 팩토리를 호출하지 않으므로 비용을 지불하지 않는다.
+    """
+    from auth.adapters.cipher.aes_gcm import AESGCMCipher
+
+    instance = os.getenv("CLOUD_SQL_INSTANCE")
+    iam_user = os.getenv("DB_IAM_USER")
+    db_name = os.getenv("DB_NAME")
+    if not (instance and iam_user and db_name):
+        raise RuntimeError(
+            "credential resolver는 CLOUD_SQL_INSTANCE / DB_IAM_USER / DB_NAME "
+            "환경변수를 요구한다 (Cloud SQL IAM auth). secret_env_vars 바인딩 확인."
+        )
+
+    # AESGCMCipher는 ENCRYPTION_KEY 환경변수를 생성 시 읽는다 — worker secret_env_vars
+    # 에 encryption-key 바인딩 필요(infra/terraform/.../staging/main.tf).
+    cipher = AESGCMCipher()
+
+    @asynccontextmanager
+    async def factory() -> AsyncIterator[Any]:
+        from auth.domain.services.credential_injection_service import (
+            CredentialInjectionService,
+        )
+        from google.cloud.sql.connector import IPTypes, create_async_connector
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from sqlalchemy.pool import NullPool
+        from storage.repositories.pg_credential_repository import PgCredentialRepository
+        from storage.repositories.pg_node_definition_repository import (
+            PgNodeDefinitionRepository,
+        )
+        from storage.repositories.pg_oauth_repository import PgOAuthRepository
+
+        # create_async_connector()는 현재 실행 중인 이벤트 루프를 캡처한다 —
+        # asyncio.run()이 만든 루프에 바인딩되어 본 with 블록 내에서만 유효.
+        connector = await create_async_connector()
+
+        async def getconn():
+            return await connector.connect_async(
+                instance,
+                "asyncpg",
+                user=iam_user,
+                db=db_name,
+                enable_iam_auth=True,
+                ip_type=IPTypes.PUBLIC,
+            )
+
+        engine = create_async_engine(
+            "postgresql+asyncpg://",
+            async_creator=getconn,
+            poolclass=NullPool,
+        )
+        try:
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with session_factory() as session:
+                yield CredentialInjectionService(
+                    cipher=cipher,
+                    oauth_repo=PgOAuthRepository(session),
+                    node_def_repo=PgNodeDefinitionRepository(session),
+                    credential_repo=PgCredentialRepository(session),
+                )
+        finally:
+            await engine.dispose()
+            await connector.close_async()
+
+    return factory
+
+
 def create_container() -> Container:
     global _container
     if _container is not None:
         return _container
 
-    import redis
+    from nodes_graph.application.catalog_registry import get_all_node_classes
+    from sqlalchemy.orm import sessionmaker
 
     from ..adapters.postgres_execution_repo import PostgresExecutionRepository
     from ..adapters.postgres_workflow_repo import PostgresWorkflowRepository
 
-    redis_url = os.getenv("REDIS_URL")
-    redis_client = redis.Redis.from_url(redis_url) if redis_url else redis.Redis()
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    db_host = os.getenv("DB_HOST")
-    db_port = int(os.getenv("DB_PORT", "5432"))
-    db_user = os.getenv("DB_USER")
-    db_password = os.getenv("DB_PASSWORD")
-    db_name = os.getenv("DB_NAME")
-    database_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-
-    engine = create_engine(database_url, pool_pre_ping=True)
+    redis_client = _build_redis_client()
+    engine = _build_db_engine()
     session_factory = sessionmaker(bind=engine)
 
     workflow_repo = PostgresWorkflowRepository(session_factory)
     execution_repo = PostgresExecutionRepository(session_factory)
     event_publisher = SSEEventPublisher(redis_client)
-    credential_provider = VaultCredentialProvider(credential_store=_noop_credential_store)
-    node_executor = ToolsetExecutor(execute_tool=_noop_tool_executor)
+    node_executor = CatalogNodeExecutor(
+        get_all_node_classes(),
+        credential_service_factory=_build_credential_service_factory(),
+    )
 
     from .._celery_app import celery_app
 
@@ -127,20 +240,7 @@ def create_container() -> Container:
         workflow_repo=workflow_repo,
         execution_repo=execution_repo,
         node_executor=node_executor,
-        credential_provider=credential_provider,
         event_publisher=event_publisher,
         task_queue=task_queue,
     )
     return _container
-
-
-class _NoopCredentialStore:
-    def decrypt(self, credential_id, user_id):
-        raise NotImplementedError("CredentialStore not wired — provide auth module adapter")
-
-
-_noop_credential_store = _NoopCredentialStore()
-
-
-def _noop_tool_executor(tool_name, input_data, credential_id=None, credentials=None, user_id=None):
-    raise NotImplementedError("ToolsetExecutor not wired — provide toolset module adapter")

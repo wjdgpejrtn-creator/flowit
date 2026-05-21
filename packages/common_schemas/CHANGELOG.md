@@ -7,6 +7,82 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.9.0] - 2026-05-21
+
+### Added — `ContentBlock` / `DocumentBlock` 파싱 커버리지 필드 4종 (PR #60 리뷰 후속, REQ-006 doc_parser 요청)
+- `ContentBlock.metadata: Optional[dict[str, Any]] = None` — 블록 부가 메타데이터. XLSX 병합셀 3층 구조(`data_rows` / `normalized_headers` 등) 데이터 운반용. `QualityGate._calc_valid_table_ratio()`의 `isinstance(table[0], dict)` 분기를 정식 필드로 대체.
+- `ContentBlock.is_corrupted: bool = False` — 깨진 블록 마킹. `QualityGate`가 깨진 블록 비율을 집계할 때 사용.
+- `DocumentBlock.vision_block_count: int = 0` — 비전 추출로 생성된 블록 수.
+- `DocumentBlock.failed_block_count: int = 0` — 비전 추출 실패 횟수(`VisionPort.extract()` → `None`).
+
+### Changed
+- TypeScript codegen: `ContentBlock` / `DocumentBlock` 인터페이스에 4개 필드 자동 반영 (`generated/index.ts`).
+- `test_document.py` — `ContentBlock` 신규 필드 2건 + `DocumentBlock` 커버리지 카운트 2건 테스트 추가 (109 → 113).
+
+### Symbols
+- 59 → 59 (기존 모델 필드 추가만 — 신규 top-level export 없음)
+
+### Migration notes
+- 추가만 있는 변경 — 모든 필드가 default 보유, 기존 코드 무영향.
+- 배경: `InterleavingParser`는 비전 성공(`extract()` → `ContentBlock`) / 실패(`extract()` → `None`)를 이미 분기 감지하지만, 실패 시 `else` 분기는 블록을 0개 생성하므로 per-block 마커로는 집계 불가. `failed_block_count`는 `DocumentBlock` 레벨 운반 필드로만 `QualityGate`까지 전달 가능.
+- **후속 (김진형, REQ-006 별도 PR)**:
+  - `InterleavingParser._rebuild_doc()` — `vision_block_count` / `failed_block_count` 채워서 `DocumentBlock` 생성.
+  - `QualityGate._calc_coverage()` — `vision_blocks=0` / `failed_blocks=0` 하드코딩(TODO)을 `document.vision_block_count` / `document.failed_block_count`로 교체.
+  - `QualityGate._calc_valid_table_ratio()` — XLSX 분기를 `ContentBlock.metadata` 기반으로 정리.
+  - `ContentBlock.metadata` 키 규약(XLSX 병합셀 `data_rows` / `normalized_headers` 등) — 생산자(xlsx_parser) ↔ 소비자(QualityGate) drift 방지 위해 `TypedDict` 또는 별도 모델로 명문화 검토 (PR #120 리뷰 🟢 LOW). `metadata` 자체는 범용 확장 슬롯이므로 `dict[str, Any]` 유지, 키 규약만 doc_parser 측에서 명문화.
+  - `tests/conftest.py`의 `common_schemas` stub 제거 (common_schemas 0.9.0 머지 후).
+
+## [0.8.0] - 2026-05-20
+
+### Added — `SkillDocument` 스킬 지침서 (ADR-0017, PR #106 리뷰)
+- `skill_document.py` 모듈 신설 — `SkillDocument` Pydantic 모델 1종.
+- `SkillDocument`: `skill_id: UUID`, `name: str`, `description: str`, `instructions: str`, `scripts: list[dict] = []`, `templates: list[dict] = []`.
+  - 한 스킬의 ADR-0017 이중 저장 중 "지침서"(SKILL.md) 측. 메타는 `NodeDefinition` + `SkillRepository`.
+  - LLM(Main Agent)이 사용자에게 옵션 제시 시 자연어로 읽는 markdown 문서. 저장: GCS `gs://{bucket}/skills/{skill_id}/SKILL.md` via `SkillDocumentStore`.
+  - `frozen=True` — 불변 데이터 캐리어 (common_schemas 모델 표준 컨벤션).
+- 신규 테스트 `test_skill_document.py` — `SkillDocument` 8건.
+
+### Changed — `SkillDocument` SSOT 위치 정정
+- PR #106 리뷰에서 지적: `SkillDocument`는 **생산자 ai_agent(Skills Builder) + 저장자 skills_marketplace(SkillDocumentStore)** 양쪽이 쓰는 공유 타입.
+  ADR-0017의 skills_marketplace 도메인 소유로는 ai_agent가 import 규칙상 직접 참조 불가 → PR #106은 dict로 우회(type 안전성 상실).
+- `common_schemas`로 승격하면 모든 모듈이 import 가능 → import 규칙 위반 없이 type-safe 공유. SSOT 위치를 skills_marketplace → common_schemas로 정정.
+
+### Symbols
+- 58 → 59 (+1: `SkillDocument`)
+
+### Migration notes
+- common_schemas 측은 추가만 있는 변경 — 기존 코드 무영향.
+- 신규 사용 패턴:
+  ```python
+  from common_schemas import SkillDocument
+  ```
+- **후속 (박아름, 별도 PR)**: `modules/skills_marketplace/domain/entities/skill_document.py`를 common_schemas 재노출 shim으로 전환 + `SkillDocumentStore` Port가 `common_schemas.SkillDocument` 사용. ai_agent 3 use case의 `skill_documents` dict → `SkillDocument` 객체로 정정 (type-safe). ADR-0017 소유권 문구 정정.
+- skills_marketplace 측 `SkillDocument`(PR #98)는 필드 동일 — shim 전환 시 기존 테스트 무변경 통과.
+
+## [0.7.0] - 2026-05-20
+
+### Added — `NodeContext` 노드 실행 컨텍스트 (ADR-0018 Phase 1)
+- `node.py` 모듈 신설 (기존엔 placeholder) — `NodeContext` Pydantic 모델 1종.
+- `NodeContext`: `execution_id: UUID`, `user_id: UUID`, `connection_token: Optional[str] = None`.
+  - ADR-0018에 따라 워크플로우 노드 실행 경로가 `BaseNode.process(input, context)`로 확장될 때 `CatalogNodeExecutor`가 노드에 전달하는 1회 실행분 컨텍스트.
+  - `connection_token`은 해결된 connection 토큰 — connection이 필요한 external 노드만 사용, domain 28종은 무시.
+  - `frozen=False` + `wipe()` 메서드 — `process()` 종료 후 평문 토큰 제거 (`PlaintextCredential`과 동일 패턴, ADR-0018 Decision 5).
+- 신규 테스트 `test_node.py` — `NodeContext` 6건.
+
+### Changed
+- `typescript/package.json` version `0.3.0` → `0.7.0` — Python 패키지 버전과 drift 누적분 재동기화 (0.4.0~0.6.2 동안 미반영). 이후 두 곳 동시 bump 유지.
+
+### Symbols
+- 57 → 58 (+1: `NodeContext`)
+
+### Migration notes
+- 추가만 있는 변경 — 기존 코드 무영향.
+- 본 PR은 타입 정의만 추가한다. `BaseNode.process()` 시그니처 확장(nodes_graph, REQ-003 박아름) + `CatalogNodeExecutor` 신규(execution_engine, REQ-007)는 ADR-0018 Phase 1 후속 작업.
+- 신규 사용 패턴:
+  ```python
+  from common_schemas import NodeContext
+  ```
+
 ## [0.6.2] - 2026-05-19
 
 ### Added — broker task name 상수 모듈 (PR #75 리뷰 #4 반영)

@@ -76,11 +76,13 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
         if isinstance(node_results_raw, str):
             node_results_raw = json.loads(node_results_raw)
 
+        # pg8000은 UUID 컬럼을 uuid.UUID 객체로 반환 — str()을 거쳐 안전 파싱
+        # (UUID(UUID객체)는 .replace AttributeError).
         user_id_raw = row.get("user_id")
         return ExecutionResult(
-            execution_id=UUID(row["execution_id"]),
-            workflow_id=UUID(row["workflow_id"]),
-            user_id=UUID(user_id_raw) if user_id_raw else None,
+            execution_id=UUID(str(row["execution_id"])),
+            workflow_id=UUID(str(row["workflow_id"])),
+            user_id=UUID(str(user_id_raw)) if user_id_raw else None,
             status=ExecutionStatus(row["status"]),
             node_results=[NodeResult.model_validate(nr) for nr in node_results_raw],
             started_at=row["started_at"],

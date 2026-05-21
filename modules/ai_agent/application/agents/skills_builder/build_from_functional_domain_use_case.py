@@ -106,6 +106,7 @@ class BuildFromFunctionalDomainUseCase:
         version = seed.get("version", "1.0.0")
         skill_nodes_data = seed.get("skill_nodes", [])
         upserted_node_types: list[str] = []
+        skill_documents: list[dict[str, str]] = []
         failed_node_types: list[dict] = []
 
         for entry in skill_nodes_data:
@@ -152,6 +153,16 @@ class BuildFromFunctionalDomainUseCase:
                 continue
 
             upserted_node_types.append(node_def.node_type)
+            # ADR-0017: seed에 instructions가 있으면 SkillDocument 데이터 수집 (선택 — ② seed 채우기 전엔 미수집).
+            # skills_marketplace.SkillDocument 직접 import 안 함 (dict 반환 — 조장 리뷰 #98 "use case 경유" 준수).
+            instructions = entry.get("instructions")
+            if instructions:
+                skill_documents.append({
+                    "node_type": node_def.node_type,
+                    "name": node_def.name,
+                    "description": node_def.description,
+                    "instructions": instructions,
+                })
 
         # 4. 결과 프레임
         yield ResultFrame(
@@ -163,6 +174,7 @@ class BuildFromFunctionalDomainUseCase:
                 "upserted_count": len(upserted_node_types),
                 "failed_count": len(failed_node_types),
                 "node_types": upserted_node_types,
+                "skill_documents": skill_documents,
                 "failed_node_types": failed_node_types,
                 "user_id": str(user_id),
             },

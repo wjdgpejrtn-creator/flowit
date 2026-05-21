@@ -4,15 +4,20 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+import httpx
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "slack_post_message"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+_SLACK_POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
+_TIMEOUT_SECONDS = 30
 
 
 @dataclass
@@ -43,10 +48,35 @@ class SlackPostMessageNode(BaseNode[SlackPostMessageInput, SlackPostMessageOutpu
     input_schema = SlackPostMessageInput
     output_schema = SlackPostMessageOutput
 
-    async def process(self, input: SlackPostMessageInput) -> SlackPostMessageOutput:
-        raise NotImplementedError(
-            "외부 서비스 호출은 REQ-005 toolset connector를 통해 처리. "
-            "OAuth credential 주입은 REQ-002 CredentialInjectionService 담당."
+    async def process(self, input: SlackPostMessageInput, context: NodeContext) -> SlackPostMessageOutput:
+        # connection_token = Slack Bot OAuth 토큰 (xoxb-...).
+        if not context.connection_token:
+            raise ValidationError("slack_post_message는 credential(Slack Bot 토큰)이 필요하다")
+
+        payload: dict[str, Any] = {
+            "channel": input.channel,
+            "text": input.text,
+            "mrkdwn": input.mrkdwn,
+        }
+        if input.thread_ts:
+            payload["thread_ts"] = input.thread_ts
+        if input.blocks:
+            payload["blocks"] = input.blocks
+        headers = {
+            "Authorization": f"Bearer {context.connection_token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            response = await client.post(_SLACK_POST_MESSAGE_URL, json=payload, headers=headers)
+
+        # chat.postMessage는 논리 오류도 HTTP 200 + {"ok": false, "error": ...}로 반환한다.
+        raw: dict[str, Any] = response.json()
+        return SlackPostMessageOutput(
+            ok=bool(raw.get("ok", False)),
+            ts=raw.get("ts", ""),
+            channel=raw.get("channel", ""),
+            raw_response=raw,
         )
 
 

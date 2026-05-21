@@ -41,11 +41,26 @@ def execute_workflow_task(self, workflow_id: str, context_data: dict) -> dict:
     acks_late=True,
 )
 def cancel_execution_task(self, execution_id: str) -> dict:
+    from common_schemas.exceptions import DomainError
+
     from ..dependencies.container import create_container
 
     container = create_container()
     use_case = container.pause_resume_use_case
-    use_case.execute(UUID(execution_id), action="cancel")
+    try:
+        use_case.execute(UUID(execution_id), action="cancel")
+    except DomainError as exc:
+        # 도메인 계층 오류는 사용자 입력 범주 → graceful skip. 종료된 execution을
+        # cancel(ExecutionError, invalid transition)이든 존재하지 않는 execution
+        # (NotFoundError)이든 입력 오류이지 시스템 장애가 아니다 — task를 ERROR로
+        # 올리면 로그 노이즈 + task 실패율이 왜곡된다. broker 장애 등 비-DomainError
+        # 예외는 그대로 전파해 task 실패로 노출한다.
+        return {
+            "execution_id": execution_id,
+            "action": "cancel",
+            "status": "skipped",
+            "reason": str(exc),
+        }
     return {"execution_id": execution_id, "action": "cancel", "status": "cancelled"}
 
 
@@ -56,11 +71,24 @@ def cancel_execution_task(self, execution_id: str) -> dict:
     acks_late=True,
 )
 def resume_execution_task(self, execution_id: str) -> dict:
+    from common_schemas.exceptions import DomainError
+
     from ..dependencies.container import create_container
 
     container = create_container()
     use_case = container.pause_resume_use_case
-    use_case.execute(UUID(execution_id), action="resume")
+    try:
+        use_case.execute(UUID(execution_id), action="resume")
+    except DomainError as exc:
+        # 도메인 계층 오류(resume 불가 상태 ExecutionError / 존재하지 않는 execution
+        # NotFoundError 등)는 사용자 입력 범주 → graceful skip. 비-DomainError 예외는
+        # 그대로 전파한다. (cancel_execution_task 참고)
+        return {
+            "execution_id": execution_id,
+            "action": "resume",
+            "status": "skipped",
+            "reason": str(exc),
+        }
     return {"execution_id": execution_id, "action": "resume", "status": "running"}
 
 

@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
+from ._file_sandbox import resolve_sandboxed_path
 
 _NODE_TYPE = "file_write"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -41,11 +44,21 @@ class FileWriteNode(BaseNode[FileWriteInput, FileWriteOutput]):
     input_schema = FileWriteInput
     output_schema = FileWriteOutput
 
-    async def process(self, input: FileWriteInput) -> FileWriteOutput:
-        raise NotImplementedError(
-            "파일 쓰기는 REQ-005 toolset.FileWriteTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
+    async def process(self, input: FileWriteInput, context: NodeContext) -> FileWriteOutput:
+        file_path = resolve_sandboxed_path(input.path)
+        if file_path.is_dir():
+            raise ValidationError(f"경로가 디렉토리임: {input.path!r}")
+        if input.mode not in ("w", "a"):
+            raise ValidationError(f"mode는 'w' 또는 'a'만 허용: {input.mode!r}")
+
+        if input.create_parents:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+        with file_path.open(mode=input.mode, encoding=input.encoding) as f:
+            f.write(input.content)
+        return FileWriteOutput(
+            path=str(file_path),
+            bytes_written=len(input.content.encode(input.encoding)),
+            success=True,
         )
 
 

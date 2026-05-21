@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+import httpx
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ExecutionError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
+from ._url_guard import validate_outbound_url
 
 _NODE_TYPE = "graphql"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+_MAX_TIMEOUT_SECONDS = 300  # input_schema의 timeout_seconds maximum과 정합
 
 
 @dataclass
@@ -42,11 +48,35 @@ class GraphqlNode(BaseNode[GraphqlInput, GraphqlOutput]):
     input_schema = GraphqlInput
     output_schema = GraphqlOutput
 
-    async def process(self, input: GraphqlInput) -> GraphqlOutput:
-        raise NotImplementedError(
-            "GraphQL 호출은 REQ-005 toolset.GraphqlTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
+    async def process(self, input: GraphqlInput, context: NodeContext) -> GraphqlOutput:
+        await validate_outbound_url(input.endpoint)
+
+        payload: dict[str, Any] = {"query": input.query}
+        if input.variables:
+            payload["variables"] = input.variables
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            **input.headers,
+        }
+        # credential 노드일 때 해결된 토큰을 Bearer로 주입 (ADR-0018).
+        if context.connection_token and not any(k.lower() == "authorization" for k in headers):
+            headers["Authorization"] = f"Bearer {context.connection_token}"
+        timeout = min(input.timeout_seconds, _MAX_TIMEOUT_SECONDS)
+
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(input.endpoint, json=payload, headers=headers)
+
+        try:
+            result = json.loads(response.content)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise ExecutionError(f"GraphQL response is not valid JSON: {e}") from e
+
+        errors = result.get("errors") or []
+        return GraphqlOutput(
+            data=result.get("data"),
+            errors=errors,
+            ok=response.status_code < 300 and not errors,
         )
 
 

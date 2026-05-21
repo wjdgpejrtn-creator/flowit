@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import csv
+import json
 from dataclasses import dataclass
+from io import StringIO
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
+from ._file_sandbox import resolve_sandboxed_path
 
 _NODE_TYPE = "file_transform"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+_SUPPORTED_FORMATS = {"csv", "json"}
 
 
 @dataclass
@@ -40,12 +47,34 @@ class FileTransformNode(BaseNode[FileTransformInput, FileTransformOutput]):
     input_schema = FileTransformInput
     output_schema = FileTransformOutput
 
-    async def process(self, input: FileTransformInput) -> FileTransformOutput:
-        raise NotImplementedError(
-            "파일 형식 변환은 REQ-005 toolset.FileTransformTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
-        )
+    async def process(self, input: FileTransformInput, context: NodeContext) -> FileTransformOutput:
+        if input.source_format not in _SUPPORTED_FORMATS or input.target_format not in _SUPPORTED_FORMATS:
+            raise ValidationError("source/target_format은 'csv' 또는 'json'만 허용")
+
+        src = resolve_sandboxed_path(input.source_path)
+        dst = resolve_sandboxed_path(input.target_path)
+        if not src.is_file():
+            raise ValidationError(f"원본 파일을 찾을 수 없음: {input.source_path!r}")
+
+        raw = src.read_text(encoding=input.encoding)
+        if input.source_format == "csv":
+            rows = list(csv.DictReader(StringIO(raw)))
+        else:
+            loaded = json.loads(raw)
+            rows = loaded if isinstance(loaded, list) else [loaded]
+
+        if input.target_format == "json":
+            dst.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding=input.encoding)
+        elif not rows:
+            dst.write_text("", encoding=input.encoding)
+        else:
+            buf = StringIO()
+            writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+            dst.write_text(buf.getvalue(), encoding=input.encoding)
+
+        return FileTransformOutput(target_path=str(dst), rows_processed=len(rows))
 
 
 def get_node_definition() -> NodeDefinition:

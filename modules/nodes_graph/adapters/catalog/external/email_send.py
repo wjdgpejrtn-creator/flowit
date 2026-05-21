@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import asyncio
+import smtplib
+import ssl
 from dataclasses import dataclass
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
+from ._url_guard import validate_outbound_host
 
 _NODE_TYPE = "email_send"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -43,12 +51,39 @@ class EmailSendNode(BaseNode[EmailSendInput, EmailSendOutput]):
     input_schema = EmailSendInput
     output_schema = EmailSendOutput
 
-    async def process(self, input: EmailSendInput) -> EmailSendOutput:
-        raise NotImplementedError(
-            "이메일 발송은 REQ-005 toolset.EmailSendTool을 통해 처리. "
-            "execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출. "
-            "BaseNode.process() 직접 호출 X."
-        )
+    async def process(self, input: EmailSendInput, context: NodeContext) -> EmailSendOutput:
+        if not input.to_addresses:
+            raise ValidationError("email_send requires at least one recipient")
+        # SSRF — smtp_host가 내부/예약 대역이면 차단 (slack_notify 웹훅 가드와 대칭).
+        await validate_outbound_host(input.smtp_host, input.smtp_port)
+
+        username: str | None = None
+        password: str | None = None
+        # credential 노드일 때 connection_token 형식은 'username:password' (SMTP 인증).
+        if context.connection_token:
+            if ":" not in context.connection_token:
+                raise ValidationError("Email credential must be 'username:password' format")
+            username, password = context.connection_token.split(":", 1)
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = input.subject
+        msg["From"] = input.from_address
+        msg["To"] = ", ".join(input.to_addresses)
+        msg.attach(MIMEText(input.body, input.body_type))
+        message = msg.as_string()
+
+        def _send_sync() -> None:
+            tls_context = ssl.create_default_context()
+            with smtplib.SMTP(input.smtp_host, input.smtp_port, timeout=30) as server:
+                if input.use_tls:
+                    server.starttls(context=tls_context)
+                if username and password:
+                    server.login(username, password)
+                server.sendmail(input.from_address, input.to_addresses, message)
+
+        # smtplib는 blocking — 노드 실행 1회분 이벤트 루프를 막지 않도록 스레드로 분리.
+        await asyncio.to_thread(_send_sync)
+        return EmailSendOutput(sent=True, recipients_count=len(input.to_addresses))
 
 
 def get_node_definition() -> NodeDefinition:

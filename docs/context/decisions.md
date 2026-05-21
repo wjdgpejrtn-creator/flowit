@@ -35,4 +35,5 @@
 | 0012 | [`database/` / `modules/storage/` / `modules/skills_marketplace/` 책임 분배](./adr/ADR-0012-database-storage-module-boundary.md) | Accepted | 2026-05-14 |
 | 0013 | [EmbedderPort SSOT — nodes_graph 소유 + ai_agent 구현체 (예외 패턴)](./adr/ADR-0013-embedder-port-ssot.md) | Accepted | 2026-05-12 |
 | 0014 | [ToolToNodeWrapper 제거 + REQ-005 toolset 11종을 nodes_graph external/로 직접 등록](./adr/ADR-0014-tool-to-node-wrapper-removal.md) | Accepted | 2026-05-19 |
-| 0018 | [Vision Pipeline 도입 — fitz(PyMuPDF) + Gemma4 + 인터리빙 패턴](./adr/ADR-0018-vision-pipeline-fitz-gemma4-interleaving.md) | Accepted | 2026-05-21 |
+| 0018 | [워크플로우 노드 독립 실행 경로 — ToolsetExecutor 폐기, BaseNode.process() 직접 실행](./adr/ADR-0018-workflow-node-independent-execution-path.md) | Accepted | 2026-05-20 |
+| 0019 | [Vision Pipeline 도입 — fitz(PyMuPDF) + Gemma4 + 인터리빙 패턴](./adr/ADR-0019-vision-pipeline-fitz-gemma4-interleaving.md) | Accepted | 2026-05-21 |

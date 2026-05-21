@@ -15,6 +15,7 @@
 | `NodeConfig` | `common_schemas.workflow` | 노드 설정 스키마. NodeDefinition의 상위 구조 참조 |
 | `Edge` | `common_schemas.workflow` | 노드 간 연결. WorkflowSchema.connections의 요소 |
 | `Position` | `common_schemas.workflow` | 캔버스 좌표 (x, y). NodeInstance.position 타입 |
+| `NodeContext` | `common_schemas.node` | 노드 1회 실행 컨텍스트 (connection 토큰 + 실행 메타). `BaseNode.process()` 인자 (ADR-0018) |
 | `RiskLevel` | `common_schemas.enums` | 노드 위험 등급 (Low/Medium/High/Restricted) |
 | `ErrorCode` | `common_schemas.enums` | 그래프 검증 에러 코드 (E_CYCLE_DETECTED, E_ISOLATED_NODE 등) |
 | `ValidationError` | `common_schemas.exceptions` | 스키마 검증 실패 시 raise |
@@ -24,7 +25,7 @@
 
 ```python
 from common_schemas import (
-    WorkflowSchema, NodeInstance, NodeConfig, Edge, Position,
+    WorkflowSchema, NodeInstance, NodeConfig, NodeContext, Edge, Position,
     ValidationErrorItem, ValidationErrorResponse,
 )
 from common_schemas.enums import RiskLevel, ErrorCode
@@ -116,6 +117,8 @@ class NodeMetadata:
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
+from common_schemas import NodeContext
+
 TInput = TypeVar("TInput")
 TOutput = TypeVar("TOutput")
 
@@ -129,8 +132,13 @@ class BaseNode(Generic[TInput, TOutput], ABC):
     output_schema: type[TOutput]
     
     @abstractmethod
-    async def process(self, input: TInput) -> TOutput:
-        """노드 로직 실행. Input → Output 변환."""
+    async def process(self, input: TInput, context: NodeContext) -> TOutput:
+        """노드 로직 실행. Input → Output 변환.
+        
+        context — 실행 컨텍스트(connection 토큰 + 실행 메타, ADR-0018).
+        connection이 필요 없는 노드는 무시. connection_token을 소비하는
+        노드 범위는 ADR-0018 Decision 4 참조.
+        """
         ...
 ```
 
@@ -335,9 +343,31 @@ class CatalogRegistry:
 > **`tool_to_node_wrapper.py` (ToolToNodeWrapper) 제거 — 2026-05-19 박아름 toolset 정리 PR**
 > 
 > 5/15 햄햄·박아름 합의 + 5/19 조장 안 반영. toolset 14종(http_request_tool/conditional/loop 중복 3종 제외)
-> 모두 `adapters/catalog/external/`에 개별 NodeDefinition 파일로 등록. 실행 흐름은
-> `services/execution_engine.ToolsetExecutor`가 `node_type` 기반으로 `toolset.execute_tool()` 호출.
-> BaseNode.process()는 NotImplementedError + 위임 메시지 패턴(anthropic_chat 패턴 정합).
+> 모두 `adapters/catalog/external/`에 개별 BaseNode 파일로 등록. 실행 흐름은 ADR-0018에 따라
+> `services/execution_engine.CatalogNodeExecutor`가 `node_type`으로 `BaseNode.process()`를 직접
+> 호출한다 (`ToolsetExecutor` 경로 폐기). **Phase 3d 완료로 external 25종 + domain 28종 = 53종
+> 전부 `process()` 실구현** — `NotImplementedError` 스텁은 남아 있지 않다.
+
+#### 노드별 `connection_token` 기대 형식 (ADR-0018)
+
+`CredentialInjectionService`가 해결한 `NodeContext.connection_token`(`Optional[str]`)을
+노드가 해석하는 규약. 작성자가 노드에 맞지 않는 credential을 연결하면 노드의
+입력 검증(`ValidationError`)이 안전망으로 동작한다. `credential_kind`는 REQ-002
+`Credential`(`api_key`/`oauth_token`/`password`/`certificate`/`custom`) 기준.
+
+| 노드 | `connection_token` 기대 형식 | 권장 `credential_kind` |
+|------|------------------------------|------------------------|
+| `slack_post_message` | Slack Bot OAuth 토큰 (`xoxb-…`) → `Authorization: Bearer` | `oauth_token` |
+| `gmail_send`·`google_calendar_create_event`·`google_docs_write`·`google_drive_read`·`google_sheets_read`·`bigquery_query` | Google OAuth access token → `Authorization: Bearer` | `oauth_token` |
+| `slack_notify` | Slack Incoming Webhook URL | `api_key` |
+| `email_send` | `username:password` (SMTP 인증) | `password` |
+| `rest_api`·`graphql`·`webhook` | Bearer 토큰 (선택 — 있으면 `Authorization: Bearer`) | `api_key` |
+| `anthropic_chat` | Anthropic API key → `x-api-key` 헤더 | `api_key` |
+| `linear_create_issue` | Linear API key → `Authorization` 헤더 (Bearer 접두사 없음) | `api_key` |
+| `postgresql_query` | PostgreSQL 연결 DSN (`postgresql://user:pass@host:port/db`) | `custom` (단일 비밀번호가 아닌 복합 연결 문자열) |
+| `mysql_query` | MySQL 연결 URL (`mysql://user:pass@host:port/db`) | `custom` (단일 비밀번호가 아닌 복합 연결 문자열) |
+| `gemma_chat` | (불필요 — 시스템 내장 LLM, `LLM_BASE_URL` 기반 호출) | — |
+| `file_read`·`file_write`·`file_transform` | (불필요 — `NODE_FILE_BASE_DIR` 샌드박스 로컬 FS) | — |
 
 #### ports/embedder_port.py — `EmbedderPort` (ABC)
 
@@ -382,9 +412,9 @@ Upstream (이 모듈이 의존):
   │     └── WorkflowSchema, NodeInstance, NodeConfig, Edge, Position
   │     └── RiskLevel, ErrorCode
   │     └── ValidationErrorItem, ValidationErrorResponse
-  └── modules/toolset (REQ-005) — 직접 import 없음.
-        catalog/external/* 의 BaseNode.process()는 NotImplementedError로 위임만 표명하고,
-        실제 실행은 services/execution_engine.ToolsetExecutor가 node_type 기반으로 toolset 호출.
+  └── modules/toolset (REQ-005) — 직접 import 없음 (nodes_graph→toolset 역의존 금지).
+        catalog/external/* 의 BaseNode.process()는 ADR-0018에 따라 execution_engine.
+        CatalogNodeExecutor가 직접 호출. toolset BaseTool 로직은 nodes_graph로 포팅(Phase 3a~).
 
 Downstream (이 모듈에 의존):
   ├── modules/auth (REQ-002)
@@ -468,4 +498,4 @@ modules/nodes_graph/
 | `utility` | 2 | (박아름 1주차엔 utility 분류 없음) | + `file_read`, `file_write` |
 | **합계** | **53** | **42** (28 domain + 14 external, gemma_chat 포함) | **+11** (toolset 연동) |
 
-각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. 신규 11종은 `modules/nodes_graph/adapters/catalog/external/` 아래 개별 파일로 등록되며, `BaseNode.process()`는 NotImplementedError + ToolsetExecutor 위임 메시지(anthropic_chat 패턴 정합). 실행은 `services/execution_engine.ToolsetExecutor`가 `node_type` 기반으로 `toolset.execute_tool()` 호출.
+각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. 신규 11종은 `modules/nodes_graph/adapters/catalog/external/` 아래 개별 파일로 등록된다. `BaseNode.process()` 실행은 ADR-0018에 따라 `services/execution_engine.CatalogNodeExecutor`가 `node_type`으로 직접 호출한다 (`ToolsetExecutor`·`toolset.execute_tool()` 경로 폐기). `process()` 실구현은 ADR-0018 Phase 3d 완료로 external 25종 전부 끝났다 (DB 3종은 asyncpg/aiomysql, Google 5종·bigquery는 REST httpx, file 3종은 샌드박스 로컬 FS).

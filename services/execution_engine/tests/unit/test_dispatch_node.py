@@ -1,14 +1,16 @@
-"""DispatchNodeUseCase 단위 테스트 — credential 주입, 실행, 재시도."""
+"""DispatchNodeUseCase 단위 테스트 — 실행, 재시도.
+
+credential 주입은 ADR-0018 Phase 2b에서 CatalogNodeExecutor로 이동 —
+관련 테스트는 test_catalog_node_executor.py 참조.
+"""
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
-
-from common_schemas.workflow import NodeConfig, NodeInstance, Position
 from common_schemas.enums import RiskLevel
-
+from common_schemas.workflow import NodeConfig, NodeInstance, Position
 from src.application.use_cases.dispatch_node import DispatchNodeUseCase
 from src.domain.entities.retry_policy import RetryPolicy
 from src.domain.services.retry_manager import RetryManager
@@ -47,22 +49,14 @@ def mock_executor():
 
 
 @pytest.fixture
-def mock_credentials():
-    m = MagicMock()
-    m.get_credential.return_value = {"api_key": "secret123"}
-    return m
-
-
-@pytest.fixture
 def mock_events():
     return MagicMock()
 
 
 @pytest.fixture
-def use_case(mock_executor, mock_credentials, mock_events):
+def use_case(mock_executor, mock_events):
     return DispatchNodeUseCase(
         node_executor=mock_executor,
-        credential_provider=mock_credentials,
         event_publisher=mock_events,
         retry_manager=RetryManager(),
         retry_policy=RetryPolicy(max_retries=2, backoff_base_seconds=0.01, retryable_errors=["TimeoutError"]),
@@ -86,42 +80,25 @@ class TestDispatchNodeSuccess:
         assert result.retry_count == 0
         assert result.error is None
 
-    def test_credential_injection(self, use_case, mock_executor, mock_credentials):
-        """credential_id 있으면 __credentials__ + __user_id__ 주입"""
+    def test_passes_inputs_and_context_to_executor(self, use_case, mock_executor):
+        """inputs는 가공 없이, NodeContext는 execution_id/user_id로 채워 executor에 전달."""
         mock_executor.execute.return_value = {}
-        cred_id = uuid4()
-        user_id = uuid4()
-        node = _make_node(credential_id=cred_id)
+        node = _make_node(credential_id=uuid4())
         config = _make_config()
+        user_id = uuid4()
+        execution_id = uuid4()
 
         use_case.execute(
             node=node, config=config, inputs={"x": 1},
-            user_id=user_id, execution_id=uuid4(),
+            user_id=user_id, execution_id=execution_id,
         )
 
-        mock_credentials.get_credential.assert_called_once_with(cred_id, user_id)
-        call_args = mock_executor.execute.call_args
-        inputs_passed = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("inputs", call_args[0][2])
-        assert "__credentials__" in inputs_passed
-        assert inputs_passed["__user_id__"] == str(user_id)
-
-    def test_no_credential_when_none(self, use_case, mock_executor, mock_credentials):
-        """credential_id=None이면 credential 조회 안 하지만 __user_id__는 주입"""
-        mock_executor.execute.return_value = {}
-        node = _make_node(credential_id=None)
-        config = _make_config()
-        user_id = uuid4()
-
-        use_case.execute(
-            node=node, config=config, inputs={"x": 1},
-            user_id=user_id, execution_id=uuid4(),
+        passed_node, passed_config, passed_inputs, passed_context = (
+            mock_executor.execute.call_args[0]
         )
-
-        mock_credentials.get_credential.assert_not_called()
-        call_args = mock_executor.execute.call_args
-        inputs_passed = call_args[0][2] if len(call_args[0]) > 2 else call_args[1].get("inputs", call_args[0][2])
-        assert "__credentials__" not in inputs_passed
-        assert inputs_passed["__user_id__"] == str(user_id)
+        assert passed_inputs == {"x": 1}
+        assert passed_context.execution_id == execution_id
+        assert passed_context.user_id == user_id
 
 
 class TestDispatchNodeRetry:

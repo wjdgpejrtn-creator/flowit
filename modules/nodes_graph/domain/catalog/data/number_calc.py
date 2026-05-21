@@ -4,6 +4,7 @@ import math
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -38,7 +39,7 @@ class NumberCalcNode(BaseNode[NumberCalcInput, NumberCalcOutput]):
     input_schema = NumberCalcInput
     output_schema = NumberCalcOutput
 
-    async def process(self, input: NumberCalcInput) -> NumberCalcOutput:
+    async def process(self, input: NumberCalcInput, context: NodeContext) -> NumberCalcOutput:
         ops = input.operands
         match input.operation:
             case "add" | "sum":

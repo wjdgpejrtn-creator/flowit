@@ -267,6 +267,8 @@ export interface ContentBlock {
   source_ref?: SourceRef | null;
   token_estimate?: number | null;
   importance_score?: number | null;
+  metadata?: Record<string, unknown> | null;
+  is_corrupted: boolean;
 }
 
 export interface SheetMeta {
@@ -300,6 +302,8 @@ export interface DocumentBlock {
   file_meta: FileMeta;
   parser?: ParserMeta | null;
   blocks: Array<ContentBlock>;
+  vision_block_count: number;
+  failed_block_count: number;
 }
 
 export interface EvaluationResult {
@@ -337,6 +341,12 @@ export interface Message {
   name?: unknown;
 }
 
+export interface NodeContext {
+  execution_id: string;
+  user_id: string;
+  connection_token?: string | null;
+}
+
 export interface NodeExecutionState {
   node_instance_id: string;
   status: "pending" | "running" | "succeeded" | "failed" | "retrying" | "cancelled";
@@ -363,6 +373,15 @@ export interface PlaintextCredential {
 
 export interface SSEFrame {
   frame_type: string;
+}
+
+export interface SkillDocument {
+  skill_id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  scripts: Array<Record<string, unknown>>;
+  templates: Array<Record<string, unknown>>;
 }
 
 export interface ValidationErrorItem {

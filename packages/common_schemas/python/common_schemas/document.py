@@ -72,6 +72,8 @@ class ContentBlock(BaseModel):
     source_ref: Optional[SourceRef] = None
     token_estimate: Optional[int] = None
     importance_score: Optional[float] = None
+    metadata: Optional[dict[str, Any]] = None
+    is_corrupted: bool = False
 
 
 class DocumentBlock(BaseModel):
@@ -83,6 +85,8 @@ class DocumentBlock(BaseModel):
     file_meta: FileMeta
     parser: Optional[ParserMeta] = None
     blocks: list[ContentBlock]
+    vision_block_count: int = 0
+    failed_block_count: int = 0
 
 
 class AnalysisResult(BaseModel):

@@ -1,18 +1,29 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid5
 
+import asyncpg
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
+from ._url_guard import validate_outbound_host
 
 _NODE_TYPE = "postgresql_query"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+
+
+def _jsonable(row: dict[str, Any]) -> dict[str, Any]:
+    """datetime·Decimal·UUID 등 비-JSON 타입을 str로 강제 — 결과 영속화/SSE 호환."""
+    return json.loads(json.dumps(dict(row), default=str))
 
 
 @dataclass
@@ -41,11 +52,42 @@ class PostgresqlQueryNode(BaseNode[PostgresqlQueryInput, PostgresqlQueryOutput])
     input_schema = PostgresqlQueryInput
     output_schema = PostgresqlQueryOutput
 
-    async def process(self, input: PostgresqlQueryInput) -> PostgresqlQueryOutput:
-        raise NotImplementedError(
-            "DB 연결은 REQ-005 toolset connector를 통해 처리. "
-            "연결 정보(host/port/user/password)는 REQ-002 CredentialInjectionService 담당."
-        )
+    async def process(self, input: PostgresqlQueryInput, context: NodeContext) -> PostgresqlQueryOutput:
+        # connection_token = PostgreSQL 연결 DSN (postgresql://user:pass@host:port/db).
+        if not context.connection_token:
+            raise ValidationError("postgresql_query는 credential(연결 DSN)이 필요하다")
+        parsed = urlparse(context.connection_token)
+        if parsed.hostname:  # SSRF — 내부 대역 DB 호스트 차단
+            await validate_outbound_host(parsed.hostname, parsed.port or 5432)
+
+        conn = await asyncpg.connect(context.connection_token, timeout=input.timeout_seconds)
+        try:
+            if input.fetch_mode == "none":
+                status = await conn.execute(
+                    input.query, *input.parameters, timeout=input.timeout_seconds
+                )
+                # asyncpg execute는 "INSERT 0 3" / "UPDATE 2" 형태 상태 문자열을 반환.
+                tail = status.split()
+                row_count = int(tail[-1]) if tail and tail[-1].isdigit() else 0
+                return PostgresqlQueryOutput(rows=[], row_count=row_count, fields=[])
+
+            if input.fetch_mode == "one":
+                record = await conn.fetchrow(
+                    input.query, *input.parameters, timeout=input.timeout_seconds
+                )
+                rows = [_jsonable(record)] if record is not None else []
+            else:
+                records = await conn.fetch(
+                    input.query, *input.parameters, timeout=input.timeout_seconds
+                )
+                rows = [_jsonable(r) for r in records]
+            return PostgresqlQueryOutput(
+                rows=rows,
+                row_count=len(rows),
+                fields=list(rows[0].keys()) if rows else [],
+            )
+        finally:
+            await conn.close()
 
 
 def get_node_definition() -> NodeDefinition:

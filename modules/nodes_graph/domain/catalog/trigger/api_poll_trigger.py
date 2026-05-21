@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -41,7 +42,7 @@ class ApiPollTriggerNode(BaseNode[ApiPollTriggerInput, ApiPollTriggerOutput]):
     input_schema = ApiPollTriggerInput
     output_schema = ApiPollTriggerOutput
 
-    async def process(self, input: ApiPollTriggerInput) -> ApiPollTriggerOutput:
+    async def process(self, input: ApiPollTriggerInput, context: NodeContext) -> ApiPollTriggerOutput:
         diff_keys: list[str] = []
         if input.previous_response is not None:
             for key in input.response:
