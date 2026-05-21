@@ -12,13 +12,13 @@ domain 레이어 전체 public export
         ParserPort, ConfigLoaderPort, VisionPort,
         NormalizationService, ChunkingService, QualityGate,
         PIIMaskingService,
-        VisionType, VisionPromptStrategy,
+        VisionType,
     )
 """
 from doc_parser.domain.entities.chunk import Chunk, ChunkingStrategy
 from doc_parser.domain.entities.pii import PIIMaskRule
 from doc_parser.domain.entities.quality import QualityConfig, QualityGateResult, QualityMetrics
-from doc_parser.domain.entities.vision_type import VisionPromptStrategy, VisionType
+from doc_parser.domain.entities.vision_type import VisionType
 from doc_parser.domain.entities.warning import ElapsedDetail, WarningInfo
 from doc_parser.domain.ports.config_port import ConfigLoaderPort
 from doc_parser.domain.ports.parser_port import ParserPort
@@ -43,7 +43,7 @@ __all__ = [
     "PIIMaskRule",
     # entities/vision_type.py
     "VisionType",
-    "VisionPromptStrategy",
+    # VisionPromptStrategy → adapters/vision/prompts.py로 이동
     # ports/parser_port.py
     "ParserPort",
     # ports/config_port.py
