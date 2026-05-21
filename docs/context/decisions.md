@@ -36,3 +36,5 @@
 | 0013 | [EmbedderPort SSOT — nodes_graph 소유 + ai_agent 구현체 (예외 패턴)](./adr/ADR-0013-embedder-port-ssot.md) | Accepted | 2026-05-12 |
 | 0014 | [ToolToNodeWrapper 제거 + REQ-005 toolset 11종을 nodes_graph external/로 직접 등록](./adr/ADR-0014-tool-to-node-wrapper-removal.md) | Accepted (호출 경로 A는 0018로 부분 대체) | 2026-05-19 |
 | 0018 | [워크플로우 노드 독립 실행 경로 — ToolsetExecutor 폐기, BaseNode.process() 직접 실행](./adr/ADR-0018-workflow-node-independent-execution-path.md) | Accepted | 2026-05-20 |
+| 0019 | [Vision Pipeline 도입 — fitz(PyMuPDF) + Gemma4 + 인터리빙 패턴](./adr/ADR-0019-vision-pipeline-fitz-gemma4-interleaving.md) | Accepted | 2026-05-21 |
+| 0020 | [Skills Builder 산출물 게시 lifecycle 게이트 + scope별 진입 (Option B)](./adr/ADR-0020-skills-builder-publish-lifecycle-gate.md) | Proposed | 2026-05-21 |

@@ -20,8 +20,9 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, TypedDict
 from uuid import UUID, uuid4
 
+from auth.domain.services.permission_resolver import PermissionResolver
 from common_schemas.agent import DraftSpec, MemoryEntry, SlotFillingState
-from common_schemas.enums import IntentType
+from common_schemas.enums import IntentType, RiskLevel
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
@@ -38,7 +39,10 @@ from common_schemas.transport import (
 )
 from common_schemas.workflow import NodeConfig, WorkflowSchema
 from langgraph.graph import END, StateGraph
+from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.services.graph_validator import GraphValidator
+from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
+from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 
 from ...domain.entities.session_ref import SessionRef
 from ...domain.ports.node_registry import NodeRegistry
@@ -69,6 +73,8 @@ _SLOT_DONE = "slot_done"
 class _State(TypedDict):
     session_id: UUID
     user_id: UUID
+    user_role: str  # "User" | "Admin" — PermissionResolver 권한 확인용
+    department_id: UUID | None
     messages: list[dict[str, Any]]
     turn_count: int
     personal_memory: list[MemoryEntry]
@@ -100,6 +106,9 @@ class LangGraphOrchestrator:
         node_registry: NodeRegistry,
         workflow_repo: WorkflowRepository,
         graph_validator: GraphValidator,
+        permission_resolver: PermissionResolver | None = None,
+        embedder: EmbedderPort | None = None,
+        skill_search: SearchSkillsUseCase | None = None,
         session_frame_store: SessionFrameStore | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
@@ -109,6 +118,9 @@ class LangGraphOrchestrator:
         self._node_registry = node_registry
         self._workflow_repo = workflow_repo
         self._graph_validator = graph_validator
+        self._permission_resolver = permission_resolver
+        self._embedder = embedder
+        self._skill_search = skill_search
         self._session_frame_store = session_frame_store
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
@@ -121,8 +133,10 @@ class LangGraphOrchestrator:
         session_id: UUID,
         message: str,
         personal_memory: list[MemoryEntry] | None = None,
+        user_role: str = "User",
+        department_id: UUID | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
-        return self._run(user_id, session_id, message, personal_memory or [])
+        return self._run(user_id, session_id, message, personal_memory or [], user_role, department_id)
 
     async def _run(
         self,
@@ -130,6 +144,8 @@ class LangGraphOrchestrator:
         session_id: UUID,
         message: str,
         personal_memory: list[MemoryEntry],
+        user_role: str,
+        department_id: UUID | None,
     ) -> AsyncGenerator[SSEFrame, None]:
         session_frame = SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
         yield session_frame
@@ -138,6 +154,8 @@ class LangGraphOrchestrator:
         initial: _State = {
             "session_id": session_id,
             "user_id": user_id,
+            "user_role": user_role,
+            "department_id": department_id,
             "messages": [{"role": "user", "content": message}],
             "turn_count": 1,
             "personal_memory": personal_memory,
@@ -213,14 +231,46 @@ class LangGraphOrchestrator:
         compressed = state["messages"][-1:]
         return {"messages": compressed, "turn_count": 1}
 
-    # 2. security_node — 기본 입력 검증 (빈 메시지, 길이 초과)
+    # 위험 패턴 — 시스템 명령 / SQL 조작 / 프롬프트 탈취 시도
+    _DANGEROUS_PATTERNS: list[str] = [
+        "drop table", "delete from", "truncate table",  # SQL 파괴
+        "rm -rf", "sudo ", "exec(", "eval(",             # 시스템 명령
+        "ignore previous instructions", "ignore all instructions",  # 프롬프트 탈취
+        "you are now", "act as if",                      # 역할 변경 시도
+    ]
+
+    # 2. security_node — 입력 검증 + 위험 패턴 감지 + 권한 확인
     async def _security_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         message = state["messages"][-1].get("content", "") if state["messages"] else ""
+
         if not message.strip():
             return {"error": "빈 메시지는 처리할 수 없습니다."}
         if len(message) > 10_000:
             return {"error": f"메시지가 너무 깁니다 ({len(message)}자). 최대 10,000자."}
+
+        # 위험 패턴 감지
+        lower = message.lower()
+        for pattern in self._DANGEROUS_PATTERNS:
+            if pattern in lower:
+                return {"error": f"허용되지 않는 요청입니다. (감지된 패턴: '{pattern}')"}
+
+        # 권한 확인 — PermissionResolver 주입된 경우
+        # NOTE: 이 단계는 coarse pre-screen — 실제 노드가 식별되기 전이라
+        # 텍스트 키워드 휴리스틱만 사용한다. 정밀한 risk_ceiling 강제는
+        # 실 노드가 확정되는 validator/drafter 단계에서 별도 처리 필요.
+        if self._permission_resolver is not None and state.get("department_id"):
+            perm = self._permission_resolver.resolve(
+                user_id=state["user_id"],
+                role=state["user_role"],  # type: ignore[arg-type]
+                department_id=state["department_id"],
+                session_id=state["session_id"],
+            )
+            if perm.risk_ceiling != RiskLevel.RESTRICTED and any(
+                kw in lower for kw in ("restricted", "admin only", "관리자만", "시스템 접근")
+            ):
+                return {"error": "해당 요청은 관리자 권한이 필요합니다."}
+
         elapsed = int((time.monotonic() - t0) * 1000)
         return {
             "collected_frames": [
@@ -298,7 +348,7 @@ class LangGraphOrchestrator:
             }
         return {}
 
-    # 6. retriever_node — 노드 후보 검색
+    # 6. retriever_node — 노드 후보 검색 + 커스텀 스킬 합산
     async def _retriever_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         spec = state["draft_spec"]
@@ -307,6 +357,29 @@ class LangGraphOrchestrator:
             candidates = await self._node_registry.search(query)
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
+
+        # 커스텀 스킬 검색 — embedder + skill_search 모두 주입된 경우에만
+        if self._embedder is not None and self._skill_search is not None:
+            try:
+                query_embedding = await self._embedder.embed(query)
+                skill_results = await self._skill_search.execute(
+                    query_embedding=query_embedding,
+                    scope=SkillScope.COMPANY,
+                    limit=10,
+                )
+                existing_ids = {c.node_id for c in candidates}
+                for skill in skill_results:
+                    try:
+                        node_cfg = await self._node_registry.get_schema(skill.node_definition_id)
+                        if node_cfg.node_id not in existing_ids:
+                            candidates = [*candidates, node_cfg]
+                            existing_ids.add(node_cfg.node_id)
+                    except Exception:
+                        continue  # 노드 정의 없으면 스킵
+            except Exception as _skill_exc:
+                import logging as _log
+                _log.getLogger(__name__).warning("skill search failed: %s", _skill_exc)
+
         elapsed = int((time.monotonic() - t0) * 1000)
         return {
             "node_candidates": candidates,

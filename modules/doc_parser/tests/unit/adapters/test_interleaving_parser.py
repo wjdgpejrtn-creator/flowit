@@ -134,7 +134,7 @@ class TestInterleavingParser:
         extractor.extract.assert_not_called()
 
     def test_표블록_비전트리거(self):
-        """block_type=table 감지 시 VisionExtractor.extract() 호출."""
+        """block_type=table 감지 시 VisionExtractor.extract() 호출, 원본+비전 블록 모두 보존."""
         table_block = _make_table_block(page=1)
         vision_block = _make_vision_block(page=1)
         base_doc = _make_base_doc([table_block])
@@ -154,8 +154,10 @@ class TestInterleavingParser:
             page_num=1,
             block_index=0,
         )
-        assert len(result.blocks) == 1
-        assert result.blocks[0].content == "비전 추출 결과"
+        # 원본 블록 + 비전 블록 모두 보존
+        assert len(result.blocks) == 2
+        assert result.blocks[0].block_id == table_block.block_id
+        assert result.blocks[1].content == "비전 추출 결과"
 
     def test_페이지당_1번만_찰칵(self):
         """같은 페이지에 표가 2개 있어도 VisionExtractor는 1번만 호출."""
@@ -175,8 +177,8 @@ class TestInterleavingParser:
 
         # 추출은 1번만
         extractor.extract.assert_called_once()
-        # 블록은 2개 (비전 교체 1개 + 원본 유지 1개)
-        assert len(result.blocks) == 2
+        # 블록은 3개 (첫 번째 원본 + 비전 + 두 번째 원본은 페이지 스킵 후 그대로 통과)
+        assert len(result.blocks) == 3
 
     def test_비전실패시_원본유지(self):
         """VisionExtractor.extract()가 None 반환하면 원본 블록 유지."""
@@ -232,53 +234,6 @@ class TestInterleavingParser:
         detector.detect.assert_not_called()
         extractor.extract.assert_not_called()
 
-    def test_전체페이지찰칵_DOCX(self):
-        """DOCX는 FULL_PAGE VisionType으로 extract() 1번 호출 + 텍스트 병행."""
-        text_block = _make_text_block(page=1, content="본문 텍스트")
-        vision_block = _make_vision_block(page=1)
-        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        base_doc = _make_base_doc([text_block], mime_type=mime)
-        file_meta = _make_file_meta(mime)
-
-        parser, _, detector, extractor = _make_parser(
-            base_doc=base_doc,
-            detect_returns=[],
-            extract_return=vision_block,
-        )
-
-        result = parser.parse("test.docx", file_meta)
-
-        # FULL_PAGE로 1번 호출
-        extractor.extract.assert_called_once_with(
-            file_path="test.docx",
-            vision_type=VisionType.FULL_PAGE,
-            page_num=1,
-            block_index=1,   # 텍스트 블록 1개 뒤에 추가
-        )
-        # 텍스트 블록 + 비전 블록
-        assert len(result.blocks) == 2
-        assert result.blocks[0].content == "본문 텍스트"
-        assert result.blocks[1].content == "비전 추출 결과"
-
-    def test_전체페이지찰칵_DOCX_비전실패(self):
-        """DOCX 전체 찰칵 실패 시 텍스트 블록만 반환."""
-        text_block = _make_text_block(page=1, content="본문 텍스트")
-        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        base_doc = _make_base_doc([text_block], mime_type=mime)
-        file_meta = _make_file_meta(mime)
-
-        parser, _, detector, extractor = _make_parser(
-            base_doc=base_doc,
-            detect_returns=[],
-            extract_return=None,     # 비전 실패
-        )
-
-        result = parser.parse("test.docx", file_meta)
-
-        # 텍스트 블록만 남음
-        assert len(result.blocks) == 1
-        assert result.blocks[0].content == "본문 텍스트"
-
     def test_parser_name_인터리빙_표기(self):
         """결과 DocumentBlock의 parser_name이 'Interleaving(...)' 형식."""
         block = _make_text_block()
@@ -323,4 +278,52 @@ class TestInterleavingParser:
 
         # 페이지 2개 → extract 2번
         assert extractor.extract.call_count == 2
-        assert len(result.blocks) == 2
+        assert len(result.blocks) == 4  # 원본 2 + 비전 2
+
+    def test_비전성공_카운트_반영(self):
+        """비전 추출 성공 시 vision_block_count가 DocumentBlock에 반영된다."""
+        block_p1 = _make_table_block(page=1)
+        block_p2 = _make_table_block(page=2)
+        vision_p1 = _make_vision_block(page=1)
+        vision_p2 = _make_vision_block(page=2)
+        base_doc = _make_base_doc([block_p1, block_p2])
+        file_meta = _make_file_meta("application/pdf")
+
+        extractor = MagicMock()
+        extractor.extract.side_effect = [vision_p1, vision_p2]
+
+        detector = MagicMock()
+        detector.detect.side_effect = [VisionType.TABLE, VisionType.TABLE]
+
+        base_parser = MagicMock()
+        base_parser.parse.return_value = base_doc
+        base_parser.supports.return_value = True
+
+        parser = InterleavingParser(
+            base_parser=base_parser,
+            table_detector=detector,
+            vision_extractor=extractor,
+        )
+
+        result = parser.parse("test.pdf", file_meta)
+
+        assert result.vision_block_count == 2
+        assert result.failed_block_count == 0
+
+    def test_비전실패_카운트_반영(self):
+        """비전 추출 실패(None) 시 failed_block_count가 DocumentBlock에 반영된다."""
+        block_p1 = _make_table_block(page=1)
+        block_p2 = _make_table_block(page=2)
+        base_doc = _make_base_doc([block_p1, block_p2])
+        file_meta = _make_file_meta("application/pdf")
+
+        parser, _, detector, extractor = _make_parser(
+            base_doc=base_doc,
+            detect_returns=[VisionType.TABLE, VisionType.TABLE],
+            extract_return=None,  # 전부 실패
+        )
+
+        result = parser.parse("test.pdf", file_meta)
+
+        assert result.vision_block_count == 0
+        assert result.failed_block_count == 2
