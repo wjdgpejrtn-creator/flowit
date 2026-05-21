@@ -35,6 +35,7 @@ image = (
         "protobuf>=4.25",
         "jsonschema>=4.0",
         "google-cloud-secret-manager>=2.20",
+        "google-cloud-storage>=2.0",
     )
     .env({
         "PYTHONPATH": "/app/modules:/app/common_schemas_src:/repo",
@@ -80,6 +81,7 @@ class AgentComposer:
             "db-name":            "DB_NAME",
             "llm-base-url":       "LLM_BASE_URL",
             "embedding-base-url": "EMBEDDING_BASE_URL",
+            "gcs-session-bucket": "GCS_SESSION_BUCKET",
         })
 
         # Connector를 getconn() 안에서 lazy 초기화 + 명시적 loop 바인딩
@@ -110,6 +112,7 @@ class AgentComposer:
         # 어댑터 + 서비스 wiring
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
+        from ai_agent.adapters.memory.gcs_session_frame_store import GCSSessionFrameStore
         from ai_agent.adapters.node_registry_adapter import NodeRegistryAdapter
         from ai_agent.adapters.langgraph.composer_graph import LangGraphOrchestrator
         from ai_agent.domain.services.intent_analyzer_service import IntentAnalyzerService
@@ -133,6 +136,7 @@ class AgentComposer:
         self._qa_evaluator = QAEvaluatorService(llm)
         self._slot_filler = SlotFillingService()
         self._orchestrator_cls = LangGraphOrchestrator
+        self._session_frame_store = GCSSessionFrameStore()
 
         # 그래프는 요청마다 세션을 새로 생성해서 주입 — _get_graph() 참조
 
@@ -183,6 +187,7 @@ class AgentComposer:
                             node_registry=node_registry,
                             workflow_repo=workflow_repo,
                             graph_validator=graph_validator,
+                            session_frame_store=self._session_frame_store,
                         )
                         async for frame in await graph.stream(
                             user_id=req.user_id,
