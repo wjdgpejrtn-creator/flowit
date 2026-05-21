@@ -91,7 +91,7 @@ gs://{SKILLS_MARKETPLACE_BUCKET}/skills/{skill_id}/templates/ (선택)
 - **위치**: `SkillDocument` 모델 = `common_schemas/skill_document.py` (PR #111 머지, `from common_schemas import SkillDocument`).
 - skills_marketplace `domain/entities/skill_document.py`는 하위호환 **재노출 shim**으로 전환 — **완료 (PR #113)**.
 - `SkillDocumentStore` Port는 skills_marketplace 소유 유지하되 `common_schemas.SkillDocument`를 사용 — **완료 (PR #113)**.
-- ai_agent 3 use case(SOP/functional/industry) `skill_documents` dict → `common_schemas.SkillDocument` 객체화 — **전환 예정 (후속 PR, REQ-004)**. PR #106 dict 우회는 그 후속에서 해소. **PR #113 시점 = ai_agent는 dict 그대로**.
+- ai_agent 3 use case(SOP/functional/industry) `skill_documents` dict → `common_schemas.SkillDocument` 객체화 — **완료 (PR #123)**. PR #106 dict 우회 해소. `payload["skill_documents"]` = `SkillDocument.model_dump(mode="json")` 리스트. **`SkillDocument`는 node가 아닌 지침서라 `node_type` 없이 `skill_id`(=NodeDefinition.node_id)로 연결** (조장 PR #113 결정 — node 오인 호출 방지).
 - **DDD 응집도(위 정정)보다 공유 타입 SSOT(import 규칙 + type 안전성)를 우선** — common_schemas의 다른 공유 타입(`WorkflowSchema`/`AgentState` 등)과 동일 원칙.
 
 ### 3. Composer 검색 흐름 갱신 (5/20 조장 확정)
