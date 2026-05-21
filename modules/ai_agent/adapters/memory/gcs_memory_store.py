@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
     from google.cloud.storage import Bucket
 
 _INDEX_FILENAME = "MEMORY.md"
+_DEBOUNCE_FILENAME = ".debounce.json"
 _INDEX_LINE_RE = re.compile(r"^- \[([^\]]+)\]\(([^)]+)\) — (.+)$")
 
 
@@ -34,6 +36,14 @@ def _serialize_index(refs: list[MemoryFileRef]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _parse_updated_at(value: str) -> datetime:
+    try:
+        dt = datetime.fromisoformat(value)
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
 def _parse_md_file(filename: str, raw: str) -> MemoryFile:
     if raw.startswith("---"):
         try:
@@ -51,12 +61,19 @@ def _parse_md_file(filename: str, raw: str) -> MemoryFile:
         fm = _parse_frontmatter(fm_str)
         metadata = fm.get("metadata", {}) if isinstance(fm.get("metadata"), dict) else {}
         mem_type = metadata.get("type", "project")
+        raw_updated_at = fm.get("updated_at", "")
+        updated_at = (
+            _parse_updated_at(str(raw_updated_at))
+            if raw_updated_at
+            else datetime(1970, 1, 1, tzinfo=timezone.utc)
+        )
         return MemoryFile(
             filename=filename,
             name=fm.get("name", filename.removesuffix(".md")),
             description=fm.get("description", ""),
             memory_type=mem_type,  # type: ignore[arg-type]
             body=body,
+            updated_at=updated_at,
         )
     return MemoryFile(
         filename=filename,
@@ -68,12 +85,14 @@ def _parse_md_file(filename: str, raw: str) -> MemoryFile:
 
 
 def _serialize_md_file(file: MemoryFile) -> str:
+    updated_at_str = file.updated_at.isoformat()
     return (
         f"---\n"
         f"name: {file.name}\n"
         f"description: {file.description}\n"
         f"metadata:\n"
         f"  type: {file.memory_type}\n"
+        f"updated_at: {updated_at_str}\n"
         f"---\n\n"
         f"{file.body}\n"
     )
@@ -211,6 +230,36 @@ class GCSMemoryStore(PersonalMemoryStore):
         emb_filename = f"{name}.emb.json"
         data = json.dumps({"embedding": embedding}, ensure_ascii=False).encode("utf-8")
         await self._upload(user_id, emb_filename, data)
+
+    # ── debounce claim ──────────────────────────────────────────────────────
+
+    async def claim_debounce_window(self, user_id: UUID, now: datetime, window: timedelta) -> bool:
+        bucket = self._get_bucket()
+        key = self._blob_key(user_id, _DEBOUNCE_FILENAME)
+        blob = bucket.blob(key)
+
+        try:
+            blob.reload()
+            generation = blob.generation
+            raw = blob.download_as_bytes()
+            data = json.loads(raw.decode("utf-8"))
+            claimed_at = _parse_updated_at(data.get("claimed_at", ""))
+            if (now - claimed_at) < window:
+                return False  # 아직 윈도우 내 — debounce
+        except Exception:
+            generation = 0  # blob 없음 (신규 유저)
+
+        try:
+            from google.api_core.exceptions import PreconditionFailed
+
+            blob.upload_from_string(
+                json.dumps({"claimed_at": now.isoformat()}).encode("utf-8"),
+                content_type="application/json",
+                if_generation_match=generation,
+            )
+            return True
+        except PreconditionFailed:
+            return False  # 동시 요청이 먼저 선점
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 

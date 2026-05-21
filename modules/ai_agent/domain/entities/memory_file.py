@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 MemoryFileType = Literal["user", "feedback", "project", "reference"]
 
@@ -27,3 +28,4 @@ class MemoryFile(BaseModel):
     description: str
     memory_type: MemoryFileType
     body: str
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

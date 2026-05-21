@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 
-from ai_agent.adapters.memory.gcs_memory_store import GCSMemoryStore
+from ai_agent.adapters.memory.gcs_memory_store import GCSMemoryStore, _parse_md_file, _serialize_md_file
 from ai_agent.domain.entities.memory_file import MemoryFile, MemoryFileRef
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -18,6 +19,16 @@ _SKILL_MD = (
     "description: 사용자 역할\n"
     "metadata:\n"
     "  type: user\n"
+    "---\n\n"
+    "Go 백엔드 전문가입니다\n"
+)
+_SKILL_MD_WITH_UPDATED_AT = (
+    "---\n"
+    "name: user-role\n"
+    "description: 사용자 역할\n"
+    "metadata:\n"
+    "  type: user\n"
+    "updated_at: 2026-05-21T10:00:00+00:00\n"
     "---\n\n"
     "Go 백엔드 전문가입니다\n"
 )
@@ -214,3 +225,53 @@ class TestEnvFallback:
     def test_constructor_arg_takes_priority(self):
         with patch.dict("os.environ", {"GCS_PERSONAL_BUCKET": "env-bucket"}):
             assert GCSMemoryStore(bucket_name="explicit")._bucket_name == "explicit"
+
+
+class TestUpdatedAt:
+    def test_parse_md_file_reads_updated_at(self):
+        """frontmatter에 updated_at이 있으면 파싱해서 반환."""
+        f = _parse_md_file("user_role.md", _SKILL_MD_WITH_UPDATED_AT)
+        expected = datetime(2026, 5, 21, 10, 0, 0, tzinfo=timezone.utc)
+        assert f.updated_at == expected
+
+    def test_parse_md_file_no_updated_at_returns_epoch(self):
+        """frontmatter에 updated_at이 없으면 epoch(1970-01-01) 반환."""
+        f = _parse_md_file("user_role.md", _SKILL_MD)
+        assert f.updated_at == datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    def test_parse_md_file_no_frontmatter_uses_default(self):
+        """frontmatter 없는 파일은 updated_at 기본값(현재 시각)을 사용."""
+        before = datetime.now(timezone.utc)
+        f = _parse_md_file("plain.md", "그냥 텍스트")
+        after = datetime.now(timezone.utc)
+        assert before <= f.updated_at <= after
+
+    def test_serialize_md_file_includes_updated_at(self):
+        """직렬화 결과에 updated_at이 포함됨."""
+        dt = datetime(2026, 5, 21, 10, 0, 0, tzinfo=timezone.utc)
+        f = MemoryFile(
+            filename="role.md",
+            name="role",
+            description="설명",
+            memory_type="user",
+            body="내용",
+            updated_at=dt,
+        )
+        serialized = _serialize_md_file(f)
+        assert "updated_at:" in serialized
+        assert "2026-05-21" in serialized
+
+    def test_roundtrip_preserves_updated_at(self):
+        """직렬화 → 역직렬화 시 updated_at이 보존됨."""
+        dt = datetime(2026, 5, 21, 10, 0, 0, tzinfo=timezone.utc)
+        f = MemoryFile(
+            filename="role.md",
+            name="role",
+            description="설명",
+            memory_type="user",
+            body="내용",
+            updated_at=dt,
+        )
+        serialized = _serialize_md_file(f)
+        parsed = _parse_md_file("role.md", serialized)
+        assert parsed.updated_at == dt

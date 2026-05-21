@@ -13,7 +13,7 @@ from ....domain.entities.memory_file import MemoryFile, MemoryFileRef, MemoryFil
 from ....domain.ports.llm_port import LLMPort
 from ....domain.ports.personal_memory_store import PersonalMemoryStore
 
-_DEFAULT_DEBOUNCE = timedelta(minutes=30)
+_DEFAULT_DEBOUNCE = timedelta(minutes=5)
 _TURN_COUNT_THRESHOLD = 3
 
 
@@ -81,7 +81,6 @@ class UpdateUserMemoryUseCase:
         self._llm = llm
         self._debounce_window = debounce_window
         self._turn_count_threshold = turn_count_threshold
-        self._last_updated: dict[UUID, datetime] = {}
 
     async def execute(
         self,
@@ -97,8 +96,9 @@ class UpdateUserMemoryUseCase:
             return False
 
         now = datetime.now(timezone.utc)
-        last = self._last_updated.get(user_id)
-        if last is not None and (now - last) < self._debounce_window:
+
+        # CAS 선점 — LLM 호출 전에 debounce 윈도우 확보 (claim-first)
+        if not await self._store.claim_debounce_window(user_id, now, self._debounce_window):
             return False
 
         refs = await self._store.load_index(user_id)
@@ -123,6 +123,7 @@ class UpdateUserMemoryUseCase:
                 description=spec.description,
                 memory_type=spec.memory_type,
                 body=spec.body,
+                updated_at=now,
             )
             await self._store.save_file(user_id, file)
             index_map[spec.filename] = MemoryFileRef(
@@ -134,6 +135,5 @@ class UpdateUserMemoryUseCase:
 
         if changed:
             await self._store.save_index(user_id, list(index_map.values()))
-            self._last_updated[user_id] = now
 
         return changed
