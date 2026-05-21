@@ -117,7 +117,7 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
 | `LoadUserMemoryUseCase` | `user_id: UUID → list[MemoryEntry]` | GCS `MEMORY.md` + 관련 .md 파일 로드 |
-| `UpdateUserMemoryUseCase` | `user_id: UUID, session_summary: dict, workflow: WorkflowSchema → None` | 워크플로우 완료 후 LLM 패턴 추출 → .md 갱신 |
+| `UpdateUserMemoryUseCase` | `user_id: UUID, turn_count: int, session_summary: str\|None, workflow: WorkflowSchema\|None → bool` | 워크플로우 완료 후 LLM 패턴 추출 → .md 갱신. debounce 5분 (claim-first CAS) |
 | `RecallPersonalSkillsUseCase` | `user_id: UUID, query: str, limit: int → list[PersonalSkill]` | BGE-M3 코사인 유사도 top-k |
 | `SaveMemoryUseCase` | `session_id: UUID, entries: list[MemoryEntry] → None` | 대화 종료 후 RDB 메모리 저장 (`AgentMemoryRepository`) |
 
@@ -130,6 +130,7 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 | `HTTPSubAgentClient` | sub-agent VPC 내부 HTTP SSE 호출. `SubAgentClient` 구현 |
 | `NodeRegistryAdapter` | `nodes_graph`의 `NodeDefinitionRepository`를 감싸는 Facade. `NodeRegistry` 구현 |
 | `LangGraphOrchestrator` | LangGraph StateGraph 기반 내부 오케스트레이션 (13노드). 내부용, Port 아님 |
+| `GCSMemoryStore` | GCS `gs://workflow-automation-personal/users/{user_id}/` 읽기/쓰기. `claim_debounce_window()`로 `.debounce.json` blob을 `if_generation_match` CAS 선점 (debounce 5분). `PersonalMemoryStore` 구현 |
 
 ## 의존 관계
 
