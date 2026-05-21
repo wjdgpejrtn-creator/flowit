@@ -7,6 +7,31 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.9.0] - 2026-05-21
+
+### Added — `ContentBlock` / `DocumentBlock` 파싱 커버리지 필드 4종 (PR #60 리뷰 후속, REQ-006 doc_parser 요청)
+- `ContentBlock.metadata: Optional[dict[str, Any]] = None` — 블록 부가 메타데이터. XLSX 병합셀 3층 구조(`data_rows` / `normalized_headers` 등) 데이터 운반용. `QualityGate._calc_valid_table_ratio()`의 `isinstance(table[0], dict)` 분기를 정식 필드로 대체.
+- `ContentBlock.is_corrupted: bool = False` — 깨진 블록 마킹. `QualityGate`가 깨진 블록 비율을 집계할 때 사용.
+- `DocumentBlock.vision_block_count: int = 0` — 비전 추출로 생성된 블록 수.
+- `DocumentBlock.failed_block_count: int = 0` — 비전 추출 실패 횟수(`VisionPort.extract()` → `None`).
+
+### Changed
+- TypeScript codegen: `ContentBlock` / `DocumentBlock` 인터페이스에 4개 필드 자동 반영 (`generated/index.ts`).
+- `test_document.py` — `ContentBlock` 신규 필드 2건 + `DocumentBlock` 커버리지 카운트 2건 테스트 추가 (109 → 113).
+
+### Symbols
+- 59 → 59 (기존 모델 필드 추가만 — 신규 top-level export 없음)
+
+### Migration notes
+- 추가만 있는 변경 — 모든 필드가 default 보유, 기존 코드 무영향.
+- 배경: `InterleavingParser`는 비전 성공(`extract()` → `ContentBlock`) / 실패(`extract()` → `None`)를 이미 분기 감지하지만, 실패 시 `else` 분기는 블록을 0개 생성하므로 per-block 마커로는 집계 불가. `failed_block_count`는 `DocumentBlock` 레벨 운반 필드로만 `QualityGate`까지 전달 가능.
+- **후속 (김진형, REQ-006 별도 PR)**:
+  - `InterleavingParser._rebuild_doc()` — `vision_block_count` / `failed_block_count` 채워서 `DocumentBlock` 생성.
+  - `QualityGate._calc_coverage()` — `vision_blocks=0` / `failed_blocks=0` 하드코딩(TODO)을 `document.vision_block_count` / `document.failed_block_count`로 교체.
+  - `QualityGate._calc_valid_table_ratio()` — XLSX 분기를 `ContentBlock.metadata` 기반으로 정리.
+  - `ContentBlock.metadata` 키 규약(XLSX 병합셀 `data_rows` / `normalized_headers` 등) — 생산자(xlsx_parser) ↔ 소비자(QualityGate) drift 방지 위해 `TypedDict` 또는 별도 모델로 명문화 검토 (PR #120 리뷰 🟢 LOW). `metadata` 자체는 범용 확장 슬롯이므로 `dict[str, Any]` 유지, 키 규약만 doc_parser 측에서 명문화.
+  - `tests/conftest.py`의 `common_schemas` stub 제거 (common_schemas 0.9.0 머지 후).
+
 ## [0.8.0] - 2026-05-20
 
 ### Added — `SkillDocument` 스킬 지침서 (ADR-0017, PR #106 리뷰)
