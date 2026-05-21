@@ -12,16 +12,17 @@ spec §3.2 Workflow Composer 내부 StateGraph 구현. LangGraph는 adapters/에
 """
 from __future__ import annotations
 
+import logging
 import operator
 import time
-from typing import Annotated, Any, AsyncGenerator, Optional, TypedDict
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Annotated, Any, TypedDict
 from uuid import UUID, uuid4
-
-from langgraph.graph import END, StateGraph
 
 from auth.domain.services.permission_resolver import PermissionResolver
 from common_schemas.agent import DraftSpec, MemoryEntry, SlotFillingState
-from common_schemas.enums import ExecutionStatus, IntentType, RiskLevel
+from common_schemas.enums import IntentType, RiskLevel
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
@@ -37,20 +38,24 @@ from common_schemas.transport import (
     WorkflowDraftFrame,
 )
 from common_schemas.workflow import NodeConfig, WorkflowSchema
+from langgraph.graph import END, StateGraph
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.services.graph_validator import GraphValidator
 from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
 from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 
+from ...domain.entities.session_ref import SessionRef
 from ...domain.ports.node_registry import NodeRegistry
+from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.workflow_repository import WorkflowRepository
 from ...domain.services.drafter_service import DrafterService
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 from ...domain.services.qa_evaluator_service import QAEvaluatorService
 from ...domain.services.slot_filling_service import SlotFillingService
 from ...domain.services.workflow_layout_service import WorkflowLayoutService
-from ...domain.value_objects.quality_threshold import QualityThreshold
 from ...domain.value_objects.turn_limit import TurnLimit
+
+_logger = logging.getLogger(__name__)
 
 _QA_MAX_RETRY = 3
 
@@ -69,15 +74,15 @@ class _State(TypedDict):
     session_id: UUID
     user_id: UUID
     user_role: str  # "User" | "Admin" — PermissionResolver 권한 확인용
-    department_id: Optional[UUID]
+    department_id: UUID | None
     messages: list[dict[str, Any]]
     turn_count: int
     personal_memory: list[MemoryEntry]
     intent: str | None
     intent_analyzed_entities: dict[str, Any]
-    draft_spec: Optional[DraftSpec]
+    draft_spec: DraftSpec | None
     node_candidates: list[NodeConfig]
-    workflow_draft: Optional[WorkflowSchema]
+    workflow_draft: WorkflowSchema | None
     qa_attempts: int
     qa_score: float
     pass_flag: bool
@@ -104,6 +109,7 @@ class LangGraphOrchestrator:
         permission_resolver: PermissionResolver | None = None,
         embedder: EmbedderPort | None = None,
         skill_search: SearchSkillsUseCase | None = None,
+        session_frame_store: SessionFrameStore | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -115,6 +121,7 @@ class LangGraphOrchestrator:
         self._permission_resolver = permission_resolver
         self._embedder = embedder
         self._skill_search = skill_search
+        self._session_frame_store = session_frame_store
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -140,7 +147,9 @@ class LangGraphOrchestrator:
         user_role: str,
         department_id: UUID | None,
     ) -> AsyncGenerator[SSEFrame, None]:
-        yield SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
+        session_frame = SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
+        yield session_frame
+        all_frames: list[AnySSEFrame] = [session_frame]
 
         initial: _State = {
             "session_id": session_id,
@@ -165,14 +174,53 @@ class LangGraphOrchestrator:
 
         async for event in self._graph.astream(initial, stream_mode="updates"):
             for node_name, updates in event.items():
-                yield AgentNodeFrame(agent_node_name=node_name)
+                node_frame = AgentNodeFrame(agent_node_name=node_name)
+                yield node_frame
+                all_frames.append(node_frame)
                 if not isinstance(updates, dict):
                     continue
                 for frame in updates.get("collected_frames", []):
                     yield frame
+                    all_frames.append(frame)
                 if updates.get("error"):
-                    yield ErrorFrame(code="E_COMPOSER", message=updates["error"])
+                    error_frame = ErrorFrame(code="E_COMPOSER", message=updates["error"])
+                    yield error_frame
+                    all_frames.append(error_frame)
+                    await self._try_save_session(session_id, user_id, message, all_frames)
                     return
+
+        await self._try_save_session(session_id, user_id, message, all_frames)
+
+    async def _try_save_session(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        message: str,
+        frames: list[AnySSEFrame],
+    ) -> None:
+        if self._session_frame_store is None:
+            return
+        workflow_id: UUID | None = None
+        for frame in frames:
+            if isinstance(frame, ResultFrame):
+                wid_str = frame.payload.get("workflow_id")
+                if wid_str:
+                    try:
+                        workflow_id = UUID(wid_str)
+                    except Exception:
+                        pass
+                break
+        ref = SessionRef(
+            session_id=session_id,
+            user_id=user_id,
+            workflow_id=workflow_id,
+            created_at=datetime.now(UTC),
+            message_preview=message[:100],
+        )
+        try:
+            await self._session_frame_store.save_session(ref, frames)
+        except Exception as exc:
+            _logger.warning("session frame 저장 실패 (non-fatal): %s", exc)
 
     # ------------------------------------------------------------------ nodes (13)
 
