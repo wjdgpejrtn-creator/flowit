@@ -185,22 +185,19 @@ class ChunkingService:
     ) -> list[Chunk]:
         """4순위: 표 독립 청크 처리.
 
-        XLSX 2층+3층 구조 분기:
-            table[0]이 dict → normalized_headers + data_rows 로 재구성
-            table[0]이 list → 기존 flat rows 처리
+        XLSX 병합셀 구조 분기:
+            block.metadata 존재 시 → normalized_headers + data_rows 로 재구성
+            metadata 없음 → 기존 flat rows 처리
 
         20행 초과 시 header 유지 후 row group 단위로 분할.
-
-        # TODO: ContentBlock.metadata 필드 추가 후 이 분기 제거 (황대원님 협의 필요)
         """
         if not block.table:
             return []
 
-        # ── XLSX 2층+3층 구조 분기 ──
-        if isinstance(block.table[0], dict):
-            meta = block.table[0]
-            normalized_headers = meta.get("normalized_headers", [])
-            data_rows = meta.get("data_rows", [])
+        # ── XLSX 병합셀 구조 분기 ──
+        if block.metadata and "data_rows" in block.metadata:
+            normalized_headers = block.metadata.get("normalized_headers", [])
+            data_rows = block.metadata.get("data_rows", [])
             # 청킹용 rows: normalized_headers 를 헤더 행으로 재구성
             rows = ([normalized_headers] + data_rows) if normalized_headers else data_rows
         else:
