@@ -82,6 +82,8 @@ class InterleavingParser(ParserPort):
         """
         result_blocks: list[ContentBlock] = []
         captured_pages: set[int] = set()
+        vision_count: int = 0
+        failed_count: int = 0
 
         for block in base_doc.blocks:
             vision_type = self._table_detector.detect(block)
@@ -110,16 +112,20 @@ class InterleavingParser(ParserPort):
                 # 원문 블록 + 비전 보조 블록을 모두 보존한다.
                 result_blocks.append(block)
                 result_blocks.append(vision_block)
+                vision_count += 1
             else:
                 result_blocks.append(block)
+                failed_count += 1
 
-        return self._rebuild_doc(base_doc, result_blocks, file_meta)
+        return self._rebuild_doc(base_doc, result_blocks, file_meta, vision_count, failed_count)
 
     def _rebuild_doc(
         self,
         base_doc: DocumentBlock,
         blocks: list[ContentBlock],
         file_meta: FileMeta,
+        vision_count: int = 0,
+        failed_count: int = 0,
     ) -> DocumentBlock:
         """새 블록 목록으로 DocumentBlock 재조립."""
         return DocumentBlock(
@@ -130,4 +136,6 @@ class InterleavingParser(ParserPort):
                 parser_version="1.1.0",
             ),
             blocks=blocks,
+            vision_block_count=vision_count,
+            failed_block_count=failed_count,
         )

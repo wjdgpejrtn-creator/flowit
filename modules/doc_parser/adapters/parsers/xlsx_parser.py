@@ -73,7 +73,7 @@ class XlsxParser(ParserPort):
         """XLSX 파싱 → DocumentBlock 반환.
 
         병합셀이 없는 시트: 1층 flat rows → table 필드에 list[list[str]]
-        병합셀이 있는 시트: 2층+3층 구조 → table 필드에 [dict] (청킹 서비스 분기 처리)
+        병합셀이 있는 시트: table=data_rows(flat), metadata=병합셀 구조 dict
 
         Args:
             file_path: XLSX 파일 경로
@@ -110,9 +110,8 @@ class XlsxParser(ParserPort):
                     if block is None:
                         continue
 
-                    # SheetMeta: raw_grid 기준 집계
-                    grid_info = block.table[0]  # type: ignore[index]
-                    raw_grid = grid_info["raw_grid"]
+                    # SheetMeta: metadata의 raw_grid 기준 집계
+                    raw_grid = block.metadata["raw_grid"]  # type: ignore[index]
                     row_count = len(raw_grid)
                     col_count = max(len(r) for r in raw_grid) if raw_grid else 0
                 else:
@@ -221,7 +220,8 @@ class XlsxParser(ParserPort):
             block_type="table",
             content=None,
             page=sheet_index + 1,
-            table=[layered],  # list[dict] — 청킹 서비스에서 isinstance 분기
+            table=data_rows if data_rows else raw_grid,  # flat rows — 청킹용
+            metadata=layered,                             # 병합셀 구조 — QualityGate/Vision용
             source_ref=SourceRef(
                 page=sheet_index + 1,
                 sheet_name=sheet_name,
