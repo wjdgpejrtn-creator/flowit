@@ -29,7 +29,7 @@ class SkillDocument(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     skill_id: UUID
-    name: str  # frontmatter — kebab-case 식별자
+    name: str  # frontmatter — 사람이 읽는 스킬 이름 (Main Agent가 옵션 제시 시 표시). 식별자는 skill_id.
     description: str  # frontmatter — LLM trigger 판단용 자연어
     instructions: str  # markdown body — 단계별 지침서
     scripts: list[dict[str, Any]] = Field(default_factory=list)  # 선택 — SKILL.md scripts/ (path/content)
