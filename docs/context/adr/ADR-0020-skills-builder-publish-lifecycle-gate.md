@@ -30,14 +30,14 @@ REQ-013 skills_marketplace는 5단계 게시 lifecycle(`DRAFT → REVIEW → APP
 
 ### 2. scope별 lifecycle 진입 분기
 
-Skills Builder 추출 후 scope(personal/team/company)에 따라 진입:
+Skills Builder는 **personal 스킬만 직접 생성**한다 (Q3 promotion-only). team/company는 직접 생성하지 않고 personal을 승격(promote)한다:
 
-| scope | Skill Builder 페이지에서 | REVIEW 이후 |
-|-------|--------------------------|-------------|
-| personal | DRAFT→REVIEW→APPROVED→PUBLISHED 전 과정 in-place (owner=본인) | (그 자리에서 완결) |
-| team / company | DRAFT 저장까지만 | Marketplace에서 리뷰어가 진행 |
+| scope | 진입 경로 | lifecycle 진행 |
+|-------|----------|----------------|
+| personal | Skill Builder에서 직접 생성 (추출 → DRAFT) | DRAFT→REVIEW→APPROVED→PUBLISHED 전 과정 Skill Builder 페이지 in-place (owner=본인, self-review) |
+| team / company | **Skill Builder 직접 생성 불가** — personal PUBLISHED를 `PromoteToTeam/Company`로 승격(DRAFT 복제, ADR-0019 promotion=복제) | Marketplace에서 리뷰어가 DRAFT→REVIEW→APPROVED→PUBLISHED 진행 |
 
-UX 근거: personal은 본인이 쓸 스킬이라 그 자리 완결이 자연스럽고, team/company는 타인(리뷰어) 검토가 필요하니 Marketplace가 거처. "추출 결과 검토 wizard 부재"도 personal in-place 흐름으로 해소.
+UX 근거: personal은 본인이 쓸 스킬이라 Skill Builder에서 그 자리 완결(self-review). team/company는 promotion-only(Q3) — 검증된 personal 스킬을 승격하고, 타인(리뷰어) 검토가 필요하니 Marketplace가 거처. **Skill Builder 페이지의 scope 선택은 "personal 생성" 단일이며, team/company 노출은 Marketplace의 promote 흐름으로 분리**(초안의 3택 모델은 Q3 promotion-only로 정정됨).
 
 ### 3. Q1~Q7 확정 (2026-05-21 조장·박아름 합의)
 
@@ -79,7 +79,7 @@ UX 근거: personal은 본인이 쓸 스킬이라 그 자리 완결이 자연스
 - **api_server** (REQ-009, 황대원) — scope-aware skill lifecycle 라우트(submit/approve/publish) 신설.
 - **nodes_graph** (REQ-003, 박아름) — `NodeDefinition`에 `owner_user_id`/`team_id` Optional 추가 + `NodeDefinitionRepository.search`에 scope 필터(`(owner IS NULL AND team IS NULL) OR owner=현재유저 OR team IN 내팀`).
 - **database** (REQ-001, 황대원) — PR-2e DDL에 staging 컬럼 + `node_definitions`에 `owner_user_id`/`team_id` **nullable** 컬럼(기존 53종=NULL=전역) + lifecycle_state 인덱스.
-- **frontend** (REQ-010) — Skill Builder 페이지 scope 선택 UI + (personal) in-place 검토 UI.
+- **frontend** (REQ-010) — Skill Builder 페이지: personal 생성 + in-place 검토(DRAFT→PUBLISHED) UI. team/company는 별도 Marketplace promote 흐름(Q3 promotion-only — Skill Builder에 team/company 직접 생성 UI 없음).
 
 ### 긍정
 
