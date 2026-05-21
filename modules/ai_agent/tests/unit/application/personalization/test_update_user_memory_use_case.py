@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -149,37 +149,82 @@ class TestUpdateUserMemoryUseCase:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_debounce_blocks_second_call(self):
-        store = _make_store_with([], {})
+    async def test_debounce_blocks_recent_file(self):
+        """GCS 파일의 updated_at이 debounce_window 이내면 저장 건너뜀."""
+        recent_file = MemoryFile(
+            filename="p.md",
+            name="p",
+            description="설명",
+            memory_type="feedback",
+            body="내용",
+            updated_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        )
+        ref = MemoryFileRef(filename="p.md", name="p", description="설명")
+        store = _make_store_with([ref], {"p.md": recent_file})
         llm = AsyncMock(spec=LLMPort)
-        llm.generate_structured.return_value = _make_llm_result([_make_create_spec()])
-        uc = UpdateUserMemoryUseCase(store, llm, debounce_window=timedelta(hours=1))
-        uid = uuid4()
+        uc = UpdateUserMemoryUseCase(store, llm, debounce_window=timedelta(minutes=5))
 
-        first = await uc.execute(uid, turn_count=5, session_summary="첫 세션", workflow=_make_workflow())
-        second = await uc.execute(uid, turn_count=5, session_summary="두 번째 세션", workflow=_make_workflow())
-        assert first is True
-        assert second is False
-        assert llm.generate_structured.call_count == 1
+        result = await uc.execute(uuid4(), turn_count=5, session_summary="세션", workflow=_make_workflow())
+        assert result is False
+        llm.generate_structured.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_debounce_allows_call_after_window(self):
+        """GCS 파일의 updated_at이 debounce_window 초과면 저장 허용."""
+        old_file = MemoryFile(
+            filename="p.md",
+            name="p",
+            description="설명",
+            memory_type="feedback",
+            body="내용",
+            updated_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+        )
+        ref = MemoryFileRef(filename="p.md", name="p", description="설명")
+        store = _make_store_with([ref], {"p.md": old_file})
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured.return_value = _make_llm_result([_make_create_spec()])
+        uc = UpdateUserMemoryUseCase(store, llm, debounce_window=timedelta(minutes=5))
+
+        result = await uc.execute(uuid4(), turn_count=5, session_summary="세션", workflow=_make_workflow())
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_first_user_no_debounce(self):
+        """기존 파일 없는 신규 유저는 debounce 없이 저장됨."""
         store = _make_store_with([], {})
         llm = AsyncMock(spec=LLMPort)
         llm.generate_structured.return_value = _make_llm_result([_make_create_spec()])
-        uc = UpdateUserMemoryUseCase(store, llm, debounce_window=timedelta(minutes=0))
-        uid = uuid4()
+        uc = UpdateUserMemoryUseCase(store, llm, debounce_window=timedelta(minutes=5))
 
-        first = await uc.execute(uid, turn_count=5, session_summary="첫 세션", workflow=_make_workflow())
-        second = await uc.execute(uid, turn_count=5, session_summary="두 번째 세션", workflow=_make_workflow())
-        assert first is True
-        assert second is True
-        assert llm.generate_structured.call_count == 2
+        result = await uc.execute(uuid4(), turn_count=5, session_summary="첫 세션", workflow=_make_workflow())
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_saved_file_has_updated_at(self):
+        """저장된 MemoryFile의 updated_at이 현재 시각으로 설정됨."""
+        store = _make_store_with([], {})
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured.return_value = _make_llm_result([_make_create_spec()])
+        uc = UpdateUserMemoryUseCase(store, llm)
+
+        before = datetime.now(timezone.utc)
+        await uc.execute(uuid4(), turn_count=5, session_summary="세션", workflow=_make_workflow())
+        after = datetime.now(timezone.utc)
+
+        saved_file: MemoryFile = store.save_file.call_args[0][1]
+        assert before <= saved_file.updated_at <= after
 
     @pytest.mark.asyncio
     async def test_existing_index_entries_preserved_on_new_file(self):
         existing_ref = MemoryFileRef(filename="old.md", name="old", description="기존")
-        existing_file = MemoryFile(filename="old.md", name="old", description="기존", memory_type="user", body="기존 내용")
+        existing_file = MemoryFile(
+            filename="old.md",
+            name="old",
+            description="기존",
+            memory_type="user",
+            body="기존 내용",
+            updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
         store = _make_store_with([existing_ref], {"old.md": existing_file})
         llm = AsyncMock(spec=LLMPort)
         llm.generate_structured.return_value = _make_llm_result([
