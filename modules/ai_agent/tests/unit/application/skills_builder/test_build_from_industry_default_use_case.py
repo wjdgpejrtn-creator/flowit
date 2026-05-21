@@ -448,10 +448,10 @@ async def test_seed_instructions_included_in_skill_documents(tmp_path: Path):
 
     docs = result.payload["skill_documents"]
     assert len(docs) == 1
-    assert docs[0]["node_type"] == "ecommerce_cart_abandonment"
+    # SkillDocument 객체(model_dump) — node_type 없음(SkillDocument≠Node), skill_id로 식별
+    assert "node_type" not in docs[0]
+    assert {"skill_id", "name", "description", "instructions"} <= docs[0].keys()
     assert docs[0]["instructions"].startswith("## When to use")
-    assert "name" in docs[0]
-    assert "description" in docs[0]
 
 
 @pytest.mark.asyncio

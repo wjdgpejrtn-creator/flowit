@@ -28,6 +28,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import UUID, uuid5
 
+from common_schemas import SkillDocument
 from common_schemas.enums import RiskLevel
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame, SSEFrame
 from nodes_graph.domain.entities.node_definition import NodeDefinition
@@ -35,7 +36,6 @@ from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRepository
 
 from ....domain.entities.skill_node import SkillNode
-
 
 # uuid5 namespace for skills builder generated nodes (industry default).
 # node_id = uuid5(_NS, f"{industry_code}:{node_type}") — industry_code를 명시 결합해서
@@ -124,7 +124,7 @@ class BuildFromIndustryDefaultUseCase:
         version = seed.get("version", "1.0.0")
         skill_nodes_data = seed.get("skill_nodes", [])
         upserted_node_types: list[str] = []
-        skill_documents: list[dict[str, str]] = []
+        skill_documents: list[SkillDocument] = []
         failed_node_types: list[dict] = []
 
         for entry in skill_nodes_data:
@@ -171,16 +171,17 @@ class BuildFromIndustryDefaultUseCase:
                 continue
 
             upserted_node_types.append(node_def.node_type)
-            # ADR-0017: seed에 instructions가 있으면 SkillDocument 데이터 수집 (선택 — ② seed 채우기 전엔 미수집).
-            # skills_marketplace.SkillDocument 직접 import 안 함 (dict 반환 — 조장 리뷰 #98 "use case 경유" 준수).
+            # ADR-0017: seed에 instructions가 있으면 SkillDocument 수집 (선택 — ② seed 채우기 전엔 미수집).
+            # common_schemas.SkillDocument 객체 (type-safe). SkillDocument≠Node라
+            # node_type 없이 skill_id로 NodeDefinition 연결 (조장 PR #106/#113).
             instructions = entry.get("instructions")
             if instructions:
-                skill_documents.append({
-                    "node_type": node_def.node_type,
-                    "name": node_def.name,
-                    "description": node_def.description,
-                    "instructions": instructions,
-                })
+                skill_documents.append(SkillDocument(
+                    skill_id=node_def.node_id,
+                    name=node_def.name,
+                    description=node_def.description,
+                    instructions=instructions,
+                ))
 
         # 4. 결과 프레임
         yield ResultFrame(
@@ -191,7 +192,7 @@ class BuildFromIndustryDefaultUseCase:
                 "upserted_count": len(upserted_node_types),
                 "failed_count": len(failed_node_types),
                 "node_types": upserted_node_types,
-                "skill_documents": skill_documents,
+                "skill_documents": [doc.model_dump(mode="json") for doc in skill_documents],
                 "failed_node_types": failed_node_types,
                 "user_id": str(user_id),
             },
