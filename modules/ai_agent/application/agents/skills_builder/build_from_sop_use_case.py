@@ -60,7 +60,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import UUID, uuid5
 
-from common_schemas import DocumentBlock, MemoryEntry
+from common_schemas import DocumentBlock, MemoryEntry, SkillDocument
 from common_schemas.enums import RiskLevel
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame, SSEFrame
 from nodes_graph.domain.entities.node_definition import NodeDefinition
@@ -70,7 +70,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ....domain.entities.skill_node import SkillNode
 from ....domain.ports.llm_port import LLMPort
-
 
 # uuid5 namespace for skills builder generated nodes (SOP source).
 # node_id = uuid5(_NS, f"sop:{document_id}:{node_type}") — 같은 SOP에서 추출된
@@ -208,7 +207,7 @@ class BuildFromSOPUseCase:
         #   다른 노드 계속. ResultFrame.failed_node_types에 기록.
         # - uuid5 deterministic(같은 SOP·node_type) → 부분 실패 후 재실행 안전.
         upserted_node_types: list[str] = []
-        skill_documents: list[dict[str, str]] = []
+        skill_documents: list[SkillDocument] = []
         failed_node_types: list[dict] = []
 
         for ext in extracted.skill_nodes:
@@ -254,15 +253,15 @@ class BuildFromSOPUseCase:
                 continue
 
             upserted_node_types.append(node_def.node_type)
-            # ADR-0017: NodeDefinition upsert 성공분만 SkillDocument 데이터 수집.
-            # skills_marketplace.SkillDocument를 직접 import하지 않고 dict로 반환 (조장 리뷰 #98
-            # "ai_agent는 use case 경유" 결정). 실제 GCS 저장은 후속 SkillDocumentStore 구현 + use case wiring.
-            skill_documents.append({
-                "node_type": node_def.node_type,
-                "name": node_def.name,
-                "description": node_def.description,
-                "instructions": ext.instructions,
-            })
+            # ADR-0017: NodeDefinition upsert 성공분만 SkillDocument 수집 (common_schemas SSOT, type-safe).
+            # SkillDocument는 node가 아닌 지침서 → node_type 없이 skill_id(=node_id)로
+            # NodeDefinition과 연결 (조장 PR #106/#113 결정).
+            skill_documents.append(SkillDocument(
+                skill_id=node_def.node_id,
+                name=node_def.name,
+                description=node_def.description,
+                instructions=ext.instructions,
+            ))
 
         # 5. 결과 프레임
         yield ResultFrame(
@@ -274,7 +273,7 @@ class BuildFromSOPUseCase:
                 "upserted_count": len(upserted_node_types),
                 "failed_count": len(failed_node_types),
                 "node_types": upserted_node_types,
-                "skill_documents": skill_documents,
+                "skill_documents": [doc.model_dump(mode="json") for doc in skill_documents],
                 "failed_node_types": failed_node_types,
                 "user_id": str(user_id),
             },

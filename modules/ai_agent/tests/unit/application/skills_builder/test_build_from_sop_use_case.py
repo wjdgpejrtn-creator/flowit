@@ -669,12 +669,13 @@ async def test_result_payload_includes_skill_documents():
     assert isinstance(result, ResultFrame)
     docs = result.payload["skill_documents"]
     assert len(docs) == 2
-    by_type = {d["node_type"]: d for d in docs}
-    # SkillDocument 데이터 = node_type 매핑 + name/description/instructions
-    assert by_type["sop_alert"]["instructions"] == "## When to use\nA\n## Steps\n1. x"
-    assert by_type["sop_escalate"]["instructions"] == "## When to use\nB"
-    assert "name" in by_type["sop_alert"]
-    assert "description" in by_type["sop_alert"]
+    # SkillDocument 객체(model_dump) — node_type 없음(SkillDocument≠Node, 조장 결정), skill_id로 식별
+    for d in docs:
+        assert {"skill_id", "name", "description", "instructions"} <= d.keys()
+        assert "node_type" not in d
+    instructions_set = {d["instructions"] for d in docs}
+    assert "## When to use\nA\n## Steps\n1. x" in instructions_set
+    assert "## When to use\nB" in instructions_set
 
 
 @pytest.mark.asyncio
@@ -692,6 +693,7 @@ async def test_skill_documents_exclude_failed_nodes():
 
     result = frames[-1]
     docs = result.payload["skill_documents"]
-    doc_types = {d["node_type"] for d in docs}
-    assert "sop_ok" in doc_types
-    assert "sop_fail" not in doc_types
+    # sop_fail upsert 실패 → SkillDocument 제외, sop_ok만 남음 (성공분만 수집)
+    assert len(docs) == 1
+    assert "node_type" not in docs[0]
+    assert {"skill_id", "name", "description", "instructions"} <= docs[0].keys()
