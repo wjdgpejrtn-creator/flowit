@@ -6,11 +6,12 @@ spec §3.1 supervisor diagram 구현. LangGraph는 adapters/에만 존재 (CLAUD
 from __future__ import annotations
 
 import asyncio
+import logging
 import operator
-from typing import Annotated, Any, AsyncGenerator, TypedDict
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Annotated, Any, TypedDict
 from uuid import UUID, uuid4
-
-from langgraph.graph import END, StateGraph
 
 from common_schemas.agent import AgentState, MemoryEntry
 from common_schemas.agent_protocol import AgentProtocolRequest
@@ -23,9 +24,14 @@ from common_schemas.transport import (
     SessionFrame,
     SSEFrame,
 )
+from langgraph.graph import END, StateGraph
 
+from ...domain.entities.session_ref import SessionRef
+from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.sub_agent_client import SubAgentClient
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
+
+_logger = logging.getLogger(__name__)
 
 _COMPOSER = "composer"
 _SKILLS = "skills"
@@ -57,11 +63,13 @@ class LangGraphSupervisor:
         personalization_client: SubAgentClient,
         composer_client: SubAgentClient,
         skills_client: SubAgentClient,
+        session_frame_store: SessionFrameStore | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._personalization = personalization_client
         self._composer = composer_client
         self._skills = skills_client
+        self._session_frame_store = session_frame_store
         self._live_queues: dict[UUID, asyncio.Queue] = {}
         self._graph = self._build()
 
@@ -106,7 +114,7 @@ class LangGraphSupervisor:
         # relay 노드(_COMPOSER, _SKILLS)는 _relay()가 직접 Queue에 put하므로
         # run_graph에서는 collected_frames를 중복 emit하지 않음.
         # 나머지 노드(load_memory, intent, finalize, update_memory)는 여기서 emit.
-        _RELAY_NODES = {_COMPOSER, _SKILLS}
+        _relay_nodes = {_COMPOSER, _SKILLS}
 
         async def _run_graph() -> None:
             try:
@@ -115,7 +123,7 @@ class LangGraphSupervisor:
                         await queue.put(AgentNodeFrame(agent_node_name=node_name))
                         if not isinstance(updates, dict):
                             continue
-                        if node_name not in _RELAY_NODES:
+                        if node_name not in _relay_nodes:
                             for frame in updates.get("collected_frames", []):
                                 await queue.put(frame)
                         if updates.get("error"):
@@ -129,11 +137,16 @@ class LangGraphSupervisor:
 
         asyncio.create_task(_run_graph())
 
+        all_frames: list[AnySSEFrame] = []
         while True:
             frame = await queue.get()
             if frame is None:
                 break
+            all_frames.append(frame)
             yield frame
+
+        if self._session_frame_store:
+            await self._save_session_frames(session_id, user_id, message, all_frames)
 
     # ------------------------------------------------------------------ nodes
 
@@ -262,6 +275,35 @@ class LangGraphSupervisor:
         except Exception as exc:
             return {"collected_frames": frames, "error": str(exc)}
         return {"collected_frames": frames}
+
+    async def _save_session_frames(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        message: str,
+        frames: list[SSEFrame],
+    ) -> None:
+        try:
+            workflow_id: UUID | None = None
+            for frame in frames:
+                if isinstance(frame, ResultFrame):
+                    wf_str = frame.payload.get("workflow_id")
+                    if wf_str:
+                        try:
+                            workflow_id = UUID(wf_str)
+                        except Exception:
+                            pass
+                    break
+            ref = SessionRef(
+                session_id=session_id,
+                user_id=user_id,
+                workflow_id=workflow_id,
+                created_at=datetime.now(UTC),
+                message_preview=message[:100],
+            )
+            await self._session_frame_store.save_session(ref, frames)  # type: ignore[union-attr]
+        except Exception as exc:
+            _logger.warning("session frame 저장 실패 (non-fatal): %s", exc)
 
     # ------------------------------------------------------------------ routing
 
