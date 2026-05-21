@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+/* ───────── Pretendard + JetBrains Mono 폰트 ───────── */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ───────── Tailwind v4 디자인 토큰 ───────── */
+@theme {
+  /* 배경/표면 */
+  --color-paper: #F4F6F8;
+  --color-paper2: #EBEEF2;
+  --color-surface: #FFFFFF;
+  --color-sidebar: #FFFFFF;
+
+  /* 텍스트 (Ink) */
+  --color-ink: #1E293B;
+  --color-ink2: #334155;
+  --color-ink3: #64748B;
+  --color-ink4: #94A3B8;
+
+  /* 강조선 */
+  --color-line: #1E293B;
+  --color-line-soft: #CBD5E1;
+
+  /* 하이라이트 (마커펜) */
+  --color-hl: #E0E7FF;
+  --color-hl2: #C7D2FE;
+
+  /* 액센트 (Indigo) */
+  --color-accent: #4F46E5;
+  --color-accent2: #6366F1;
+  --color-accent3: #4338CA;
+
+  /* 위험도 */
+  --color-risk-low: #10B981;
+  --color-risk-med: #F59E0B;
+  --color-risk-high: #F97316;
+  --color-risk-restricted: #EF4444;
+
+  /* 실행 상태 */
+  --color-status-running: #4F46E5;
+  --color-status-succeeded: #10B981;
+  --color-status-failed: #EF4444;
+  --color-status-retrying: #F59E0B;
+  --color-status-paused: #64748B;
+  --color-status-cancelled: #94A3B8;
+  --color-status-pending: #94A3B8;
+
+  /* 공유 범위 */
+  --color-scope-private: #64748B;
+  --color-scope-team: #7C3AED;
+  --color-scope-public: #4F46E5;
+
+  /* AI 에이전트 */
+  --color-agent: #4F46E5;
+
+  /* 폰트 패밀리 */
+  --font-pretendard: 'Pretendard', 'Pretendard Variable', -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* ───────── 기본 스타일 ───────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-pretendard);
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.01em;
+}
+
+/* ───────── 키프레임 애니메이션 ───────── */
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.4; }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes wiggle {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+/* ───────── 커스텀 유틸리티 ───────── */
+.animate-blink {
+  animation: blink 1s steps(2) infinite;
+}
+
+.animate-pulse-dot {
+  animation: pulse 1.2s infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, var(--color-paper2) 0%, #e6e2d2 40%, var(--color-paper2) 80%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+.animate-wiggle {
+  animation: wiggle 0.4s 1;
+}
