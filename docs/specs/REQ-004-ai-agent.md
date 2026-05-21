@@ -229,7 +229,7 @@ LLM 자유 생성 산업 default는 v2(Sprint 4+) 이연.
                 └────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Workflow Composer 내부 StateGraph (기존 13-노드, 보존)
+### 3.2 Workflow Composer 내부 StateGraph (16-노드, 2026-05-21 확장)
 
 ```
 AgentState ─► security_node ─► intent_node ─►
@@ -239,11 +239,36 @@ AgentState ─► security_node ─► intent_node ─►
   │                                            score < 8 (최대 3회 retry)
   │                                            score >= 8
   │                                                       ▼
-  └─ [propose] ─► promote_node ─► handoff_node (WorkflowRepository.save)
+  └─ [propose] ─► promote_node ─► handoff_node (WorkflowRepository.save → saved_workflow_id)
                                               │
                                               ▼
-                                        workflow_id → REQ-007
+                                        execute_node          ← 실행 엔진 호출 (REQ-007 연동)
+                                              │
+                                              ▼
+                                        evaluate_output_node  ← LLM 산출물 퀄리티 검증
+                                              │
+                                              ▼
+                                        user_confirm_node     ← 결과 사용자 제시
+                                              │
+                                              ▼
+                                        memory_save → END
 ```
+
+#### 신규 노드 상세 (2026-05-21 추가, PR #135)
+
+| 노드 | 역할 | 구현 상태 |
+|------|------|----------|
+| `execute_node` | `POST /api/v1/workflows/{id}/execute` 호출 → execution_id 획득 → 결과 폴링 (`GET /api/v1/executions/{id}`, 3초 간격, 최대 5분) | ✅ 구현 완료 — `EXECUTION_ENGINE_URL` 환경변수 필요 (팀장님 Secret Manager 등록 대기) |
+| `evaluate_output_node` | 실행 산출물 퀄리티 평가. LLMPort 주입 시 LLM 평가, 미주입 시 실행 상태 기반 휴리스틱 | ✅ 구현 완료 |
+| `user_confirm_node` | `ResultFrame(intent="execution_review")` emit — 실행 결과 요약을 프론트엔드에 전달 | ✅ 구현 완료 |
+
+#### `promote_node` 변경 (2026-05-21)
+
+`promote_node`는 `is_draft=False` 설정 후 **`WorkflowDraftStore.save_draft(session_id, draft)`** 를 호출해 AI 생성 원본 초안을 임시 보관한다. 사용자 승인 시 `ApproveWorkflowUseCase`가 이 초안과 최종본을 비교해 `WorkflowDiff`를 생성한다 (§3.3 참조).
+
+#### `validator_node` 변경 (2026-05-21)
+
+`GraphValidator` 구조 검증에 더해, `PermissionResolver`가 주입된 경우 워크플로우 각 노드의 `risk_level`을 조회해 사용자 `permission.risk_ceiling` 초과 노드를 차단한다.
 
 > **drafter_node 좌표 배치**: `drafter_node`는 `DrafterService.draft()` 호출 직후 `WorkflowLayoutService.apply_layout(workflow)`를 실행해 각 `NodeInstance`에 캔버스 x,y 좌표를 부여한다. 이 좌표는 프론트엔드 React Flow 캔버스에 직접 사용된다.
 
@@ -284,8 +309,10 @@ WorkflowDraftStore.delete_draft(session_id)  ← 정리
 |------|------|
 | `WorkflowDiffService` 구현 (`domain/services/`) | 신정혜 ✅ |
 | `WorkflowDraftStore` Port 정의 (`domain/ports/`) | 신정혜 ✅ |
-| `WorkflowDraftStore` 어댑터 구현 | 신정혜 (구현 어댑터 미정) |
-| Personalization Agent — 승인 이벤트 수신 + diff → memory 변환 | 햄햄(이가원) |
+| `WorkflowDraftStore` 어댑터 구현 (`InMemoryWorkflowDraftStore`) | 신정혜 ✅ (PR #135) |
+| `ApproveWorkflowUseCase` — 승인 이벤트 수신 + diff 계산 + Personalization 이벤트 전달 | 신정혜 ✅ (PR #135) |
+| `POST /v1/agent/approve` 엔드포인트 | 신정혜 ✅ (PR #135) |
+| Personalization Agent — diff → MemoryEntry 변환 + 저장 | 햄햄(이가원) |
 
 ---
 
@@ -353,6 +380,7 @@ VPC 내부 통신만 허용 (옵션 C). Modal app 외부 노출 금지. mTLS는 
 | `COMPOSER_URL` / `SKILLS_BUILDER_URL` / `PERSONALIZATION_URL` | orchestrator | Sub-agent endpoint |
 | `GCS_PERSONAL_BUCKET` | personalization | `workflow-automation-personal` |
 | `GCS_SESSION_BUCKET` 🆕 | composer | SSE 세션 프레임 저장 버킷 (`GCSSessionFrameStore` 사용, Secret Manager key: `gcs-session-bucket`) |
+| `EXECUTION_ENGINE_URL` 🆕 | composer | 실행 엔진 API base URL (Secret Manager key: `execution-engine-url`, PR #135) |
 | `AGENT_MAX_TURNS` | composer | 25 |
 | `QA_PASS_THRESHOLD` | composer | 8 |
 
@@ -533,7 +561,8 @@ modules/ai_agent/
 │       │   └── route_request_use_case.py
 │       ├── workflow_composer/
 │       │   ├── compose_workflow_use_case.py
-│       │   └── continue_conversation_use_case.py
+│       │   ├── continue_conversation_use_case.py
+│       │   └── approve_workflow_use_case.py      # 신규 (PR #135) — 사용자 승인 diff 처리
 │       ├── skills_builder/
 │       │   ├── build_from_sop_use_case.py
 │       │   └── build_from_industry_default_use_case.py
@@ -548,12 +577,13 @@ modules/ai_agent/
 │   │   └── modal_embedding_adapter.py        # 신규
 │   ├── memory/
 │   │   ├── gcs_memory_store.py               # 신규 (PersonalMemoryStore 구현)
-│   │   └── gcs_session_frame_store.py        # 신규 (SessionFrameStore 구현 — 모니터링 히스토리)
+│   │   ├── gcs_session_frame_store.py        # 신규 (SessionFrameStore 구현 — 모니터링 히스토리)
+│   │   └── in_memory_draft_store.py          # 신규 (PR #135, WorkflowDraftStore in-memory 구현)
 │   ├── agent_clients/                        # 신규 (orchestrator 전용)
 │   │   └── http_sub_agent_client.py
 │   ├── langgraph/
 │   │   ├── supervisor_graph.py               # Orchestrator
-│   │   └── composer_graph.py                 # Workflow Composer 13-노드
+│   │   └── composer_graph.py                 # Workflow Composer 16-노드 (PR #135)
 │   └── node_registry_adapter.py
 ├── seeds/
 │   ├── industry_defaults/                    # 신규 (Skills Builder seed — 산업 baseline)
@@ -594,4 +624,5 @@ modules/ai_agent/
 | 2026-05-15 | **Personalization 저장 구조 개선** — ① GCSMemoryStore Session Cache (`_cache: dict[UUID, list[PersonalSkill]]`) 구현 완료: 세션 내 GCS 중복 호출 제거, `save_entry()` 시 캐시 갱신. ② Content Hash Dedupe 제거: 중복 저장 방지 목적의 hash 비교 로직을 단순화 (Debounce P-4a로 대체 예정). ③ EmbeddingPort SSOT 이관: `ai_agent/domain/ports/embedding_port.py` 폐기, `nodes_graph.domain.ports.EmbedderPort` 사용으로 통일. | 이가원 |
 | 2026-05-18 | **Personalization MemoryFile 기반 전면 재설계 반영 (PR #71)** — `PersonalMemoryStore` Port를 MemoryFile 기반 8메서드로 확정 (`load/save_index`, `load/save/delete_file`, `load/save_embedding`, `cleanup`). `UpdateUserMemoryUseCase` 시그니처 변경: `turn_count` 파라미터 추가, threshold(3) 미만·workflow 없으면 early return, 반환값 `bool`로 변경. `cleanup_memory` action 엔드포인트 추가 (`agent-personalization/main.py`). | 이가원 |
 | 2026-05-21 | **사용자 승인 diff 흐름 추가 (PR #133, §3.3)** — 햄햄(이가원) 제안. `WorkflowDiffService`(domain/services, draft vs final 구조적 비교), `WorkflowDraftStore` Port(domain/ports, draft 임시 보관) 신규 구현. 단위 테스트 9건 완료. Personalization Agent 승인 이벤트 수신 + diff→memory 변환은 햄햄 담당. | 신정혜 |
+| 2026-05-21 | **실행 검증 흐름 추가 (PR #135, §3.2)** — Composer 13→16노드 확장. `execute_node`(실행 엔진 HTTP 호출+폴링), `evaluate_output_node`(LLM 산출물 퀄리티 평가), `user_confirm_node`(결과 프레임 emit) 신규. `promote_node` WorkflowDraftStore 연동, `validator_node` RiskLevel 강제, `handoff_node` saved_workflow_id 상태 저장. `InMemoryWorkflowDraftStore` 어댑터, `ApproveWorkflowUseCase`, `POST /v1/agent/approve` 엔드포인트 구현. 단위 테스트 13건. 환경변수 `EXECUTION_ENGINE_URL` 추가(팀장님 Secret Manager 등록 필요). | 신정혜 |
 | 2026-05-21 | **Personalization debounce claim-first 재설계 (PR #122)** — `PersonalMemoryStore` Port에 `claim_debounce_window(user_id, now, window) -> bool` 추가. `GCSMemoryStore`에서 `.debounce.json` blob을 `if_generation_match` CAS로 LLM 호출 전 선점. `UpdateUserMemoryUseCase` 흐름 재배치: CAS claim → 파일 로드 → LLM → 쓰기. 기존 `MemoryFile.updated_at` 기반 debounce 제거. debounce 정책: **5분**. | 이가원 |
