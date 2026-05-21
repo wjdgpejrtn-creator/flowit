@@ -1,7 +1,7 @@
 # REQ-006 Doc-Parser -- 구현 명세
 
-> 담당: 김진형  
-> 모듈 경로: `modules/doc_parser/`  
+> 담당: 김진형
+> 모듈 경로: `modules/doc_parser/`
 > 의존 패키지: `common_schemas >= 0.1.0`
 
 ---
@@ -57,6 +57,7 @@ from common_schemas import (
 | `QualityConfig` | `min_text_length: int`, `min_text_per_page: int`, `korean_ratio_warn: float`, `broken_char_warn: float`, `blocks_per_page_warn: float`, `max_parser_warnings: int`, `min_heading_ratio: float`, `min_valid_table_ratio: float`, `min_structural_chunk_ratio: float`, `warn_threshold_count: int` | `config/parser_quality.yaml`에서 로드하는 설정 VO (모듈 내부 유지) |
 | `PIIMaskRule` | `pattern: str`, `replacement: str`, `label: str` | PII 마스킹 규칙 정의 (모듈 내부 유지) |
 | `ElapsedDetail` | `parse_ms: float`, `normalize_ms: float`, `pii_ms: float`, `chunk_ms: float`, `quality_ms: float` | 파이프라인 단계별 처리 시간 (모듈 내부 유지) |
+| `VisionType` | `TABLE`, `GRAPH`, `CHART`, `CORRUPTED` | 비전 추출 유형 enum. TableDetector가 감지한 상황에 따라 Gemma4 프롬프트 결정 |
 
 > **SSOT 주의**: `Chunk`, `ChunkingStrategy`, `QualityGateResult`, `QualityMetrics`, `WarningInfo`는 PR #34에서 `common_schemas/document.py` SSOT 승격이 확정되었다. 위 import 테이블 참조. 모듈 내 재정의 금지.
 
@@ -68,7 +69,6 @@ from common_schemas import (
 | `QualityGate` | `evaluate(document: DocumentBlock, chunks: list[Chunk]) -> QualityGateResult` | 파싱 품질 검증. 임계값은 `config/parser_quality.yaml`에서 로드 |
 | `PIIMaskingService` | `mask_document(document: DocumentBlock) -> tuple[DocumentBlock, list[WarningInfo]]` | PII 단방향 마스킹. 정규화 이후/청킹 이전 수행 |
 | `NormalizationService` | `normalize_document(document: DocumentBlock) -> DocumentBlock` | 기본 텍스트 정규화 (공백/특수문자/인코딩 정리) |
-| `ParserFactory` | `get(mime_type: str) -> ParserPort`, `supports(mime_type: str) -> bool` | MIME 타입 기반 파서 선택 팩토리 |
 
 #### domain/ports (ABC 인터페이스)
 
@@ -76,6 +76,7 @@ from common_schemas import (
 |------|--------|----------|
 | `ParserPort` | `parse(file_path: str, file_meta: FileMeta) -> DocumentBlock` | `adapters/parsers/` |
 | | `supports(mime_type: str) -> bool` | |
+| `VisionPort` | `extract(file_path: str, vision_type: VisionType, page_num: int, block_index: int) -> ContentBlock \| None` | `adapters/vision/` |
 | `DocumentRepositoryPort` | `save(document: DocumentBlock) -> UUID` | `adapters/persistence/` (REQ-001 storage 연동) |
 | | `save_chunks(chunks: list[Chunk]) -> None` | |
 | | `save_quality_log(result: QualityGateResult, document_id: UUID) -> None` | |
@@ -120,6 +121,21 @@ from common_schemas import (
 |--------|------|
 | `YamlConfigLoader` | `ConfigLoaderPort` 구현. `config/parser_quality.yaml`에서 설정 로드 |
 
+#### adapters/vision
+
+| 클래스 | 설명 |
+|--------|------|
+| `VisionExtractor` | `VisionPort` 구현. fitz(PyMuPDF)로 페이지 캡처 → Gemma4(Modal) 비전 분석. LibreOffice 미사용 |
+| `TableDetector` | 블록 스트림에서 비전 트리거 감지. block_type + broken_char_ratio 기준으로 TABLE/GRAPH/CHART/CORRUPTED 판단 |
+| `VisionPromptStrategy` | VisionType별 Gemma4 프롬프트 정책. 정책 변경이 잦아 domain이 아닌 adapters에 위치 |
+
+#### adapters (루트)
+
+| 클래스 | 설명 |
+|--------|------|
+| `InterleavingParser` | `ParserPort` 구현. 텍스트 파싱 + 비전 인터리빙 지휘자. CSV/MD는 비전 스킵, 나머지는 `_parse_interleaving()` 단일 경로로 통일 |
+| `ParserFactory` | MIME 타입 기반 파서 선택 팩토리. 순환 import 방지를 위해 `domain/services`가 아닌 `adapters`에 위치. `from_yaml(config_path)` 클래스 메서드로 yaml 설정 주입 |
+
 ---
 
 ## 합의된 변경사항 (클래스 다이어그램 교차분석)
@@ -163,6 +179,7 @@ dependencies = [
     "common_schemas",
     "pydantic>=2.0",
     "pdfplumber>=0.10",
+    "pymupdf>=1.23",
     "python-docx>=1.0",
     "openpyxl>=3.1",
     "python-pptx>=0.6",
@@ -185,17 +202,18 @@ modules/doc_parser/
 │   │   ├── chunk.py              ← Chunk, ChunkingStrategy (common_schemas SSOT import 후 re-export)
 │   │   ├── quality.py            ← QualityGateResult, QualityMetrics (SSOT), QualityConfig (내부)
 │   │   ├── warning.py            ← WarningInfo (SSOT), ElapsedDetail (내부)
-│   │   └── pii.py                ← PIIMaskRule
+│   │   ├── pii.py                ← PIIMaskRule
+│   │   └── vision_type.py        ← VisionType enum (TABLE/GRAPH/CHART/CORRUPTED)
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── chunking_service.py   ← ChunkingService
 │   │   ├── quality_gate.py       ← QualityGate
 │   │   ├── pii_masking.py        ← PIIMaskingService
-│   │   ├── normalization.py      ← NormalizationService
-│   │   └── parser_factory.py     ← ParserFactory
+│   │   └── normalization.py      ← NormalizationService
 │   └── ports/
 │       ├── __init__.py
 │       ├── parser_port.py        ← ParserPort (ABC)
+│       ├── vision_port.py        ← VisionPort (ABC)
 │       ├── repository_port.py    ← DocumentRepositoryPort (ABC)
 │       └── config_port.py        ← ConfigLoaderPort (ABC)
 ├── application/
@@ -207,6 +225,8 @@ modules/doc_parser/
 │       └── parsing_pipeline.py   ← ParsingPipeline
 ├── adapters/
 │   ├── __init__.py
+│   ├── interleaving_parser.py    ← InterleavingParser (텍스트+비전 인터리빙 지휘자)
+│   ├── parser_factory.py         ← ParserFactory (순환 import 방지로 adapters에 위치)
 │   ├── parsers/
 │   │   ├── __init__.py
 │   │   ├── pdf_parser.py
@@ -217,6 +237,11 @@ modules/doc_parser/
 │   │   ├── hwp_parser.py
 │   │   ├── hwpx_parser.py
 │   │   └── markdown_parser.py
+│   ├── vision/
+│   │   ├── __init__.py
+│   │   ├── vision_extractor.py   ← VisionExtractor (fitz+Gemma4)
+│   │   ├── table_detector.py     ← TableDetector (비전 트리거 감지)
+│   │   └── prompts.py            ← VisionPromptStrategy (Gemma4 프롬프트 정책)
 │   ├── persistence/
 │   │   ├── __init__.py
 │   │   └── postgres_document_repo.py

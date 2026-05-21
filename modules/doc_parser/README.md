@@ -16,8 +16,9 @@ pip install -e "modules/doc_parser[dev]"
 ```python
 from doc_parser.domain.entities import Chunk, QualityGateResult, QualityMetrics
 from doc_parser.domain.services import (
-    ChunkingService, QualityGate, PIIMaskingService, NormalizationService, ParserFactory,
+    ChunkingService, QualityGate, PIIMaskingService, NormalizationService,
 )
+from doc_parser.adapters.parser_factory import ParserFactory
 from doc_parser.domain.ports import ParserPort, DocumentRepositoryPort, ConfigLoaderPort
 from doc_parser.application.use_cases import (
     ParseDocumentUseCase, ExtractChunksUseCase, ParsingPipeline,
@@ -46,7 +47,7 @@ from doc_parser.application.use_cases import (
 | `QualityGateResult` | `quality_status: Literal["success","warning","manual_correction_required","failed"]`, `metrics: QualityMetrics`, `warnings: list[str]`, `error_codes: list[str]`, `decision_reason: str` | 파서 품질 게이트 판정 결과 |
 | `QualityMetrics` | `text_length: int`, `korean_ratio: float`, `broken_char_ratio: float`, `blocks_per_page: float`, `heading_ratio: float`, `valid_table_ratio: float`, `structural_chunk_ratio: float`, `warning_count: int` | 품질 수치 메트릭 |
 
-### domain/value_objects
+### domain/entities — Value Objects
 
 | 클래스 | 설명 |
 |--------|------|
@@ -62,7 +63,13 @@ from doc_parser.application.use_cases import (
 | `QualityGate` | `evaluate(document: DocumentBlock, config: QualityConfig) → QualityGateResult` | 설정 기반 품질 검증. warning 누적 시 manual_correction_required 격상 |
 | `PIIMaskingService` | `mask(blocks: list[ContentBlock], rules: list[PIIMaskRule]) → list[ContentBlock]` | PII 단방향 마스킹. 정규화 이후/청킹 이전 수행 |
 | `NormalizationService` | `normalize(blocks: list[ContentBlock]) → list[ContentBlock]` | 기본 텍스트 정규화 (공백/특수문자/인코딩 정리) |
-| `ParserFactory` | `get(file_type: str) → ParserPort`, `register(parser: ParserPort) → None` | MIME 타입 기반 파서 선택 팩토리 |
+
+### adapters/parser_factory
+
+| 클래스 | 메서드 | 설명 |
+|--------|--------|------|
+| `ParserFactory` | `get(mime_type: str) → ParserPort` | MIME 타입 기반 파서 선택. 비전 모드 활성화 시 InterleavingParser 자동 래핑 |
+| | `register(parser: ParserPort) → None` | 파서 등록 |
 
 ### domain/ports (인터페이스)
 
@@ -120,6 +127,9 @@ Downstream (이 모듈에 의존):
 | `PARSER_MAX_FILE_SIZE_MB` | N | 최대 파일 크기 (기본: 10MB) |
 | `PARSER_TIMEOUT_SECONDS` | N | 파싱 타임아웃 (기본: 120s) |
 | `OCR_ENABLED` | N | OCR 활성화 여부 (기본: false) |
+| `HF_TOKEN` | N | Gemma4 HuggingFace 접근 토큰 (비전 모드 활성화 시 필요) |
+| `MODAL_TOKEN` | N | Modal 워크스페이스 인증 토큰 (비전 모드 활성화 시 필요) |
+| `MODAL_TOKEN_SECRET` | N | Modal Secret 키 (비전 모드 활성화 시 필요) |
 
 ## 에러 코드
 

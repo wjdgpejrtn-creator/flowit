@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from doc_parser.domain.entities.warning import WarningInfo
 
@@ -42,6 +42,46 @@ class QualityMetrics(BaseModel):
     avg_tokens: float
 
 
+class ParseCoverage(BaseModel):
+    """파싱 커버리지 VO.
+
+    파싱 결과의 커버리지(범위/완성도)를 나타내는 지표.
+    QualityGate.evaluate() 가 계산하여 QualityGateResult 에 포함.
+    frozen=True → 생성 후 불변 (Value Object 원칙)
+
+    담당별 채움 주체:
+        total_pages    → FileMeta.page_count 에서
+        parsed_pages   → QualityGate (실제 파싱된 page 집합 집계)
+        text_blocks    → QualityGate (blocks 순회 집계)
+        table_blocks   → QualityGate (blocks 순회 집계)
+        vision_blocks  → InterleavingParser (Skeleton: 현재 0 고정)
+        failed_blocks  → InterleavingParser (Skeleton: 현재 0 고정)
+        warnings       → QualityGate
+
+    # TODO: vision_blocks / failed_blocks — InterleavingParser 연결 후 채움
+    #       ContentBlock.metadata 필드 추가 후 황대원님 협의
+
+    Attributes:
+        total_pages: 문서 전체 페이지 수 (FileMeta.page_count 기준)
+        parsed_pages: 실제 파싱된 페이지 수
+        text_blocks: 텍스트/헤딩 블록 수
+        table_blocks: 표 블록 수
+        vision_blocks: 비전 추출 블록 수 (Skeleton: 0 고정)
+        failed_blocks: 비전 실패 블록 수 (Skeleton: 0 고정)
+        warnings: 커버리지 관련 경고 메시지 목록
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    total_pages: int = 0
+    parsed_pages: int = 0
+    text_blocks: int = 0
+    table_blocks: int = 0
+    vision_blocks: int = 0       # Skeleton: InterleavingParser 연결 후 채움
+    failed_blocks: int = 0       # Skeleton: InterleavingParser 연결 후 채움
+    warnings: list[str] = Field(default_factory=list)
+
+
 class QualityGateResult(BaseModel):
     """품질 게이트 판정 결과 VO.
 
@@ -59,6 +99,7 @@ class QualityGateResult(BaseModel):
         warnings: 발생한 경고 목록
         error_codes: 발생한 에러코드 목록 (E0201 등)
         decision_reason: 판정 근거 설명 (선택)
+        coverage: 파싱 커버리지 (ParseCoverage)
     """
 
     model_config = ConfigDict(frozen=True)
@@ -73,6 +114,7 @@ class QualityGateResult(BaseModel):
     warnings: list[WarningInfo]
     error_codes: list[str]
     decision_reason: Optional[str] = None
+    coverage: ParseCoverage = Field(default_factory=ParseCoverage)
 
 
 class QualityConfig(BaseModel):
