@@ -1,4 +1,4 @@
-# ADR-0018: Vision Pipeline 도입 — fitz(PyMuPDF) + Gemma4 + 인터리빙 패턴
+# ADR-0019: Vision Pipeline 도입 — fitz(PyMuPDF) + Gemma4 + 인터리빙 패턴
 
 - **Status**: Accepted
 - **Date**: 2026-05-21
