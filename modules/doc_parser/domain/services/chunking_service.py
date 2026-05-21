@@ -195,7 +195,7 @@ class ChunkingService:
             return []
 
         # ── XLSX 병합셀 구조 분기 ──
-        if block.metadata is not None:
+        if block.metadata and "data_rows" in block.metadata:
             normalized_headers = block.metadata.get("normalized_headers", [])
             data_rows = block.metadata.get("data_rows", [])
             # 청킹용 rows: normalized_headers 를 헤더 행으로 재구성

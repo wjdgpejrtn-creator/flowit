@@ -254,7 +254,7 @@ class QualityGate:
             if not b.table:
                 continue
             # XLSX 병합셀 구조: metadata에 data_rows/normalized_headers 포함
-            if b.metadata is not None:
+            if b.metadata and "data_rows" in b.metadata:
                 data_rows = b.metadata.get("data_rows", [])
                 normalized_headers = b.metadata.get("normalized_headers", [])
                 is_valid = len(data_rows) >= 1 and len(normalized_headers) >= 2
