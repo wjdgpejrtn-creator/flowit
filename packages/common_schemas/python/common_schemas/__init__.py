@@ -20,7 +20,9 @@ from .exceptions import (
     ValidationError,
 )
 from .handoff import EvaluationResult, HandoffPayload
+from .node import NodeContext
 from .security import PermissionSource, PlaintextCredential
+from .skill_document import SkillDocument
 from .transport import (
     AgentNodeFrame,
     AnySSEFrame,
@@ -63,6 +65,8 @@ __all__ = [
     "NodeInstance",
     "Position",
     "WorkflowSchema",
+    # node — 노드 실행 컨텍스트 (ADR-0018)
+    "NodeContext",
     # document
     "AnalysisResult",
     "BBox",
@@ -111,6 +115,8 @@ __all__ = [
     # handoff
     "EvaluationResult",
     "HandoffPayload",
+    # skill_document — 스킬 지침서 (ADR-0017, PR #106 리뷰 — common_schemas SSOT)
+    "SkillDocument",
     # types
     "UtcDatetime",
     # broker tasks (SSOT for Celery task names — api_server/execution_engine 양쪽 참조)

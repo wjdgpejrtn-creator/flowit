@@ -81,7 +81,7 @@ from skills_marketplace.application.use_cases import (
 
 | 클래스 | 설명 |
 |--------|------|
-| `SkillDocument` | 스킬 지침서 (SKILL.md 레퍼런스): `skill_id`, `name`, `description`(frontmatter) + `instructions`(markdown body) + `scripts`/`templates`(선택). ADR-0017 이중 저장 중 GCS 측 |
+| `SkillDocument` | 스킬 지침서 (SKILL.md 레퍼런스): `skill_id`, `name`, `description`(frontmatter) + `instructions`(markdown body) + `scripts`/`templates`(선택). ADR-0017 이중 저장 중 GCS 측. **SSOT = `common_schemas` (PR #111) — `domain/entities/skill_document.py`는 재노출 shim** |
 
 ### domain/ports (인터페이스 — 구현체는 `modules/storage` / 후속)
 

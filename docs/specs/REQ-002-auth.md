@@ -204,11 +204,11 @@ class PermissionResolver:
 
 ```python
 class CredentialInjectionService:
-    """노드 실행 시 자격증명을 복호화하여 주입.
+    """노드 실행 시 자격증명을 복호화하여 주입 (ADR-0018 Decision 5·6).
     
     H-4 합의: NodeDefinitionRepository.get_by_id() 호출 후 필드 접근으로
     risk_level, required_connections, service_type을 확인한다.
-    별도 메서드(get_service_type 등)를 ABC에 추가하지 않는다.
+    `credentials` 테이블을 해결 SSOT로 두고 credential_kind로 분기한다.
     """
     
     def __init__(
@@ -216,23 +216,29 @@ class CredentialInjectionService:
         cipher: CipherPort,
         oauth_repo: OAuthConnectionRepository,
         node_def_repo: NodeDefinitionRepository,  # REQ-003에서 정의한 ABC
+        credential_repo: CredentialRepository,
     ):
         ...
     
     async def inject(self, credential_id: UUID, node_id: UUID) -> PlaintextCredential:
         """
-        1. node_def_repo.get_by_id(node_id) → NodeDefinition
-        2. node_def.risk_level 확인 (Restricted면 추가 검증)
-        3. node_def.required_connections 확인 (필수 서비스 연결 존재 여부)
-        4. node_def.service_type 확인
-        5. oauth_repo.get_by_credential_id(credential_id) → OAuthConnection
-        6. cipher.decrypt(connection.access_token_encrypted) → plaintext bytes
-        7. PlaintextCredential 생성 후 반환
+        1. node_def_repo.get_by_id(node_id) → NodeDefinition (없으면 NotFoundError)
+        2. node_def.risk_level == RESTRICTED이면 AuthorizationError
+        3. credential_repo.get_by_id(credential_id) → Credential
+           (없거나 is_active=False이면 NotFoundError)
+        4. credential.credential_kind 분기:
+           - oauth_token: oauth_repo.get_by_credential_id로 enrich →
+             required_connections ↔ conn.service 검증 → decrypt(access_token_encrypted)
+           - api_key 등: decrypt(credential.encrypted_data) 직접 (service-match 비적용 —
+             credentials에 service 컬럼 없음, 검증은 OAuth 스코핑 전용)
+        5. PlaintextCredential 생성 후 반환
         
         주의: 호출측은 사용 후 반드시 credential.wipe() 호출.
         """
         ...
 ```
+
+**service-match 정책 (의도적 — 보안 판단)**: `required_connections ↔ service` 검증은 `oauth_token` credential에만 적용한다. OAuth access token은 특정 provider 스코프에 묶여 있어 provider 불일치 주입(google 토큰을 slack 노드에) 차단이 필요하다. 반면 `api_key`는 워크플로우 작성자가 `node.credential_id`로 명시 선택하는 author-scoped 자원이라 provider 스코핑 대상이 아니다 — `credentials`에 service 컬럼이 없는 것은 이 정책의 결과이지 원인이 아니다. 두 경로 모두 RESTRICTED 위험도 게이트 + credential 활성 검증은 동일 적용된다. (api_key를 노드 service에 묶고 싶으면 `Credential.metadata["service"]` 기반 검증을 후속 도입할 수 있다 — 현재는 미적용.)
 
 ---
 

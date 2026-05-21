@@ -4,20 +4,26 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+import httpx
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ExecutionError, ValidationError
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "anthropic_chat"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
+_ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+_ANTHROPIC_VERSION = "2023-06-01"
+_TIMEOUT_SECONDS = 120  # LLM 추론은 느림 — 넉넉히
 
 
 @dataclass
 class AnthropicChatInput:
-    model: str                                                  # e.g. "claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"
+    model: str  # 예: claude-opus-4-7 / claude-sonnet-4-6 / claude-haiku-4-5
     messages: list[dict[str, Any]]                              # [{"role": "user", "content": "..."}, ...]
     max_tokens: int = 1024
     system: str | None = None                                   # system prompt
@@ -47,10 +53,48 @@ class AnthropicChatNode(BaseNode[AnthropicChatInput, AnthropicChatOutput]):
     input_schema = AnthropicChatInput
     output_schema = AnthropicChatOutput
 
-    async def process(self, input: AnthropicChatInput) -> AnthropicChatOutput:
-        raise NotImplementedError(
-            "Anthropic API 호출은 REQ-005 toolset connector를 통해 처리. "
-            "API key 주입은 REQ-002 CredentialInjectionService 담당."
+    async def process(self, input: AnthropicChatInput, context: NodeContext) -> AnthropicChatOutput:
+        # connection_token = Anthropic API key (x-api-key 헤더).
+        if not context.connection_token:
+            raise ValidationError("anthropic_chat는 credential(Anthropic API key)이 필요하다")
+
+        body: dict[str, Any] = {
+            "model": input.model,
+            "messages": input.messages,
+            "max_tokens": input.max_tokens,
+            "temperature": input.temperature,
+            "top_p": input.top_p,
+        }
+        if input.system:
+            body["system"] = input.system
+        if input.stop_sequences:
+            body["stop_sequences"] = input.stop_sequences
+        if input.tools:
+            body["tools"] = input.tools
+        headers = {
+            "x-api-key": context.connection_token,
+            "anthropic-version": _ANTHROPIC_VERSION,
+            "content-type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            response = await client.post(_ANTHROPIC_API_URL, json=body, headers=headers)
+
+        if response.status_code >= 400:
+            raise ExecutionError(
+                f"Anthropic API 오류 {response.status_code}: {response.text[:200]}"
+            )
+
+        data = response.json()
+        blocks = data.get("content", [])
+        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        tool_use = [b for b in blocks if b.get("type") == "tool_use"]
+        return AnthropicChatOutput(
+            content=text,
+            stop_reason=data.get("stop_reason", ""),
+            model=data.get("model", input.model),
+            usage=data.get("usage", {}),
+            tool_use=tool_use,
         )
 
 

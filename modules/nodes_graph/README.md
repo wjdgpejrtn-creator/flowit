@@ -32,7 +32,7 @@ from nodes_graph.application.use_cases import (
 |--------|----------|------|
 | `NodeDefinition` | `node_id: UUID`, `node_type: str`, `name: str`, `category: str`, `version: str`, `input_schema: dict`, `output_schema: dict`, `parameter_schema: dict`, `risk_level: RiskLevel`, `required_connections: list[str]`, `description: str`, `is_mvp: bool`, `service_type: Optional[str]`, `embedding: Optional[list[float]]` | NodeConfig(REQ-012) 확장. REQ-002가 `risk_level`, `required_connections`, `service_type`을 필드 접근으로 사용 (H-4 합의) |
 | `NodeMetadata` | `node_id: UUID`, `name: str`, `category: str`, `risk_level: RiskLevel`, `is_mvp: bool` | BaseNode의 메타데이터 (frozen) |
-| `BaseNode` | `metadata: NodeMetadata`, `input_schema: type[TInput]`, `output_schema: type[TOutput]` | 모든 노드의 ABC. `Generic[TInput, TOutput]`. `async process(input: TInput) → TOutput` 구현 필요 |
+| `BaseNode` | `metadata: NodeMetadata`, `input_schema: type[TInput]`, `output_schema: type[TOutput]` | 모든 노드의 ABC. `Generic[TInput, TOutput]`. `async process(input: TInput, context: NodeContext) → TOutput` 구현 필요 (`context` = ADR-0018 실행 컨텍스트, common_schemas) |
 
 ### domain/services
 
@@ -64,7 +64,7 @@ from nodes_graph.application.use_cases import (
 
 | 어댑터 | 설명 |
 |--------|------|
-| `catalog/external/*` | 25종 NodeDefinition 파일 (기존 14 + REQ-005 toolset 연동 신규 11). `BaseNode.process()`는 NotImplementedError + ToolsetExecutor 위임 메시지 |
+| `catalog/external/*` | 25종 NodeDefinition + BaseNode 파일. ADR-0018 Phase 3d 완료로 25종 전부 `process()` 실구현 (transform/api·messaging·LLM/Linear·DB·Google·file·http_request·pdf_generate). `NotImplementedError` 스텁 없음 |
 | `catalog/registry.py` | Plugin discovery 진입점 (`discover_and_register`) |
 
 > **`ToolToNodeWrapper` 제거 — 2026-05-19 박아름 toolset 정리 PR**: 5/15 햄햄·박아름 합의 + 5/19 조장 안. toolset 14종 중 중복 3종(`http_request_tool`/`conditional`/`loop`)은 양쪽 제거, 나머지 11종은 `external/`에 개별 파일로 직접 등록.
@@ -77,7 +77,8 @@ Upstream (이 모듈이 의존):
   │     └── WorkflowSchema, NodeInstance, NodeConfig, Edge, Position
   │     └── RiskLevel, ErrorCode, ValidationErrorItem, ValidationErrorResponse
   └── toolset (REQ-005) — 직접 import 없음.
-        실행은 services/execution_engine.ToolsetExecutor가 node_type 기반으로 toolset.execute_tool() 호출.
+        external 노드 실행은 execution_engine.CatalogNodeExecutor가 node_type으로
+        BaseNode.process()를 직접 호출 (ADR-0018 — ToolsetExecutor 경로 폐기).
 
 Downstream (이 모듈에 의존):
   ├── auth (REQ-002)            → NodeDefinitionRepository ABC import (CredentialInjectionService)

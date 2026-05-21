@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -41,7 +42,7 @@ class RegexReplaceNode(BaseNode[RegexReplaceInput, RegexReplaceOutput]):
     input_schema = RegexReplaceInput
     output_schema = RegexReplaceOutput
 
-    async def process(self, input: RegexReplaceInput) -> RegexReplaceOutput:
+    async def process(self, input: RegexReplaceInput, context: NodeContext) -> RegexReplaceOutput:
         flags = re.IGNORECASE if input.ignore_case else 0
         before_count = len(re.findall(input.pattern, input.text, flags))
         result = re.sub(input.pattern, input.replacement, input.text, count=input.max_count, flags=flags)

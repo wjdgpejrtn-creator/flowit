@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -39,7 +40,7 @@ class ScheduleTriggerNode(BaseNode[ScheduleTriggerInput, ScheduleTriggerOutput])
     input_schema = ScheduleTriggerInput
     output_schema = ScheduleTriggerOutput
 
-    async def process(self, input: ScheduleTriggerInput) -> ScheduleTriggerOutput:
+    async def process(self, input: ScheduleTriggerInput, context: NodeContext) -> ScheduleTriggerOutput:
         return ScheduleTriggerOutput(
             triggered_at=input.triggered_at,
             cron=input.cron,

@@ -7,19 +7,29 @@ category="action" (DB CHECK 영문 8종 매핑).
 """
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ValidationError
 
 from nodes_graph.adapters.catalog.external.gmail_send import (
     GmailSendInput,
     GmailSendNode,
+)
+from nodes_graph.adapters.catalog.external.gmail_send import (
     get_node_definition as gmail_send_def,
 )
 from nodes_graph.adapters.catalog.external.slack_post_message import (
     SlackPostMessageInput,
     SlackPostMessageNode,
+)
+from nodes_graph.adapters.catalog.external.slack_post_message import (
     get_node_definition as slack_post_def,
 )
+
+NODE_CTX = NodeContext(execution_id=uuid4(), user_id=uuid4())
 
 
 # ----------------------------------------------------------------------
@@ -47,10 +57,12 @@ def test_slack_node_metadata_consistent_with_definition():
 
 
 @pytest.mark.asyncio
-async def test_slack_process_raises_not_implemented():
+async def test_slack_process_requires_credential():
+    """slack_post_message는 ADR-0018 Phase 3b에서 실구현 — credential(Bot 토큰)
+    없이 호출하면 ValidationError. 실행 경로 전체는 test_messaging_nodes.py 참조."""
     node = SlackPostMessageNode()
-    with pytest.raises(NotImplementedError, match="toolset connector"):
-        await node.process(SlackPostMessageInput(channel="#general", text="hi"))
+    with pytest.raises(ValidationError, match="credential"):
+        await node.process(SlackPostMessageInput(channel="#general", text="hi"), NODE_CTX)
 
 
 # ----------------------------------------------------------------------
@@ -69,10 +81,12 @@ def test_gmail_node_definition_fields():
 
 
 @pytest.mark.asyncio
-async def test_gmail_process_raises_not_implemented():
+async def test_gmail_process_requires_credential():
+    """gmail_send는 ADR-0018 Phase 3d 실구현 — credential(Google OAuth 토큰) 없이
+    ValidationError. 실행 경로 전체는 test_db_file_google_nodes.py 참조."""
     node = GmailSendNode()
-    with pytest.raises(NotImplementedError, match="toolset connector"):
-        await node.process(GmailSendInput(to=["a@b.com"], subject="s", body="b"))
+    with pytest.raises(ValidationError, match="credential"):
+        await node.process(GmailSendInput(to=["a@b.com"], subject="s", body="b"), NODE_CTX)
 
 
 # ----------------------------------------------------------------------

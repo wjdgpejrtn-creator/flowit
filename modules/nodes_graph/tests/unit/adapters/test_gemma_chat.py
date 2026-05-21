@@ -6,14 +6,20 @@ gemma_chat은 시스템 내장 Gemma 4 LLM wrapper — prompt 동적 입력 + �
 """
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ExecutionError
 
 from nodes_graph.adapters.catalog.external.gemma_chat import (
     GemmaChatInput,
     GemmaChatNode,
     get_node_definition,
 )
+
+NODE_CTX = NodeContext(execution_id=uuid4(), user_id=uuid4())
 
 
 def test_node_definition_identity_fields():
@@ -63,10 +69,10 @@ def test_metadata_consistent_with_definition():
 
 
 @pytest.mark.asyncio
-async def test_process_raises_not_implemented_delegates_to_req004():
-    """process() = NotImplementedError. 실제 호출은 REQ-004 ModalLLMAdapter 위임."""
+async def test_process_requires_llm_base_url(monkeypatch):
+    """gemma_chat은 ADR-0018 Phase 3c에서 실구현 — llm-base /v1/generate HTTP 호출.
+    LLM_BASE_URL 미설정 시 ExecutionError. 실행 경로 전체는 test_llm_linear_nodes.py 참조."""
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
     node = GemmaChatNode()
-    input = GemmaChatInput(prompt="테스트 prompt")
-    with pytest.raises(NotImplementedError) as exc_info:
-        await node.process(input)
-    assert "ModalLLMAdapter" in str(exc_info.value)
+    with pytest.raises(ExecutionError, match="LLM_BASE_URL"):
+        await node.process(GemmaChatInput(prompt="테스트 prompt"), NODE_CTX)

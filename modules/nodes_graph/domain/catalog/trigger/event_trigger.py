@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -40,7 +41,7 @@ class EventTriggerNode(BaseNode[EventTriggerInput, EventTriggerOutput]):
     input_schema = EventTriggerInput
     output_schema = EventTriggerOutput
 
-    async def process(self, input: EventTriggerInput) -> EventTriggerOutput:
+    async def process(self, input: EventTriggerInput, context: NodeContext) -> EventTriggerOutput:
         return EventTriggerOutput(
             event_type=input.event_type,
             payload=input.payload,

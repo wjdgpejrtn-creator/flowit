@@ -412,6 +412,73 @@ async def test_upsert_failure_isolated_other_nodes_continue():
     assert "ecommerce_refund_approval" not in stored_types
 
 
+# ----------------------------------------------------------------------
+# SkillDocument 생성 (ADR-0017 — seed instructions → skill_documents)
+# ----------------------------------------------------------------------
+
+
+def _write_ecommerce_seed(tmp_path: Path, *, with_instructions: bool) -> Path:
+    """instructions 필드를 선택적으로 포함하는 테스트 ecommerce seed 생성."""
+    node = {
+        "node_type": "ecommerce_cart_abandonment",
+        "name": "장바구니 이탈 회복",
+        "category": "action",
+        "description": "장바구니 이탈 N시간 후 회복 메일 발송",
+        "inputs": {"type": "object", "properties": {"cart_id": {"type": "string"}}},
+        "outputs": {"type": "object", "properties": {"sent": {"type": "boolean"}}},
+        "risk_level": "Low",
+        "required_connections": ["email"],
+        "service_type": "email",
+    }
+    if with_instructions:
+        node["instructions"] = "## When to use\n장바구니 이탈 시.\n## Steps\n1. N시간 대기\n2. 회복 메일 발송"
+    seed = {"industry_code": "ecommerce", "industry_name": "이커머스", "skill_nodes": [node]}
+    (tmp_path / "ecommerce.json").write_text(json.dumps(seed, ensure_ascii=False), encoding="utf-8")
+    return tmp_path
+
+
+@pytest.mark.asyncio
+async def test_seed_instructions_included_in_skill_documents(tmp_path: Path):
+    """seed에 instructions가 있으면 ResultFrame.payload['skill_documents']에 포함 (ADR-0017)."""
+    seeds = _write_ecommerce_seed(tmp_path, with_instructions=True)
+    use_case = BuildFromIndustryDefaultUseCase(_InMemoryRepo(), _FakeEmbedder(), seeds_dir=seeds)
+
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
+    result = frames[-1]
+
+    docs = result.payload["skill_documents"]
+    assert len(docs) == 1
+    assert docs[0]["node_type"] == "ecommerce_cart_abandonment"
+    assert docs[0]["instructions"].startswith("## When to use")
+    assert "name" in docs[0]
+    assert "description" in docs[0]
+
+
+@pytest.mark.asyncio
+async def test_seed_without_instructions_empty_skill_documents(tmp_path: Path):
+    """seed에 instructions 없으면 skill_documents 비어있음 (② 채우기 전 기존 동작 유지)."""
+    seeds = _write_ecommerce_seed(tmp_path, with_instructions=False)
+    use_case = BuildFromIndustryDefaultUseCase(_InMemoryRepo(), _FakeEmbedder(), seeds_dir=seeds)
+
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
+    result = frames[-1]
+
+    assert result.payload["upserted_count"] == 1
+    assert result.payload["skill_documents"] == []
+
+
+@pytest.mark.asyncio
+async def test_real_seed_still_works_without_instructions():
+    """실제 ecommerce seed(instructions 미포함)도 깨지지 않음 — skill_documents 비움."""
+    use_case = BuildFromIndustryDefaultUseCase(_InMemoryRepo(), _FakeEmbedder())
+
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
+    result = frames[-1]
+
+    assert result.payload["upserted_count"] >= 1
+    assert result.payload["skill_documents"] == []
+
+
 @pytest.mark.asyncio
 async def test_result_frame_includes_failed_fields_on_full_success():
     """전체 성공 시에도 ResultFrame에 failed_count/failed_node_types 필드 존재 (빈 리스트)."""

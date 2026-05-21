@@ -343,3 +343,70 @@ async def test_result_frame_has_failed_fields_in_normal_case():
     assert isinstance(result, ResultFrame)
     assert result.payload["failed_count"] == 0
     assert result.payload["failed_node_types"] == []
+
+
+# ----------------------------------------------------------------------
+# SkillDocument 생성 (ADR-0017 — seed instructions → skill_documents)
+# ----------------------------------------------------------------------
+
+
+def _write_seed(tmp_path: Path, domain_code: str = "hr", *, with_instructions: bool) -> Path:
+    """instructions 필드를 선택적으로 포함하는 테스트 seed 생성."""
+    node = {
+        "node_type": "hr_onboarding_notify",
+        "name": "온보딩 알림",
+        "category": "action",
+        "description": "신규 입사자 온보딩 알림 발송",
+        "inputs": {"type": "object", "properties": {"employee_id": {"type": "string"}}},
+        "outputs": {"type": "object", "properties": {"sent": {"type": "boolean"}}},
+        "risk_level": "Low",
+        "required_connections": ["slack"],
+        "service_type": "slack",
+    }
+    if with_instructions:
+        node["instructions"] = "## When to use\n신규 입사자 등록 시.\n## Steps\n1. 온보딩 체크리스트 발송"
+    seed = {"domain_code": domain_code, "domain_name": "인사", "skill_nodes": [node]}
+    (tmp_path / f"{domain_code}.json").write_text(json.dumps(seed, ensure_ascii=False), encoding="utf-8")
+    return tmp_path
+
+
+@pytest.mark.asyncio
+async def test_seed_instructions_included_in_skill_documents(tmp_path: Path):
+    """seed에 instructions가 있으면 ResultFrame.payload['skill_documents']에 포함 (ADR-0017)."""
+    seeds = _write_seed(tmp_path, "hr", with_instructions=True)
+    use_case = BuildFromFunctionalDomainUseCase(_InMemoryRepo(), _FakeEmbedder(), seeds_dir=seeds)
+
+    frames = [f async for f in use_case.execute(uuid4(), "hr")]
+    result = frames[-1]
+
+    docs = result.payload["skill_documents"]
+    assert len(docs) == 1
+    assert docs[0]["node_type"] == "hr_onboarding_notify"
+    assert docs[0]["instructions"].startswith("## When to use")
+    assert "name" in docs[0]
+    assert "description" in docs[0]
+
+
+@pytest.mark.asyncio
+async def test_seed_without_instructions_empty_skill_documents(tmp_path: Path):
+    """seed에 instructions 없으면 skill_documents 비어있음 (② 채우기 전 기존 동작 유지)."""
+    seeds = _write_seed(tmp_path, "hr", with_instructions=False)
+    use_case = BuildFromFunctionalDomainUseCase(_InMemoryRepo(), _FakeEmbedder(), seeds_dir=seeds)
+
+    frames = [f async for f in use_case.execute(uuid4(), "hr")]
+    result = frames[-1]
+
+    assert result.payload["upserted_count"] == 1   # NodeDefinition은 정상 upsert
+    assert result.payload["skill_documents"] == []  # instructions 없으니 SkillDocument 미생성
+
+
+@pytest.mark.asyncio
+async def test_real_seed_still_works_without_instructions():
+    """실제 seed(instructions 미포함)도 깨지지 않음 — NodeDefinition upsert + skill_documents 비움."""
+    use_case = BuildFromFunctionalDomainUseCase(_InMemoryRepo(), _FakeEmbedder())
+
+    frames = [f async for f in use_case.execute(uuid4(), "customer_support")]
+    result = frames[-1]
+
+    assert result.payload["upserted_count"] >= 5
+    assert result.payload["skill_documents"] == []  # 실제 seed엔 아직 instructions 없음 (② 후 채워짐)

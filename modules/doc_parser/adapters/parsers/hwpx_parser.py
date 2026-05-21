@@ -186,8 +186,15 @@ class HwpxParser(ParserPort):
                 cells = []
                 for cell_elem in elem.iter():
                     cell_tag = etree.QName(cell_elem.tag).localname if cell_elem.tag else ""
-                    if cell_tag in ("tc", "cell") and cell_elem.text:
-                        cells.append(cell_elem.text.strip())
+                    if cell_tag in ("tc", "cell"):
+                        cell_texts = []
+                        for t_elem in cell_elem.iter():
+                            t_tag = etree.QName(t_elem.tag).localname if t_elem.tag else ""
+                            if t_tag in ("t", "run", "r") and t_elem.text:
+                                cell_texts.append(t_elem.text)
+                        cell_text = " ".join(cell_texts).strip()
+                        if cell_text:
+                            cells.append(cell_text)
                 if cells:
                     rows.append(cells)
         return rows

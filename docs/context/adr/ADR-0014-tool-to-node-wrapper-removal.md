@@ -1,9 +1,16 @@
 # ADR-0014: ToolToNodeWrapper 제거 + REQ-005 toolset 11종을 nodes_graph external/로 직접 등록
 
-- **Status**: Accepted
+- **Status**: Accepted (호출 경로 A는 ADR-0018로 부분 대체)
 - **Date**: 2026-05-15 (1차 햄햄·박아름 합의), 2026-05-19 (조장 안 반영 최종 확정 + 본 ADR 등록)
 - **Deciders**: @billionaireahreum (박아름), @rooot0xyz (햄햄), @dhwang0803-glitch (조장)
 - **Tags**: area/nodes_graph, area/toolset, area/execution_engine, layer/adapter, catalog
+
+> **부분 대체 (Superseded in part by [ADR-0018](./ADR-0018-workflow-node-independent-execution-path.md), 2026-05-20)**
+> Decision 항목 3(`process()`는 `NotImplementedError` + ToolsetExecutor 위임 메시지)과
+> 항목 6(호출 경로 A — `workflow node → ToolsetExecutor → toolset.execute_tool()`)은
+> ADR-0018로 폐기됐다. 워크플로우 노드는 `CatalogNodeExecutor`가 `BaseNode.process()`를
+> 직접 호출하며(ADR-0018 Phase 3d 기준 53종 전부 실구현), `ToolsetExecutor` 경로는 제거됐다.
+> 본 ADR의 핵심 결정인 "Tool = AI 내부 / Node = workflow 구성요소" SSOT 원칙은 그대로 유효하다.
 
 ## Context
 

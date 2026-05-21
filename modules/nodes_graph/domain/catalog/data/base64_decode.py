@@ -4,6 +4,7 @@ import base64
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -37,7 +38,7 @@ class Base64DecodeNode(BaseNode[Base64DecodeInput, Base64DecodeOutput]):
     input_schema = Base64DecodeInput
     output_schema = Base64DecodeOutput
 
-    async def process(self, input: Base64DecodeInput) -> Base64DecodeOutput:
+    async def process(self, input: Base64DecodeInput, context: NodeContext) -> Base64DecodeOutput:
         decoded = base64.b64decode(input.data.encode("ascii")).decode(input.encoding)
         return Base64DecodeOutput(result=decoded)
 

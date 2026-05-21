@@ -18,12 +18,12 @@ from __future__ import annotations
 
 from common_schemas.document import DocumentBlock, FileMeta
 
+from doc_parser.adapters.parser_factory import ParserFactory
 from doc_parser.domain.entities.chunk import Chunk
 from doc_parser.domain.entities.quality import QualityGateResult
 from doc_parser.domain.ports.config_port import ConfigLoaderPort
 from doc_parser.domain.services.chunking_service import ChunkingService
 from doc_parser.domain.services.normalization import NormalizationService
-from doc_parser.domain.services.parser_factory import ParserFactory
 from doc_parser.domain.services.pii_masking import PIIMaskingService
 from doc_parser.domain.services.quality_gate import QualityGate
 

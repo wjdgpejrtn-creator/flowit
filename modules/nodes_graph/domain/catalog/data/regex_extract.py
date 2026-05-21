@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -42,7 +43,7 @@ class RegexExtractNode(BaseNode[RegexExtractInput, RegexExtractOutput]):
     input_schema = RegexExtractInput
     output_schema = RegexExtractOutput
 
-    async def process(self, input: RegexExtractInput) -> RegexExtractOutput:
+    async def process(self, input: RegexExtractInput, context: NodeContext) -> RegexExtractOutput:
         flags = 0
         if input.ignore_case:
             flags |= re.IGNORECASE

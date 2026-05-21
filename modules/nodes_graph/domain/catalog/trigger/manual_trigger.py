@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -40,7 +41,7 @@ class ManualTriggerNode(BaseNode[ManualTriggerInput, ManualTriggerOutput]):
     input_schema = ManualTriggerInput
     output_schema = ManualTriggerOutput
 
-    async def process(self, input: ManualTriggerInput) -> ManualTriggerOutput:
+    async def process(self, input: ManualTriggerInput, context: NodeContext) -> ManualTriggerOutput:
         return ManualTriggerOutput(
             payload=input.payload,
             triggered_by=input.triggered_by,

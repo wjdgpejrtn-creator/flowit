@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid5
 
+from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 
 from ....domain.entities.base_node import BaseNode
@@ -39,7 +40,7 @@ class ListMapNode(BaseNode[ListMapInput, ListMapOutput]):
     input_schema = ListMapInput
     output_schema = ListMapOutput
 
-    async def process(self, input: ListMapInput) -> ListMapOutput:
+    async def process(self, input: ListMapInput, context: NodeContext) -> ListMapOutput:
         match input.operation:
             case "extract_field":
                 result = [x.get(input.field) if isinstance(x, dict) else None for x in input.items]

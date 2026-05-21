@@ -84,10 +84,13 @@ class AuthenticateUseCase:
                 },
             )
 
-        # Create session
+        # Create session. session expires_at은 refresh_token TTL과 동일하게 둔다.
+        # access TTL(1h)에 맞추면 access 만료 후 refresh 시 RefreshTokenUseCase가
+        # 이미 만료된 session을 만나 E-AUTH-006으로 거부 → refresh가 사실상 작동 불가.
         session_hash = hashlib.sha256(os.urandom(32)).hexdigest()
         expiry = int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))
-        expires_at = datetime.now(UTC) + timedelta(seconds=expiry)
+        refresh_expiry = expiry * 7
+        expires_at = datetime.now(UTC) + timedelta(seconds=refresh_expiry)
         await self._session_repo.create(user_id, session_hash, expires_at=expires_at)
 
         # Issue JWT pair
@@ -100,7 +103,7 @@ class AuthenticateUseCase:
             "sub": str(user_id),
             "session_hash": session_hash,
             "type": "refresh",
-        }, ttl_seconds=expiry * 7)
+        }, ttl_seconds=refresh_expiry)
 
         return TokenPair(
             access_token=access_token,

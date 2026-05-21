@@ -73,6 +73,25 @@ class TestContentBlock:
                 content="x",
             )
 
+    def test_new_fields_default(self):
+        cb = ContentBlock(
+            block_id=uuid4(),
+            block_type="text",
+            content="x",
+        )
+        assert cb.metadata is None
+        assert cb.is_corrupted is False
+
+    def test_metadata_and_is_corrupted(self):
+        cb = ContentBlock(
+            block_id=uuid4(),
+            block_type="table",
+            metadata={"data_rows": [], "normalized_headers": ["a", "b"]},
+            is_corrupted=True,
+        )
+        assert cb.metadata["normalized_headers"] == ["a", "b"]
+        assert cb.is_corrupted is True
+
 
 class TestDocumentBlock:
     def test_create(self):
@@ -93,6 +112,36 @@ class TestDocumentBlock:
             ],
         )
         assert len(db.blocks) == 1
+
+    def test_coverage_counts_default(self):
+        db = DocumentBlock(
+            document_id=uuid4(),
+            file_meta=FileMeta(
+                file_name="x.pdf",
+                file_type="pdf",
+                mime_type="application/pdf",
+                file_size=512,
+            ),
+            blocks=[],
+        )
+        assert db.vision_block_count == 0
+        assert db.failed_block_count == 0
+
+    def test_coverage_counts_set(self):
+        db = DocumentBlock(
+            document_id=uuid4(),
+            file_meta=FileMeta(
+                file_name="x.pdf",
+                file_type="pdf",
+                mime_type="application/pdf",
+                file_size=512,
+            ),
+            blocks=[],
+            vision_block_count=3,
+            failed_block_count=1,
+        )
+        assert db.vision_block_count == 3
+        assert db.failed_block_count == 1
 
 
 class TestAnalysisResult:
