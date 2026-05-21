@@ -208,16 +208,17 @@ class LangGraphOrchestrator:
                 return {"error": f"허용되지 않는 요청입니다. (감지된 패턴: '{pattern}')"}
 
         # 권한 확인 — PermissionResolver 주입된 경우
+        # NOTE: 이 단계는 coarse pre-screen — 실제 노드가 식별되기 전이라
+        # 텍스트 키워드 휴리스틱만 사용한다. 정밀한 risk_ceiling 강제는
+        # 실 노드가 확정되는 validator/drafter 단계에서 별도 처리 필요.
         if self._permission_resolver is not None and state.get("department_id"):
-            from uuid import uuid4 as _uuid4
             perm = self._permission_resolver.resolve(
                 user_id=state["user_id"],
                 role=state["user_role"],  # type: ignore[arg-type]
                 department_id=state["department_id"],
                 session_id=state["session_id"],
             )
-            # User 역할은 RESTRICTED 노드 접근 불가 — 요청 자체를 조기 차단
-            if perm.risk_ceiling != "Restricted" and any(
+            if perm.risk_ceiling != RiskLevel.RESTRICTED and any(
                 kw in lower for kw in ("restricted", "admin only", "관리자만", "시스템 접근")
             ):
                 return {"error": "해당 요청은 관리자 권한이 필요합니다."}
@@ -327,8 +328,9 @@ class LangGraphOrchestrator:
                             existing_ids.add(node_cfg.node_id)
                     except Exception:
                         continue  # 노드 정의 없으면 스킵
-            except Exception:
-                pass  # 스킬 검색 실패해도 기본 후보로 진행
+            except Exception as _skill_exc:
+                import logging as _log
+                _log.getLogger(__name__).warning("skill search failed: %s", _skill_exc)
 
         elapsed = int((time.monotonic() - t0) * 1000)
         return {
