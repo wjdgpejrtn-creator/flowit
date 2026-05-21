@@ -177,8 +177,8 @@ class QualityGate:
             parsed_pages=parsed_pages,
             text_blocks=text_blocks,
             table_blocks=table_blocks,
-            vision_blocks=0,    # TODO: InterleavingParser 연결 후 채움
-            failed_blocks=0,    # TODO: InterleavingParser 연결 후 채움
+            vision_blocks=document.vision_block_count,
+            failed_blocks=document.failed_block_count,
             warnings=coverage_warnings,
         )
 
@@ -241,11 +241,9 @@ class QualityGate:
 
         유효 표 기준: 2행 이상, 2열 이상.
 
-        XLSX 2층 구조 분기:
-            table[0]이 dict → data_rows 기준으로 유효성 판단
-            table[0]이 list → 기존 flat rows 처리
-
-        # TODO: ContentBlock.metadata 필드 추가 후 이 분기 제거 (황대원님 협의 필요)
+        XLSX 병합셀 구조 분기:
+            block.metadata 존재 시 → metadata["data_rows"] / ["normalized_headers"] 기준으로 유효성 판단
+            metadata 없음 → 기존 flat rows 처리
         """
         table_blocks = [b for b in blocks if b.block_type == "table"]
         if not table_blocks:
@@ -255,11 +253,10 @@ class QualityGate:
         for b in table_blocks:
             if not b.table:
                 continue
-            # XLSX 2층 구조 분기
-            if isinstance(b.table[0], dict):
-                meta = b.table[0]
-                data_rows = meta.get("data_rows", [])
-                normalized_headers = meta.get("normalized_headers", [])
+            # XLSX 병합셀 구조: metadata에 data_rows/normalized_headers 포함
+            if b.metadata is not None:
+                data_rows = b.metadata.get("data_rows", [])
+                normalized_headers = b.metadata.get("normalized_headers", [])
                 is_valid = len(data_rows) >= 1 and len(normalized_headers) >= 2
             else:
                 is_valid = len(b.table) >= 2 and len(b.table[0]) >= 2
