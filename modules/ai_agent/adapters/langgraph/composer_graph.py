@@ -44,6 +44,7 @@ from ...domain.services.drafter_service import DrafterService
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 from ...domain.services.qa_evaluator_service import QAEvaluatorService
 from ...domain.services.slot_filling_service import SlotFillingService
+from ...domain.services.workflow_layout_service import WorkflowLayoutService
 from ...domain.value_objects.quality_threshold import QualityThreshold
 from ...domain.value_objects.turn_limit import TurnLimit
 
@@ -74,6 +75,7 @@ class _State(TypedDict):
     qa_attempts: int
     qa_score: float
     pass_flag: bool
+    qa_feedback: str
     collected_frames: Annotated[list[AnySSEFrame], operator.add]
     error: str | None
 
@@ -101,6 +103,7 @@ class LangGraphOrchestrator:
         self._node_registry = node_registry
         self._workflow_repo = workflow_repo
         self._graph_validator = graph_validator
+        self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
     # ------------------------------------------------------------------ public
@@ -137,6 +140,7 @@ class LangGraphOrchestrator:
             "qa_attempts": 0,
             "qa_score": 0.0,
             "pass_flag": False,
+            "qa_feedback": "",
             "collected_frames": [],
             "error": None,
         }
@@ -207,7 +211,30 @@ class LangGraphOrchestrator:
 
     # 4. consultant_node — clarify 인텐트: slot filling 준비
     async def _consultant_node(self, state: _State) -> dict:
-        return {}
+        t0 = time.monotonic()
+        spec = state.get("draft_spec")
+        if spec is None:
+            return {}
+        entities = spec.discovered_entities or {}
+        slot_state = spec.slot_filling_state
+        # intent_analyzer가 이미 추출한 엔티티는 filled로 이동
+        newly_filled = {k: v for k, v in entities.items() if k in slot_state.pending}
+        updated_slot = SlotFillingState(
+            asked=slot_state.asked,
+            pending=[s for s in slot_state.pending if s not in newly_filled],
+            filled={**slot_state.filled, **newly_filled},
+        )
+        updated_spec = spec.model_copy(update={
+            "slot_filling_state": updated_slot,
+            "consultant_turn_count": spec.consultant_turn_count + 1,
+        })
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "draft_spec": updated_spec,
+            "collected_frames": [
+                PipelineStatusFrame(service_name="consultant", status="completed", elapsed_ms=elapsed),
+            ],
+        }
 
     # 5. slot_fill_node — 슬롯 채움 질문 생성
     async def _slot_fill_node(self, state: _State) -> dict:
@@ -248,6 +275,7 @@ class LangGraphOrchestrator:
             return {"error": "DraftSpec 없음"}
         try:
             workflow = await self._drafter.draft(spec, state["node_candidates"], owner_user_id=state["user_id"])
+            workflow = self._layout.apply_layout(workflow)
         except Exception as exc:
             return {"error": f"drafter 실패: {exc}"}
         elapsed = int((time.monotonic() - t0) * 1000)
@@ -290,6 +318,7 @@ class LangGraphOrchestrator:
             "qa_attempts": attempt,
             "qa_score": result.score,
             "pass_flag": result.pass_flag,
+            "qa_feedback": result.feedback,
             "collected_frames": [
                 QAMetricFrame(
                     score=result.score,
@@ -303,11 +332,34 @@ class LangGraphOrchestrator:
 
     # 10. qa_retry_node — QA 실패 시 재시도 준비 (drafter로 돌아감)
     async def _qa_retry_node(self, state: _State) -> dict:
-        return {}
+        t0 = time.monotonic()
+        spec = state.get("draft_spec")
+        feedback = state.get("qa_feedback", "")
+        if spec and feedback:
+            updated_intent = f"{spec.natural_language_intent}\n[QA 피드백: {feedback}]"
+            spec = spec.model_copy(update={"natural_language_intent": updated_intent})
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "draft_spec": spec,
+            "collected_frames": [
+                PipelineStatusFrame(service_name="qa_retry", status="started", elapsed_ms=elapsed),
+            ],
+        }
 
     # 11. promote_node — propose 인텐트 또는 QA 통과 후 확정
     async def _promote_node(self, state: _State) -> dict:
-        return {}
+        t0 = time.monotonic()
+        workflow = state.get("workflow_draft")
+        if workflow is None:
+            return {"error": "promote 실패: workflow_draft 없음"}
+        promoted = workflow.model_copy(update={"is_draft": False})
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "workflow_draft": promoted,
+            "collected_frames": [
+                PipelineStatusFrame(service_name="promote", status="completed", elapsed_ms=elapsed),
+            ],
+        }
 
     # 12. handoff_node — WorkflowRepository.save → workflow_id → REQ-007
     async def _handoff_node(self, state: _State) -> dict:

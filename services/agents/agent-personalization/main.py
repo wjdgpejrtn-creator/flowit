@@ -122,11 +122,13 @@ class PersonalizationAgent:
         self._embedder = ModalEmbeddingAdapter()
         self._memory_store = GCSMemoryStore()
 
-        # tool registry — 14종 기본 tool 등록
+        # tool registry — 11종 기본 tool 등록
         self._tool_registry = ToolRegistryAdapter()
         register_default_tools(self._tool_registry)
-        # TODO: self._tool_dispatcher = ToolsetDispatcher(ExecuteToolUseCase(self._tool_registry))
-        #       신정혜 항목 4(ToolsetDispatcher) 완료 후 주입
+        # ToolsetDispatcher 클래스 구현 완료 (ai_agent/adapters/tools/toolset_dispatcher.py).
+        # ExecuteToolUseCase full wiring(SecureConnector, CredentialInjectionService 등)은
+        # 실제 agent tool-calling 유스케이스 확정 시 추가 (현재 personalization 유스케이스 미사용).
+        self._tool_dispatcher = None  # placeholder — 실사용 시 ToolsetDispatcher로 교체
 
     @modal.exit()
     def shutdown(self) -> None:
