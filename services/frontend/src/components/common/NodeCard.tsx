@@ -1,6 +1,5 @@
-import { RiskLevel, NodeExecutionState } from '@common/generated';
-
-type NodeStatus = NodeExecutionState['status'];
+import { RiskLevel } from '@common/generated';
+import type { NodeStatus } from '@/types';
 
 interface NodeCardProps {
   icon?: string;

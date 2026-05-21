@@ -9,7 +9,8 @@ import StatusPill from '@/components/common/StatusPill';
 import NodeCard from '@/components/common/NodeCard';
 import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/agentStore';
 import { ReactFlow, Background, Controls, Node, Edge, useNodesState, useEdgesState } from '@xyflow/react';
-import { RiskLevel, NodeExecutionState } from '@common/generated';
+import { RiskLevel } from '@common/generated';
+import type { NodeStatus } from '@/types';
 import '@xyflow/react/dist/style.css';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -100,8 +101,6 @@ function FlowEditor() {
 }
 
 // ─── ExecutionView (run mode) ──────────────────────────────────────────────────
-
-type NodeStatus = NodeExecutionState['status'];
 
 const RUN_TIMELINE: Array<{ time: string; name: string; status: NodeStatus; elapsed: string }> = [
   { time: '09:00:00.124', name: 'Cron Trigger', status: 'succeeded', elapsed: '+12ms' },

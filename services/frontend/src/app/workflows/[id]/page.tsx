@@ -3,9 +3,8 @@ import StatusPill from '@/components/common/StatusPill';
 import NodeCard from '@/components/common/NodeCard';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import Btn from '@/components/common/Btn';
-import { RiskLevel, NodeExecutionState } from '@common/generated';
-
-type NodeStatus = NodeExecutionState['status'];
+import { RiskLevel } from '@common/generated';
+import type { NodeStatus } from '@/types';
 
 const TIMELINE: Array<{ time: string; name: string; status: NodeStatus; elapsed: string }> = [
   { time: '09:00:00.124', name: 'Cron Trigger', status: 'succeeded', elapsed: '+12ms' },
