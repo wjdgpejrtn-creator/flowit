@@ -123,6 +123,7 @@ def _make_document(blocks: list[ContentBlock] | None = None) -> DocumentBlock:
 def _make_extracted(
     *,
     node_type: str = "sop_customer_inquiry_slack_alert",
+    name: str = "고객 문의 Slack 알림",
     category: str = "action",
     risk_level: str = "Medium",
     required_connections: list[str] | None = None,
@@ -132,7 +133,7 @@ def _make_extracted(
     """LLM이 추출한 가상 SkillNode 1건."""
     return _ExtractedSkillNode(
         node_type=node_type,
-        name="고객 문의 Slack 알림",
+        name=name,
         description="고객 문의 접수 시 Slack 채널로 알림 메시지 발송",
         category=category,
         risk_level=risk_level,
@@ -658,8 +659,11 @@ async def test_result_payload_includes_skill_documents():
     repo = _InMemoryRepo()
     embedder = _FakeEmbedder()
     llm = _FakeLLM(structured_response=_ExtractedSkillNodeList(skill_nodes=[
-        _make_extracted(node_type="sop_alert", instructions="## When to use\nA\n## Steps\n1. x"),
-        _make_extracted(node_type="sop_escalate", instructions="## When to use\nB"),
+        _make_extracted(
+            node_type="sop_alert", name="Slack 알림 스킬",
+            instructions="## When to use\nA\n## Steps\n1. x",
+        ),
+        _make_extracted(node_type="sop_escalate", name="에스컬레이션 스킬", instructions="## When to use\nB"),
     ]))
     use_case = BuildFromSOPUseCase(repo, embedder, llm)
 
@@ -673,9 +677,10 @@ async def test_result_payload_includes_skill_documents():
     for d in docs:
         assert {"skill_id", "name", "description", "instructions"} <= d.keys()
         assert "node_type" not in d
-    instructions_set = {d["instructions"] for d in docs}
-    assert "## When to use\nA\n## Steps\n1. x" in instructions_set
-    assert "## When to use\nB" in instructions_set
+    # per-skill 검증 — name으로 keying (instructions가 올바른 스킬에 매핑됐는지, 뒤바뀜 탐지)
+    by_name = {d["name"]: d for d in docs}
+    assert by_name["Slack 알림 스킬"]["instructions"] == "## When to use\nA\n## Steps\n1. x"
+    assert by_name["에스컬레이션 스킬"]["instructions"] == "## When to use\nB"
 
 
 @pytest.mark.asyncio

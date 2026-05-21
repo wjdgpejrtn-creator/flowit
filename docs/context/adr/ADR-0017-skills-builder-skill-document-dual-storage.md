@@ -49,7 +49,7 @@ REQ-004 Skills Builder의 산출물 형식과 저장 위치가 2026-05-19~05-20 
 **`SkillDocument` 구조 (SkillsMP SKILL.md 레퍼런스)**:
 ```yaml
 ---
-name: kebab-case-skill-name
+name: 환불 자동화 스킬   # display name (사람이 읽는 이름). 식별자는 skill_id — (b) 결정, PR #125
 description: 자연어 트리거 설명 (LLM이 사용자 의도 매칭 시 참조)
 ---
 
