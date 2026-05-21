@@ -1,0 +1,18 @@
+# Next.js build output
+.next/
+out/
+
+# TypeScript incremental build
+tsconfig.tsbuildinfo
+
+# dependencies
+node_modules/
+
+# env
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.pem
