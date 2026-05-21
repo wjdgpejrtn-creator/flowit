@@ -1,32 +1,12 @@
+"""SkillDocument — common_schemas SSOT 재노출 shim (ADR-0017 / PR #106·#111 리뷰).
+
+SkillDocument는 ai_agent(생산) + skills_marketplace(저장) 양쪽이 쓰는 공유 타입이라
+common_schemas로 SSOT 이동(PR #111). 본 모듈은 하위호환 재노출 shim — 기존
+`from skills_marketplace.domain.entities import SkillDocument` import 경로를 유지한다.
+신규 코드는 `from common_schemas import SkillDocument` 직접 import 권장.
+"""
 from __future__ import annotations
 
-from typing import Any
-from uuid import UUID
+from common_schemas import SkillDocument
 
-from pydantic import BaseModel, Field
-
-
-class SkillDocument(BaseModel):
-    """스킬 지침서 (SkillsMP SKILL.md 레퍼런스 — ADR-0017).
-
-    한 스킬의 이중 저장 중 "지침서" 측 (메타는 MarketplaceSkill + SkillRepository).
-    LLM(Main Agent)이 사용자에게 옵션 제시 시 자연어로 읽는 markdown 문서.
-
-    저장: GCS 버킷 (`gs://{bucket}/skills/{skill_id}/SKILL.md`) via SkillDocumentStore.
-    SSOT: skills_marketplace 도메인 (2026-05-20 박아름 소유권 결정 — ADR-0017 정정).
-          NodeDefinition(메타)과 같은 스킬 aggregate의 두 형태라 동일 도메인 소유.
-
-    SKILL.md 직렬화 형태:
-        ---
-        name: {name}
-        description: {description}
-        ---
-        {instructions}   ← markdown body (When to use / Step-by-step / Inputs·Outputs)
-    """
-
-    skill_id: UUID
-    name: str                                    # frontmatter — kebab-case 식별자
-    description: str                             # frontmatter — LLM trigger 판단용 자연어
-    instructions: str                            # markdown body — 단계별 지침서
-    scripts: list[dict[str, Any]] = Field(default_factory=list)    # 선택 — SKILL.md scripts/ (path/content)
-    templates: list[dict[str, Any]] = Field(default_factory=list)  # 선택 — SKILL.md templates/
+__all__ = ["SkillDocument"]
