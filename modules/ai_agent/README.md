@@ -118,7 +118,7 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 |-----------|----------------|------|
 | `LoadUserMemoryUseCase` | `user_id: UUID → list[MemoryEntry]` | GCS `MEMORY.md` + 관련 .md 파일 로드 |
 | `UpdateUserMemoryUseCase` | `user_id: UUID, turn_count: int, session_summary: str\|None, workflow: WorkflowSchema\|None → bool` | 워크플로우 완료 후 LLM 패턴 추출 → .md 갱신. debounce 5분 (claim-first CAS) |
-| `RecallPersonalSkillsUseCase` | `user_id: UUID, query: str, limit: int → list[PersonalSkill]` | BGE-M3 코사인 유사도 top-k |
+| `RecallPersonalSkillsUseCase` | `user_id: UUID, query: str → list[MemoryFile]` | BGE-M3 코사인 유사도 top-k (top_k는 생성자 인자) |
 | `SaveMemoryUseCase` | `session_id: UUID, entries: list[MemoryEntry] → None` | 대화 종료 후 RDB 메모리 저장 (`AgentMemoryRepository`) |
 
 ### adapters

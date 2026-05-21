@@ -171,7 +171,7 @@ LLM 자유 생성 산업 default는 v2(Sprint 4+) 이연.
 |-----------|------|------|------|---------------------|
 | `LoadUserMemoryUseCase` | 세션 시작 시 MEMORY.md + 관련 .md 로드 | `user_id: UUID` | `list[MemoryEntry]` (protocol 페이로드) | `PersonalMemoryStore.load_index()`, `load_file()` |
 | `UpdateUserMemoryUseCase` | 워크플로우 완료 후 LLM이 패턴 추출 → 변경된 .md만 선택 저장. **debounce 5분**: LLM 호출 전 `claim_debounce_window()`로 `.debounce.json` CAS 선점 — 패자는 LLM 없이 즉시 bail (claim-first 패턴) | `user_id: UUID`, `turn_count: int`, `session_summary: str\|None`, `workflow: WorkflowSchema\|None` | `bool` (저장 여부) | `PersonalMemoryStore.claim_debounce_window()`, `load_index()`, `save_file()`, `save_index()`, `LLMPort` — `turn_count < 3` 또는 `workflow.nodes` 없으면 early return |
-| `RecallPersonalSkillsUseCase` | Composer가 prompt 작성 시 호출 — 관련 memory 검색 | `user_id: UUID`, `query: str`, `limit: int` | `list[MemoryFile]` | `PersonalMemoryStore.load_index()`, `load_file()`, `load_embedding()`, `EmbedderPort.embed()` (코사인 유사도 매칭) |
+| `RecallPersonalSkillsUseCase` | Composer가 prompt 작성 시 호출 — 관련 memory 검색 | `user_id: UUID`, `query: str` | `list[MemoryFile]` | `PersonalMemoryStore.load_index()`, `load_file()`, `load_embedding()`, `EmbedderPort.embed()` (코사인 유사도 매칭, top_k는 생성자 인자) |
 | `SaveMemoryUseCase` | 기존 turn 단위 메모리 저장 (RDB AgentMemoryRepository) | `session_id: UUID`, `entries: list[MemoryEntry]` | `None` | `AgentMemoryRepository` |
 
 > **SaveMemoryUseCase 유지 사유**: RDB 기반 conversation turn 메모리는 Personalization의 GCS 패턴 추출과 별개 책임. Sprint 3에서는 두 유스케이스가 공존하며, Sprint 4에서 통합 여부 재평가.
