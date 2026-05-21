@@ -2,6 +2,7 @@ from uuid import uuid4
 
 import pytest
 from common_schemas.enums import RiskLevel
+
 from nodes_graph.application.use_cases.search_nodes_use_case import SearchNodesUseCase
 from nodes_graph.domain.entities.node_definition import NodeDefinition
 
@@ -15,7 +16,8 @@ class _Repo:
         return d
     async def list_all(self, mvp_only=False): return list(self._nodes.values())
     async def get_by_id(self, nid): return self._nodes.get(str(nid))
-    async def search_by_embedding(self, q, limit=10): return list(self._nodes.values())[:limit]
+    async def search_by_embedding(self, q, limit=10, viewer_user_id=None, viewer_team_ids=None):
+        return list(self._nodes.values())[:limit]
 
 
 class _Embedder:
@@ -52,3 +54,36 @@ async def test_search_empty_repo_returns_empty():
     uc = SearchNodesUseCase(_Repo(), _Embedder())
     results = await uc.execute("아무것도 없음")
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_passes_scope_to_repo():
+    # ADR-0020 (i): 검색 가시성 격리 — viewer scope를 repo로 전달해야 한다.
+    captured = {}
+
+    class _ScopeRepo(_Repo):
+        async def search_by_embedding(self, q, limit=10, viewer_user_id=None, viewer_team_ids=None):
+            captured["viewer_user_id"] = viewer_user_id
+            captured["viewer_team_ids"] = viewer_team_ids
+            return []
+
+    uid, tid = uuid4(), uuid4()
+    uc = SearchNodesUseCase(_ScopeRepo(), _Embedder())
+    await uc.execute("쿼리", viewer_user_id=uid, viewer_team_ids=[tid])
+    assert captured["viewer_user_id"] == uid
+    assert captured["viewer_team_ids"] == [tid]
+
+
+@pytest.mark.asyncio
+async def test_search_scope_defaults_none_global():
+    # scope 미지정 = None = 전역(기존 호출 호환, 비침습)
+    captured = {}
+
+    class _ScopeRepo(_Repo):
+        async def search_by_embedding(self, q, limit=10, viewer_user_id=None, viewer_team_ids=None):
+            captured["viewer_user_id"] = viewer_user_id
+            return list(self._nodes.values())[:limit]
+
+    uc = SearchNodesUseCase(_ScopeRepo([_def("x")]), _Embedder())
+    await uc.execute("쿼리")
+    assert captured["viewer_user_id"] is None
