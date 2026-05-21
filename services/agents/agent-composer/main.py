@@ -279,4 +279,50 @@ class AgentComposer:
                 },
             }
 
+        @api.get("/v1/agent/sessions")
+        async def list_sessions(user_id: str, limit: int = 20):
+            """세션 목록 조회 — 최신순.
+
+            Query params:
+                user_id: str (UUID)
+                limit:   int (default 20, max 100)
+            """
+            import uuid
+
+            try:
+                uid = uuid.UUID(user_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"잘못된 user_id: {exc}") from exc
+
+            limit = min(max(limit, 1), 100)
+            refs = await self._session_frame_store.list_sessions(uid, limit=limit)
+            return {
+                "sessions": [r.model_dump(mode="json") for r in refs],
+                "count": len(refs),
+            }
+
+        @api.get("/v1/agent/sessions/{session_id}/frames")
+        async def get_session_frames(session_id: str, user_id: str):
+            """세션 SSE 프레임 전체 조회.
+
+            Path params:
+                session_id: str (UUID)
+            Query params:
+                user_id: str (UUID)
+            """
+            import uuid
+
+            try:
+                sid = uuid.UUID(session_id)
+                uid = uuid.UUID(user_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"잘못된 파라미터: {exc}") from exc
+
+            frames = await self._session_frame_store.load_frames(sid, uid)
+            return {
+                "session_id": session_id,
+                "frames": [f.model_dump(mode="json") for f in frames],
+                "count": len(frames),
+            }
+
         return api
