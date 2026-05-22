@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
 import RiskPill from '@/components/common/RiskPill';
 import ScopePill from '@/components/common/ScopePill';
@@ -22,10 +23,14 @@ const SKILLS: SkillItem[] = [
   { name: '인사 온보딩 자동화',  cat: '인사',    risk: RiskLevel.LOW,        scope: 'team',   users: 9,  official: false },
 ];
 
-const TABS = ['🪴 Personal', '👥 Team', '🏢 Company'] as const;
+const TABS = [
+  { key: 'personal', label: '🪴 Personal' },
+  { key: 'team',     label: '👥 Team' },
+  { key: 'company',  label: '🏢 Company' },
+] as const;
 
-export default function MarketplacePage() {
-  const activeTab = '👥 Team';
+export default function MarketplacePage({ searchParams }: { searchParams: { tab?: string } }) {
+  const activeTabKey = searchParams.tab ?? 'team';
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
@@ -35,17 +40,18 @@ export default function MarketplacePage() {
         {/* Tabs */}
         <div className="flex gap-2">
           {TABS.map((tab) => (
-            <button
-              key={tab}
+            <Link
+              key={tab.key}
+              href={`/marketplace?tab=${tab.key}`}
               className={[
-                'text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-2 py-[3px]',
-                tab === activeTab
+                'text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-2 py-[3px] no-underline',
+                tab.key === activeTabKey
                   ? 'bg-[var(--color-ink)] text-[var(--color-paper)]'
                   : 'bg-[var(--color-surface)] text-[var(--color-ink)] hover:bg-[var(--color-paper2)]',
               ].join(' ')}
             >
-              {tab}
-            </button>
+              {tab.label}
+            </Link>
           ))}
         </div>
 

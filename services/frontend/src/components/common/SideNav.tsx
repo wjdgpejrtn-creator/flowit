@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 interface SideNavItem {
   label: string;
@@ -17,6 +18,7 @@ interface SideNavProps {
 }
 
 export default function SideNav({ title, items, activeHref }: SideNavProps) {
+  const pathname = usePathname();
   return (
     <aside
       className="border-r-[1.5px] border-[var(--color-ink)] bg-[var(--color-surface)] p-3 flex-shrink-0"
@@ -31,7 +33,7 @@ export default function SideNav({ title, items, activeHref }: SideNavProps) {
         {items.map((item, i) => {
           const isActive = activeHref
             ? item.href === activeHref
-            : false;
+            : item.href === pathname;
 
           const inner = (
             <span className="flex items-center justify-between gap-1 w-full">

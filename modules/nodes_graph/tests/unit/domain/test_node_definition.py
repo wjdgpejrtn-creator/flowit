@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 from common_schemas.enums import RiskLevel
+
 from nodes_graph.domain.entities.node_definition import NodeDefinition
 from nodes_graph.domain.entities.node_metadata import NodeMetadata
 
@@ -31,11 +32,33 @@ def test_node_definition_optional_fields_default_none():
     node = _make_node()
     assert node.service_type is None
     assert node.embedding is None
+    assert node.owner_user_id is None
+    assert node.team_id is None
 
 
 def test_node_definition_with_service_type():
     node = _make_node(service_type="google_workspace")
     assert node.service_type == "google_workspace"
+
+
+def test_node_definition_global_scope_when_owner_and_team_none():
+    # ADR-0020 (i): owner/team 둘 다 None = company 전역(기존 53종). 비침습.
+    node = _make_node()
+    assert node.owner_user_id is None and node.team_id is None
+
+
+def test_node_definition_personal_scope():
+    uid = uuid4()
+    node = _make_node(owner_user_id=uid)
+    assert node.owner_user_id == uid
+    assert node.team_id is None
+
+
+def test_node_definition_team_scope():
+    tid = uuid4()
+    node = _make_node(team_id=tid)
+    assert node.team_id == tid
+    assert node.owner_user_id is None
 
 
 def test_node_metadata_is_frozen():

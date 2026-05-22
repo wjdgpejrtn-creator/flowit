@@ -27,7 +27,9 @@ export default function LoginPage() {
         style={{ flex: '1' }}
       >
         <div className="text-[12px] text-[var(--color-ink3)] font-medium">로그인</div>
-        <Btn lg primary>🇬 Google로 로그인</Btn>
+        <a href="/api/auth/google" className="no-underline">
+          <Btn lg primary>🇬 Google로 로그인</Btn>
+        </a>
         <div className="text-[13px] text-[var(--color-ink3)]">
           사내 도메인:{' '}
           <span className="font-mono text-[var(--color-ink)]">@naver.com</span>
