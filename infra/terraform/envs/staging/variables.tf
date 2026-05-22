@@ -139,3 +139,26 @@ variable "artifact_registry_writers" {
   type        = list(string)
   default     = []
 }
+
+# ---------------------------------------------------------------------------
+# Cloud Run — REQ-010 frontend (Next.js). 단일 출처 토폴로지(A):
+# 프론트가 public 진입점이고 next.config rewrites가 /api/* 를 api_server로 프록시.
+# enable_cloud_run=true 전제 (API_PROXY_TARGET이 api_server URL을 참조).
+# ---------------------------------------------------------------------------
+variable "enable_frontend" {
+  description = "Deploy frontend to Cloud Run (default false — 이미지 빌드 완료 시 활성화). enable_cloud_run=true 전제."
+  type        = bool
+  default     = false
+}
+
+variable "frontend_image" {
+  description = "frontend container image (AR 경로:TAG). Required when enable_frontend=true"
+  type        = string
+  default     = ""
+}
+
+variable "frontend_url" {
+  description = "배포된 frontend Cloud Run URL. api_server FRONTEND_URL(OAuth 콜백 후 302 대상)에 주입. 2단계 apply — 프론트 배포 후 채운다."
+  type        = string
+  default     = ""
+}
