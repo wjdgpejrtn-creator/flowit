@@ -30,9 +30,10 @@ def app(env_minimum: None):
 
 def _override_permission(app) -> None:
     """AuthMiddleware 우회 — reviewer_id 검증용 고정 user_id 주입."""
+    # role="User" — Admin은 서비스 운영자 전용. 스킬 거버넌스 행위자는 일반 User.
     fake_permission = PermissionSource(
         user_id=_REVIEWER_ID,
-        role="Admin",  # type: ignore[arg-type]
+        role="User",  # type: ignore[arg-type]
         department_id=uuid4(),
         session_id=uuid4(),
         granted_scopes=["Private"],
