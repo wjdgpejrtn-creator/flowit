@@ -47,12 +47,11 @@ sub_agent_modal_deploy.md §3.2 + §5 참조).
 - ModalEmbeddingAdapter는 httpx 호출이라 즉시 동작.
 - PgNodeDefinitionRepository는 황대원 5/15 PR에 머지된 구현체 그대로 사용.
 """
-import json
 import os
-from typing import Any, AsyncIterator, Literal
+from collections.abc import AsyncIterator
+from typing import Any, Literal
 
 import modal
-
 
 APP_NAME = "agent-skills-builder"
 
@@ -83,7 +82,7 @@ def _sse_bytes(response: Any) -> bytes:
     SSE 포맷: 'data: <json>\\n\\n'
     """
     body = response.model_dump_json()
-    return f"data: {body}\n\n".encode("utf-8")
+    return f"data: {body}\n\n".encode()
 
 
 def _done_frame_bytes() -> bytes:
@@ -176,12 +175,11 @@ class SkillsBuilderAgent:
         import tempfile
         from pathlib import Path
 
+        from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
+        from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
         from services.common.gcp_secrets import load_secrets_to_env
-
-        from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
-        from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
 
         # 1) GCP SA JSON을 임시 파일로 풀고 ADC 환경변수 지정
         sa_payload = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
@@ -240,12 +238,10 @@ class SkillsBuilderAgent:
 
     @modal.asgi_app()
     def fastapi(self):
-        import asyncio
-
-        from fastapi import Body, FastAPI, HTTPException
-        from fastapi.responses import StreamingResponse
 
         from common_schemas.agent_protocol import AgentProtocolRequest
+        from fastapi import Body, FastAPI, HTTPException
+        from fastapi.responses import StreamingResponse
 
         api = FastAPI(title=APP_NAME, version="1.0")
 
@@ -313,10 +309,6 @@ class SkillsBuilderAgent:
         로 래핑. next_action은 ResultFrame에서 "complete", ErrorFrame에서
         "error", 중간 진행 프레임에서 "continue"로 설정 (Literal 세 값 spec).
         """
-        from common_schemas import DocumentBlock
-        from common_schemas.agent_protocol import AgentProtocolResponse
-        from common_schemas.transport import ErrorFrame, ResultFrame
-
         from ai_agent.application.agents.skills_builder.build_from_functional_domain_use_case import (
             BuildFromFunctionalDomainUseCase,
         )
@@ -326,6 +318,9 @@ class SkillsBuilderAgent:
         from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
             BuildFromSOPUseCase,
         )
+        from common_schemas import DocumentBlock
+        from common_schemas.agent_protocol import AgentProtocolResponse
+        from common_schemas.transport import ErrorFrame
         from skills_marketplace.application.use_cases import CreateDraftSkillUseCase
         from storage.repositories.pg_marketplace_skill_repository import PgMarketplaceSkillRepository
         from storage.repositories.pg_node_definition_repository import PgNodeDefinitionRepository
