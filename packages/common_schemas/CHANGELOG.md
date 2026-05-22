@@ -15,7 +15,7 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 ### Changed
 - TypeScript codegen: 6종 인터페이스 `generated/index.ts`에 자동 반영.
-- `test_document.py` — 6종 단위 테스트 13건 추가 (frozen/default/Literal 검증).
+- `test_document.py` — 6종 단위 테스트 12건 추가 (frozen/default/Literal 검증).
 - doc_parser `chunk.py`/`quality.py`/`warning.py`는 common_schemas 재노출 shim으로 전환 — `doc_parser.domain.entities.*` 기존 import 무변경 동작. `QualityConfig`/`ElapsedDetail`은 doc_parser 내부 타입이라 잔류.
 
 ### Symbols
