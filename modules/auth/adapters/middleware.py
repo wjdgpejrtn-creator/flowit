@@ -30,15 +30,25 @@ class AuthMiddleware(BaseHTTPMiddleware):
             self._PUBLIC_PATHS | frozenset(extra_public_paths) if extra_public_paths else self._PUBLIC_PATHS
         )
 
+    @staticmethod
+    def _extract_token(request: Request) -> str | None:
+        """JWT 추출: `Authorization: Bearer` 헤더 우선, 없으면 `access_token` 쿠키.
+
+        헤더 경로는 비브라우저 클라이언트(스크립트·스모크) 호환을 위해 유지하고,
+        쿠키 경로는 ADR-0021 단일 출처 HttpOnly 쿠키 인증을 지원한다.
+        """
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            return auth_header.removeprefix("Bearer ") or None
+        return request.cookies.get("access_token") or None
+
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         if request.url.path in self._public_paths:
             return await call_next(request)
 
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
+        token = self._extract_token(request)
+        if not token:
             return JSONResponse({"code": "E-AUTH-003", "message": "Missing token"}, status_code=401)
-
-        token = auth_header.removeprefix("Bearer ")
 
         try:
             payload = self._jwt.decode(token)
