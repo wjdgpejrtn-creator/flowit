@@ -2,6 +2,12 @@ from .agent_memory_mapper import AgentMemoryMapper
 from .credential_mapper import CredentialMapper
 from .document_mapper import DocumentMapper
 from .execution_mapper import ExecutionMapper, ExecutionRow
+from .marketplace_skill_mapper import (
+    CompanySkillMapper,
+    PersonalSkillMapper,
+    SkillApprovalMapper,
+    TeamSkillMapper,
+)
 from .node_definition_mapper import NodeDefinitionMapper
 from .oauth_connection_mapper import OAuthConnectionMapper
 from .session_mapper import SessionMapper
@@ -17,6 +23,10 @@ __all__ = [
     "DocumentMapper",
     "ExecutionMapper",
     "ExecutionRow",
+    "CompanySkillMapper",
+    "PersonalSkillMapper",
+    "SkillApprovalMapper",
+    "TeamSkillMapper",
     "NodeDefinitionMapper",
     "OAuthConnectionMapper",
     "SessionMapper",

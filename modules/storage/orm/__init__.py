@@ -3,6 +3,12 @@ from .base import Base
 from .credential_model import CredentialModel
 from .document_model import DocumentChunkModel, DocumentModel, QualityLogModel
 from .execution_model import ExecutionModel, NodeResultModel
+from .marketplace_skill_model import (
+    CompanySkillModel,
+    PersonalSkillModel,
+    SkillApprovalModel,
+    TeamSkillModel,
+)
 from .node_definition_model import NodeDefinitionModel
 from .oauth_connection_model import OAuthConnectionModel
 from .session_model import SessionModel
@@ -19,6 +25,10 @@ __all__ = [
     "DocumentChunkModel",
     "DocumentModel",
     "ExecutionModel",
+    "CompanySkillModel",
+    "PersonalSkillModel",
+    "SkillApprovalModel",
+    "TeamSkillModel",
     "NodeDefinitionModel",
     "NodeResultModel",
     "OAuthConnectionModel",

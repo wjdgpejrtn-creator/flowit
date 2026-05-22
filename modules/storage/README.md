@@ -23,6 +23,7 @@ from storage.repositories import (
     PgDocumentRepository,
     PgExecutionRepository,
     PgSkillRepository,
+    PgMarketplaceSkillRepository,
     PgToolExecutionRepository,
 )
 ```
