@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import pytest
-
 from common_schemas.exceptions import ValidationError
-from storage.marketplace.domain.skill_lifecycle import SkillLifecycle, SkillState
+
+from skills_marketplace.domain.services.skill_lifecycle import SkillLifecycle
+from skills_marketplace.domain.value_objects.skill_state import SkillState
 
 
 class TestSkillLifecycle:
