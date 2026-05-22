@@ -157,12 +157,6 @@ variable "frontend_image" {
   default     = ""
 }
 
-variable "frontend_service_account" {
-  description = "Runtime service account email for frontend Cloud Run. 프론트는 secret/DB 미사용 — staging은 공용 SA 재활용 가능"
-  type        = string
-  default     = ""
-}
-
 variable "frontend_url" {
   description = "배포된 frontend Cloud Run URL. api_server FRONTEND_URL(OAuth 콜백 후 302 대상)에 주입. 2단계 apply — 프론트 배포 후 채운다."
   type        = string

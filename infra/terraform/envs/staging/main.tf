@@ -107,10 +107,14 @@ module "container_registry" {
   format        = "DOCKER"
   description   = "Cloud Run images for api_server + execution_engine worker (REQ-009/REQ-007 staging)"
 
-  reader_members = compact([
-    var.api_server_service_account != "" ? "serviceAccount:${var.api_server_service_account}" : "",
-    var.execution_engine_worker_service_account != "" ? "serviceAccount:${var.execution_engine_worker_service_account}" : "",
-  ])
+  reader_members = compact(concat(
+    [
+      var.api_server_service_account != "" ? "serviceAccount:${var.api_server_service_account}" : "",
+      var.execution_engine_worker_service_account != "" ? "serviceAccount:${var.execution_engine_worker_service_account}" : "",
+    ],
+    # frontend 런타임 SA — 자기 이미지 pull용 AR reader (enable_frontend 시에만)
+    [for e in google_service_account.frontend[*].email : "serviceAccount:${e}"],
+  ))
   writer_members = local.ar_writers # default = agent_secret_accessors fallback (var.artifact_registry_writers override 가능)
 
   labels = merge(local.common_labels, { role = "container-registry" })
@@ -289,6 +293,30 @@ module "execution_engine_worker" {
 }
 
 # ---------------------------------------------------------------------------
+# frontend 전용 런타임 SA (PR #140 리뷰 LOW 반영)
+# public 진입점 + GCP API(secret/DB) 미사용 → role 부여 0 (AR reader만 reader_members 경유).
+# 공용 cloudsql-iam-modal SA 재사용 금지 — 침해 시 blast radius 축소.
+# lifecycle precondition — enable_frontend 활성 시 필수 입력 fail-fast (plan 단계).
+# ---------------------------------------------------------------------------
+resource "google_service_account" "frontend" {
+  count        = var.enable_frontend ? 1 : 0
+  project      = var.project_id
+  account_id   = "workflow-frontend-${var.environment}"
+  display_name = "REQ-010 frontend Cloud Run runtime SA (least privilege)"
+
+  lifecycle {
+    precondition {
+      condition     = var.frontend_image != ""
+      error_message = "enable_frontend=true 시 var.frontend_image(AR 이미지 경로:TAG)는 필수입니다."
+    }
+    precondition {
+      condition     = var.enable_cloud_run
+      error_message = "enable_frontend=true는 enable_cloud_run=true 전제입니다 — API_PROXY_TARGET이 api_server URL을 참조합니다."
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Cloud Run — REQ-010 frontend (Next.js). 단일 출처 토폴로지(A):
 # 프론트가 public 진입점이고, next.config rewrites가 /api/* 를 api_server로
 # 프록시한다 (API_PROXY_TARGET env). 브라우저는 프론트 URL 하나만 보므로
@@ -304,7 +332,7 @@ module "frontend" {
   region                = var.region
   service_name          = "workflow-frontend-${var.environment}"
   image                 = var.frontend_image
-  service_account_email = var.frontend_service_account
+  service_account_email = google_service_account.frontend[0].email
   vpc_connector_id      = module.networking.serverless_connector_id
   vpc_egress            = "PRIVATE_RANGES_ONLY"
   cpu                   = "1"
