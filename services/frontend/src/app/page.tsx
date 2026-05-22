@@ -1,9 +1,12 @@
+'use client';
+
 import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
 import RiskPill from '@/components/common/RiskPill';
 import StatusPill from '@/components/common/StatusPill';
 import WarnBanner from '@/components/common/WarnBanner';
 import { RiskLevel, NodeExecutionState } from '@common/generated';
+import { useAuthStore } from '@/stores/authStore';
 
 const RECENT_WORKFLOWS: Array<{ name: string; status: NodeExecutionState['status']; risk: RiskLevel }> = [
   { name: '주간 회의록 요약', status: 'running',   risk: RiskLevel.HIGH },
@@ -13,6 +16,11 @@ const RECENT_WORKFLOWS: Array<{ name: string; status: NodeExecutionState['status
 const QUICK_CHIPS = ['📈 광고 리포트', '📄 PDF 처리', '💬 Slack 알림', '📅 캘린더 동기화'];
 
 export default function DashboardPage() {
+  const { userName, dept } = useAuthStore();
+  const userDisplay = userName
+    ? `${userName}님${dept ? ` · ${dept}` : ''}`
+    : '사용자님';
+
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
       <AppBar />
@@ -26,7 +34,7 @@ export default function DashboardPage() {
           무엇을 <span className="bg-[var(--color-hl)] px-1">자동화</span>할까요?
         </h1>
         <p className="text-[var(--color-ink3)] text-[14px] mb-[14px]">
-          김주임님 · 마케팅팀 · 자연어로 그냥 말씀해주세요.
+          {userDisplay} · 자연어로 그냥 말씀해주세요.
         </p>
 
         {/* Large input */}

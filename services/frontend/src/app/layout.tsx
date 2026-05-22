@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import AuthInitializer from '@/components/common/AuthInitializer';
 
 export const metadata: Metadata = {
   title: '∿ flow — 워크플로우 자동화',
@@ -9,7 +10,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
-      <body>{children}</body>
+      <body>
+        <AuthInitializer />
+        {children}
+      </body>
     </html>
   );
 }

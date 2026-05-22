@@ -1,7 +1,26 @@
+'use client';
+
+import { useState } from 'react';
 import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
+import { getAuthorizeUrl } from '@/lib/api/authApi';
 
 export default function LoginPage() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const { authorization_url } = await getAuthorizeUrl();
+      window.location.href = authorization_url;
+    } catch {
+      setError('로그인 서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.');
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex bg-[var(--color-paper2)]">
       {/* Left: copy */}
@@ -27,25 +46,24 @@ export default function LoginPage() {
         style={{ flex: '1' }}
       >
         <div className="text-[12px] text-[var(--color-ink3)] font-medium">로그인</div>
-        <a href="/api/auth/google" className="no-underline">
-          <Btn lg primary>🇬 Google로 로그인</Btn>
-        </a>
+        <Btn lg primary onClick={() => void handleGoogleLogin()} disabled={loading}>
+          {loading ? '연결 중…' : '🇬 Google로 로그인'}
+        </Btn>
         <div className="text-[13px] text-[var(--color-ink3)]">
           사내 도메인:{' '}
           <span className="font-mono text-[var(--color-ink)]">@naver.com</span>
         </div>
 
-        {/* Error state — shown conditionally in real app */}
-        {false && (
+        {error && (
           <ErrorBanner>
             <span>⚠</span>
-            <span>401 · 허용되지 않은 계정입니다. Admin에게 문의하세요.</span>
+            <span>{error}</span>
           </ErrorBanner>
         )}
 
         <div className="mt-[14px] h-[1.5px] bg-[var(--color-ink3)] rounded" />
         <div className="text-[11px] text-[var(--color-ink3)]">
-          로그인 시 TokenPair (access+refresh)가 안전 저장됩니다.
+          로그인 시 인증 쿠키가 HttpOnly로 안전하게 저장됩니다.
         </div>
       </div>
     </div>
