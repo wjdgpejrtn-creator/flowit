@@ -1,18 +1,15 @@
 """LangGraph Orchestrator (Composer) — Workflow Composer 어댑터 레이어.
 
 spec §3.2 Workflow Composer 내부 StateGraph 구현. LangGraph는 adapters/에만 존재.
-16개 노드:
-  security → intent →
-    [clarify]      consultant → slot_fill (loop)
-    [draft/refine] retriever → drafter → validator → qa_evaluator
-                                                     score<8 → qa_retry → drafter
-                                                     score>=8 ↓
-    [propose]      ──────────────────────────────── promote → handoff → execute
-                                                                          ↓
-                                                              evaluate_output → user_confirm
-                                                                                     ↓
-                                                                              memory_save → END
-  compress (turn_count >= 25 시 entry point 앞 삽입)
+
+Tool-calling 에이전트 구조:
+  compress (turn_count >= 25 시) → security → agent_loop → END
+
+  agent_loop: LLM이 아래 툴 중 하나를 선택해 실행, done 반환 시 종료.
+    analyze_intent / ask_clarification / fill_slots / search_nodes /
+    draft_workflow / validate_workflow / evaluate_quality / retry_draft /
+    promote_workflow / save_workflow / execute_workflow / evaluate_output /
+    confirm_result / save_memory / done
 """
 from __future__ import annotations
 
@@ -24,7 +21,9 @@ import os
 import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
+
+from pydantic import BaseModel
 from uuid import UUID, uuid4
 
 import httpx
@@ -34,6 +33,7 @@ from common_schemas.enums import IntentType, RiskLevel
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
+    ChatMessageFrame,
     DraftSpecDeltaFrame,
     ErrorFrame,
     IntentResultFrame,
@@ -68,8 +68,9 @@ from ...domain.value_objects.turn_limit import TurnLimit
 _logger = logging.getLogger(__name__)
 
 _QA_MAX_RETRY = 3
+_MAX_AGENT_ITERATIONS = 30  # 무한 루프 방지
 
-# routing keys
+# routing keys (tool-calling 이전 호환용 — _route_intent 등에서 사용)
 _CLARIFY = "clarify"
 _DRAFT = "draft"
 _PROPOSE = "propose"
@@ -78,6 +79,29 @@ _QA_RETRY = "qa_retry"
 _QA_FORCE = "qa_force"
 _SLOT_LOOP = "slot_loop"
 _SLOT_DONE = "slot_done"
+
+
+class _NextAction(BaseModel):
+    """LLM 에이전트가 다음에 실행할 툴을 선택하는 스키마."""
+
+    tool_name: Literal[
+        "analyze_intent",
+        "ask_clarification",
+        "fill_slots",
+        "search_nodes",
+        "draft_workflow",
+        "validate_workflow",
+        "evaluate_quality",
+        "retry_draft",
+        "promote_workflow",
+        "save_workflow",
+        "execute_workflow",
+        "evaluate_output",
+        "confirm_result",
+        "save_memory",
+        "done",
+    ]
+    reasoning: str
 
 # 실행 결과 폴링 설정
 _EXEC_POLL_INTERVAL_SEC = 3
@@ -107,6 +131,9 @@ class _State(TypedDict):
     qa_feedback: str
     collected_frames: Annotated[list[AnySSEFrame], operator.add]
     error: str | None
+    # tool-calling agent 제어
+    agent_done: bool
+    agent_iterations: int
     # handoff 이후 필드
     saved_workflow_id: UUID | None          # handoff_node에서 WorkflowRepository.save() 결과
     # 실행 검증 필드
@@ -117,8 +144,9 @@ class _State(TypedDict):
 
 
 class LangGraphOrchestrator:
-    """Workflow Composer 내부 16-노드 StateGraph (spec §3.2).
+    """Workflow Composer — tool-calling 에이전트 (spec §3.2).
 
+    compress → security → agent_loop(LLM이 툴 선택) → END 구조.
     services/agents/agent-composer/main.py composition root에서 인스턴스화.
     """
 
@@ -180,7 +208,9 @@ class LangGraphOrchestrator:
     ) -> AsyncGenerator[SSEFrame, None]:
         session_frame = SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
         yield session_frame
-        all_frames: list[AnySSEFrame] = [session_frame]
+        user_chat_frame = ChatMessageFrame(role="user", content=message)
+        yield user_chat_frame
+        all_frames: list[AnySSEFrame] = [session_frame, user_chat_frame]
 
         initial: _State = {
             "session_id": session_id,
@@ -201,6 +231,8 @@ class LangGraphOrchestrator:
             "qa_feedback": "",
             "collected_frames": [],
             "error": None,
+            "agent_done": False,
+            "agent_iterations": 0,
             "saved_workflow_id": None,
             "execution_id": None,
             "execution_result": None,
@@ -210,9 +242,11 @@ class LangGraphOrchestrator:
 
         async for event in self._graph.astream(initial, stream_mode="updates"):
             for node_name, updates in event.items():
-                node_frame = AgentNodeFrame(agent_node_name=node_name)
-                yield node_frame
-                all_frames.append(node_frame)
+                # agent 루프 노드는 내부에서 tool별 AgentNodeFrame을 collected_frames에 포함
+                if node_name != "agent":
+                    node_frame = AgentNodeFrame(agent_node_name=node_name)
+                    yield node_frame
+                    all_frames.append(node_frame)
                 if not isinstance(updates, dict):
                     continue
                 for frame in updates.get("collected_frames", []):
@@ -258,7 +292,137 @@ class LangGraphOrchestrator:
         except Exception as exc:
             _logger.warning("session frame 저장 실패 (non-fatal): %s", exc)
 
-    # ------------------------------------------------------------------ nodes (16)
+    # ------------------------------------------------------------------ agent loop
+
+    def _build_agent_prompt(self, state: _State) -> str:
+        intent = state.get("intent") or "아직 분석 안 됨"
+        has_draft = state.get("workflow_draft") is not None
+        qa_score = state.get("qa_score", 0.0)
+        qa_attempts = state.get("qa_attempts", 0)
+        pass_flag = state.get("pass_flag", False)
+        saved = state.get("saved_workflow_id") is not None
+        executed = state.get("execution_id") is not None
+        messages_preview = "\n".join(
+            f"{m['role']}: {m.get('content', '')[:200]}"
+            for m in (state.get("messages") or [])[-3:]
+        )
+        return (
+            "워크플로우 자동화 AI 에이전트입니다.\n\n"
+            f"대화:\n{messages_preview}\n\n"
+            f"현재 상태:\n"
+            f"- 의도: {intent}\n"
+            f"- 워크플로우 초안: {'있음' if has_draft else '없음'}\n"
+            f"- QA: 점수={qa_score}, 시도={qa_attempts}회, 통과={pass_flag}\n"
+            f"- DB 저장: {saved}, 실행 완료: {executed}\n\n"
+            "사용 가능한 툴:\n"
+            "- analyze_intent: 사용자 의도 분석\n"
+            "- ask_clarification: 추가 정보 요청 (슬롯 미완성)\n"
+            "- fill_slots: 슬롯 채우기\n"
+            "- search_nodes: 노드 카탈로그 검색\n"
+            "- draft_workflow: 워크플로우 초안 생성\n"
+            "- validate_workflow: 워크플로우 구조 검증\n"
+            "- evaluate_quality: 워크플로우 품질 평가\n"
+            "- retry_draft: QA 실패 시 재초안\n"
+            "- promote_workflow: 워크플로우 확정 (is_draft=False)\n"
+            "- save_workflow: DB에 저장\n"
+            "- execute_workflow: 실행 엔진 호출\n"
+            "- evaluate_output: 실행 결과 품질 평가\n"
+            "- confirm_result: 사용자에게 결과 전달\n"
+            "- save_memory: 대화 패턴 저장\n"
+            "- done: 모든 작업 완료\n\n"
+            "다음에 실행할 툴 하나를 선택하고 이유를 설명하세요.\n"
+            '{"tool_name": "<툴이름>", "reasoning": "<이유>"}'
+        )
+
+    async def _agent_node(self, state: _State) -> dict:
+        if self._llm is None:
+            return {"error": "LLM 미주입 — tool-calling 불가", "agent_done": True}
+
+        iterations = state.get("agent_iterations", 0) + 1
+        if iterations > _MAX_AGENT_ITERATIONS:
+            return {
+                "agent_done": True,
+                "error": f"에이전트 최대 반복 횟수({_MAX_AGENT_ITERATIONS}) 초과",
+                "agent_iterations": iterations,
+            }
+
+        t0 = time.monotonic()
+        try:
+            action = await self._llm.generate_structured(self._build_agent_prompt(state), _NextAction)
+        except Exception as exc:
+            return {"error": f"툴 선택 실패: {exc}", "agent_done": True, "agent_iterations": iterations}
+
+        _logger.info("agent 툴 선택: %s — %s", action.tool_name, action.reasoning)
+
+        tool_map: dict[str, Any] = {
+            "analyze_intent":   self._intent_node,
+            "ask_clarification": self._consultant_node,
+            "fill_slots":       self._slot_fill_node,
+            "search_nodes":     self._retriever_node,
+            "draft_workflow":   self._drafter_node,
+            "validate_workflow": self._validator_node,
+            "evaluate_quality": self._qa_evaluator_node,
+            "retry_draft":      self._qa_retry_node,
+            "promote_workflow": self._promote_node,
+            "save_workflow":    self._handoff_node,
+            "execute_workflow": self._execute_node,
+            "evaluate_output":  self._evaluate_output_node,
+            "confirm_result":   self._user_confirm_node,
+            "save_memory":      self._memory_save_node,
+        }
+
+        if action.tool_name == "done":
+            elapsed = int((time.monotonic() - t0) * 1000)
+            return {
+                "agent_done": True,
+                "agent_iterations": iterations,
+                "collected_frames": [
+                    PipelineStatusFrame(service_name="agent", status="completed", elapsed_ms=elapsed)
+                ],
+            }
+
+        tool_fn = tool_map.get(action.tool_name)
+        if tool_fn is None:
+            return {"error": f"알 수 없는 툴: {action.tool_name}", "agent_done": True, "agent_iterations": iterations}
+
+        try:
+            updates = await tool_fn(state)
+        except Exception as exc:
+            return {"error": f"툴 실행 실패({action.tool_name}): {exc}", "agent_done": True, "agent_iterations": iterations}
+
+        tool_frames = updates.get("collected_frames", [])
+
+        # 사용자에게 보이는 AI 응답을 ChatMessageFrame으로 기록
+        assistant_chat: ChatMessageFrame | None = None
+        if action.tool_name == "ask_clarification":
+            for f in tool_frames:
+                if isinstance(f, SlotFillQuestionFrame):
+                    assistant_chat = ChatMessageFrame(role="assistant", content=f.question)
+                    break
+        elif action.tool_name == "confirm_result":
+            for f in tool_frames:
+                if isinstance(f, ResultFrame):
+                    summary = json.dumps(f.payload, ensure_ascii=False)[:300]
+                    assistant_chat = ChatMessageFrame(role="assistant", content=summary)
+                    break
+
+        pre_frames: list[AnySSEFrame] = [AgentNodeFrame(agent_node_name=action.tool_name)]
+        if assistant_chat:
+            pre_frames.append(assistant_chat)
+
+        return {
+            **updates,
+            "agent_iterations": iterations,
+            "collected_frames": pre_frames + tool_frames,
+        }
+
+    @staticmethod
+    def _route_agent(state: _State) -> str:
+        if state.get("agent_done") or state.get("error"):
+            return "end"
+        return "continue"
+
+    # ------------------------------------------------------------------ preprocessing nodes
 
     # 1. compress_node — turn_count >= 25 시 메시지 압축
     async def _compress_node(self, state: _State) -> dict:
@@ -776,65 +940,22 @@ class LangGraphOrchestrator:
     def _build(self):
         graph: StateGraph = StateGraph(_State)
 
-        # 16 nodes
+        # tool-calling 구조: compress → security → agent_loop
         graph.add_node("compress", self._compress_node)
         graph.add_node("security", self._security_node)
-        graph.add_node("intent", self._intent_node)
-        graph.add_node("consultant", self._consultant_node)
-        graph.add_node("slot_fill", self._slot_fill_node)
-        graph.add_node("retriever", self._retriever_node)
-        graph.add_node("drafter", self._drafter_node)
-        graph.add_node("validator", self._validator_node)
-        graph.add_node("qa_evaluator", self._qa_evaluator_node)
-        graph.add_node("qa_retry", self._qa_retry_node)
-        graph.add_node("promote", self._promote_node)
-        graph.add_node("handoff", self._handoff_node)
-        graph.add_node("execute", self._execute_node)
-        graph.add_node("evaluate_output", self._evaluate_output_node)
-        graph.add_node("user_confirm", self._user_confirm_node)
-        graph.add_node("memory_save", self._memory_save_node)
+        graph.add_node("agent", self._agent_node)
 
-        # entry: turn_count 체크 후 compress 또는 security
         graph.set_entry_point("compress")
         graph.add_conditional_edges(
             "compress",
             self._should_compress,
             {"compress": "compress", "security": "security"},
         )
-
-        # security → intent → branch
-        graph.add_edge("security", "intent")
+        graph.add_edge("security", "agent")
         graph.add_conditional_edges(
-            "intent",
-            self._route_intent,
-            {_CLARIFY: "consultant", _DRAFT: "retriever", _PROPOSE: "promote"},
+            "agent",
+            self._route_agent,
+            {"continue": "agent", "end": END},
         )
-
-        # clarify branch: consultant → slot_fill → (loop or retriever)
-        graph.add_edge("consultant", "slot_fill")
-        graph.add_conditional_edges(
-            "slot_fill",
-            self._route_slot,
-            {_SLOT_LOOP: "slot_fill", _SLOT_DONE: "retriever"},
-        )
-
-        # draft branch: retriever → drafter → validator → qa_evaluator → branch
-        graph.add_edge("retriever", "drafter")
-        graph.add_edge("drafter", "validator")
-        graph.add_edge("validator", "qa_evaluator")
-        graph.add_conditional_edges(
-            "qa_evaluator",
-            self._route_qa,
-            {_QA_PASS: "promote", _QA_RETRY: "qa_retry", _QA_FORCE: "promote"},
-        )
-        graph.add_edge("qa_retry", "drafter")
-
-        # promote → handoff → execute → evaluate_output → user_confirm → memory_save → END
-        graph.add_edge("promote", "handoff")
-        graph.add_edge("handoff", "execute")
-        graph.add_edge("execute", "evaluate_output")
-        graph.add_edge("evaluate_output", "user_confirm")
-        graph.add_edge("user_confirm", "memory_save")
-        graph.add_edge("memory_save", END)
 
         return graph.compile()
