@@ -1,6 +1,6 @@
 # ADR-0020: Skills Builder 산출물 게시 lifecycle 게이트 + scope별 진입 (Option B)
 
-- **Status**: Proposed
+- **Status**: Accepted (본 PR #132에서 Accept — #128은 Proposed 상태로 머지됨. GAP 2 (i) 확정, 2026-05-21)
 - **Date**: 2026-05-21
 - **Deciders**: @dhwang0803-glitch (조장, REQ-001/008/009) + @billionaireahreum (박아름, REQ-002/003/004 Skills Builder/013 skills_marketplace)
 - **Tags**: area/skills_builder, area/skills_marketplace, area/nodes_graph, area/api_server, lifecycle, catalog
@@ -30,16 +30,16 @@ REQ-013 skills_marketplace는 5단계 게시 lifecycle(`DRAFT → REVIEW → APP
 
 ### 2. scope별 lifecycle 진입 분기
 
-Skills Builder 추출 후 scope(personal/team/company)에 따라 진입:
+Skills Builder는 **personal 스킬만 직접 생성**한다 (Q3 promotion-only). team/company는 직접 생성하지 않고 personal을 승격(promote)한다:
 
-| scope | Skill Builder 페이지에서 | REVIEW 이후 |
-|-------|--------------------------|-------------|
-| personal | DRAFT→REVIEW→APPROVED→PUBLISHED 전 과정 in-place (owner=본인) | (그 자리에서 완결) |
-| team / company | DRAFT 저장까지만 | Marketplace에서 리뷰어가 진행 |
+| scope | 진입 경로 | lifecycle 진행 |
+|-------|----------|----------------|
+| personal | Skill Builder에서 직접 생성 (추출 → DRAFT) | DRAFT→REVIEW→APPROVED→PUBLISHED 전 과정 Skill Builder 페이지 in-place (owner=본인, self-review) |
+| team / company | **Skill Builder 직접 생성 불가** — personal PUBLISHED를 `PromoteToTeam/Company`로 승격(DRAFT 복제, ADR-0019 promotion=복제) | Marketplace에서 리뷰어가 DRAFT→REVIEW→APPROVED→PUBLISHED 진행 |
 
-UX 근거: personal은 본인이 쓸 스킬이라 그 자리 완결이 자연스럽고, team/company는 타인(리뷰어) 검토가 필요하니 Marketplace가 거처. "추출 결과 검토 wizard 부재"도 personal in-place 흐름으로 해소.
+UX 근거: personal은 본인이 쓸 스킬이라 Skill Builder에서 그 자리 완결(self-review). team/company는 promotion-only(Q3) — 검증된 personal 스킬을 승격하고, 타인(리뷰어) 검토가 필요하니 Marketplace가 거처. **Skill Builder 페이지의 scope 선택은 "personal 생성" 단일이며, team/company 노출은 Marketplace의 promote 흐름으로 분리**(초안의 3택 모델은 Q3 promotion-only로 정정됨).
 
-### 3. Q1~Q7 확정 (2026-05-21 조장·박아름 합의)
+### 3. Q1~Q8 확정 (2026-05-21 조장·박아름 합의)
 
 | # | 결정 | 근거 |
 |---|------|------|
@@ -50,6 +50,7 @@ UX 근거: personal은 본인이 쓸 스킬이라 그 자리 완결이 자연스
 | **Q5** 검색/가시성 | **(i) `NodeDefinition`에 `owner_user_id`/`team_id` Optional 추가** → 단일 카탈로그 + scope 필터. `NULL`=company 전역(기존 53종 포함) / `owner_user_id`=personal / `team_id`=team. 검색: `(owner IS NULL AND team IS NULL) OR owner=현재유저 OR team IN 내팀`. PUBLISHED만 upsert(lifecycle 게이트) 유지 | (e) 단일 인스턴스라 멀티테넌트 부담 0 + `NULL`=전역이라 기존 53종 비침습 |
 | **Q6** batch 단위 | batch(SOP 1건=1 scope) 기본 + 스킬별 override는 후속 | — |
 | **Q7** seed 경로 | seed(industry/functional)는 사전 큐레이션이라 **company scope 자동 PUBLISHED**(리뷰 생략). `source_type` 게이트(seed=자동 / sop=lifecycle) | 박아름 큐레이션 검증본 |
+| **Q8** 추출 편집 wizard | **2차 후속으로 분리**. 1차는 **one-shot 추출 유지** — 현재 즉시 upsert(라이브)를 DRAFT emit + lifecycle 게이트(§1)로 바꿔 "검토 없이 라이브" 구멍을 먼저 막는다. 사용자가 추출된 노드 스펙(이름/설명/스키마)을 검토·수정하는 편집 wizard는 frontend 착수 시 2차. **`extract_draft`/`confirm` use case 분리 + 다단계 API/세션은 2차에서.** ※ ADR-0020 "personal in-place"는 lifecycle 승인이지 추출 편집 wizard가 아님(별개 축) | frontend 미구현 + 1차 lifecycle 게이트로 핵심 구멍 선해소 + staging(Q1) 기반이 이미 있어 wizard 후속 추가 무손실 (2026-05-21 조장 합의) |
 
 ### 4. 아키텍처 축 — NodeDefinition owner/scope Optional (단일 카탈로그)
 
@@ -79,7 +80,7 @@ UX 근거: personal은 본인이 쓸 스킬이라 그 자리 완결이 자연스
 - **api_server** (REQ-009, 황대원) — scope-aware skill lifecycle 라우트(submit/approve/publish) 신설.
 - **nodes_graph** (REQ-003, 박아름) — `NodeDefinition`에 `owner_user_id`/`team_id` Optional 추가 + `NodeDefinitionRepository.search`에 scope 필터(`(owner IS NULL AND team IS NULL) OR owner=현재유저 OR team IN 내팀`).
 - **database** (REQ-001, 황대원) — PR-2e DDL에 staging 컬럼 + `node_definitions`에 `owner_user_id`/`team_id` **nullable** 컬럼(기존 53종=NULL=전역) + lifecycle_state 인덱스.
-- **frontend** (REQ-010) — Skill Builder 페이지 scope 선택 UI + (personal) in-place 검토 UI.
+- **frontend** (REQ-010) — Skill Builder 페이지: personal 생성 + in-place 검토(DRAFT→PUBLISHED) UI. team/company는 별도 Marketplace promote 흐름(Q3 promotion-only — Skill Builder에 team/company 직접 생성 UI 없음).
 
 ### 긍정
 
