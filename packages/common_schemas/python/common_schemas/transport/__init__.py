@@ -2,6 +2,7 @@ from .llm import LLMResponse, Message, ToolCall
 from .sse import (
     AgentNodeFrame,
     AnySSEFrame,
+    ChatMessageFrame,
     DraftSpecDeltaFrame,
     ErrorFrame,
     IntentResultFrame,
@@ -27,6 +28,7 @@ __all__ = [
     "SessionFrame",
     "SlotFillQuestionFrame",
     # SSE monitoring frames (PR #74, 오른쪽 사이드바 + 캔버스 실시간)
+    "ChatMessageFrame",
     "IntentResultFrame",
     "PipelineStatusFrame",
     "QAMetricFrame",
