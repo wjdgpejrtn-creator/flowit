@@ -5,6 +5,7 @@ from ...domain.entities.marketplace_personal_skill import MarketplacePersonalSki
 from ...domain.entities.marketplace_team_skill import MarketplaceTeamSkill
 from ...domain.ports.skill_repository import SkillRepository
 from ...domain.value_objects.skill_scope import SkillScope
+from ...domain.value_objects.skill_state import SkillState
 
 SkillResult = MarketplacePersonalSkill | MarketplaceTeamSkill | MarketplaceCompanySkill
 
@@ -27,6 +28,13 @@ class SearchSkillsUseCase:
         query_embedding: list[float],
         scope: SkillScope = SkillScope.COMPANY,
         limit: int = 10,
+        lifecycle_state: SkillState | None = SkillState.PUBLISHED,
     ) -> list[SkillResult]:
-        """scope 범위 내 query_embedding 유사도 top-k 스킬 후보 반환."""
-        return await self._repo.search(query_embedding, scope, limit)
+        """scope 범위 내 query_embedding 유사도 top-k 스킬 후보 반환.
+
+        lifecycle_state 기본 PUBLISHED (ADR-0020 (b)): Composer 후보는 게시된 스킬만 노출.
+        관리/디버그 목적이면 None을 명시해 전체 상태 검색.
+        """
+        return await self._repo.search(
+            query_embedding, scope, limit, lifecycle_state=lifecycle_state
+        )

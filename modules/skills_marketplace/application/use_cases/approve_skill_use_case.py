@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from common_schemas.exceptions import NotFoundError
 
+from ...domain.entities.approval_workflow import ApprovalWorkflow
 from ...domain.ports.skill_repository import SkillRepository
 from ...domain.services.skill_lifecycle import SkillLifecycle
 from ...domain.value_objects.skill_scope import SkillScope
@@ -36,8 +37,22 @@ class ApproveSkillUseCase:
 
         target = SkillState.APPROVED if approved else SkillState.DRAFT
         new_state = SkillLifecycle.transition(SkillState(skill.lifecycle_state), target)
-        updated = skill.model_copy(update={"lifecycle_state": new_state, "updated_at": datetime.now(UTC)})
+        now = datetime.now(UTC)
+        updated = skill.model_copy(update={"lifecycle_state": new_state, "updated_at": now})
         await self._save(updated, scope)
+
+        # ADR-0020 (+): 승인 결정을 ApprovalWorkflow 레코드로 저장 (감사 추적)
+        await self._repo.save_approval(
+            ApprovalWorkflow(
+                approval_id=uuid4(),
+                skill_id=skill_id,
+                reviewer_id=reviewer_id,
+                status="approved" if approved else "rejected",
+                comment=comment,
+                reviewed_at=now,
+                created_at=now,
+            )
+        )
 
     async def _get(self, skill_id: UUID, scope: SkillScope):
         if scope == SkillScope.PERSONAL:

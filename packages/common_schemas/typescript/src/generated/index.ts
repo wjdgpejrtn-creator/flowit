@@ -220,8 +220,14 @@ export interface WorkflowDraftFrame {
   connections: Array<Record<string, unknown>>;
 }
 
+export interface ChatMessageFrame {
+  frame_type: "chat_message";
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface AgentProtocolResponse {
-  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame>;
+  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame>;
   state_delta: Record<string, unknown>;
   next_action: "continue" | "complete" | "error";
 }
@@ -398,4 +404,4 @@ export interface ValidationErrorResponse {
   errors: Array<ValidationErrorItem>;
 }
 
-export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame;
+export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame;

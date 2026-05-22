@@ -5,6 +5,7 @@ from pydantic import TypeAdapter
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
+    ChatMessageFrame,
     DraftSpecDeltaFrame,
     ErrorFrame,
     RationaleDeltaFrame,
@@ -56,6 +57,19 @@ class TestErrorFrame:
         assert f.frame_type == "error"
 
 
+class TestChatMessageFrame:
+    def test_create_user(self):
+        f = ChatMessageFrame(role="user", content="이메일 자동화 워크플로우 만들어줘")
+        assert f.frame_type == "chat_message"
+        assert f.role == "user"
+        assert f.content == "이메일 자동화 워크플로우 만들어줘"
+
+    def test_create_assistant(self):
+        f = ChatMessageFrame(role="assistant", content="워크플로우 초안을 생성했습니다")
+        assert f.frame_type == "chat_message"
+        assert f.role == "assistant"
+
+
 class TestAnySSEFrameDiscriminator:
     def test_discriminate_from_dict(self):
         adapter = TypeAdapter(AnySSEFrame)
@@ -72,3 +86,10 @@ class TestAnySSEFrameDiscriminator:
             {"frame_type": "error", "code": "E_X", "message": "fail"}
         )
         assert isinstance(frame, ErrorFrame)
+
+    def test_discriminate_chat_message(self):
+        adapter = TypeAdapter(AnySSEFrame)
+        frame = adapter.validate_python(
+            {"frame_type": "chat_message", "role": "user", "content": "hello"}
+        )
+        assert isinstance(frame, ChatMessageFrame)

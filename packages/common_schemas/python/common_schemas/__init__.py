@@ -26,6 +26,7 @@ from .skill_document import SkillDocument
 from .transport import (
     AgentNodeFrame,
     AnySSEFrame,
+    ChatMessageFrame,
     DraftSpecDeltaFrame,
     ErrorFrame,
     IntentResultFrame,
@@ -98,6 +99,7 @@ __all__ = [
     "SessionFrame",
     "SlotFillQuestionFrame",
     # transport — SSE monitoring frames (PR #74, 사이드바 + 캔버스 실시간)
+    "ChatMessageFrame",
     "IntentResultFrame",
     "PipelineStatusFrame",
     "QAMetricFrame",

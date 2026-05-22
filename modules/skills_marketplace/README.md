@@ -49,7 +49,7 @@ from skills_marketplace.application.use_cases import (
 
 | 클래스 | 주요 필드 | 설명 |
 |--------|----------|------|
-| `MarketplacePersonalSkill` | `skill_id`, `owner_user_id`, `name`, `description`, `node_definition_id`, `skill_document_uri`, `embedding`, `promoted_to_team_id`, `created_at`, `updated_at` | 개인 범위 스킬. `ai_agent.PersonalSkill`(메모리)과 도메인 다름 — `Marketplace` 접두사로 충돌 회피 |
+| `MarketplacePersonalSkill` | `skill_id`, `owner_user_id`, `name`, `description`, `node_definition_id`(Optional, ADR-0020 Q1), `node_spec_staging`(Optional `NodeSpecStaging`), `lifecycle_state`, `skill_document_uri`, `embedding`, `promoted_to_team_id`, `created_at`, `updated_at` | 개인 범위 스킬. `ai_agent.PersonalSkill`(메모리)과 도메인 다름 — `Marketplace` 접두사로 충돌 회피. `node_definition_id`는 PUBLISHED 시점에만 채움(그 전엔 `node_spec_staging` 보관, Option B) |
 | `MarketplaceTeamSkill` | + `team_id`, `promoted_from` (← 원본 personal), `promoted_to_company_id` (→ 전사 승격 마킹) | 팀 범위. PromoteToTeam으로 승격 |
 | `MarketplaceCompanySkill` | + `promoted_from` (← 원본 team) | 전사 범위(최종). PromoteToCompany로 승격 |
 
@@ -63,6 +63,7 @@ from skills_marketplace.application.use_cases import (
 |--------|------|
 | `SkillScope` | `str` Enum — `PERSONAL` / `TEAM` / `COMPANY`. 승격 단방향: PERSONAL → TEAM → COMPANY |
 | `SkillState` | `str` Enum — `draft`/`review`/`approved`/`published`/`archived`. 게시 상태 (전이 규칙은 `SkillLifecycle` service) |
+| `NodeSpecStaging` | publish 전 노드 스펙(`category`/`input_schema`/`output_schema`/`risk_level`/`required_connections`/`service_type`) 임시 보관 (ADR-0020 Q1). PUBLISHED 시 이 staging + 스킬 메타 → `NodeDefinition` 생성 |
 
 ### domain/services
 
@@ -75,7 +76,7 @@ from skills_marketplace.application.use_cases import (
 
 | 클래스 | 설명 |
 |--------|------|
-| `ApprovalWorkflow` | 게시 승인 워크플로우 항목 (storage에서 이전). 리뷰어 승인 추적 |
+| `ApprovalWorkflow` | 게시 승인 워크플로우 항목 (storage에서 이전). 리뷰어 승인 추적. `ApproveSkillUseCase`가 `SkillRepository.save_approval`로 레코드 저장 (ADR-0020 + 감사 추적) |
 
 ### domain/entities (지침서)
 
@@ -87,7 +88,7 @@ from skills_marketplace.application.use_cases import (
 
 | 포트 (ABC) | 메서드 | 구현 위치 |
 |------------|--------|----------|
-| `SkillRepository` | `async save_personal/save_team/save_company`, `async get_personal/get_team/get_company`, `async search(query_embedding, scope, limit, include_promoted=False)` | `storage/repositories/` (PR-2d 후속) |
+| `SkillRepository` | `async save_personal/save_team/save_company`, `async get_personal/get_team/get_company`, `async search(query_embedding, scope, limit, include_promoted=False, lifecycle_state=None)`, `async save_approval(approval)` | `storage/repositories/` (PR-2d 후속) |
 | `SkillDocumentStore` | `async save(skill_id, document)`, `async load(skill_id)` | GCS adapter (위치 PR-2d/2e 결정). SkillDocument(markdown) GCS 저장 |
 
 > **Port 소유권** (ADR-0017 + 5/20 박아름·조장 합의): Port 정의는 skills_marketplace(소비 모듈)가 소유, 구현체는 storage가 제공 (auth/nodes_graph 일반 패턴). CLAUDE.md L146 정정 반영.
@@ -96,11 +97,12 @@ from skills_marketplace.application.use_cases import (
 
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
+| `CreateDraftSkillUseCase` | `owner_user_id, name, description, node_spec_staging, embedding?, skill_document_uri? → UUID` | Skills Builder(③)가 추출 결과를 personal DRAFT로 생성 (ADR-0020 ②e). NodeDefinition 미생성(① 무관) — 노드 스펙은 `node_spec_staging` 보관. wizard 확정 단계 / one-shot 공통 백엔드 |
 | `PromoteToTeamUseCase` | `personal_skill_id, team_id → UUID` | 개인 → 팀 승격 (복제: 메타 승계 + DRAFT 재심사 + promoted_from 역추적 + 원본 promoted_to_team_id 마킹) |
 | `PromoteToCompanyUseCase` | `team_skill_id → UUID` | 팀 → 전사 승격 (복제: 동일 정책, 원본 promoted_to_company_id 마킹) |
-| `SearchSkillsUseCase` | `query_embedding, scope, limit → list[Skill]` | 하이브리드 검색 — ai_agent Composer 호출 (repo.search 위임) |
-| `ApproveSkillUseCase` | `skill_id, scope, reviewer_id, approved` | 게시 승인 REVIEW → APPROVED/DRAFT (storage 이전 + SkillRepository ABC 정정) |
-| `PublishSkillUseCase` | `skill_id, scope` | 게시 APPROVED → PUBLISHED (storage 이전) |
+| `SearchSkillsUseCase` | `query_embedding, scope, limit, lifecycle_state=PUBLISHED → list[Skill]` | 하이브리드 검색 — ai_agent Composer 호출 (repo.search 위임). 기본 PUBLISHED만(ADR-0020 (b), 미검토 오염 방지) |
+| `ApproveSkillUseCase` | `skill_id, scope, reviewer_id, approved, comment` | 게시 승인 REVIEW → APPROVED/DRAFT + `ApprovalWorkflow` 레코드 저장(ADR-0020 + 감사 추적) |
+| `PublishSkillUseCase` | `skill_id, scope` (생성자 +`node_def_repo`) | 게시 APPROVED → PUBLISHED + **publish 시 `node_spec_staging` → `NodeDefinition` 생성·upsert + `node_definition_id` 연결**(ADR-0020 Option B/Q1, ②d). scope별 owner/team 격리(personal=owner_user_id, team=team_id, company=전역). nodes_graph `NodeDefinitionRepository` 의존 |
 
 ## 의존 관계
 
