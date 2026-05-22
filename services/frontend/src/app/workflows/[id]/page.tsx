@@ -1,10 +1,16 @@
+'use client';
+
+import { useEffect } from 'react';
+import { use } from 'react';
 import AppBar from '@/components/common/AppBar';
 import StatusPill from '@/components/common/StatusPill';
 import NodeCard from '@/components/common/NodeCard';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import Btn from '@/components/common/Btn';
+import Skel from '@/components/common/Skel';
 import { RiskLevel } from '@common/generated';
 import type { NodeStatus } from '@/types';
+import { useWorkflow } from '@/hooks/useWorkflow';
 
 const TIMELINE: Array<{ time: string; name: string; status: NodeStatus; elapsed: string }> = [
   { time: '09:00:00.124', name: 'Cron Trigger', status: 'succeeded', elapsed: '+12ms' },
@@ -22,8 +28,15 @@ const CANVAS_NODES: Array<{ icon: string; name: string; risk: RiskLevel; status:
   { icon: '#',  name: 'Slack',     risk: RiskLevel.HIGH,   status: 'pending',   x: 432, y: 80 },
 ];
 
-export default function WorkflowDetailPage({ params }: { params: { id: string } }) {
-  void params;
+export default function WorkflowDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const { workflow, loading, error, load } = useWorkflow();
+
+  useEffect(() => {
+    void load(id);
+  }, [id, load]);
+
+  const workflowName = workflow?.name ?? (loading ? '' : '주간 회의록 요약');
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
@@ -33,7 +46,11 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
       <div
         className="flex items-center gap-[10px] px-3 py-2 border-b-[1.5px] border-[var(--color-ink)] bg-[var(--color-surface)]"
       >
-        <span className="font-bold text-[14px]">주간 회의록 요약 ▶</span>
+        {loading ? (
+          <Skel className="w-40 h-4" />
+        ) : (
+          <span className="font-bold text-[14px]">{workflowName} ▶</span>
+        )}
         <StatusPill status="running" />
         <span className="text-[13px] text-[var(--color-ink3)]">
           시작 09:00:00 · 경과 <span className="bg-[var(--color-hl)] px-[3px]">2.4s</span>
@@ -45,6 +62,12 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
         <Btn ghost disabled className="opacity-50 cursor-not-allowed">⏸ 일시정지</Btn>
         <Btn danger disabled className="opacity-50 cursor-not-allowed">⏹ 취소</Btn>
       </div>
+
+      {error && (
+        <div className="px-3 pt-2">
+          <ErrorBanner><span>⚠ {error}</span></ErrorBanner>
+        </div>
+      )}
 
       {/* Progress bar */}
       <div
@@ -71,7 +94,6 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
           className="flex-1 relative border-r-[1.5px] border-[var(--color-ink)] overflow-hidden"
           style={{ background: 'var(--color-paper2)', minHeight: 400 }}
         >
-          {/* SVG edges */}
           <svg
             className="absolute inset-0 w-full h-full pointer-events-none"
             viewBox="0 0 600 320"
@@ -82,17 +104,12 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
                 <path d="M0,0 L8,4 L0,8 z" fill="var(--color-ink)" />
               </marker>
             </defs>
-            {/* Cron → Sheets */}
             <path d="M 134 112 C 175 112, 165 112, 160 112" stroke="var(--color-ink)" strokeWidth="1.5" fill="none" markerEnd="url(#arr)" />
-            {/* Sheets → Aggregate */}
             <path d="M 272 112 C 310 112, 296 112, 296 112" stroke="var(--color-ink)" strokeWidth="1.5" fill="none" markerEnd="url(#arr)" />
-            {/* Aggregate → Slack (dashed) */}
             <path d="M 410 112 C 450 112, 432 112, 432 112" stroke="var(--color-ink)" strokeWidth="1.5" fill="none" strokeDasharray="4 3" markerEnd="url(#arr)" />
-            {/* Aggregate → Drive (dashed) */}
             <path d="M 370 140 C 370 175, 360 190, 296 222" stroke="var(--color-ink)" strokeWidth="1.5" fill="none" strokeDasharray="4 3" markerEnd="url(#arr)" />
           </svg>
 
-          {/* Nodes */}
           {CANVAS_NODES.map((node) => (
             <div
               key={node.name}

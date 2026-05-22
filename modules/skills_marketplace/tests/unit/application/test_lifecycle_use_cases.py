@@ -115,6 +115,7 @@ async def test_approve_records_approval_workflow():
     assert rec.reviewer_id == reviewer
     assert rec.status == "approved"
     assert rec.comment == "ok"
+    assert rec.scope == SkillScope.PERSONAL  # 조장 A안: skill_approvals.scope NOT NULL 충족 (감사 레코드에 scope 명시)
 
 
 @pytest.mark.asyncio

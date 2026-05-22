@@ -76,7 +76,7 @@ from skills_marketplace.application.use_cases import (
 
 | 클래스 | 설명 |
 |--------|------|
-| `ApprovalWorkflow` | 게시 승인 워크플로우 항목 (storage에서 이전). 리뷰어 승인 추적. `ApproveSkillUseCase`가 `SkillRepository.save_approval`로 레코드 저장 (ADR-0020 + 감사 추적) |
+| `ApprovalWorkflow` | 게시 승인 워크플로우 항목 (`approval_id`/`skill_id`/`scope`/`reviewer_id`/`status`/`comment`/`reviewed_at`/`created_at`). `ApproveSkillUseCase`가 `SkillRepository.save_approval`로 저장 (ADR-0020 + 감사). `scope`(SkillScope) = skill_approvals polymorphic 구분 (조장 A안) |
 
 ### domain/entities (지침서)
 

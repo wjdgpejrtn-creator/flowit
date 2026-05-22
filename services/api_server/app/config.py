@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # 환경 분기 — production이면 OpenAPI/docs 차단 + DSN fallback 금지
     environment: Literal["dev", "staging", "production"] = Field(default="dev", alias="ENVIRONMENT")
 
+    # OAuth 콜백 후 브라우저를 돌려보낼 frontend 진입점 (ADR-0021). infra 2단계 apply로 채워진다.
+    frontend_url: str = Field(default="/", alias="FRONTEND_URL")
+
     # REQ-011 infra 미구축 단계에서는 Optional — Phase F(Celery)에서 필수가 됨
     redis_url: str | None = Field(default=None, alias="REDIS_URL")
 

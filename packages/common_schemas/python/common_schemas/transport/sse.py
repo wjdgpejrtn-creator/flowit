@@ -84,6 +84,17 @@ class WorkflowDraftFrame(SSEFrame):
     connections: list[dict[str, Any]]
 
 
+class ChatMessageFrame(SSEFrame):
+    """대화 메시지 본문 — 유저 입력 / AI assistant 응답.
+
+    파이프라인 상태 프레임만으로는 모니터링에서 대화 내용을 재생할 수 없어,
+    SessionFrameStore가 유저 메시지·assistant 응답을 함께 기록하도록 추가된 프레임.
+    """
+    frame_type: Literal["chat_message"] = "chat_message"
+    role: Literal["user", "assistant"]
+    content: str
+
+
 def _get_frame_discriminator(v: Any) -> str:
     if isinstance(v, dict):
         return v.get("frame_type", "")
@@ -103,6 +114,7 @@ AnySSEFrame = Annotated[
         Annotated[IntentResultFrame, Tag("intent_result")],
         Annotated[QAMetricFrame, Tag("qa_metric")],
         Annotated[WorkflowDraftFrame, Tag("workflow_draft")],
+        Annotated[ChatMessageFrame, Tag("chat_message")],
     ],
     Discriminator(_get_frame_discriminator),
 ]
