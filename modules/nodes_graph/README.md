@@ -30,7 +30,7 @@ from nodes_graph.application.use_cases import (
 
 | 클래스 | 주요 필드 | 설명 |
 |--------|----------|------|
-| `NodeDefinition` | `node_id: UUID`, `node_type: str`, `name: str`, `category: str`, `version: str`, `input_schema: dict`, `output_schema: dict`, `parameter_schema: dict`, `risk_level: RiskLevel`, `required_connections: list[str]`, `description: str`, `is_mvp: bool`, `service_type: Optional[str]`, `embedding: Optional[list[float]]` | NodeConfig(REQ-012) 확장. REQ-002가 `risk_level`, `required_connections`, `service_type`을 필드 접근으로 사용 (H-4 합의) |
+| `NodeDefinition` | `node_id: UUID`, `node_type: str`, `name: str`, `category: str`, `version: str`, `input_schema: dict`, `output_schema: dict`, `parameter_schema: dict`, `risk_level: RiskLevel`, `required_connections: list[str]`, `description: str`, `is_mvp: bool`, `service_type: Optional[str]`, `embedding: Optional[list[float]]`, `owner_user_id: Optional[UUID]`, `team_id: Optional[UUID]` | NodeConfig(REQ-012) 확장. REQ-002가 `risk_level`, `required_connections`, `service_type`을 필드 접근으로 사용 (H-4 합의). `owner_user_id`/`team_id`는 ADR-0020 (i) scope 격리(None=company 전역, 기존 53종 비침습) |
 | `NodeMetadata` | `node_id: UUID`, `name: str`, `category: str`, `risk_level: RiskLevel`, `is_mvp: bool` | BaseNode의 메타데이터 (frozen) |
 | `BaseNode` | `metadata: NodeMetadata`, `input_schema: type[TInput]`, `output_schema: type[TOutput]` | 모든 노드의 ABC. `Generic[TInput, TOutput]`. `async process(input: TInput, context: NodeContext) → TOutput` 구현 필요 (`context` = ADR-0018 실행 컨텍스트, common_schemas) |
 
@@ -48,7 +48,7 @@ from nodes_graph.application.use_cases import (
 | `NodeDefinitionRepository` | `async upsert(definition: NodeDefinition) → NodeDefinition` | `storage/repositories/` |
 | | `async list_all(mvp_only: bool = False) → list[NodeDefinition]` | |
 | | `async get_by_id(node_id: UUID) → Optional[NodeDefinition]` | |
-| | `async search_by_embedding(query_embedding: list[float], limit: int = 10) → list[NodeDefinition]` | |
+| | `async search_by_embedding(query_embedding: list[float], limit: int = 10, viewer_user_id: Optional[UUID] = None, viewer_team_ids: Optional[list[UUID]] = None) → list[NodeDefinition]` | viewer scope 격리(ADR-0020 (i)): None=전역만, 지정 시 전역+본인 personal+소속 team |
 | `EmbedderPort` | `async embed(text: str) → list[float]` | 외부 구현 (BGE-M3, 768차원) |
 | | `async embed_batch(texts: list[str]) → list[list[float]]` | |
 

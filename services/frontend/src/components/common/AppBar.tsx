@@ -47,7 +47,7 @@ export default function AppBar({
 
       {/* Nav */}
       <nav className="flex gap-2 flex-1 min-w-0 text-[12px] text-[var(--color-ink3)] overflow-hidden">
-        {navItems.map((item) => {
+        {[...navItems, ...(role === 'Admin' ? [{ label: '관리자', href: '/admin' }] : [])].map((item) => {
           const isCur = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
           return (
             <Link
@@ -90,6 +90,14 @@ export default function AppBar({
       <span className="text-[13px] border border-[var(--color-ink4)] px-[6px] py-[1px] rounded flex-shrink-0">
         🔔 {notifCount}
       </span>
+
+      {/* Logout */}
+      <Link
+        href="/login"
+        className="text-[13px] border border-[var(--color-ink4)] px-[6px] py-[1px] rounded flex-shrink-0 no-underline text-[var(--color-ink3)] hover:text-[var(--color-ink)]"
+      >
+        로그아웃
+      </Link>
     </header>
   );
 }

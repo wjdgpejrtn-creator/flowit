@@ -75,6 +75,10 @@ class NodeDefinition:
     # === REQ-003 확장 필드 ===
     service_type: Optional[str] = None      # REQ-002가 참조 (e.g. "google_workspace")
     embedding: Optional[list[float]] = None # BGE-M3 벡터 (768차원) — 검색용
+
+    # === ADR-0020 (i) scope 격리 ===
+    owner_user_id: Optional[UUID] = None    # None=company 전역(기존 53종) / 값=personal 스킬 소유자
+    team_id: Optional[UUID] = None          # None=비team / 값=team 스킬
 ```
 
 | 필드 | 타입 | REQ-002 참조 | 설명 |
@@ -93,6 +97,8 @@ class NodeDefinition:
 | `is_mvp` | `bool` | | MVP 포함 여부 |
 | `service_type` | `Optional[str]` | YES | 외부 서비스 유형 |
 | `embedding` | `Optional[list[float]]` | | BGE-M3 임베딩 벡터 |
+| `owner_user_id` | `Optional[UUID]` | | ADR-0020 (i) scope: None=company 전역 / 값=personal 소유자 |
+| `team_id` | `Optional[UUID]` | | ADR-0020 (i) scope: None=비team / 값=team |
 
 ---
 
@@ -247,10 +253,20 @@ class NodeDefinitionRepository(ABC):
         ...
     
     @abstractmethod
-    async def search_by_embedding(self, query_embedding: list[float], limit: int = 10) -> list[NodeDefinition]:
+    async def search_by_embedding(
+        self,
+        query_embedding: list[float],
+        limit: int = 10,
+        viewer_user_id: Optional[UUID] = None,
+        viewer_team_ids: Optional[list[UUID]] = None,
+    ) -> list[NodeDefinition]:
         """벡터 유사도 기반 노드 검색.
         AI Agent(REQ-004)의 노드 추천에 사용.
-        pgvector cosine similarity 활용."""
+        pgvector cosine similarity 활용.
+
+        ADR-0020 (i) scope 격리: viewer 지정 시 가시 노드만 반환.
+        필터 = (owner IS NULL AND team IS NULL) OR owner=viewer_user_id OR team IN viewer_team_ids.
+        둘 다 None이면 전역 노드만(비침습 기본). 필터 SQL은 storage 구현."""
         ...
 ```
 
@@ -287,11 +303,19 @@ class SearchNodesUseCase:
     def __init__(self, node_def_repo: NodeDefinitionRepository, embedder: EmbedderPort):
         ...
     
-    async def execute(self, query: str, limit: int = 10) -> list[NodeDefinition]:
+    async def execute(
+        self,
+        query: str,
+        limit: int = 10,
+        viewer_user_id: Optional[UUID] = None,
+        viewer_team_ids: Optional[list[UUID]] = None,
+    ) -> list[NodeDefinition]:
         """
         1. embedder.embed(query) → query_embedding (768차원)
-        2. node_def_repo.search_by_embedding(query_embedding, limit)
+        2. node_def_repo.search_by_embedding(query_embedding, limit, viewer scope)
         3. 결과 반환
+
+        ADR-0020 (i): viewer scope 전달 시 가시 노드만(전역+본인 personal+소속 team).
         """
         ...
 ```

@@ -24,6 +24,8 @@ class NodeDefinitionMapper:
             is_mvp=orm.is_mvp,
             service_type=orm.service_type,
             embedding=list(orm.embedding) if orm.embedding is not None else None,
+            owner_user_id=orm.owner_user_id,
+            team_id=orm.team_id,
         )
 
     @staticmethod
@@ -43,4 +45,6 @@ class NodeDefinitionMapper:
             is_mvp=entity.is_mvp,
             service_type=entity.service_type,
             embedding=entity.embedding,
+            owner_user_id=entity.owner_user_id,
+            team_id=entity.team_id,
         )
