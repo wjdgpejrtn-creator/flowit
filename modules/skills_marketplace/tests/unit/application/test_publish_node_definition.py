@@ -6,6 +6,7 @@ from common_schemas.enums import RiskLevel
 
 from skills_marketplace.application.use_cases.publish_skill_use_case import PublishSkillUseCase
 from skills_marketplace.domain.entities.marketplace_personal_skill import MarketplacePersonalSkill
+from skills_marketplace.domain.entities.marketplace_team_skill import MarketplaceTeamSkill
 from skills_marketplace.domain.value_objects import NodeSpecStaging, SkillScope, SkillState
 
 _NOW = datetime.now(UTC)
@@ -14,12 +15,13 @@ _NOW = datetime.now(UTC)
 class _SkillRepo:
     def __init__(self):
         self.personal: dict = {}
+        self.team: dict = {}
 
     async def get_personal(self, sid):
         return self.personal.get(sid)
 
     async def get_team(self, sid):
-        return None
+        return self.team.get(sid)
 
     async def get_company(self, sid):
         return None
@@ -29,6 +31,7 @@ class _SkillRepo:
         return skill
 
     async def save_team(self, skill):
+        self.team[skill.skill_id] = skill
         return skill
 
     async def save_company(self, skill):
@@ -89,6 +92,26 @@ async def test_publish_personal_creates_node_definition():
     updated = repo.personal[sid]
     assert updated.node_definition_id == nd.node_id
     assert updated.lifecycle_state == SkillState.PUBLISHED
+
+
+@pytest.mark.asyncio
+async def test_publish_team_scope_isolates_team_id():
+    # ADR-0020 ① scope 격리: team 스킬 publish → NodeDefinition.team_id 채움, owner None
+    repo = _SkillRepo()
+    node_def_repo = _NodeDefRepo()
+    sid, tid, author = uuid4(), uuid4(), uuid4()
+    repo.team[sid] = MarketplaceTeamSkill(
+        skill_id=sid, team_id=tid, author_id=author, name="팀 스킬", description="팀용",
+        node_spec_staging=_staging(), lifecycle_state=SkillState.APPROVED,
+        created_at=_NOW, updated_at=_NOW,
+    )
+
+    await PublishSkillUseCase(repo, node_def_repo).execute(sid, SkillScope.TEAM)
+
+    nd = node_def_repo.upserted[0]
+    assert nd.team_id == tid          # team scope → team_id 격리
+    assert nd.owner_user_id is None   # owner 누출 없음
+    assert repo.team[sid].node_definition_id == nd.node_id
 
 
 @pytest.mark.asyncio

@@ -38,7 +38,8 @@ class PublishSkillUseCase:
         changes: dict = {"lifecycle_state": new_state, "updated_at": datetime.now(UTC)}
 
         # Option B: PUBLISHED 시점에만 NodeDefinition 생성 (staging 있고 아직 미연결인 경우)
-        staging = getattr(skill, "node_spec_staging", None)
+        # node_spec_staging은 3종 스킬 모두 보유 → 직접 접근 (조장 리뷰 minor)
+        staging = skill.node_spec_staging
         if staging is not None and skill.node_definition_id is None:
             node_def = self._build_node_definition(skill, scope, staging)
             await self._node_def_repo.upsert(node_def)
