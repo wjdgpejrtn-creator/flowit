@@ -48,6 +48,13 @@ class NodeDefinitionModel(Base):
     is_mvp: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     service_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(768), nullable=True)
+    # ADR-0020 (i) scope 격리 — NULL=company 전역(기존 53종 비침습)
+    owner_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        pg.UUID(as_uuid=True), nullable=True
+    )
+    team_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        pg.UUID(as_uuid=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
