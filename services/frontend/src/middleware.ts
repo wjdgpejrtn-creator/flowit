@@ -5,9 +5,13 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (isPublicPath(pathname)) return NextResponse.next();
 
-  // refresh_token httpOnly 쿠키 없으면 /login으로 리다이렉트
   const refreshToken = req.cookies.get('refresh_token')?.value;
-  if (!refreshToken) return NextResponse.redirect(new URL('/login', req.url));
+  if (!refreshToken) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    return NextResponse.redirect(new URL('/login', req.url));
+  }
 
   return NextResponse.next();
 }
