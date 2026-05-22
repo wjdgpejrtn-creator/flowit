@@ -1,9 +1,8 @@
 """LangGraph Orchestrator (Composer) — Workflow Composer 어댑터 레이어.
 
 spec §3.2 Workflow Composer 내부 StateGraph 구현. LangGraph는 adapters/에만 존재.
-17개 노드:
-  security → intent → skill_suggest →
-    [skill_found]  END (다음 턴 사용자 응답 대기)
+16개 노드:
+  security → intent →
     [clarify]      consultant → slot_fill (loop)
     [draft/refine] retriever → drafter → validator → qa_evaluator
                                                      score<8 → qa_retry → drafter
@@ -79,8 +78,6 @@ _QA_RETRY = "qa_retry"
 _QA_FORCE = "qa_force"
 _SLOT_LOOP = "slot_loop"
 _SLOT_DONE = "slot_done"
-_SKILL_FOUND = "skill_found"
-_SKILL_NONE = "skill_none"
 
 # 실행 결과 폴링 설정
 _EXEC_POLL_INTERVAL_SEC = 3
@@ -110,8 +107,6 @@ class _State(TypedDict):
     qa_feedback: str
     collected_frames: Annotated[list[AnySSEFrame], operator.add]
     error: str | None
-    # skill_suggest 필드
-    skill_suggestion_done: bool             # skill_suggest_node에서 스킬 제안 완료 시 True
     # handoff 이후 필드
     saved_workflow_id: UUID | None          # handoff_node에서 WorkflowRepository.save() 결과
     # 실행 검증 필드
@@ -206,7 +201,6 @@ class LangGraphOrchestrator:
             "qa_feedback": "",
             "collected_frames": [],
             "error": None,
-            "skill_suggestion_done": False,
             "saved_workflow_id": None,
             "execution_id": None,
             "execution_result": None,
@@ -345,65 +339,6 @@ class LangGraphOrchestrator:
             "collected_frames": [
                 IntentResultFrame(intent=result.intent, entities=result.analyzed_entities),
                 PipelineStatusFrame(service_name="intent", status="completed", elapsed_ms=elapsed),
-            ],
-        }
-
-    # 3.5. skill_suggest_node — intent 직후 커스텀 스킬 검색 및 제안
-    async def _skill_suggest_node(self, state: _State) -> dict:
-        """PERSONAL → COMPANY 순으로 커스텀 스킬 검색. 스킬 없거나 미주입 시 fall-through."""
-        if self._skill_search is None or self._embedder is None:
-            return {"skill_suggestion_done": False}
-
-        spec = state.get("draft_spec")
-        query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
-
-        try:
-            query_embedding = await self._embedder.embed(query)
-            skill_results = await self._skill_search.execute(
-                query_embedding=query_embedding,
-                scope=SkillScope.PERSONAL,
-                limit=3,
-            )
-            if not skill_results:
-                skill_results = await self._skill_search.execute(
-                    query_embedding=query_embedding,
-                    scope=SkillScope.COMPANY,
-                    limit=3,
-                )
-        except Exception as exc:
-            _logger.warning("skill_suggest 검색 실패 (fall-through): %s", exc)
-            return {"skill_suggestion_done": False}
-
-        if not skill_results:
-            return {"skill_suggestion_done": False}
-
-        skill_infos = []
-        for skill in skill_results[:3]:
-            try:
-                node_cfg = await self._node_registry.get_schema(skill.node_definition_id)
-                skill_infos.append({
-                    "skill_id": str(skill.node_definition_id),
-                    "name": node_cfg.name or str(skill.node_definition_id),
-                    "description": getattr(node_cfg, "description", ""),
-                })
-            except Exception:
-                continue
-
-        if not skill_infos:
-            return {"skill_suggestion_done": False}
-
-        names = [s["name"] for s in skill_infos]
-        return {
-            "skill_suggestion_done": True,
-            "collected_frames": [
-                ResultFrame(
-                    intent="skill_suggestion",
-                    payload={
-                        "skills": skill_infos,
-                        "message": f"관련 스킬을 찾았어요! {', '.join(names)} — 사용하시겠어요?",
-                        "session_id": str(state["session_id"]),
-                    },
-                )
             ],
         }
 
@@ -811,17 +746,6 @@ class LangGraphOrchestrator:
             return _CLARIFY
         return _DRAFT  # draft / refine
 
-    @staticmethod
-    def _route_after_skill_suggest(state: _State) -> str:
-        """스킬 제안 완료 시 END, 아니면 intent 기반 분기."""
-        if state.get("skill_suggestion_done"):
-            return _SKILL_FOUND
-        intent = state.get("intent") or IntentType.CLARIFY
-        if intent == IntentType.PROPOSE:
-            return _PROPOSE
-        if intent == IntentType.CLARIFY:
-            return _CLARIFY
-        return _DRAFT
 
     @staticmethod
     def _route_slot(state: _State) -> str:
@@ -850,11 +774,10 @@ class LangGraphOrchestrator:
     def _build(self):
         graph: StateGraph = StateGraph(_State)
 
-        # 17 nodes
+        # 16 nodes
         graph.add_node("compress", self._compress_node)
         graph.add_node("security", self._security_node)
         graph.add_node("intent", self._intent_node)
-        graph.add_node("skill_suggest", self._skill_suggest_node)
         graph.add_node("consultant", self._consultant_node)
         graph.add_node("slot_fill", self._slot_fill_node)
         graph.add_node("retriever", self._retriever_node)
@@ -877,13 +800,12 @@ class LangGraphOrchestrator:
             {"compress": "compress", "security": "security"},
         )
 
-        # security → intent → skill_suggest → branch
+        # security → intent → branch
         graph.add_edge("security", "intent")
-        graph.add_edge("intent", "skill_suggest")
         graph.add_conditional_edges(
-            "skill_suggest",
-            self._route_after_skill_suggest,
-            {_SKILL_FOUND: END, _CLARIFY: "consultant", _DRAFT: "retriever", _PROPOSE: "promote"},
+            "intent",
+            self._route_intent,
+            {_CLARIFY: "consultant", _DRAFT: "retriever", _PROPOSE: "promote"},
         )
 
         # clarify branch: consultant → slot_fill → (loop or retriever)
