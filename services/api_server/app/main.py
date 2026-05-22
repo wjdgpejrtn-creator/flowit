@@ -24,6 +24,7 @@ from app.routers import auth as auth_router
 from app.routers import exec_control as exec_control_router
 from app.routers import health
 from app.routers import nodes as nodes_router
+from app.routers import skills as skills_router
 from app.routers import workflows as workflows_router
 
 logger = logging.getLogger(__name__)
@@ -84,4 +85,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(nodes_router.router)
     app.include_router(workflows_router.router)
     app.include_router(exec_control_router.router)
+    app.include_router(skills_router.router)
     return app
