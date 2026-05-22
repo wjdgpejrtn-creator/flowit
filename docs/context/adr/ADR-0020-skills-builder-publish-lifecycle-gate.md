@@ -1,6 +1,6 @@
 # ADR-0020: Skills Builder 산출물 게시 lifecycle 게이트 + scope별 진입 (Option B)
 
-- **Status**: Accepted (PR #128 머지 + 조장 협의 — GAP 2 (i) 확정, 2026-05-21)
+- **Status**: Accepted (본 PR #132에서 Accept — #128은 Proposed 상태로 머지됨. GAP 2 (i) 확정, 2026-05-21)
 - **Date**: 2026-05-21
 - **Deciders**: @dhwang0803-glitch (조장, REQ-001/008/009) + @billionaireahreum (박아름, REQ-002/003/004 Skills Builder/013 skills_marketplace)
 - **Tags**: area/skills_builder, area/skills_marketplace, area/nodes_graph, area/api_server, lifecycle, catalog
