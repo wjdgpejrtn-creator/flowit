@@ -121,5 +121,6 @@ Downstream (이 모듈에 의존):
 |------|------|------|
 | 뼈대 (깊이 1) | 구조 + Port ABC + entity + README | ✅ PR #98 |
 | PR-2d | use case 구현 + storage 게시 도메인 복사 + 정석 정정 | ✅ PR #98 흡수 |
-| storage 정리 (조장) | storage/marketplace/ 원본 삭제 + pg_skill_repository → SkillRepository ABC 구현 | ⏳ |
-| PR-2e | 3계층 schema 마이그레이션 (DB DDL — 카톡 협의) | ⏳ |
+| SkillRepository ABC 구현 (조장) | `PgMarketplaceSkillRepository` 3-scope 신규 (storage/repositories) | ✅ PR #147 |
+| PR-2e | 3계층 schema 마이그레이션 (`020_skills_marketplace_staging.sql`) | ✅ PR #147 |
+| storage/marketplace/ 원본 삭제 (조장) | 구 게시 도메인 복사본 정리 | ⏳ |

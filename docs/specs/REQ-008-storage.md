@@ -75,6 +75,7 @@
 | `PgDocumentRepository` | `doc_parser/domain/ports/` | `save(document: DocumentBlock) → UUID`, `save_chunks(chunks: list[Chunk]) → None`, `save_quality_log(result, document_id) → None` |
 | `PgToolExecutionRepository` | `toolset/domain/ports/ToolExecutionRepository` | `save(record: ToolExecutionRecord) → None`, `find_by_tool(tool_name, limit) → list[ToolExecutionRecord]` |
 | `PgSkillRepository` | 자체 정의 | `upsert(skill) → Skill`, `get_by_id(skill_id) → Skill`, `list(offset, limit) → list[Skill]`, `search(query, embedding, limit) → list[Skill]` (하이브리드: 0.4×FTS + 0.6×vector) |
+| `PgMarketplaceSkillRepository` | `skills_marketplace/domain/ports/SkillRepository` | `save/get_personal·team·company`, `search(query_embedding, scope, limit, include_promoted, lifecycle_state)`, `save_approval(approval)` (ADR-0020 ② 3계층, PR #147 — 구 `PgSkillRepository`와 별개) |
 
 ### Marketplace 하위 도메인
 
