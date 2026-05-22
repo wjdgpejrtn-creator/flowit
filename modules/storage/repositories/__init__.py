@@ -2,6 +2,7 @@ from .pg_agent_memory_repository import PgAgentMemoryRepository
 from .pg_credential_repository import PgCredentialRepository
 from .pg_document_repository import PgDocumentRepository
 from .pg_execution_repository import PgExecutionRepository
+from .pg_marketplace_skill_repository import PgMarketplaceSkillRepository
 from .pg_node_definition_repository import PgNodeDefinitionRepository
 from .pg_oauth_repository import PgOAuthRepository
 from .pg_session_repository import PgSessionRepository
@@ -15,6 +16,7 @@ __all__ = [
     "PgCredentialRepository",
     "PgDocumentRepository",
     "PgExecutionRepository",
+    "PgMarketplaceSkillRepository",
     "PgNodeDefinitionRepository",
     "PgOAuthRepository",
     "PgSessionRepository",
