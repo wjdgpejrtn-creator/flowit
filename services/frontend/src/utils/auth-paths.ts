@@ -1,4 +1,4 @@
-export const PUBLIC_PATHS = ['/login', '/api/auth'];
+export const PUBLIC_PATHS = ['/login', '/api/v1/auth'];
 
 export const isPublicPath = (pathname: string) =>
   PUBLIC_PATHS.some(

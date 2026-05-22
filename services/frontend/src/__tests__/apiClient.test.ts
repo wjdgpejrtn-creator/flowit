@@ -28,14 +28,14 @@ describe('apiFetch — 401 → refresh → retry', () => {
   it('retries once after 401 when refresh succeeds', async () => {
     mockFetch
       .mockResolvedValueOnce(makeRes('', 401))           // 원본 요청 401
-      .mockResolvedValueOnce(makeRes('{}', 200))         // /api/auth/refresh 성공
+      .mockResolvedValueOnce(makeRes('{}', 200))         // /api/v1/auth/refresh 성공
       .mockResolvedValueOnce(makeRes('{"ok":true}', 200)); // 재시도 성공
 
     const res = await apiFetch('/api/test');
 
     expect(res.status).toBe(200);
     expect(mockFetch).toHaveBeenCalledTimes(3);
-    expect(mockFetch.mock.calls[1][0]).toBe('/api/auth/refresh');
+    expect(mockFetch.mock.calls[1][0]).toBe('/api/v1/auth/refresh');
   });
 
   it('throws Session expired when refresh also fails', async () => {

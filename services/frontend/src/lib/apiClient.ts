@@ -1,6 +1,6 @@
 async function _tryRefresh(): Promise<boolean> {
   try {
-    const res = await fetch('/api/auth/refresh', { method: 'POST' });
+    const res = await fetch('/api/v1/auth/refresh', { method: 'POST' });
     return res.ok;
   } catch {
     return false;

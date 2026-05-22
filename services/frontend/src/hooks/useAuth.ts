@@ -9,14 +9,18 @@ export function useAuth() {
 
   const initFromRefreshToken = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch('/api/auth/refresh', { method: 'POST' });
+      // BFF 래퍼 제거 — 백엔드 /api/v1/auth/refresh 직접 호출 (ADR-0021)
+      // 쿠키는 백엔드가 Set-Cookie로 갱신, 응답 본문은 { expires_in } 뿐
+      const res = await fetch('/api/v1/auth/refresh', { method: 'POST' });
       if (!res.ok) return false;
+
+      // PermissionSource 반환 — email/dept 미제공 (백엔드 /auth/me 확장 결정 대기)
       const user = await me();
       setAuth({
         role: user.role === 'Admin' ? 'Admin' : 'User',
         userId: user.user_id,
-        userName: user.email.split('@')[0],
-        dept: user.dept ?? '',
+        userName: '',          // 백엔드 /auth/me에 email 추가 후 교체 예정
+        dept: user.department_id,
       });
       return true;
     } catch {
@@ -30,7 +34,8 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    // BFF 래퍼 제거 — 백엔드 /api/v1/auth/logout 직접 호출 (ADR-0021, 서버 세션 revoke 포함)
+    await fetch('/api/v1/auth/logout', { method: 'POST' });
     clearAuth();
     window.location.href = '/login';
   }, [clearAuth]);
