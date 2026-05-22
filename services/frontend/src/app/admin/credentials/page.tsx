@@ -1,14 +1,14 @@
 import Btn from '@/components/common/Btn';
 
 const CREDENTIALS = [
-  { name: 'Slack · marketing-bot', dept: '마케팅', calls: '144', expires: '12.4일',  risk: undefined },
-  { name: 'Drive · sales',          dept: '영업',   calls: '37',  expires: '5일 ⚠',  risk: 'med' as const },
-  { name: 'Gmail · hr-bot',         dept: '인사',   calls: '12',  expires: '21일',    risk: undefined },
-  { name: 'Notion · OKR',           dept: '마케팅', calls: '89',  expires: '7일',     risk: 'med' as const },
-  { name: 'ERP · finance',          dept: '재무',   calls: '3',   expires: '-2일 ✕',  risk: 'high' as const },
+  { name: 'Slack · marketing-bot', dept: '마케팅', calls: '144', expires: '12.4일',  urgency: undefined },
+  { name: 'Drive · sales',          dept: '영업',   calls: '37',  expires: '5일 ⚠',  urgency: 'med' as const },
+  { name: 'Gmail · hr-bot',         dept: '인사',   calls: '12',  expires: '21일',    urgency: undefined },
+  { name: 'Notion · OKR',           dept: '마케팅', calls: '89',  expires: '7일',     urgency: 'med' as const },
+  { name: 'ERP · finance',          dept: '재무',   calls: '3',   expires: '-2일 ✕',  urgency: 'high' as const },
 ];
 
-const RISK_COLOR: Record<string, string> = {
+const URGENCY_COLOR: Record<string, string> = {
   med:  'var(--color-risk-med)',
   high: 'var(--color-risk-high)',
 };
@@ -69,7 +69,7 @@ export default function AdminCredentialsPage() {
               className="text-[13px]"
               style={{
                 flex: 1,
-                color: cred.risk ? RISK_COLOR[cred.risk] : 'var(--color-ink)',
+                color: cred.urgency ? URGENCY_COLOR[cred.urgency] : 'var(--color-ink)',
               }}
             >
               {cred.expires}
