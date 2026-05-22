@@ -2,9 +2,9 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from common_schemas.exceptions import ValidationError
+from common_schemas.exceptions import NotFoundError, ValidationError
 
-from skills_marketplace.application.use_cases import ApproveSkillUseCase, PublishSkillUseCase
+from skills_marketplace.application.use_cases import ApproveSkillUseCase, PublishSkillUseCase, SubmitSkillUseCase
 from skills_marketplace.domain.entities import MarketplacePersonalSkill
 from skills_marketplace.domain.value_objects import SkillScope, SkillState
 
@@ -139,3 +139,34 @@ async def test_publish_from_draft_raises_invalid_transition():
     # DRAFT → PUBLISHED 직접 전이 금지
     with pytest.raises(ValidationError):
         await PublishSkillUseCase(repo, _NodeDefRepo()).execute(sid, SkillScope.PERSONAL)
+
+
+@pytest.mark.asyncio
+async def test_submit_draft_to_review():
+    # ADR-0020 Q4 (PR #150 위임): DRAFT → REVIEW 검토 제출
+    repo = _InMemorySkillRepo()
+    sid = uuid4()
+    await repo.save_personal(_personal(sid, SkillState.DRAFT))
+
+    await SubmitSkillUseCase(repo).execute(sid, SkillScope.PERSONAL)
+
+    updated = await repo.get_personal(sid)
+    assert updated.lifecycle_state == SkillState.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_submit_published_raises_invalid_transition():
+    repo = _InMemorySkillRepo()
+    sid = uuid4()
+    await repo.save_personal(_personal(sid, SkillState.PUBLISHED))
+
+    # PUBLISHED → REVIEW 전이 금지 (DRAFT에서만 submit 가능)
+    with pytest.raises(ValidationError):
+        await SubmitSkillUseCase(repo).execute(sid, SkillScope.PERSONAL)
+
+
+@pytest.mark.asyncio
+async def test_submit_not_found_raises():
+    repo = _InMemorySkillRepo()
+    with pytest.raises(NotFoundError):
+        await SubmitSkillUseCase(repo).execute(uuid4(), SkillScope.PERSONAL)
