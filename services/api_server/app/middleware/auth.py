@@ -10,7 +10,8 @@ API_SERVER_PUBLIC_PATHS: frozenset[str] = frozenset({
     "/api/v1/openapi.json",
     "/api/v1/auth/authorize",
     "/api/v1/auth/callback",  # Google OAuth redirect_uri 수신
-    "/api/v1/auth/refresh",   # refresh token으로 새 access 발급 — Bearer 없이 허용
+    "/api/v1/auth/refresh",   # refresh token 쿠키로 새 access 발급 — access 만료 후에도 호출
+    "/api/v1/auth/logout",    # 쿠키 clear — access token 만료/부재 시에도 로그아웃 가능해야 함
 })
 
 

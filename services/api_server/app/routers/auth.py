@@ -4,20 +4,25 @@ import logging
 import secrets
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from pydantic import BaseModel
-
+from auth.adapters.jwt_adapter import JWTAdapter
 from auth.adapters.oauth.google_oauth_client import GoogleOAuthClient
 from auth.application.use_cases.authenticate_use_case import AuthenticateUseCase
 from auth.application.use_cases.refresh_token_use_case import RefreshTokenUseCase
-from auth.domain.value_objects.token_pair import TokenPair
+from auth.domain.ports.session_repository import SessionRepository
 from common_schemas import PermissionSource
+from common_schemas.exceptions import AuthorizationError
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel
 
 from app.config import Settings
+from app.cookies import ACCESS_COOKIE, REFRESH_COOKIE, clear_auth_cookies, set_auth_cookies
 from app.dependencies.auth import (
     get_authenticate_use_case,
     get_google_oauth,
+    get_jwt_adapter,
     get_refresh_token_use_case,
+    get_session_repository,
 )
 from app.dependencies.clients import get_redis
 from app.dependencies.permission import get_permission_source
@@ -33,17 +38,13 @@ OAUTH_STATE_KEY_PREFIX = "oauth_state:"
 OAUTH_STATE_TTL_SECONDS = 600
 
 
-class LoginRequest(BaseModel):
-    code: str
-
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
 class AuthorizeResponse(BaseModel):
     authorization_url: str
     state: str
+
+
+class RefreshResponse(BaseModel):
+    expires_in: int
 
 
 @router.get("/authorize", response_model=AuthorizeResponse)
@@ -81,45 +82,87 @@ async def _consume_oauth_state(state: str | None, redis: aioredis.Redis | None, 
         raise HTTPException(status_code=401, detail="Invalid or expired OAuth state (CSRF check)")
 
 
-@router.post("/login", response_model=TokenPair)
-async def login(
-    req: LoginRequest = Body(...),
-    use_case: AuthenticateUseCase = Depends(get_authenticate_use_case),
-) -> TokenPair:
-    try:
-        return await use_case.execute(req.code)
-    except Exception as exc:
-        # Google OAuth 실패(invalid code) 등은 401로 표면화
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {exc}") from exc
-
-
-@router.get("/callback", response_model=TokenPair)
+@router.get("/callback")
 async def callback(
     code: str = Query(..., description="Google OAuth authorization code"),
     state: str | None = Query(None, description="CSRF state (authorize에서 발급)"),
     use_case: AuthenticateUseCase = Depends(get_authenticate_use_case),
     redis: aioredis.Redis | None = Depends(get_redis),
     settings: Settings = Depends(get_settings),
-) -> TokenPair:
-    """Google OAuth redirect_uri 수신 endpoint. dev/staging에서 브라우저로 직접 호출하여
-    JSON으로 access/refresh 토큰을 표시. 프로덕션에서는 프론트엔드가 받아서 cookie/storage에
-    저장 후 워크플로 페이지로 redirect하는 것이 일반적.
+) -> RedirectResponse:
+    """Google OAuth redirect_uri 수신 endpoint (ADR-0021 A안).
+
+    code를 토큰으로 교환한 뒤 access/refresh를 HttpOnly 쿠키로 굽고 frontend(`FRONTEND_URL`)로
+    302 redirect한다. 토큰이 브라우저 JS에 노출되지 않으므로 XSS 내성을 갖는다.
 
     state 검증: authorize에서 발급된 토큰을 Redis GETDEL로 소진. 누락/만료 시 401 (CSRF).
     """
     await _consume_oauth_state(state, redis, settings)
     try:
-        return await use_case.execute(code)
+        tokens = await use_case.execute(code)
     except Exception as exc:
         raise HTTPException(status_code=401, detail=f"Authentication failed: {exc}") from exc
 
+    response = RedirectResponse(url=settings.frontend_url, status_code=302)
+    set_auth_cookies(response, tokens, settings)
+    return response
 
-@router.post("/refresh", response_model=TokenPair)
+
+@router.post("/refresh", response_model=RefreshResponse)
 async def refresh(
-    req: RefreshRequest = Body(...),
+    request: Request,
     use_case: RefreshTokenUseCase = Depends(get_refresh_token_use_case),
-) -> TokenPair:
-    return await use_case.execute(req.refresh_token)
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """`refresh_token` 쿠키로 새 토큰 쌍을 발급하고 쿠키를 재set한다 (ADR-0021).
+
+    토큰은 응답 본문에 싣지 않는다 — 본문은 frontend가 다음 갱신을 예약할 수 있도록 `expires_in`만 반환.
+    """
+    refresh_token = request.cookies.get(REFRESH_COOKIE)
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Missing refresh token cookie")
+
+    try:
+        tokens = await use_case.execute(refresh_token)
+    except AuthorizationError as exc:
+        # 만료·무효 refresh 토큰 / 만료된 session = 재인증이 필요한 정상 케이스 → 401.
+        # /callback과 달리 외부 호출이 없으므로 AuthorizationError만 잡고, 그 외 예외(DB 장애 등)는
+        # 500으로 전파해 모니터링에 실제 장애가 드러나도록 둔다.
+        raise HTTPException(status_code=401, detail="Refresh token invalid or expired") from exc
+
+    response = JSONResponse({"expires_in": tokens.expires_in})
+    set_auth_cookies(response, tokens, settings)
+    return response
+
+
+@router.post("/logout", status_code=204)
+async def logout(
+    request: Request,
+    session_repo: SessionRepository = Depends(get_session_repository),
+    jwt_adapter: JWTAdapter = Depends(get_jwt_adapter),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """인증 쿠키를 제거하고 서버측 세션을 revoke한다 (ADR-0021).
+
+    refresh_token(없으면 access_token) 쿠키에서 session_hash를 복원해 세션을 revoke한다.
+    토큰이 만료/손상돼도 로그아웃 자체는 성공해야 하므로 revoke는 best-effort.
+    """
+    token = request.cookies.get(REFRESH_COOKIE) or request.cookies.get(ACCESS_COOKIE)
+    if token:
+        try:
+            payload = jwt_adapter.decode(token)
+            session_hash = payload.get("session_hash")
+            if session_hash:
+                session = await session_repo.find_by_hash(session_hash)
+                if session is not None:
+                    await session_repo.revoke(session.session_id)
+        except Exception:
+            # 만료/손상 토큰 — 서버측 revoke 불가하나 쿠키 정리는 계속 진행
+            logger.info("logout: 세션 revoke 생략 (토큰 디코드 실패) — 쿠키만 정리")
+
+    response = Response(status_code=204)
+    clear_auth_cookies(response, settings)
+    return response
 
 
 @router.get("/me", response_model=PermissionSource)
