@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useAuthStore } from '@/stores/authStore';
+import { useAuth } from '@/hooks/useAuth';
 
 interface NavItem {
   label: string;
@@ -25,13 +27,19 @@ const DEFAULT_NAV: NavItem[] = [
 ];
 
 export default function AppBar({
-  dept = '마케팅팀',
-  userName = '김주임',
-  role = 'User',
+  dept: deptProp,
+  userName: userNameProp,
+  role: roleProp,
   notifCount = 0,
   navItems = DEFAULT_NAV,
 }: AppBarProps) {
+  const store = useAuthStore();
+  const { logout } = useAuth();
   const pathname = usePathname();
+
+  const dept = deptProp ?? store.dept ?? '';
+  const userName = userNameProp ?? store.userName ?? '사용자';
+  const role = roleProp ?? store.role;
 
   return (
     <header
@@ -70,7 +78,7 @@ export default function AppBar({
       <span
         className="text-[13px] text-[var(--color-ink3)] border border-[var(--color-ink4)] px-[6px] py-[1px] rounded flex-shrink-0 whitespace-nowrap"
       >
-        📍 {dept}
+        📍 {dept || '—'}
       </span>
 
       {/* User badge */}
@@ -92,12 +100,12 @@ export default function AppBar({
       </span>
 
       {/* Logout */}
-      <Link
-        href="/login"
-        className="text-[13px] border border-[var(--color-ink4)] px-[6px] py-[1px] rounded flex-shrink-0 no-underline text-[var(--color-ink3)] hover:text-[var(--color-ink)]"
+      <button
+        onClick={logout}
+        className="text-[13px] border border-[var(--color-ink4)] px-[6px] py-[1px] rounded flex-shrink-0 bg-transparent cursor-pointer text-[var(--color-ink3)] hover:text-[var(--color-ink)]"
       >
         로그아웃
-      </Link>
+      </button>
     </header>
   );
 }
