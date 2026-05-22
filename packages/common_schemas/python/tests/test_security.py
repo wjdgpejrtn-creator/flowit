@@ -19,6 +19,18 @@ class TestPermissionSource:
         assert ps.role == "Admin"
         assert len(ps.granted_scopes) == 2
 
+    def test_manager_roles_accepted(self):
+        for role in ("team_manager", "company_manager"):
+            ps = PermissionSource(
+                user_id=uuid4(),
+                role=role,
+                department_id=uuid4(),
+                session_id=uuid4(),
+                granted_scopes=["Private"],
+                risk_ceiling="High",
+            )
+            assert ps.role == role
+
     def test_invalid_role(self):
         with pytest.raises(ValidationError):
             PermissionSource(

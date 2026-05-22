@@ -389,7 +389,7 @@ export interface ParseCoverage {
 
 export interface PermissionSource {
   user_id: string;
-  role: "User" | "Admin";
+  role: "User" | "team_manager" | "company_manager" | "Admin";
   department_id: string;
   session_id: string;
   current_workflow_id?: string | null;

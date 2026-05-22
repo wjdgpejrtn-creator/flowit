@@ -7,6 +7,22 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.12.0] - 2026-05-23
+
+### Changed — `PermissionSource.role`에 매니저 역할 2종 추가 (스킬 마켓플레이스 RBAC, PR #150 위임2)
+- `security.py`: `PermissionSource.role` Literal `["User", "Admin"]` → `["User", "team_manager", "company_manager", "Admin"]`. 스킬 마켓플레이스 team/company scope 승인 인가용 — `SkillApprovalPolicy`가 `actor.role`로 승인 권한을 판정한다.
+- 짝 변경: `auth` `UserRole` Literal, `users.role` CHECK (`database/schemas/021_user_roles_expand.sql`). 세 곳이 동일 4종 집합을 공유한다.
+
+### Changed
+- TypeScript codegen: `PermissionSource.role` union이 4종으로 `generated/index.ts`에 자동 반영.
+- `test_security.py` — `team_manager`/`company_manager` 허용 검증 1건 추가.
+
+### Symbols
+- 66 → 66 (신규 top-level export 없음 — 기존 `PermissionSource`의 Literal widening만).
+
+### Migration notes
+- 순수 additive (Literal widening) — 기존 `"User"`/`"Admin"` 값은 그대로 유효. `PermissionSource.role`를 분기하는 소비자는 신규 2종 케이스 추가를 권장하나, 미처리해도 기존 동작은 깨지지 않는다.
+
 ## [0.11.0] - 2026-05-22
 
 ### Added — 파싱 품질/청킹 타입 6종 SSOT 이관 (REQ-006 doc_parser → common_schemas)

@@ -7,7 +7,7 @@ from common_schemas.types import UtcDatetime
 from pydantic import BaseModel
 
 
-UserRole = Literal["User", "Admin"]
+UserRole = Literal["User", "team_manager", "company_manager", "Admin"]
 
 
 class User(BaseModel):
