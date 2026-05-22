@@ -33,6 +33,7 @@ from common_schemas.enums import IntentType, RiskLevel
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
+    ChatMessageFrame,
     DraftSpecDeltaFrame,
     ErrorFrame,
     IntentResultFrame,
@@ -207,7 +208,9 @@ class LangGraphOrchestrator:
     ) -> AsyncGenerator[SSEFrame, None]:
         session_frame = SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
         yield session_frame
-        all_frames: list[AnySSEFrame] = [session_frame]
+        user_chat_frame = ChatMessageFrame(role="user", content=message)
+        yield user_chat_frame
+        all_frames: list[AnySSEFrame] = [session_frame, user_chat_frame]
 
         initial: _State = {
             "session_id": session_id,
@@ -388,10 +391,29 @@ class LangGraphOrchestrator:
             return {"error": f"툴 실행 실패({action.tool_name}): {exc}", "agent_done": True, "agent_iterations": iterations}
 
         tool_frames = updates.get("collected_frames", [])
+
+        # 사용자에게 보이는 AI 응답을 ChatMessageFrame으로 기록
+        assistant_chat: ChatMessageFrame | None = None
+        if action.tool_name == "ask_clarification":
+            for f in tool_frames:
+                if isinstance(f, SlotFillQuestionFrame):
+                    assistant_chat = ChatMessageFrame(role="assistant", content=f.question)
+                    break
+        elif action.tool_name == "confirm_result":
+            for f in tool_frames:
+                if isinstance(f, ResultFrame):
+                    summary = json.dumps(f.payload, ensure_ascii=False)[:300]
+                    assistant_chat = ChatMessageFrame(role="assistant", content=summary)
+                    break
+
+        pre_frames: list[AnySSEFrame] = [AgentNodeFrame(agent_node_name=action.tool_name)]
+        if assistant_chat:
+            pre_frames.append(assistant_chat)
+
         return {
             **updates,
             "agent_iterations": iterations,
-            "collected_frames": [AgentNodeFrame(agent_node_name=action.tool_name)] + tool_frames,
+            "collected_frames": pre_frames + tool_frames,
         }
 
     @staticmethod
