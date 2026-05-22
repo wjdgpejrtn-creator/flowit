@@ -7,6 +7,23 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.11.0] - 2026-05-22
+
+### Added — 파싱 품질/청킹 타입 6종 SSOT 이관 (REQ-006 doc_parser → common_schemas)
+- `document.py`: `WarningInfo`, `QualityMetrics`, `ParseCoverage`, `QualityGateResult`, `Chunk`, `ChunkingStrategy` — `doc_parser.domain.entities`에서 이관. doc_parser가 자체 정의하던 타입을 common_schemas SSOT로 단일화 (storage `DocumentRepositoryPort`/`PgDocumentRepository`, ai_agent가 경계를 넘어 공유).
+- `ParseCoverage`는 CLAUDE.md SSOT 표 누락분 — `QualityGateResult.coverage`의 타입이라 함께 이관(없으면 `QualityGateResult` 정의 불가).
+
+### Changed
+- TypeScript codegen: 6종 인터페이스 `generated/index.ts`에 자동 반영.
+- `test_document.py` — 6종 단위 테스트 13건 추가 (frozen/default/Literal 검증).
+- doc_parser `chunk.py`/`quality.py`/`warning.py`는 common_schemas 재노출 shim으로 전환 — `doc_parser.domain.entities.*` 기존 import 무변경 동작. `QualityConfig`/`ElapsedDetail`은 doc_parser 내부 타입이라 잔류.
+
+### Symbols
+- 60 → 66 (`WarningInfo`, `QualityMetrics`, `ParseCoverage`, `QualityGateResult`, `Chunk`, `ChunkingStrategy` 신규 top-level export)
+
+### Migration notes
+- 순수 additive — 기존 타입/필드 무변경. doc_parser 측은 shim 유지로 기존 import 경로(`from doc_parser.domain.entities...`) 그대로 동작. 신규 코드는 `from common_schemas import ...` 권장.
+
 ## [0.10.0] - 2026-05-22
 
 ### Added — `ChatMessageFrame` SSE 프레임 (REQ-004 실시간 모니터링 요청)
