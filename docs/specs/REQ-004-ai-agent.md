@@ -192,7 +192,7 @@ LLM 자유 생성 산업 default는 v2(Sprint 4+) 이연.
 | `GCSSessionFrameStore` 🆕 | 세션별 SSE 프레임 전체를 GCS에 저장 (`sessions/{user_id}/{session_id}.json`) + 사용자별 인덱스 관리 (`sessions/{user_id}/index.json`, 최대 100건). 모니터링 히스토리 재생에 사용 | `SessionFrameStore` | `google-cloud-storage` (asyncio.to_thread 래핑) | composer |
 | `NodeRegistryAdapter` | nodes_graph의 `NodeDefinitionRepository`를 감싸는 Facade | `NodeRegistry` | `nodes_graph.domain.ports.NodeDefinitionRepository` (DI 주입) | composer, skills_builder |
 | `HTTPSubAgentClient` 🆕 | 다른 sub-agent Modal endpoint 호출 (VPC 내부) | `SubAgentClient` | `httpx` | orchestrator |
-| `LangGraphOrchestrator` | Workflow Composer 내부 16-노드 StateGraph. 선택 의존성: `PermissionResolver`(권한 확인), `EmbedderPort`+`SearchSkillsUseCase`(커스텀 스킬 검색), `SessionFrameStore`(모니터링 세션 저장) | (내부용, Port 아님) | `langgraph` | composer |
+| `LangGraphOrchestrator` | Workflow Composer tool-calling 에이전트 (3 LangGraph 노드: compress / security / agent_loop). LLM이 17종 툴을 동적으로 선택·실행. 선택 의존성: `PermissionResolver`(권한 확인), `EmbedderPort`+`SearchSkillsUseCase`(스킬 제안), `SessionFrameStore`(모니터링 세션 저장) | (내부용, Port 아님) | `langgraph` | composer |
 | `LangGraphSupervisor` 🆕 | Main Orchestrator supervisor 그래프 | (내부용, Port 아님) | `langgraph` | orchestrator |
 
 ---
@@ -229,38 +229,48 @@ LLM 자유 생성 산업 default는 v2(Sprint 4+) 이연.
                 └────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Workflow Composer 내부 StateGraph (16-노드, 2026-05-21 확장)
+### 3.2 Workflow Composer 내부 StateGraph (tool-calling 에이전트, 2026-05-22 재설계)
+
+LangGraph 노드 3개 (compress / security / agent_loop)로 구성. LLM이 아래 툴 중 하나를 동적으로 선택·실행하며, `done` 반환 시 루프 종료.
 
 ```
-AgentState ─► security_node ─► intent_node ─►
-  ├─ [clarify] ─► consultant_node ─► slot_fill_node (loop back)
-  ├─ [draft/refine] ─► retriever_node ─► drafter_node ─► validator_node ─► qa_evaluator_node
-  │                                                       │
-  │                                            score < 8 (최대 3회 retry)
-  │                                            score >= 8
-  │                                                       ▼
-  └─ [propose] ─► promote_node ─► handoff_node (WorkflowRepository.save → saved_workflow_id)
-                                              │
-                                              ▼
-                                        execute_node          ← 실행 엔진 호출 (REQ-007 연동)
-                                              │
-                                              ▼
-                                        evaluate_output_node  ← LLM 산출물 퀄리티 검증
-                                              │
-                                              ▼
-                                        user_confirm_node     ← 결과 사용자 제시
-                                              │
-                                              ▼
-                                        memory_save → END
+AgentState ─► compress (turn_count ≥ 25 시 메시지 압축)
+              │
+              ▼
+           security (입력 검증 + 위험 패턴 감지 + 권한 확인)
+              │
+              ▼
+           agent_loop ──(LLM 툴 선택 반복, 최대 30회)──► END
+
+agent_loop 사용 가능 툴 (총 17종):
+  analyze_intent      — 사용자 의도 분석
+  ask_clarification   — 추가 정보 요청 (슬롯 미완성)
+  fill_slots          — 슬롯 채우기
+  search_nodes        — 노드 카탈로그 검색
+  suggest_skill       — 스킬 마켓플레이스 후보 제시 (첫 1회)
+  use_suggested_skill — 제안된 스킬을 워크플로우에 추가 (사용자 수락 시)
+  draft_workflow      — 워크플로우 초안 생성
+  validate_workflow   — 워크플로우 구조 검증 + RiskLevel 강제
+  evaluate_quality    — 워크플로우 품질 평가 (LLM-as-a-Judge, 기준 score ≥ 8)
+  retry_draft         — QA 실패 시 피드백 반영 재초안 (최대 3회)
+  promote_workflow    — 워크플로우 확정 (is_draft=False) + draft 임시 보관
+  save_workflow       — DB 저장 (WorkflowRepository)
+  execute_workflow    — 실행 엔진 호출 + 결과 폴링 (최대 5분)
+  evaluate_output     — 실행 산출물 퀄리티 평가
+  confirm_result      — 결과 사용자 제시 (ResultFrame emit)
+  save_memory         — 대화 패턴 저장
+  done                — 완료 (루프 종료)
 ```
 
-#### 신규 노드 상세 (2026-05-21 추가, PR #135)
+#### 신규 툴 상세 (2026-05-21 추가, PR #135)
 
-| 노드 | 역할 | 구현 상태 |
+| 툴 | 역할 | 구현 상태 |
 |------|------|----------|
-| `execute_node` | `POST /api/v1/workflows/{id}/execute` 호출 → execution_id 획득 → 결과 폴링 (`GET /api/v1/executions/{id}`, 3초 간격, 최대 5분) | ✅ 구현 완료 — `EXECUTION_ENGINE_URL` 환경변수 필요 (팀장님 Secret Manager 등록 대기) |
-| `evaluate_output_node` | 실행 산출물 퀄리티 평가. LLMPort 주입 시 LLM 평가, 미주입 시 실행 상태 기반 휴리스틱 | ✅ 구현 완료 |
-| `user_confirm_node` | `ResultFrame(intent="execution_review")` emit — 실행 결과 요약을 프론트엔드에 전달 | ✅ 구현 완료 |
+| `execute_workflow` | `POST /api/v1/workflows/{id}/execute` 호출 → execution_id 획득 → 결과 폴링 (`GET /api/v1/executions/{id}`, 3초 간격, 최대 5분) | ✅ 구현 완료 — `EXECUTION_ENGINE_URL` 환경변수 필요 (팀장님 Secret Manager 등록 대기) |
+| `evaluate_output` | 실행 산출물 퀄리티 평가. LLMPort 주입 시 LLM 평가, 미주입 시 실행 상태 기반 휴리스틱 | ✅ 구현 완료 |
+| `confirm_result` | `ResultFrame(intent="execution_review")` emit — 실행 결과 요약을 프론트엔드에 전달 | ✅ 구현 완료 |
+| `suggest_skill` | 스킬 마켓플레이스 후보 검색 → `SlotFillQuestionFrame`으로 사용자에게 제안. `skill_suggested=True` 플래그로 재중복 방지 | ✅ 구현 완료 (PR #142) |
+| `use_suggested_skill` | LLM이 사용자 수락 판단 후 호출 — `suggested_skills` 목록을 `node_candidates`에 추가 | ✅ 구현 완료 (PR #142) |
 
 #### `promote_node` 변경 (2026-05-21)
 
@@ -591,7 +601,7 @@ modules/ai_agent/
 │   │   └── http_sub_agent_client.py
 │   ├── langgraph/
 │   │   ├── supervisor_graph.py               # Orchestrator
-│   │   └── composer_graph.py                 # Workflow Composer 16-노드 (PR #135)
+│   │   └── composer_graph.py                 # Workflow Composer tool-calling 에이전트 (PR #142)
 │   └── node_registry_adapter.py
 ├── seeds/
 │   ├── industry_defaults/                    # 신규 (Skills Builder seed — 산업 baseline)
@@ -635,3 +645,4 @@ modules/ai_agent/
 | 2026-05-21 | **실행 검증 흐름 추가 (PR #135, §3.2)** — Composer 13→16노드 확장. `execute_node`(실행 엔진 HTTP 호출+폴링), `evaluate_output_node`(LLM 산출물 퀄리티 평가), `user_confirm_node`(결과 프레임 emit) 신규. `promote_node` WorkflowDraftStore 연동, `validator_node` RiskLevel 강제, `handoff_node` saved_workflow_id 상태 저장. `InMemoryWorkflowDraftStore` 어댑터, `ApproveWorkflowUseCase`, `POST /v1/agent/approve` 엔드포인트 구현. 단위 테스트 13건. 환경변수 `EXECUTION_ENGINE_URL` 추가(팀장님 Secret Manager 등록 필요). | 신정혜 |
 | 2026-05-21 | **Personalization debounce claim-first 재설계 (PR #122)** — `PersonalMemoryStore` Port에 `claim_debounce_window(user_id, now, window) -> bool` 추가. `GCSMemoryStore`에서 `.debounce.json` blob을 `if_generation_match` CAS로 LLM 호출 전 선점. `UpdateUserMemoryUseCase` 흐름 재배치: CAS claim → 파일 로드 → LLM → 쓰기. 기존 `MemoryFile.updated_at` 기반 debounce 제거. debounce 정책: **5분**. | 이가원 |
 | 2026-05-22 | **스펙 누락 항목 보완** — ① §2.3 `LangGraphOrchestrator` 노드 수 13→16 정정. ② §4 `agent-composer` 전용 엔드포인트 3종 추가: `POST /v1/agent/approve`, `GET /v1/agent/sessions`, `GET /v1/agent/sessions/{session_id}/frames` (PR #135 구현 완료분). | 신정혜 |
+| 2026-05-22 | **§3.2 tool-calling 재설계 반영 (PR #142)** — Composer 16-노드 고정 그래프 → tool-calling 에이전트 (compress / security / agent_loop 3 LangGraph 노드). LLM이 17종 툴 동적 선택. `suggest_skill` / `use_suggested_skill` 신규 추가 — 스킬 마켓플레이스 후보 제시 + 사용자 수락 시 node_candidates 추가. `_State`에 `skill_suggested: bool`, `suggested_skills: list` 필드 추가. | 신정혜 |

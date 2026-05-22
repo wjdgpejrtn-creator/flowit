@@ -89,6 +89,8 @@ class _NextAction(BaseModel):
         "ask_clarification",
         "fill_slots",
         "search_nodes",
+        "suggest_skill",
+        "use_suggested_skill",
         "draft_workflow",
         "validate_workflow",
         "evaluate_quality",
@@ -141,6 +143,9 @@ class _State(TypedDict):
     execution_result: dict[str, Any] | None  # execute_node에서 실행 결과
     output_quality_score: float             # evaluate_output_node에서 설정
     output_quality_feedback: str            # evaluate_output_node에서 설정
+    # skill suggest 필드
+    skill_suggested: bool                   # suggest_skill 툴 실행 여부 (재중복 방지)
+    suggested_skills: list[dict[str, Any]]  # 제안된 스킬 후보 목록
 
 
 class LangGraphOrchestrator:
@@ -233,6 +238,8 @@ class LangGraphOrchestrator:
             "error": None,
             "agent_done": False,
             "agent_iterations": 0,
+            "skill_suggested": False,
+            "suggested_skills": [],
             "saved_workflow_id": None,
             "execution_id": None,
             "execution_result": None,
@@ -319,6 +326,8 @@ class LangGraphOrchestrator:
             "- ask_clarification: 추가 정보 요청 (슬롯 미완성)\n"
             "- fill_slots: 슬롯 채우기\n"
             "- search_nodes: 노드 카탈로그 검색\n"
+            "- suggest_skill: 스킬 마켓플레이스 후보 제시 (아직 제안 안 했을 때)\n"
+            "- use_suggested_skill: 제안된 스킬을 워크플로우에 추가 (사용자 수락 시)\n"
             "- draft_workflow: 워크플로우 초안 생성\n"
             "- validate_workflow: 워크플로우 구조 검증\n"
             "- evaluate_quality: 워크플로우 품질 평가\n"
@@ -358,8 +367,10 @@ class LangGraphOrchestrator:
             "analyze_intent":   self._intent_node,
             "ask_clarification": self._consultant_node,
             "fill_slots":       self._slot_fill_node,
-            "search_nodes":     self._retriever_node,
-            "draft_workflow":   self._drafter_node,
+            "search_nodes":         self._retriever_node,
+            "suggest_skill":        self._suggest_skill_node,
+            "use_suggested_skill":  self._use_suggested_skill_node,
+            "draft_workflow":       self._drafter_node,
             "validate_workflow": self._validator_node,
             "evaluate_quality": self._qa_evaluator_node,
             "retry_draft":      self._qa_retry_node,
@@ -584,6 +595,83 @@ class LangGraphOrchestrator:
             "node_candidates": candidates,
             "collected_frames": [
                 PipelineStatusFrame(service_name="retriever", status="completed", elapsed_ms=elapsed)
+            ],
+        }
+
+    # 6.5. suggest_skill_node — 스킬 마켓플레이스 후보 제시
+    async def _suggest_skill_node(self, state: _State) -> dict:
+        if self._skill_search is None or self._embedder is None:
+            return {"skill_suggested": True}  # 미주입 시 건너뜀
+
+        t0 = time.monotonic()
+        spec = state.get("draft_spec")
+        query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
+        try:
+            query_embedding = await self._embedder.embed(query)
+            skill_results = await self._skill_search.execute(
+                query_embedding=query_embedding,
+                scope=SkillScope.COMPANY,
+                limit=5,
+            )
+        except Exception as exc:
+            _logger.warning("suggest_skill 검색 실패: %s", exc)
+            return {"skill_suggested": True}
+
+        skill_list: list[dict[str, Any]] = []
+        for skill in skill_results:
+            if skill.node_definition_id is None:
+                continue
+            skill_list.append({
+                "node_definition_id": str(skill.node_definition_id),
+                "name": getattr(skill, "name", ""),
+                "description": getattr(skill, "description", ""),
+            })
+
+        if not skill_list:
+            return {"skill_suggested": True}
+
+        options = "\n".join(f"- {s['name']}: {s['description']}" for s in skill_list)
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "skill_suggested": True,
+            "suggested_skills": skill_list,
+            "collected_frames": [
+                SlotFillQuestionFrame(
+                    question=f"아래 스킬을 워크플로우에 포함할까요?\n{options}\n포함하려면 스킬 이름을 말씀해 주세요.",
+                    field_name="suggested_skill",
+                ),
+                PipelineStatusFrame(service_name="suggest_skill", status="completed", elapsed_ms=elapsed),
+            ],
+        }
+
+    # 6.6. use_suggested_skill_node — 제안된 스킬을 node_candidates에 추가 (사용자 수락 시)
+    async def _use_suggested_skill_node(self, state: _State) -> dict:
+        suggested = state.get("suggested_skills") or []
+        if not suggested:
+            return {}
+
+        t0 = time.monotonic()
+        candidates = list(state.get("node_candidates") or [])
+        existing_ids = {c.node_id for c in candidates}
+
+        for skill in suggested:
+            nd_id_str = skill.get("node_definition_id")
+            if not nd_id_str:
+                continue
+            try:
+                nd_id = UUID(nd_id_str)
+                node_cfg = await self._node_registry.get_schema(nd_id)
+                if node_cfg.node_id not in existing_ids:
+                    candidates.append(node_cfg)
+                    existing_ids.add(node_cfg.node_id)
+            except Exception:
+                continue
+
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "node_candidates": candidates,
+            "collected_frames": [
+                PipelineStatusFrame(service_name="use_suggested_skill", status="completed", elapsed_ms=elapsed),
             ],
         }
 
