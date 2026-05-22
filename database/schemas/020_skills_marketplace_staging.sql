@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS personal_skills (
                           CHECK (lifecycle_state IN ('draft', 'review', 'approved', 'published', 'archived')),
     skill_document_uri  TEXT,
     embedding           VECTOR(768),
-    workflow_id         UUID,
+    workflow_id         UUID,  -- 연결 워크플로우 (workflows FK는 명세상 생략)
     tags                JSONB NOT NULL DEFAULT '[]'::jsonb,
     version             TEXT NOT NULL DEFAULT '0.1.0',
     metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS team_skills (
                           CHECK (lifecycle_state IN ('draft', 'review', 'approved', 'published', 'archived')),
     skill_document_uri  TEXT,
     embedding           VECTOR(768),
-    workflow_id         UUID,
+    workflow_id         UUID,  -- 연결 워크플로우 (workflows FK는 명세상 생략)
     tags                JSONB NOT NULL DEFAULT '[]'::jsonb,
     version             TEXT NOT NULL DEFAULT '0.1.0',
     metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS company_skills (
                           CHECK (lifecycle_state IN ('draft', 'review', 'approved', 'published', 'archived')),
     skill_document_uri  TEXT,
     embedding           VECTOR(768),
-    workflow_id         UUID,
+    workflow_id         UUID,  -- 연결 워크플로우 (workflows FK는 명세상 생략)
     tags                JSONB NOT NULL DEFAULT '[]'::jsonb,
     version             TEXT NOT NULL DEFAULT '0.1.0',
     metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,

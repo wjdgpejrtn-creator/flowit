@@ -10,14 +10,17 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from common_schemas.enums import RiskLevel
+from skills_marketplace.domain.entities.approval_workflow import ApprovalWorkflow
 from skills_marketplace.domain.entities.marketplace_company_skill import MarketplaceCompanySkill
 from skills_marketplace.domain.entities.marketplace_personal_skill import MarketplacePersonalSkill
 from skills_marketplace.domain.entities.marketplace_team_skill import MarketplaceTeamSkill
 from skills_marketplace.domain.value_objects.node_spec_staging import NodeSpecStaging
+from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 
 from storage.mappers.marketplace_skill_mapper import (
     CompanySkillMapper,
     PersonalSkillMapper,
+    SkillApprovalMapper,
     TeamSkillMapper,
 )
 
@@ -115,3 +118,36 @@ class TestCompanySkillMapper:
             updated_at=_NOW,
         )
         assert _roundtrip_orm(CompanySkillMapper, entity) == entity
+
+
+class TestSkillApprovalMapper:
+    """ApprovalWorkflow ↔ skill_approvals. created_at은 엔티티가 들고 있어 to_orm이
+    그대로 싣는다 → 타임스탬프 재주입 없이 직접 왕복."""
+
+    def test_roundtrip_approved(self):
+        approval = ApprovalWorkflow(
+            approval_id=uuid4(),
+            skill_id=uuid4(),
+            scope=SkillScope.TEAM,
+            reviewer_id=uuid4(),
+            status="approved",
+            comment="LGTM",
+            reviewed_at=_NOW,
+            created_at=_NOW,
+        )
+        result = SkillApprovalMapper.to_domain(SkillApprovalMapper.to_orm(approval))
+        assert result == approval
+
+    def test_roundtrip_pending_no_review(self):
+        approval = ApprovalWorkflow(
+            approval_id=uuid4(),
+            skill_id=uuid4(),
+            scope=SkillScope.PERSONAL,
+            reviewer_id=uuid4(),
+            status="pending",
+            created_at=_NOW,
+        )
+        result = SkillApprovalMapper.to_domain(SkillApprovalMapper.to_orm(approval))
+        assert result == approval
+        assert result.scope == SkillScope.PERSONAL
+        assert result.reviewed_at is None

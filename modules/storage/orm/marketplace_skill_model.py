@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Text, func
 from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,13 +30,14 @@ class _MarketplaceSkillCommon:
         pg.UUID(as_uuid=True), ForeignKey("node_definitions.node_id"), nullable=True
     )
     lifecycle_state: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="draft"
+        Text, nullable=False, server_default="draft"
     )
     skill_document_uri: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(768), nullable=True)
+    # 연결 워크플로우 — workflows FK는 명세상 생략 (team_id와 동일하게 UUID만 보관)
     workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(pg.UUID(as_uuid=True), nullable=True)
     tags: Mapped[list[str]] = mapped_column(pg.JSONB, nullable=False, server_default="'[]'::jsonb")
-    version: Mapped[str] = mapped_column(String(20), nullable=False, server_default="0.1.0")
+    version: Mapped[str] = mapped_column(Text, nullable=False, server_default="0.1.0")
     skill_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata", pg.JSONB, nullable=False, server_default="'{}'::jsonb"
     )
@@ -94,11 +95,11 @@ class SkillApprovalModel(Base):
         pg.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     skill_id: Mapped[uuid.UUID] = mapped_column(pg.UUID(as_uuid=True), nullable=False)
-    scope: Mapped[str] = mapped_column(String(20), nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
     reviewer_id: Mapped[uuid.UUID] = mapped_column(
         pg.UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
-    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
     comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

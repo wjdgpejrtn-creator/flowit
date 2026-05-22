@@ -153,8 +153,8 @@ class CompanySkillMapper:
 class SkillApprovalMapper:
     """`ApprovalWorkflow` ↔ `skill_approvals`.
 
-    `scope`는 박아름 후속 PR에서 `ApprovalWorkflow`에 추가된다(A안 협의). 그 PR 머지 전엔
-    `to_orm`이 `approval.scope` 접근에서 실패하므로 본 storage PR은 그 PR과 동반/후행 머지.
+    `ApprovalWorkflow.scope`(`SkillScope`)는 skill_approvals의 polymorphic `skill_id`가
+    어느 3계층 테이블 소속인지 구분한다 (PR #146, 조장 A안).
     """
 
     @staticmethod
