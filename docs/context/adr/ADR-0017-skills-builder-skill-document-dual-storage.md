@@ -1,6 +1,6 @@
 # ADR-0017: Skills Builder 산출물 = NodeDefinition + SkillDocument 이중 저장 (`skills_marketplace` = 사내 SkillsMP 역할)
 
-- **Status**: Accepted (PR #98 머지 = Accept — 조장 리뷰 #98 권고 반영, 2026-05-20)
+- **Status**: Accepted (PR #98 머지 = Accept — 조장 리뷰 #98 권고 반영, 2026-05-20). **§2 "NodeDefinition 즉시 생성"은 [ADR-0020](./ADR-0020-skills-builder-publish-lifecycle-gate.md)으로 부분 대체** (PUBLISHED 시점 생성 + 게시 lifecycle 게이트, 2026-05-21)
 - **Date**: 2026-05-20
 - **Deciders**: @dhwang0803-glitch (조장, REQ-001/008/009/skills_marketplace) + @billionaireahreum (박아름, REQ-002/003/004 Skills Builder)
 - **Tags**: area/skills_builder, area/skills_marketplace, layer/domain, layer/storage
@@ -37,7 +37,7 @@ REQ-004 Skills Builder의 산출물 형식과 저장 위치가 2026-05-19~05-20 
 
 | 산출물 | 형식 | 저장 위치 | 소비자 |
 |--------|------|----------|--------|
-| `NodeDefinition` (메타) | pydantic + JSON Schema | `skills_marketplace` 테이블 (PostgreSQL) | `execution_engine` (워크플로우 노드 실행) |
+| `NodeDefinition` (메타) | pydantic + JSON Schema | **nodes_graph `node_definitions` 카탈로그 (PostgreSQL)** — NodeDefinition은 nodes_graph 소유 (skills_marketplace 테이블은 MarketplaceSkill용). PUBLISHED 시점에만 생성 (ADR-0020) | `execution_engine` (워크플로우 노드 실행) |
 | `SkillDocument` (지침서) | markdown frontmatter + body | GCS 버킷 (별도 파일) | Main Agent (사용자 옵션 제시) |
 
 **`NodeDefinition` 필드 (기존 `nodes_graph.NodeDefinition` 재사용)**:
