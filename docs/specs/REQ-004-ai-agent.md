@@ -193,40 +193,29 @@ LLM 자유 생성 산업 default는 v2(Sprint 4+) 이연.
 | `NodeRegistryAdapter` | nodes_graph의 `NodeDefinitionRepository`를 감싸는 Facade | `NodeRegistry` | `nodes_graph.domain.ports.NodeDefinitionRepository` (DI 주입) | composer, skills_builder |
 | `HTTPSubAgentClient` 🆕 | 다른 sub-agent Modal endpoint 호출 (VPC 내부) | `SubAgentClient` | `httpx` | orchestrator |
 | `LangGraphOrchestrator` | Workflow Composer tool-calling 에이전트 (3 LangGraph 노드: compress / security / agent_loop). LLM이 17종 툴을 동적으로 선택·실행. 선택 의존성: `PermissionResolver`(권한 확인), `EmbedderPort`+`SearchSkillsUseCase`(스킬 제안), `SessionFrameStore`(모니터링 세션 저장) | (내부용, Port 아님) | `langgraph` | composer |
-| `LangGraphSupervisor` 🆕 | Main Orchestrator supervisor 그래프 | (내부용, Port 아님) | `langgraph` | orchestrator |
+| `LangGraphSupervisor` 🆕 | Main Orchestrator tool-calling 에이전트 (2 LangGraph 노드: load_memory / agent_loop). LLM이 6종 툴 동적 선택 — analyze_intent / call_composer / call_skills_builder / finalize / update_memory / done | (내부용, Port 아님) | `langgraph` | orchestrator |
 
 ---
 
 ## 3. LangGraph 그래프 구성
 
-### 3.1 Main Orchestrator Supervisor Graph (신규)
+### 3.1 Main Orchestrator Supervisor Graph (tool-calling 에이전트, 2026-05-22 재설계)
+
+LangGraph 노드 2개 (load_memory / agent_loop)로 구성. LLM이 아래 툴 중 하나를 동적으로 선택·실행하며, `done` 반환 시 루프 종료.
 
 ```
-                ┌────────────────────────────────────────────────────────┐
-                │  Main Orchestrator (modal app: orchestrator)            │
-                │                                                          │
-   사용자 메시지 ──►│  load_memory_node                                       │
-                │       │  (HTTP → agent-personalization                    │
-                │       │          : LoadUserMemoryUseCase)                  │
-                │       ▼                                                    │
-                │  intent_node (IntentAnalyzerService)                      │
-                │       │                                                    │
-                │       ├─ intent=draft/refine/clarify ─► composer_node      │
-                │       │                                  (HTTP → agent-composer  │
-                │       │                                   : ComposeWorkflowUseCase)│
-                │       │                                                    │
-                │       ├─ intent=build_skill ──────────► skills_node        │
-                │       │                                  (HTTP → agent-skills-builder│
-                │       │                                   : BuildFromSOP/Industry) │
-                │       │                                                    │
-                │       └─ intent=propose ──────────────► finalize_node      │
-                │                                                            │
-                │  update_memory_node (워크플로우 완료 후)                     │
-                │       │  (HTTP → agent-personalization                     │
-                │       │          : UpdateUserMemoryUseCase)                 │
-                │       ▼                                                    │
-                │  SSE 통합 yield                                             │
-                └────────────────────────────────────────────────────────┘
+사용자 메시지 ─► load_memory (항상 실행, HTTP → agent-personalization)
+                  │
+                  ▼
+               agent_loop ──(LLM 툴 선택 반복, 최대 10회)──► END
+
+agent_loop 사용 가능 툴 (총 6종):
+  analyze_intent      — 사용자 의도 분석 (IntentAnalyzerService)
+  call_composer       — Workflow Composer sub-agent 호출 (HTTP → agent-composer)
+  call_skills_builder — Skills Builder sub-agent 호출 (HTTP → agent-skills-builder)
+  finalize            — 워크플로우 제안 확정 (propose 의도)
+  update_memory       — Personalization 메모리 업데이트 (HTTP → agent-personalization)
+  done                — 완료 (루프 종료)
 ```
 
 ### 3.2 Workflow Composer 내부 StateGraph (tool-calling 에이전트, 2026-05-22 재설계)
@@ -645,4 +634,5 @@ modules/ai_agent/
 | 2026-05-21 | **실행 검증 흐름 추가 (PR #135, §3.2)** — Composer 13→16노드 확장. `execute_node`(실행 엔진 HTTP 호출+폴링), `evaluate_output_node`(LLM 산출물 퀄리티 평가), `user_confirm_node`(결과 프레임 emit) 신규. `promote_node` WorkflowDraftStore 연동, `validator_node` RiskLevel 강제, `handoff_node` saved_workflow_id 상태 저장. `InMemoryWorkflowDraftStore` 어댑터, `ApproveWorkflowUseCase`, `POST /v1/agent/approve` 엔드포인트 구현. 단위 테스트 13건. 환경변수 `EXECUTION_ENGINE_URL` 추가(팀장님 Secret Manager 등록 필요). | 신정혜 |
 | 2026-05-21 | **Personalization debounce claim-first 재설계 (PR #122)** — `PersonalMemoryStore` Port에 `claim_debounce_window(user_id, now, window) -> bool` 추가. `GCSMemoryStore`에서 `.debounce.json` blob을 `if_generation_match` CAS로 LLM 호출 전 선점. `UpdateUserMemoryUseCase` 흐름 재배치: CAS claim → 파일 로드 → LLM → 쓰기. 기존 `MemoryFile.updated_at` 기반 debounce 제거. debounce 정책: **5분**. | 이가원 |
 | 2026-05-22 | **스펙 누락 항목 보완** — ① §2.3 `LangGraphOrchestrator` 노드 수 13→16 정정. ② §4 `agent-composer` 전용 엔드포인트 3종 추가: `POST /v1/agent/approve`, `GET /v1/agent/sessions`, `GET /v1/agent/sessions/{session_id}/frames` (PR #135 구현 완료분). | 신정혜 |
+| 2026-05-22 | **§3.1 supervisor tool-calling 재설계 반영** — LangGraphSupervisor 6노드 고정 라우터 → tool-calling 에이전트 (load_memory / agent_loop 2 LangGraph 노드). LLM이 6종 툴 동적 선택. `_SupervisorAction` 스키마, `agent_done/agent_iterations` State 필드, `llm: LLMPort` 주입 추가. | 신정혜 |
 | 2026-05-22 | **§3.2 tool-calling 재설계 반영 (PR #142)** — Composer 16-노드 고정 그래프 → tool-calling 에이전트 (compress / security / agent_loop 3 LangGraph 노드). LLM이 17종 툴 동적 선택. `suggest_skill` / `use_suggested_skill` 신규 추가 — 스킬 마켓플레이스 후보 제시 + 사용자 수락 시 node_candidates 추가. `_State`에 `skill_suggested: bool`, `suggested_skills: list` 필드 추가. | 신정혜 |
