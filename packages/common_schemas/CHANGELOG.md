@@ -7,6 +7,23 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.10.0] - 2026-05-22
+
+### Added — `ChatMessageFrame` SSE 프레임 (REQ-004 실시간 모니터링 요청)
+- `transport/sse.py`: `ChatMessageFrame(SSEFrame)` — `frame_type: "chat_message"`, `role: Literal["user", "assistant"]`, `content: str`. 유저 입력·AI assistant 응답 본문을 운반.
+- `AnySSEFrame` discriminated union에 `chat_message` 태그 추가.
+- 배경: `SessionFrameStore`가 파이프라인 상태 프레임(`AgentNodeFrame` / `PipelineStatusFrame` / `ResultFrame` 등)만 기록해 모니터링에서 대화 내용을 재생할 수 없었음. 본 프레임으로 유저 메시지·assistant 응답을 함께 기록할 수 있다.
+
+### Changed
+- TypeScript codegen: `ChatMessageFrame` 인터페이스 + `AnySSEFrame` union에 자동 반영 (`generated/index.ts`).
+- `test_transport.py` — `ChatMessageFrame` 단위 테스트 2건 + `AnySSEFrame` discriminator 테스트 1건 추가.
+
+### Symbols
+- 59 → 60 (`ChatMessageFrame` 신규 top-level export)
+
+### Migration notes
+- 없음 — 순수 additive(신규 프레임 추가만, 기존 프레임/필드 무변경). `AnySSEFrame` 소비자는 새 `chat_message` 케이스 처리를 추가하는 것을 권장하나 미처리해도 기존 동작은 깨지지 않는다.
+
 ## [0.9.0] - 2026-05-21
 
 ### Added — `ContentBlock` / `DocumentBlock` 파싱 커버리지 필드 4종 (PR #60 리뷰 후속, REQ-006 doc_parser 요청)
