@@ -14,9 +14,8 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from common_schemas.agent import MemoryEntry
-from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 from common_schemas.agent import AgentState
+from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 from common_schemas.enums import AgentMode, ExecutionStatus
 
 from ....domain.ports.sub_agent_client import SubAgentClient

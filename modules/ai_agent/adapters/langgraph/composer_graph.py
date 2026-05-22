@@ -83,6 +83,10 @@ _SLOT_DONE = "slot_done"
 _EXEC_POLL_INTERVAL_SEC = 3
 _EXEC_TIMEOUT_SEC = 300
 
+# 실행 엔진 API 경로 상수 — api_server 라우트 변경 시 여기만 수정
+_EXEC_START_PATH = "/api/v1/workflows/{workflow_id}/execute"
+_EXEC_POLL_PATH = "/api/v1/executions/{execution_id}"
+
 
 class _State(TypedDict):
     session_id: UUID
@@ -599,7 +603,7 @@ class LangGraphOrchestrator:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
-                    f"{base_url}/api/v1/workflows/{workflow_id}/execute",
+                    base_url + _EXEC_START_PATH.format(workflow_id=workflow_id),
                     json={"session_id": str(state["session_id"])},
                 )
                 resp.raise_for_status()
@@ -635,7 +639,7 @@ class LangGraphOrchestrator:
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.get(
-                        f"{base_url}/api/v1/executions/{execution_id}"
+                        base_url + _EXEC_POLL_PATH.format(execution_id=execution_id)
                     )
                     if resp.status_code == 200:
                         data: dict[str, Any] = resp.json()

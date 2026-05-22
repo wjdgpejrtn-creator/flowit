@@ -248,7 +248,6 @@ class AgentComposer:
             """
             import uuid
             from ai_agent.application.agents.workflow_composer.approve_workflow_use_case import ApproveWorkflowUseCase
-            from ai_agent.domain.services.workflow_diff_service import WorkflowDiffService
 
             try:
                 session_id = uuid.UUID(body["session_id"])
