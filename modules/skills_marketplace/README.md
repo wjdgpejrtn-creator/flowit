@@ -101,6 +101,7 @@ from skills_marketplace.application.use_cases import (
 | `PromoteToTeamUseCase` | `personal_skill_id, team_id → UUID` | 개인 → 팀 승격 (복제: 메타 승계 + DRAFT 재심사 + promoted_from 역추적 + 원본 promoted_to_team_id 마킹) |
 | `PromoteToCompanyUseCase` | `team_skill_id → UUID` | 팀 → 전사 승격 (복제: 동일 정책, 원본 promoted_to_company_id 마킹) |
 | `SearchSkillsUseCase` | `query_embedding, scope, limit, lifecycle_state=PUBLISHED → list[Skill]` | 하이브리드 검색 — ai_agent Composer 호출 (repo.search 위임). 기본 PUBLISHED만(ADR-0020 (b), 미검토 오염 방지) |
+| `SubmitSkillUseCase` | `skill_id, scope` | 게시 검토 제출 DRAFT → REVIEW (ADR-0020 Q4, PR #150 위임). submit 라우트(REQ-009)가 조립 — 라우트 직접 전이 = Composition Root 위반이라 use case 선행. approve/publish와 동일 패턴 |
 | `ApproveSkillUseCase` | `skill_id, scope, reviewer_id, approved, comment` | 게시 승인 REVIEW → APPROVED/DRAFT + `ApprovalWorkflow` 레코드 저장(ADR-0020 + 감사 추적) |
 | `PublishSkillUseCase` | `skill_id, scope` (생성자 +`node_def_repo`) | 게시 APPROVED → PUBLISHED + **publish 시 `node_spec_staging` → `NodeDefinition` 생성·upsert + `node_definition_id` 연결**(ADR-0020 Option B/Q1, ②d). scope별 owner/team 격리(personal=owner_user_id, team=team_id, company=전역). nodes_graph `NodeDefinitionRepository` 의존 |
 
