@@ -29,17 +29,20 @@ LLM 호출은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base
    ``modules/ai_agent/adapters/llm/modal_embedding_adapter.py``의 ``ModalEmbeddingAdapter``가
    ``llm-base``의 ``POST /v1/embed`` HTTP endpoint 호출.
 
-3) Composition root (api_server 또는 운영 스크립트):
+3) Composition root (api_server 또는 운영 스크립트) — wizard 1차(ADR-0020 Q8):
    ```python
    from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
    from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
-   from storage.repositories import PgNodeDefinitionRepository  # 황대원 5/15
+   from skills_marketplace.application.use_cases import CreateDraftSkillUseCase
+   from storage.repositories import PgSkillRepository  # 조장 PR-2d (SkillRepository 3-scope 구현)
 
    use_case = BuildFromSOPUseCase(
-       node_def_repo=PgNodeDefinitionRepository(...),
+       create_draft_skill=CreateDraftSkillUseCase(PgSkillRepository(...)),
        embedder=ModalEmbeddingAdapter(base_url=os.environ["EMBEDDING_BASE_URL"]),
        llm=ModalLLMAdapter(),  # MODAL_TOKEN_ID/SECRET 환경변수 자동 사용
    )
+   # 2단계: extract_draft(user_id, document, personal_memory) → 사용자 검토·수정 → confirm(user_id, skills)
+   # NodeDefinition은 미생성(Option B) — publish 시점(PublishSkillUseCase ②d)에 staging→NodeDefinition.
    ```
 
 4) Modal app endpoint (박아름 5/17 plan):
