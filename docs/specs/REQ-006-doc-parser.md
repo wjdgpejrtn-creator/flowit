@@ -24,6 +24,7 @@
 | `QualityGateResult` | `common_schemas.document` | 파서 품질 게이트 판정 결과 (SSOT 승격 확정, PR #34) |
 | `QualityMetrics` | `common_schemas.document` | 파서 출력 품질 수치 메트릭 (SSOT 승격 확정, PR #34) |
 | `WarningInfo` | `common_schemas.document` | 파싱 경고 정보 (SSOT 승격 확정, PR #34) |
+| `ParseCoverage` | `common_schemas.document` | 파싱 커버리지 지표 (`QualityGateResult.coverage` 타입 — PR #34 결정 누락분, REQ-012 이관) |
 
 ### import 예시
 
@@ -40,6 +41,7 @@ from common_schemas import (
     ChunkingStrategy,
     QualityGateResult,
     QualityMetrics,
+    ParseCoverage,
     WarningInfo,
 )
 ```
@@ -59,7 +61,7 @@ from common_schemas import (
 | `ElapsedDetail` | `parse_ms: float`, `normalize_ms: float`, `pii_ms: float`, `chunk_ms: float`, `quality_ms: float` | 파이프라인 단계별 처리 시간 (모듈 내부 유지) |
 | `VisionType` | `TABLE`, `GRAPH`, `CHART`, `CORRUPTED` | 비전 추출 유형 enum. TableDetector가 감지한 상황에 따라 Gemma4 프롬프트 결정 |
 
-> **SSOT 주의**: `Chunk`, `ChunkingStrategy`, `QualityGateResult`, `QualityMetrics`, `WarningInfo`는 PR #34에서 `common_schemas/document.py` SSOT 승격이 확정되었다. 위 import 테이블 참조. 모듈 내 재정의 금지.
+> **SSOT 주의**: `Chunk`, `ChunkingStrategy`, `QualityGateResult`, `QualityMetrics`, `ParseCoverage`, `WarningInfo`는 `common_schemas/document.py` SSOT다 (PR #34 결정 → REQ-012 common_schemas 0.11.0에서 실제 이관 완료). `domain/entities/{chunk,quality,warning}.py`는 하위호환 shim — 기존 import 경로는 유지되나 신규 코드는 `common_schemas`에서 직접 import. 모듈 내 재정의 금지.
 
 #### domain/services
 
