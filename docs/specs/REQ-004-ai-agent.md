@@ -192,7 +192,7 @@ LLM 자유 생성 산업 default는 v2(Sprint 4+) 이연.
 | `GCSSessionFrameStore` 🆕 | 세션별 SSE 프레임 전체를 GCS에 저장 (`sessions/{user_id}/{session_id}.json`) + 사용자별 인덱스 관리 (`sessions/{user_id}/index.json`, 최대 100건). 모니터링 히스토리 재생에 사용 | `SessionFrameStore` | `google-cloud-storage` (asyncio.to_thread 래핑) | composer |
 | `NodeRegistryAdapter` | nodes_graph의 `NodeDefinitionRepository`를 감싸는 Facade | `NodeRegistry` | `nodes_graph.domain.ports.NodeDefinitionRepository` (DI 주입) | composer, skills_builder |
 | `HTTPSubAgentClient` 🆕 | 다른 sub-agent Modal endpoint 호출 (VPC 내부) | `SubAgentClient` | `httpx` | orchestrator |
-| `LangGraphOrchestrator` | Workflow Composer 내부 13-노드 StateGraph. 선택 의존성: `PermissionResolver`(권한 확인), `EmbedderPort`+`SearchSkillsUseCase`(커스텀 스킬 검색), `SessionFrameStore`(모니터링 세션 저장) | (내부용, Port 아님) | `langgraph` | composer |
+| `LangGraphOrchestrator` | Workflow Composer 내부 16-노드 StateGraph. 선택 의존성: `PermissionResolver`(권한 확인), `EmbedderPort`+`SearchSkillsUseCase`(커스텀 스킬 검색), `SessionFrameStore`(모니터링 세션 저장) | (내부용, Port 아님) | `langgraph` | composer |
 | `LangGraphSupervisor` 🆕 | Main Orchestrator supervisor 그래프 | (내부용, Port 아님) | `langgraph` | orchestrator |
 
 ---
@@ -345,6 +345,14 @@ class AgentProtocolResponse(BaseModel):
 
 - `POST /v1/agent/route` — `agent-composer`, `agent-skills-builder`, `agent-personalization` 동일
 - `GET /v1/health` — health check (REST 표준 + 운영 도구 호환성, 2026-05-14 정정)
+
+#### `agent-composer` 전용 엔드포인트 (2026-05-22 추가)
+
+| 엔드포인트 | 메서드 | 설명 | Query Params | 응답 |
+|-----------|--------|------|-------------|------|
+| `/v1/agent/approve` | POST | 사용자 승인 이벤트 처리 — WorkflowDiff 계산 후 Personalization 전달 | — | `{status, diff: {added_nodes, removed_nodes, modified_params, feedback_lines}}` |
+| `/v1/agent/sessions` | GET | 세션 목록 조회 (최신순) | `user_id: str(UUID)`, `limit: int(1-100, default 20)` | `{sessions: list[SessionRef], count: int}` |
+| `/v1/agent/sessions/{session_id}/frames` | GET | 세션 SSE 프레임 전체 조회 | `user_id: str(UUID)` | `{session_id, frames: list[SSEFrame], count: int}` |
 
 ### SSE 종결 규칙
 
@@ -626,3 +634,4 @@ modules/ai_agent/
 | 2026-05-21 | **사용자 승인 diff 흐름 추가 (PR #133, §3.3)** — 햄햄(이가원) 제안. `WorkflowDiffService`(domain/services, draft vs final 구조적 비교), `WorkflowDraftStore` Port(domain/ports, draft 임시 보관) 신규 구현. 단위 테스트 9건 완료. Personalization Agent 승인 이벤트 수신 + diff→memory 변환은 햄햄 담당. | 신정혜 |
 | 2026-05-21 | **실행 검증 흐름 추가 (PR #135, §3.2)** — Composer 13→16노드 확장. `execute_node`(실행 엔진 HTTP 호출+폴링), `evaluate_output_node`(LLM 산출물 퀄리티 평가), `user_confirm_node`(결과 프레임 emit) 신규. `promote_node` WorkflowDraftStore 연동, `validator_node` RiskLevel 강제, `handoff_node` saved_workflow_id 상태 저장. `InMemoryWorkflowDraftStore` 어댑터, `ApproveWorkflowUseCase`, `POST /v1/agent/approve` 엔드포인트 구현. 단위 테스트 13건. 환경변수 `EXECUTION_ENGINE_URL` 추가(팀장님 Secret Manager 등록 필요). | 신정혜 |
 | 2026-05-21 | **Personalization debounce claim-first 재설계 (PR #122)** — `PersonalMemoryStore` Port에 `claim_debounce_window(user_id, now, window) -> bool` 추가. `GCSMemoryStore`에서 `.debounce.json` blob을 `if_generation_match` CAS로 LLM 호출 전 선점. `UpdateUserMemoryUseCase` 흐름 재배치: CAS claim → 파일 로드 → LLM → 쓰기. 기존 `MemoryFile.updated_at` 기반 debounce 제거. debounce 정책: **5분**. | 이가원 |
+| 2026-05-22 | **스펙 누락 항목 보완** — ① §2.3 `LangGraphOrchestrator` 노드 수 13→16 정정. ② §4 `agent-composer` 전용 엔드포인트 3종 추가: `POST /v1/agent/approve`, `GET /v1/agent/sessions`, `GET /v1/agent/sessions/{session_id}/frames` (PR #135 구현 완료분). | 신정혜 |
