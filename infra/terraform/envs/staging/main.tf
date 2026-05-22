@@ -212,6 +212,9 @@ module "api_server" {
 
   env_vars = {
     ENVIRONMENT = var.environment
+    # OAuth 콜백(GET /api/v1/auth/callback) 처리 후 브라우저를 돌려보낼 프론트 주소.
+    # 2단계 apply — 프론트 배포(module.frontend) 후 var.frontend_url을 채우면 반영된다.
+    FRONTEND_URL = var.frontend_url
   }
 
   # PR #80 GCP Secret Manager + 본 PR-C 신규 추가(jwt/encryption/google) — Cloud Run이 직접 주입.
@@ -283,4 +286,44 @@ module "execution_engine_worker" {
   labels = merge(local.common_labels, { role = "execution-worker" })
 
   depends_on = [module.networking, module.redis, module.agent_secrets]
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Run — REQ-010 frontend (Next.js). 단일 출처 토폴로지(A):
+# 프론트가 public 진입점이고, next.config rewrites가 /api/* 를 api_server로
+# 프록시한다 (API_PROXY_TARGET env). 브라우저는 프론트 URL 하나만 보므로
+# OAuth 쿠키가 same-origin으로 동작한다 (CORS·크로스도메인 쿠키 불필요).
+# var.enable_frontend = true + var.frontend_image 지정으로 활성화.
+# enable_cloud_run=true 전제 — API_PROXY_TARGET이 api_server URL을 참조한다.
+# ---------------------------------------------------------------------------
+module "frontend" {
+  count  = var.enable_frontend ? 1 : 0
+  source = "../../modules/cloud-run"
+
+  project_id            = var.project_id
+  region                = var.region
+  service_name          = "workflow-frontend-${var.environment}"
+  image                 = var.frontend_image
+  service_account_email = var.frontend_service_account
+  vpc_connector_id      = module.networking.serverless_connector_id
+  vpc_egress            = "PRIVATE_RANGES_ONLY"
+  cpu                   = "1"
+  memory                = "1Gi"
+  min_instances         = 0
+  max_instances         = 5
+  container_port        = 3000 # Next.js — Dockerfile EXPOSE 3000 + `next start`
+  allow_public_access   = true # 단일 출처 진입점이라 public
+  ingress               = "INGRESS_TRAFFIC_ALL"
+  cpu_idle              = true # 프론트는 request 기반 — idle 시 CPU 미할당
+
+  # API_PROXY_TARGET — next.config rewrites가 /api/* 를 프록시할 대상 (서버사이드 env, NEXT_PUBLIC_ 아님).
+  # api_server는 public이라 프론트가 공개 인터넷으로 호출한다 (VPC connector는 모듈 필수라 부착만, 미사용).
+  env_vars = {
+    ENVIRONMENT      = var.environment
+    API_PROXY_TARGET = try(module.api_server[0].service_url, "")
+  }
+
+  labels = merge(local.common_labels, { role = "frontend" })
+
+  depends_on = [module.networking]
 }
