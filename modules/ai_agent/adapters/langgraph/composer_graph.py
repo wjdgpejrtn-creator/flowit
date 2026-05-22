@@ -403,6 +403,8 @@ class LangGraphOrchestrator:
                 )
                 existing_ids = {c.node_id for c in candidates}
                 for skill in skill_results:
+                    if skill.node_definition_id is None:
+                        continue
                     try:
                         node_cfg = await self._node_registry.get_schema(skill.node_definition_id)
                         if node_cfg.node_id not in existing_ids:
