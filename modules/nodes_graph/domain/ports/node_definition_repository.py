@@ -5,6 +5,8 @@ from uuid import UUID
 
 from ..entities.node_definition import NodeDefinition
 
+__all__ = ["NodeDefinitionRepository"]
+
 
 class NodeDefinitionRepository(ABC):
     """노드 정의 카탈로그 저장소 인터페이스.
@@ -30,6 +32,19 @@ class NodeDefinitionRepository(ABC):
         ...
 
     @abstractmethod
-    async def search_by_embedding(self, query_embedding: list[float], limit: int = 10) -> list[NodeDefinition]:
-        """벡터 유사도 기반 노드 검색. AI Agent(REQ-004)의 노드 추천에 사용."""
+    async def search_by_embedding(
+        self,
+        query_embedding: list[float],
+        limit: int = 10,
+        viewer_user_id: UUID | None = None,
+        viewer_team_ids: list[UUID] | None = None,
+    ) -> list[NodeDefinition]:
+        """벡터 유사도 기반 노드 검색. AI Agent(REQ-004)의 노드 추천에 사용.
+
+        ADR-0020 (i) scope 격리: viewer 지정 시 가시 노드만 반환.
+        필터 = (owner_user_id IS NULL AND team_id IS NULL)  # company 전역
+               OR owner_user_id == viewer_user_id           # personal
+               OR team_id IN viewer_team_ids                # team
+        viewer_user_id/viewer_team_ids 모두 None이면 전역 노드만(비침습 기본).
+        """
         ...

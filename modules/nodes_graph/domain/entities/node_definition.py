@@ -32,3 +32,7 @@ class NodeDefinition:
     # REQ-003 확장 필드
     service_type: str | None = None
     embedding: list[float] | None = None
+
+    # ADR-0020 (i) scope 격리. None=company 전역(기존 53종 비침습) / owner=personal / team=team
+    owner_user_id: UUID | None = None
+    team_id: UUID | None = None
