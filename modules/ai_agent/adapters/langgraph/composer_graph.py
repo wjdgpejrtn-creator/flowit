@@ -1,25 +1,34 @@
 """LangGraph Orchestrator (Composer) — Workflow Composer 어댑터 레이어.
 
 spec §3.2 Workflow Composer 내부 StateGraph 구현. LangGraph는 adapters/에만 존재.
-13개 노드:
-  security → intent →
+17개 노드:
+  security → intent → skill_suggest →
+    [skill_found]  END (다음 턴 사용자 응답 대기)
     [clarify]      consultant → slot_fill (loop)
     [draft/refine] retriever → drafter → validator → qa_evaluator
                                                      score<8 → qa_retry → drafter
                                                      score>=8 ↓
-    [propose]      ──────────────────────────────── promote → handoff → memory_save
+    [propose]      ──────────────────────────────── promote → handoff → execute
+                                                                          ↓
+                                                              evaluate_output → user_confirm
+                                                                                     ↓
+                                                                              memory_save → END
   compress (turn_count >= 25 시 entry point 앞 삽입)
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import operator
+import os
 import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Annotated, Any, TypedDict
 from uuid import UUID, uuid4
 
+import httpx
 from auth.domain.services.permission_resolver import PermissionResolver
 from common_schemas.agent import DraftSpec, MemoryEntry, SlotFillingState
 from common_schemas.enums import IntentType, RiskLevel
@@ -45,8 +54,10 @@ from skills_marketplace.application.use_cases.search_skills_use_case import Sear
 from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 
 from ...domain.entities.session_ref import SessionRef
+from ...domain.ports.llm_port import LLMPort
 from ...domain.ports.node_registry import NodeRegistry
 from ...domain.ports.session_frame_store import SessionFrameStore
+from ...domain.ports.workflow_draft_store import WorkflowDraftStore
 from ...domain.ports.workflow_repository import WorkflowRepository
 from ...domain.services.drafter_service import DrafterService
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
@@ -68,6 +79,16 @@ _QA_RETRY = "qa_retry"
 _QA_FORCE = "qa_force"
 _SLOT_LOOP = "slot_loop"
 _SLOT_DONE = "slot_done"
+_SKILL_FOUND = "skill_found"
+_SKILL_NONE = "skill_none"
+
+# 실행 결과 폴링 설정
+_EXEC_POLL_INTERVAL_SEC = 3
+_EXEC_TIMEOUT_SEC = 300
+
+# 실행 엔진 API 경로 상수 — api_server 라우트 변경 시 여기만 수정
+_EXEC_START_PATH = "/api/v1/workflows/{workflow_id}/execute"
+_EXEC_POLL_PATH = "/api/v1/executions/{execution_id}"
 
 
 class _State(TypedDict):
@@ -89,10 +110,19 @@ class _State(TypedDict):
     qa_feedback: str
     collected_frames: Annotated[list[AnySSEFrame], operator.add]
     error: str | None
+    # skill_suggest 필드
+    skill_suggestion_done: bool             # skill_suggest_node에서 스킬 제안 완료 시 True
+    # handoff 이후 필드
+    saved_workflow_id: UUID | None          # handoff_node에서 WorkflowRepository.save() 결과
+    # 실행 검증 필드
+    execution_id: str | None               # execute_node에서 설정
+    execution_result: dict[str, Any] | None  # execute_node에서 실행 결과
+    output_quality_score: float             # evaluate_output_node에서 설정
+    output_quality_feedback: str            # evaluate_output_node에서 설정
 
 
 class LangGraphOrchestrator:
-    """Workflow Composer 내부 13-노드 StateGraph (spec §3.2).
+    """Workflow Composer 내부 16-노드 StateGraph (spec §3.2).
 
     services/agents/agent-composer/main.py composition root에서 인스턴스화.
     """
@@ -110,6 +140,9 @@ class LangGraphOrchestrator:
         embedder: EmbedderPort | None = None,
         skill_search: SearchSkillsUseCase | None = None,
         session_frame_store: SessionFrameStore | None = None,
+        llm: LLMPort | None = None,
+        workflow_draft_store: WorkflowDraftStore | None = None,
+        execution_engine_url: str | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -122,6 +155,9 @@ class LangGraphOrchestrator:
         self._embedder = embedder
         self._skill_search = skill_search
         self._session_frame_store = session_frame_store
+        self._llm = llm
+        self._workflow_draft_store = workflow_draft_store
+        self._execution_engine_url = execution_engine_url or os.getenv("EXECUTION_ENGINE_URL", "")
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -170,6 +206,12 @@ class LangGraphOrchestrator:
             "qa_feedback": "",
             "collected_frames": [],
             "error": None,
+            "skill_suggestion_done": False,
+            "saved_workflow_id": None,
+            "execution_id": None,
+            "execution_result": None,
+            "output_quality_score": 0.0,
+            "output_quality_feedback": "",
         }
 
         async for event in self._graph.astream(initial, stream_mode="updates"):
@@ -222,12 +264,11 @@ class LangGraphOrchestrator:
         except Exception as exc:
             _logger.warning("session frame 저장 실패 (non-fatal): %s", exc)
 
-    # ------------------------------------------------------------------ nodes (13)
+    # ------------------------------------------------------------------ nodes (16)
 
     # 1. compress_node — turn_count >= 25 시 메시지 압축
     async def _compress_node(self, state: _State) -> dict:
         TurnLimit().validate(state["turn_count"])
-        # 압축: 마지막 메시지만 보존
         compressed = state["messages"][-1:]
         return {"messages": compressed, "turn_count": 1}
 
@@ -258,7 +299,7 @@ class LangGraphOrchestrator:
         # 권한 확인 — PermissionResolver 주입된 경우
         # NOTE: 이 단계는 coarse pre-screen — 실제 노드가 식별되기 전이라
         # 텍스트 키워드 휴리스틱만 사용한다. 정밀한 risk_ceiling 강제는
-        # 실 노드가 확정되는 validator/drafter 단계에서 별도 처리 필요.
+        # 실 노드가 확정되는 validator 단계에서 처리한다.
         if self._permission_resolver is not None and state.get("department_id"):
             perm = self._permission_resolver.resolve(
                 user_id=state["user_id"],
@@ -307,6 +348,65 @@ class LangGraphOrchestrator:
             ],
         }
 
+    # 3.5. skill_suggest_node — intent 직후 커스텀 스킬 검색 및 제안
+    async def _skill_suggest_node(self, state: _State) -> dict:
+        """PERSONAL → COMPANY 순으로 커스텀 스킬 검색. 스킬 없거나 미주입 시 fall-through."""
+        if self._skill_search is None or self._embedder is None:
+            return {"skill_suggestion_done": False}
+
+        spec = state.get("draft_spec")
+        query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
+
+        try:
+            query_embedding = await self._embedder.embed(query)
+            skill_results = await self._skill_search.execute(
+                query_embedding=query_embedding,
+                scope=SkillScope.PERSONAL,
+                limit=3,
+            )
+            if not skill_results:
+                skill_results = await self._skill_search.execute(
+                    query_embedding=query_embedding,
+                    scope=SkillScope.COMPANY,
+                    limit=3,
+                )
+        except Exception as exc:
+            _logger.warning("skill_suggest 검색 실패 (fall-through): %s", exc)
+            return {"skill_suggestion_done": False}
+
+        if not skill_results:
+            return {"skill_suggestion_done": False}
+
+        skill_infos = []
+        for skill in skill_results[:3]:
+            try:
+                node_cfg = await self._node_registry.get_schema(skill.node_definition_id)
+                skill_infos.append({
+                    "skill_id": str(skill.node_definition_id),
+                    "name": node_cfg.name or str(skill.node_definition_id),
+                    "description": getattr(node_cfg, "description", ""),
+                })
+            except Exception:
+                continue
+
+        if not skill_infos:
+            return {"skill_suggestion_done": False}
+
+        names = [s["name"] for s in skill_infos]
+        return {
+            "skill_suggestion_done": True,
+            "collected_frames": [
+                ResultFrame(
+                    intent="skill_suggestion",
+                    payload={
+                        "skills": skill_infos,
+                        "message": f"관련 스킬을 찾았어요! {', '.join(names)} — 사용하시겠어요?",
+                        "session_id": str(state["session_id"]),
+                    },
+                )
+            ],
+        }
+
     # 4. consultant_node — clarify 인텐트: slot filling 준비
     async def _consultant_node(self, state: _State) -> dict:
         t0 = time.monotonic()
@@ -315,7 +415,6 @@ class LangGraphOrchestrator:
             return {}
         entities = spec.discovered_entities or {}
         slot_state = spec.slot_filling_state
-        # intent_analyzer가 이미 추출한 엔티티는 filled로 이동
         newly_filled = {k: v for k, v in entities.items() if k in slot_state.pending}
         updated_slot = SlotFillingState(
             asked=slot_state.asked,
@@ -375,10 +474,9 @@ class LangGraphOrchestrator:
                             candidates = [*candidates, node_cfg]
                             existing_ids.add(node_cfg.node_id)
                     except Exception:
-                        continue  # 노드 정의 없으면 스킵
+                        continue
             except Exception as _skill_exc:
-                import logging as _log
-                _log.getLogger(__name__).warning("skill search failed: %s", _skill_exc)
+                _logger.warning("skill search failed: %s", _skill_exc)
 
         elapsed = int((time.monotonic() - t0) * 1000)
         return {
@@ -411,7 +509,7 @@ class LangGraphOrchestrator:
             ],
         }
 
-    # 8. validator_node — 그래프 구조 검증
+    # 8. validator_node — 그래프 구조 검증 + RiskLevel 강제
     async def _validator_node(self, state: _State) -> dict:
         workflow = state["workflow_draft"]
         if workflow is None:
@@ -420,6 +518,36 @@ class LangGraphOrchestrator:
             await self._graph_validator.validate(workflow)
         except Exception as exc:
             return {"error": f"validator 실패: {exc}"}
+
+        # RiskLevel 강제 — PermissionResolver 주입 + department_id 있을 때만
+        if self._permission_resolver is not None and state.get("department_id"):
+            perm = self._permission_resolver.resolve(
+                user_id=state["user_id"],
+                role=state["user_role"],  # type: ignore[arg-type]
+                department_id=state["department_id"],
+                session_id=state["session_id"],
+            )
+            risk_order = {
+                RiskLevel.LOW: 0,
+                RiskLevel.MEDIUM: 1,
+                RiskLevel.HIGH: 2,
+                RiskLevel.RESTRICTED: 3,
+            }
+            ceiling_val = risk_order.get(perm.risk_ceiling, 3)
+            for node in workflow.nodes:
+                try:
+                    node_schema = await self._node_registry.get_schema(node.node_id)
+                    node_risk = getattr(node_schema, "risk_level", None)
+                    if node_risk and risk_order.get(node_risk, 0) > ceiling_val:
+                        return {
+                            "error": (
+                                f"권한 초과 노드 포함: {node_schema.name or node.node_id} "
+                                f"(risk={node_risk}, ceiling={perm.risk_ceiling})"
+                            )
+                        }
+                except Exception:
+                    continue  # 스키마 조회 실패 시 스킵
+
         return {}
 
     # 9. qa_evaluator_node — LLM-as-a-Judge 품질 평가
@@ -467,12 +595,20 @@ class LangGraphOrchestrator:
             ],
         }
 
-    # 11. promote_node — propose 인텐트 또는 QA 통과 후 확정
+    # 11. promote_node — QA 통과 후 확정 + WorkflowDraftStore에 AI 초안 보관
     async def _promote_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         workflow = state.get("workflow_draft")
         if workflow is None:
             return {"error": "promote 실패: workflow_draft 없음"}
+
+        # WorkflowDraftStore에 AI 생성 초안 저장 (사용자 승인 후 diff 비교용)
+        if self._workflow_draft_store is not None:
+            try:
+                await self._workflow_draft_store.save_draft(state["session_id"], workflow)
+            except Exception as exc:
+                _logger.warning("draft 저장 실패 (non-fatal): %s", exc)
+
         promoted = workflow.model_copy(update={"is_draft": False})
         elapsed = int((time.monotonic() - t0) * 1000)
         return {
@@ -482,15 +618,16 @@ class LangGraphOrchestrator:
             ],
         }
 
-    # 12. handoff_node — WorkflowRepository.save → workflow_id → REQ-007
+    # 12. handoff_node — WorkflowRepository.save → saved_workflow_id 저장
     async def _handoff_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         workflow = state["workflow_draft"]
         if workflow is None:
             return {
+                "saved_workflow_id": None,
                 "collected_frames": [
                     ResultFrame(intent="propose", payload={"status": "no_workflow"})
-                ]
+                ],
             }
         try:
             workflow_id = await self._workflow_repo.save(workflow)
@@ -498,13 +635,168 @@ class LangGraphOrchestrator:
             return {"error": f"workflow 저장 실패: {exc}"}
         elapsed = int((time.monotonic() - t0) * 1000)
         return {
+            "saved_workflow_id": workflow_id,
             "collected_frames": [
-                ResultFrame(intent="draft", payload={"workflow_id": str(workflow_id)}),
                 PipelineStatusFrame(service_name="handoff", status="completed", elapsed_ms=elapsed),
+            ],
+        }
+
+    # 13. execute_node — 실행 엔진 호출 + 결과 폴링
+    async def _execute_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
+        workflow_id = state.get("saved_workflow_id")
+        if not workflow_id:
+            return {
+                "execution_id": None,
+                "execution_result": {"status": "skipped", "reason": "workflow_id 없음"},
+                "collected_frames": [
+                    PipelineStatusFrame(service_name="execute", status="failed")
+                ],
+            }
+
+        base_url = self._execution_engine_url
+        if not base_url:
+            _logger.warning("EXECUTION_ENGINE_URL 미설정 — 실행 검증 건너뜀")
+            return {
+                "execution_id": None,
+                "execution_result": {"status": "skipped", "reason": "EXECUTION_ENGINE_URL 미설정"},
+                "collected_frames": [
+                    PipelineStatusFrame(service_name="execute", status="completed", elapsed_ms=0)
+                ],
+            }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    base_url + _EXEC_START_PATH.format(workflow_id=workflow_id),
+                    json={"session_id": str(state["session_id"])},
+                )
+                resp.raise_for_status()
+                start_data = resp.json()
+
+            execution_id: str = start_data.get("execution_id", "")
+            _logger.info("실행 시작: execution_id=%s", execution_id)
+
+            result = await self._poll_execution_result(base_url, execution_id)
+        except Exception as exc:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            return {
+                "execution_id": None,
+                "execution_result": {"status": "failed", "error": str(exc)},
+                "collected_frames": [
+                    PipelineStatusFrame(service_name="execute", status="failed", elapsed_ms=elapsed)
+                ],
+            }
+
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "execution_id": execution_id,
+            "execution_result": result,
+            "collected_frames": [
+                PipelineStatusFrame(service_name="execute", status="completed", elapsed_ms=elapsed)
+            ],
+        }
+
+    async def _poll_execution_result(self, base_url: str, execution_id: str) -> dict[str, Any]:
+        """실행 결과를 폴링으로 조회. 팀장님 결과 조회 API 확정 후 endpoint 조정."""
+        deadline = time.monotonic() + _EXEC_TIMEOUT_SEC
+        while time.monotonic() < deadline:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(
+                        base_url + _EXEC_POLL_PATH.format(execution_id=execution_id)
+                    )
+                    if resp.status_code == 200:
+                        data: dict[str, Any] = resp.json()
+                        status = data.get("status", "")
+                        if status in ("completed", "failed", "cancelled"):
+                            return data
+            except Exception as poll_exc:
+                _logger.debug("폴링 중 오류 (재시도): %s", poll_exc)
+            await asyncio.sleep(_EXEC_POLL_INTERVAL_SEC)
+
+        return {"status": "timeout", "execution_id": execution_id}
+
+    # 14. evaluate_output_node — 실행 산출물 퀄리티 검증
+    async def _evaluate_output_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
+        result = state.get("execution_result") or {}
+        status = result.get("status", "unknown")
+
+        # 실행 실패/타임아웃이면 즉시 저점 처리
+        if status in ("failed", "timeout", "cancelled"):
+            elapsed = int((time.monotonic() - t0) * 1000)
+            return {
+                "output_quality_score": 0.0,
+                "output_quality_feedback": f"실행 {status}",
+                "collected_frames": [
+                    PipelineStatusFrame(service_name="evaluate_output", status="failed", elapsed_ms=elapsed)
+                ],
+            }
+
+        if status == "skipped":
+            elapsed = int((time.monotonic() - t0) * 1000)
+            return {
+                "output_quality_score": 5.0,
+                "output_quality_feedback": "실행 검증 건너뜀",
+                "collected_frames": [
+                    PipelineStatusFrame(service_name="evaluate_output", status="completed", elapsed_ms=elapsed)
+                ],
+            }
+
+        # LLM 평가 — llm 주입된 경우
+        score = 7.0
+        feedback = "실행 완료"
+        if self._llm is not None:
+            try:
+                spec = state.get("draft_spec")
+                intent = spec.natural_language_intent if spec else "알 수 없음"
+                prompt = (
+                    "워크플로우 실행 결과를 검토해 0-10점으로 평가하세요.\n"
+                    f"사용자 의도: {intent}\n"
+                    f"실행 상태: {status}\n"
+                    f"결과 요약: {json.dumps(result, ensure_ascii=False)[:500]}\n"
+                    "평가 기준: 오류 없음(+4), 의도 달성(+4), 성능 적절(+2)\n"
+                    '응답은 반드시 JSON: {"score": <float>, "feedback": "<한 줄 평가>"}'
+                )
+                raw = await self._llm.generate(prompt)
+                parsed = json.loads(raw)
+                score = float(parsed.get("score", 7.0))
+                feedback = parsed.get("feedback", "LLM 평가 완료")
+            except Exception as exc:
+                _logger.warning("output 품질 LLM 평가 실패, 기본값 사용: %s", exc)
+
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "output_quality_score": score,
+            "output_quality_feedback": feedback,
+            "collected_frames": [
+                PipelineStatusFrame(service_name="evaluate_output", status="completed", elapsed_ms=elapsed)
+            ],
+        }
+
+    # 15. user_confirm_node — 실행 결과 사용자 제시 + 최종 ResultFrame emit
+    async def _user_confirm_node(self, state: _State) -> dict:
+        execution_result = state.get("execution_result") or {}
+        workflow_id = state.get("saved_workflow_id")
+
+        return {
+            "collected_frames": [
+                ResultFrame(
+                    intent="execution_review",
+                    payload={
+                        "workflow_id": str(workflow_id) if workflow_id else None,
+                        "execution_id": state.get("execution_id"),
+                        "execution_status": execution_result.get("status", "unknown"),
+                        "output_quality_score": state.get("output_quality_score", 0.0),
+                        "output_quality_feedback": state.get("output_quality_feedback", ""),
+                        "session_id": str(state["session_id"]),
+                    },
+                )
             ]
         }
 
-    # 13. memory_save_node — 세션 종료 후 메모리 저장 (AgentMemoryRepository는 DI 외부 처리)
+    # 16. memory_save_node — 세션 종료 후 메모리 저장 (AgentMemoryRepository는 DI 외부 처리)
     async def _memory_save_node(self, state: _State) -> dict:
         return {}
 
@@ -518,6 +810,18 @@ class LangGraphOrchestrator:
         if intent == IntentType.CLARIFY:
             return _CLARIFY
         return _DRAFT  # draft / refine
+
+    @staticmethod
+    def _route_after_skill_suggest(state: _State) -> str:
+        """스킬 제안 완료 시 END, 아니면 intent 기반 분기."""
+        if state.get("skill_suggestion_done"):
+            return _SKILL_FOUND
+        intent = state.get("intent") or IntentType.CLARIFY
+        if intent == IntentType.PROPOSE:
+            return _PROPOSE
+        if intent == IntentType.CLARIFY:
+            return _CLARIFY
+        return _DRAFT
 
     @staticmethod
     def _route_slot(state: _State) -> str:
@@ -546,10 +850,11 @@ class LangGraphOrchestrator:
     def _build(self):
         graph: StateGraph = StateGraph(_State)
 
-        # 13 nodes
+        # 17 nodes
         graph.add_node("compress", self._compress_node)
         graph.add_node("security", self._security_node)
         graph.add_node("intent", self._intent_node)
+        graph.add_node("skill_suggest", self._skill_suggest_node)
         graph.add_node("consultant", self._consultant_node)
         graph.add_node("slot_fill", self._slot_fill_node)
         graph.add_node("retriever", self._retriever_node)
@@ -559,6 +864,9 @@ class LangGraphOrchestrator:
         graph.add_node("qa_retry", self._qa_retry_node)
         graph.add_node("promote", self._promote_node)
         graph.add_node("handoff", self._handoff_node)
+        graph.add_node("execute", self._execute_node)
+        graph.add_node("evaluate_output", self._evaluate_output_node)
+        graph.add_node("user_confirm", self._user_confirm_node)
         graph.add_node("memory_save", self._memory_save_node)
 
         # entry: turn_count 체크 후 compress 또는 security
@@ -569,14 +877,13 @@ class LangGraphOrchestrator:
             {"compress": "compress", "security": "security"},
         )
 
-        # security → intent
+        # security → intent → skill_suggest → branch
         graph.add_edge("security", "intent")
-
-        # intent → branch
+        graph.add_edge("intent", "skill_suggest")
         graph.add_conditional_edges(
-            "intent",
-            self._route_intent,
-            {_CLARIFY: "consultant", _DRAFT: "retriever", _PROPOSE: "promote"},
+            "skill_suggest",
+            self._route_after_skill_suggest,
+            {_SKILL_FOUND: END, _CLARIFY: "consultant", _DRAFT: "retriever", _PROPOSE: "promote"},
         )
 
         # clarify branch: consultant → slot_fill → (loop or retriever)
@@ -598,9 +905,12 @@ class LangGraphOrchestrator:
         )
         graph.add_edge("qa_retry", "drafter")
 
-        # promote → handoff → memory_save → END
+        # promote → handoff → execute → evaluate_output → user_confirm → memory_save → END
         graph.add_edge("promote", "handoff")
-        graph.add_edge("handoff", "memory_save")
+        graph.add_edge("handoff", "execute")
+        graph.add_edge("execute", "evaluate_output")
+        graph.add_edge("evaluate_output", "user_confirm")
+        graph.add_edge("user_confirm", "memory_save")
         graph.add_edge("memory_save", END)
 
         return graph.compile()
