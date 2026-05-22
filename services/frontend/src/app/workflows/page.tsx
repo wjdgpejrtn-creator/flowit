@@ -28,7 +28,8 @@ const ITEMS: WorkflowItem[] = [
 
 const TABLE_HEAD = ['이름', 'SCOPE', '위험도', '노드', '마지막 실행', '수정'];
 
-export default function WorkflowListPage() {
+export default function WorkflowListPage({ searchParams }: { searchParams: { tab?: string } }) {
+  const activeTab = searchParams.tab ?? 'my';
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
       <AppBar />
@@ -38,18 +39,19 @@ export default function WorkflowListPage() {
         <div className="flex items-center justify-between">
           {/* Tabs */}
           <div className="flex gap-2">
-            {[['My', 6], ['Team', 23], ['Public', 117]].map(([label, count]) => (
-              <button
-                key={label}
+            {([['My', 'my', 6], ['Team', 'team', 23], ['Public', 'public', 117]] as const).map(([label, key, count]) => (
+              <Link
+                key={key}
+                href={`/workflows?tab=${key}`}
                 className={[
-                  'text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-2 py-[3px]',
-                  label === 'My'
+                  'text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-2 py-[3px] no-underline',
+                  key === activeTab
                     ? 'bg-[var(--color-ink)] text-[var(--color-paper)]'
                     : 'bg-[var(--color-surface)] text-[var(--color-ink)] hover:bg-[var(--color-paper2)]',
                 ].join(' ')}
               >
                 {label} <span className="font-mono text-[11px] opacity-70">{count}</span>
-              </button>
+              </Link>
             ))}
           </div>
 
@@ -60,7 +62,9 @@ export default function WorkflowListPage() {
             >
               🔍 검색…
             </div>
-            <Btn primary>＋ 빈 캔버스</Btn>
+            <Link href="/agent?mode=edit">
+              <Btn primary>＋ 빈 캔버스</Btn>
+            </Link>
             <Link href="/agent">
               <Btn>🤖 AI에게 요청</Btn>
             </Link>

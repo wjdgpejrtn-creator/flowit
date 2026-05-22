@@ -42,8 +42,8 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
           trigger: cron
         </span>
         <div className="flex-1" />
-        <Btn ghost>⏸ 일시정지</Btn>
-        <Btn danger>⏹ 취소</Btn>
+        <Btn ghost disabled className="opacity-50 cursor-not-allowed">⏸ 일시정지</Btn>
+        <Btn danger disabled className="opacity-50 cursor-not-allowed">⏹ 취소</Btn>
       </div>
 
       {/* Progress bar */}

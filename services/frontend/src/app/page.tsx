@@ -44,16 +44,20 @@ export default function DashboardPage() {
         {/* Quick chips */}
         <div className="flex gap-2 mt-3 flex-wrap">
           {QUICK_CHIPS.map((chip) => (
-            <span
+            <Link
               key={chip}
-              className="text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-[8px] py-[3px] bg-[var(--color-surface)] cursor-pointer hover:bg-[var(--color-paper2)]"
+              href={`/agent?q=${encodeURIComponent(chip)}`}
+              className="text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-[8px] py-[3px] bg-[var(--color-surface)] hover:bg-[var(--color-paper2)] no-underline text-[var(--color-ink)]"
             >
               {chip}
-            </span>
+            </Link>
           ))}
-          <span className="text-[13px] text-[var(--color-ink4)] px-[8px] py-[3px] cursor-pointer">
+          <Link
+            href="/marketplace"
+            className="text-[13px] text-[var(--color-ink4)] px-[8px] py-[3px] no-underline hover:text-[var(--color-ink3)]"
+          >
             + 더 보기
-          </span>
+          </Link>
         </div>
       </div>
 
