@@ -5,8 +5,13 @@ from fastapi import Depends
 from nodes_graph.application.use_cases.validate_graph_use_case import ValidateGraphUseCase
 from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRepository
 from nodes_graph.domain.services.graph_validator import GraphValidator
+from skills_marketplace.application.use_cases import ApproveSkillUseCase, PublishSkillUseCase
+from skills_marketplace.domain.ports.skill_repository import SkillRepository
 
-from app.dependencies.repositories import get_node_definition_repository
+from app.dependencies.repositories import (
+    get_marketplace_skill_repository,
+    get_node_definition_repository,
+)
 
 
 def get_graph_validator(
@@ -19,3 +24,16 @@ def get_validate_graph_use_case(
     validator: GraphValidator = Depends(get_graph_validator),
 ) -> ValidateGraphUseCase:
     return ValidateGraphUseCase(validator=validator)
+
+
+def get_approve_skill_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+) -> ApproveSkillUseCase:
+    return ApproveSkillUseCase(repo=repo)
+
+
+def get_publish_skill_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+    node_def_repo: NodeDefinitionRepository = Depends(get_node_definition_repository),
+) -> PublishSkillUseCase:
+    return PublishSkillUseCase(repo=repo, node_def_repo=node_def_repo)
