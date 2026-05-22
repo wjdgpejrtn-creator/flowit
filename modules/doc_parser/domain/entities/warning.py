@@ -1,27 +1,15 @@
 """
 REQ-006 doc_parser — domain/entities/warning.py
 
-파싱 중 발생한 경고 정보 및 단계별 처리 시간 엔티티
+SSOT 이관 (REQ-012, common_schemas 0.11.0): `WarningInfo`는 common_schemas로
+이관됨 (아래 shim 재노출). `ElapsedDetail`은 파이프라인 단계별 처리 시간으로
+doc_parser 내부 타입이라 잔류한다.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
-
 from pydantic import BaseModel
 
-
-class WarningInfo(BaseModel):
-    """파싱 중 발생한 경고 정보.
-
-    Attributes:
-        code: 에러코드 (E0201, E0202 등 README 에러코드 기준)
-        message: 사용자에게 전달할 메시지
-        detail: 추가 디버깅 정보 (선택)
-    """
-
-    code: str
-    message: str
-    detail: Optional[dict[str, Any]] = None
+from common_schemas import WarningInfo
 
 
 class ElapsedDetail(BaseModel):
@@ -54,3 +42,6 @@ class ElapsedDetail(BaseModel):
             + self.chunking_ms
             + self.quality_gate_ms
         )
+
+
+__all__ = ["WarningInfo", "ElapsedDetail"]

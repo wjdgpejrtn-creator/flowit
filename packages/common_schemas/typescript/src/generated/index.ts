@@ -277,6 +277,23 @@ export interface ContentBlock {
   is_corrupted: boolean;
 }
 
+export interface Chunk {
+  chunk_id: string;
+  block: ContentBlock;
+  chunk_index: number;
+  parent_document_id: string;
+  token_count: number;
+  chunk_type: string;
+  importance_score?: number | null;
+  embedding?: Array<number> | null;
+}
+
+export interface ChunkingStrategy {
+  max_tokens: number;
+  overlap_tokens: number;
+  token_estimator_mode: "tiktoken" | "char_estimate";
+}
+
 export interface SheetMeta {
   sheet_name: string;
   row_count: number;
@@ -360,6 +377,16 @@ export interface NodeExecutionState {
   last_error?: string | null;
 }
 
+export interface ParseCoverage {
+  total_pages: number;
+  parsed_pages: number;
+  text_blocks: number;
+  table_blocks: number;
+  vision_blocks: number;
+  failed_blocks: number;
+  warnings: Array<string>;
+}
+
 export interface PermissionSource {
   user_id: string;
   role: "User" | "Admin";
@@ -375,6 +402,32 @@ export interface PlaintextCredential {
   credential_id: string;
   credential_kind: "fernet" | "aes_gcm";
   value: string;
+}
+
+export interface QualityMetrics {
+  korean_ratio: number;
+  broken_char_ratio: number;
+  blocks_per_page: number;
+  heading_ratio: number;
+  valid_table_ratio: number;
+  structural_chunk_ratio: number;
+  total_chunks: number;
+  avg_tokens: number;
+}
+
+export interface WarningInfo {
+  code: string;
+  message: string;
+  detail?: Record<string, unknown> | null;
+}
+
+export interface QualityGateResult {
+  quality_status: "success" | "warning" | "manual_correction_required" | "failed";
+  metrics: QualityMetrics;
+  warnings: Array<WarningInfo>;
+  error_codes: Array<string>;
+  decision_reason?: string | null;
+  coverage: ParseCoverage;
 }
 
 export interface SSEFrame {

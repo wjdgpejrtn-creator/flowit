@@ -4,12 +4,18 @@ from .agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 from .document import (
     AnalysisResult,
     BBox,
+    Chunk,
+    ChunkingStrategy,
     ContentBlock,
     DocumentBlock,
     FileMeta,
+    ParseCoverage,
     ParserMeta,
+    QualityGateResult,
+    QualityMetrics,
     SheetMeta,
     SourceRef,
+    WarningInfo,
 )
 from .enums import AgentMode, ErrorCode, ExecutionStatus, IntentType, RiskLevel
 from .exceptions import (
@@ -77,6 +83,13 @@ __all__ = [
     "ParserMeta",
     "SheetMeta",
     "SourceRef",
+    # document — 파싱 품질/청킹 (REQ-006 SSOT, REQ-012 이관)
+    "Chunk",
+    "ChunkingStrategy",
+    "ParseCoverage",
+    "QualityGateResult",
+    "QualityMetrics",
+    "WarningInfo",
     # agent
     "AgentState",
     "DraftSpec",
