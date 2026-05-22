@@ -326,6 +326,8 @@ class SkillsBuilderAgent:
         from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
             BuildFromSOPUseCase,
         )
+        from skills_marketplace.application.use_cases import CreateDraftSkillUseCase
+        from storage.repositories.pg_marketplace_skill_repository import PgMarketplaceSkillRepository
         from storage.repositories.pg_node_definition_repository import PgNodeDefinitionRepository
 
         # AgentProtocolRequest 필드: session_id/user_id/state/personal_memory는 top-level,
@@ -345,9 +347,29 @@ class SkillsBuilderAgent:
                 use_case = BuildFromFunctionalDomainUseCase(repo, self._embedder)
                 stream = use_case.execute(req.user_id, payload["domain_code"])
             elif source_type == "sop":
-                use_case = BuildFromSOPUseCase(repo, self._embedder, self._llm)
-                document = DocumentBlock.model_validate(payload["document"])
-                stream = use_case.execute(req.user_id, document, req.personal_memory)
+                # wizard 2단계(ADR-0020 Q8): extract_draft(추출·검토용, 저장X) / confirm(편집→DRAFT).
+                # confirm은 CreateDraftSkillUseCase(SkillRepository=PgMarketplaceSkillRepository, PR #147) 경유.
+                use_case = BuildFromSOPUseCase(
+                    CreateDraftSkillUseCase(PgMarketplaceSkillRepository(session)),
+                    self._embedder,
+                    self._llm,
+                )
+                step = payload.get("step", "extract")
+                if step == "extract":
+                    document = DocumentBlock.model_validate(payload["document"])
+                    stream = use_case.extract_draft(req.user_id, document, req.personal_memory)
+                elif step == "confirm":
+                    stream = use_case.confirm(req.user_id, payload["skills"])
+                else:
+                    yield _sse_bytes(
+                        AgentProtocolResponse(
+                            frames=[],
+                            state_delta={"error": "E_SOP_STEP_INVALID", "step": step},
+                            next_action="error",
+                        )
+                    )
+                    yield _done_frame_bytes()
+                    return
             else:
                 yield _sse_bytes(
                     AgentProtocolResponse(
