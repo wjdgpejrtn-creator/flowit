@@ -1,10 +1,12 @@
 'use client';
 
 import { useAuth } from '@/hooks/useAuth';
+import { useAuthStore } from '@/stores/authStore';
 import Btn from '@/components/common/Btn';
 
 export default function SettingsSecurityPage() {
   const { logout } = useAuth();
+  const { isAuthenticated } = useAuthStore();
 
   return (
     <>
@@ -19,7 +21,7 @@ export default function SettingsSecurityPage() {
               <div className="text-[11px] text-[var(--color-ink3)]">HttpOnly 쿠키 기반 인증</div>
             </span>
             <span className="text-[11px] px-[6px] py-0 border border-[var(--color-ink4)] rounded text-[var(--color-ink3)]">
-              활성
+              {isAuthenticated ? '활성' : '—'}
             </span>
           </div>
         </div>

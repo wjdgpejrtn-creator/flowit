@@ -38,7 +38,7 @@ export default function AppBar({
   const pathname = usePathname();
 
   const dept = deptProp ?? store.dept ?? '';
-  const userName = userNameProp ?? store.userName ?? '사용자';
+  const userName = userNameProp ?? (store.userName || '사용자');
   const role = roleProp ?? store.role;
 
   return (
@@ -101,6 +101,7 @@ export default function AppBar({
 
       {/* Logout */}
       <button
+        type="button"
         onClick={logout}
         className="text-[13px] border border-[var(--color-ink4)] px-[6px] py-[1px] rounded flex-shrink-0 bg-transparent cursor-pointer text-[var(--color-ink3)] hover:text-[var(--color-ink)]"
       >
