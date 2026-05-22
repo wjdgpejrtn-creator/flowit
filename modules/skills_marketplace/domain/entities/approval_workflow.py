@@ -6,6 +6,8 @@ from uuid import UUID
 from common_schemas.types import UtcDatetime
 from pydantic import BaseModel, ConfigDict
 
+from ..value_objects.skill_scope import SkillScope
+
 
 class ApprovalWorkflow(BaseModel):
     """스킬 게시 승인 워크플로우 항목 (storage/marketplace에서 이전 — ADR-0012 PR-2d 복사).
@@ -17,6 +19,7 @@ class ApprovalWorkflow(BaseModel):
 
     approval_id: UUID
     skill_id: UUID
+    scope: SkillScope          # 승인 대상 스킬의 범위 — skill_approvals polymorphic 구분 (조장 A안)
     reviewer_id: UUID
     status: Literal["pending", "approved", "rejected"]
     comment: str | None = None
