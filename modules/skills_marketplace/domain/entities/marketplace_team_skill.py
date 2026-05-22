@@ -6,6 +6,7 @@ from uuid import UUID
 from common_schemas.types import UtcDatetime
 from pydantic import BaseModel, Field
 
+from ..value_objects.node_spec_staging import NodeSpecStaging
 from ..value_objects.skill_state import SkillState
 
 
@@ -25,7 +26,8 @@ class MarketplaceTeamSkill(BaseModel):
     author_id: UUID                                  # 원작성자 (storage Skill 흡수)
     name: str
     description: str
-    node_definition_id: UUID                         # nodes_graph NodeDefinition 참조
+    node_definition_id: UUID | None = None  # NodeDefinition 참조, PUBLISHED 시점에만 채움 (ADR-0020 Q1)
+    node_spec_staging: NodeSpecStaging | None = None  # publish 전 노드 스펙 임시 보관 (ADR-0020 Q1)
     lifecycle_state: SkillState = SkillState.DRAFT   # 게시 상태 (storage Skill에서 흡수)
     skill_document_uri: str | None = None            # GCS SkillDocument(markdown) 경로 (ADR-0017)
     embedding: list[float] | None = None             # BGE-M3 768d (하이브리드 검색용)
