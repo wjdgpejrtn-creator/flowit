@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, DateTime, Index, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -50,8 +50,9 @@ class NodeDefinitionModel(Base):
     embedding: Mapped[Optional[list[float]]] = mapped_column(Vector(768), nullable=True)
     # ADR-0020 (i) scope 격리 — NULL=company 전역(기존 53종 비침습)
     owner_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        pg.UUID(as_uuid=True), nullable=True
+        pg.UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
     )
+    # teams 테이블 부재로 FK 없이 UUID만 (019_node_definitions_scope.sql과 정합)
     team_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         pg.UUID(as_uuid=True), nullable=True
     )
