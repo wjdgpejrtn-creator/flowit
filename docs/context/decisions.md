@@ -35,6 +35,7 @@
 | 0012 | [`database/` / `modules/storage/` / `modules/skills_marketplace/` 책임 분배](./adr/ADR-0012-database-storage-module-boundary.md) | Accepted | 2026-05-14 |
 | 0013 | [EmbedderPort SSOT — nodes_graph 소유 + ai_agent 구현체 (예외 패턴)](./adr/ADR-0013-embedder-port-ssot.md) | Accepted | 2026-05-12 |
 | 0014 | [ToolToNodeWrapper 제거 + REQ-005 toolset 11종을 nodes_graph external/로 직접 등록](./adr/ADR-0014-tool-to-node-wrapper-removal.md) | Accepted (호출 경로 A는 0018로 부분 대체) | 2026-05-19 |
+| 0015 | toolset = AI tool-use 대상 (워크플로우 노드 아님) — `docs` 브랜치 전용(PR #79), development 미반영. 인덱스 갭은 의도된 것 (되살림 여부 별도 안건) | 미반영 | — |
 | 0016 | [Personalization GCS MemoryStore — Port 소유권 · 저장 경로 · Embedding 분리](./adr/ADR-0016-personalization-gcs-memory-store.md) | Accepted | 2026-05-18 |
 | 0017 | [Skills Builder 산출물 = NodeDefinition + SkillDocument 이중 저장 (`skills_marketplace` = 사내 SkillsMP 역할)](./adr/ADR-0017-skills-builder-skill-document-dual-storage.md) | Accepted (§2는 0020으로 부분 대체) | 2026-05-20 |
 | 0018 | [워크플로우 노드 독립 실행 경로 — ToolsetExecutor 폐기, BaseNode.process() 직접 실행](./adr/ADR-0018-workflow-node-independent-execution-path.md) | Accepted | 2026-05-20 |
