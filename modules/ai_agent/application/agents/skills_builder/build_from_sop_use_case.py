@@ -65,7 +65,7 @@ from common_schemas import DocumentBlock, MemoryEntry
 from common_schemas.enums import RiskLevel
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame, SSEFrame
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from skills_marketplace.application.use_cases import CreateDraftSkillUseCase
 from skills_marketplace.domain.value_objects import NodeSpecStaging
 
@@ -234,10 +234,23 @@ class BuildFromSOPUseCase:
 
         for skill in skills:
             node_type = skill.get("node_type", "?")
-            staging = NodeSpecStaging(**skill["staging"])
+            # confirm = wizard 신뢰 경계 (사용자가 편집한 데이터). malformed 입력은 예외를 던지지 않고
+            # 격리된 ErrorFrame으로 — staging 파싱 + 필수 키 + category(extract와 동일 검증)를 재확인.
+            try:
+                staging = NodeSpecStaging(**skill["staging"])
+                name = skill["name"]
+                description = skill["description"]
+                if staging.category not in _ALLOWED_CATEGORIES:
+                    raise ValueError(
+                        f"category '{staging.category}'가 DB CHECK 8영문에 없음: {sorted(_ALLOWED_CATEGORIES)}"
+                    )
+            except (KeyError, TypeError, ValueError, ValidationError) as e:
+                failed.append({"node_type": node_type, "stage": "validate", "error": str(e)})
+                yield ErrorFrame(code="E_SKILL_INVALID", message=f"확정 입력 검증 실패 ({node_type}): {e}")
+                continue
 
             try:
-                embedding = await self._embedder.embed(skill["description"])
+                embedding = await self._embedder.embed(description)
             except Exception as e:
                 failed.append({"node_type": node_type, "stage": "embed", "error": str(e)})
                 yield ErrorFrame(code="E_EMBEDDING_FAILED", message=f"임베딩 실패 ({node_type}): {e}")
@@ -248,8 +261,8 @@ class BuildFromSOPUseCase:
             try:
                 sid = await self._create_draft_skill.execute(
                     owner_user_id=user_id,
-                    name=skill["name"],
-                    description=skill["description"],
+                    name=name,
+                    description=description,
                     node_spec_staging=staging,
                     embedding=embedding,
                 )

@@ -356,7 +356,7 @@ class SkillsBuilderAgent:
                     document = DocumentBlock.model_validate(payload["document"])
                     stream = use_case.extract_draft(req.user_id, document, req.personal_memory)
                 elif step == "confirm":
-                    stream = use_case.confirm(req.user_id, payload["skills"])
+                    stream = use_case.confirm(req.user_id, payload.get("skills", []))
                 else:
                     yield _sse_bytes(
                         AgentProtocolResponse(

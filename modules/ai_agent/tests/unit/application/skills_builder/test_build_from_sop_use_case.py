@@ -29,20 +29,26 @@ from ai_agent.domain.ports.llm_port import LLMPort
 class _FakeCreateDraftSkill:
     """CreateDraftSkillUseCase mock — confirm이 호출하는 DRAFT 생성 use case."""
 
-    def __init__(self) -> None:
+    def __init__(self, raise_on_call: Exception | None = None) -> None:
         self.calls: list[dict] = []
+        self._raise = raise_on_call
 
     async def execute(self, **kwargs: Any) -> UUID:
         self.calls.append(kwargs)
+        if self._raise:
+            raise self._raise
         return uuid4()
 
 
 class _FakeEmbedder(EmbedderPort):
-    def __init__(self) -> None:
+    def __init__(self, raise_on_call: Exception | None = None) -> None:
         self.calls: list[str] = []
+        self._raise = raise_on_call
 
     async def embed(self, text: str) -> list[float]:
         self.calls.append(text)
+        if self._raise:
+            raise self._raise
         return [0.1] * 768
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
@@ -212,3 +218,79 @@ async def test_confirm_creates_draft_skills():
 async def test_confirm_empty_skills_yields_error():
     frames = [f async for f in _make_uc().confirm(uuid4(), [])]
     assert any(isinstance(f, ErrorFrame) for f in frames)
+
+
+# ----------------------------------------------------------------------
+# 실패 경로 — extract_draft LLM 오류 / confirm 입력 검증·격리 (조장 #151 리뷰 M2)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_extract_draft_llm_generation_failed():
+    llm = _FakeLLM(raise_on_call=RuntimeError("modal timeout"))
+    frames = [f async for f in _make_uc(llm=llm).extract_draft(uuid4(), _make_document())]
+    assert any(isinstance(f, ErrorFrame) and f.code == "E_LLM_GENERATION_FAILED" for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_extract_draft_llm_response_invalid():
+    # LLM이 _ExtractedSkillNodeList가 아닌 타입 반환
+    llm = _FakeLLM(structured_response={"not": "a model"})
+    frames = [f async for f in _make_uc(llm=llm).extract_draft(uuid4(), _make_document())]
+    assert any(isinstance(f, ErrorFrame) and f.code == "E_LLM_RESPONSE_INVALID" for f in frames)
+
+
+def _valid_skill() -> dict:
+    return {
+        "node_type": "sop_x", "name": "스킬", "description": "설명",
+        "instructions": "## When to use\n...",
+        "staging": {
+            "category": "action", "input_schema": {}, "output_schema": {},
+            "risk_level": "Low", "required_connections": [], "service_type": None,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_confirm_malformed_skill_isolated():
+    # confirm = 신뢰 경계: staging 키 누락 → E_SKILL_INVALID 격리, 유효 스킬은 계속 처리
+    draft = _FakeCreateDraftSkill()
+    bad = {"node_type": "bad", "name": "x", "description": "y"}  # staging 키 없음
+    skills = [bad, _valid_skill()]
+
+    frames = [f async for f in _make_uc(draft=draft).confirm(uuid4(), skills)]
+
+    assert any(isinstance(f, ErrorFrame) and f.code == "E_SKILL_INVALID" for f in frames)
+    result = frames[-1]
+    assert result.payload["created_count"] == 1   # 유효 1건만 생성
+    assert result.payload["failed_count"] == 1
+    assert len(draft.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_confirm_bad_category_isolated():
+    # 사용자가 category를 DB CHECK 8영문 밖 값으로 편집 → E_SKILL_INVALID (extract와 동일 검증)
+    draft = _FakeCreateDraftSkill()
+    bad = _valid_skill()
+    bad["staging"]["category"] = "not_a_category"
+    frames = [f async for f in _make_uc(draft=draft).confirm(uuid4(), [bad])]
+    assert any(isinstance(f, ErrorFrame) and f.code == "E_SKILL_INVALID" for f in frames)
+    assert draft.calls == []   # 검증 실패 → 생성 안 함
+
+
+@pytest.mark.asyncio
+async def test_confirm_embed_failure_isolated():
+    embedder = _FakeEmbedder(raise_on_call=RuntimeError("embed down"))
+    draft = _FakeCreateDraftSkill()
+    frames = [f async for f in _make_uc(draft=draft, embedder=embedder).confirm(uuid4(), [_valid_skill()])]
+    assert any(isinstance(f, ErrorFrame) and f.code == "E_EMBEDDING_FAILED" for f in frames)
+    assert frames[-1].payload["created_count"] == 0
+    assert draft.calls == []   # embed 실패 → create_draft 미호출
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_draft_failure_isolated():
+    draft = _FakeCreateDraftSkill(raise_on_call=RuntimeError("db down"))
+    frames = [f async for f in _make_uc(draft=draft).confirm(uuid4(), [_valid_skill()])]
+    assert any(isinstance(f, ErrorFrame) and f.code == "E_CREATE_DRAFT_FAILED" for f in frames)
+    assert frames[-1].payload["failed_count"] == 1
