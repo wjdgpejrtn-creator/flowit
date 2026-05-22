@@ -102,7 +102,7 @@ from skills_marketplace.application.use_cases import (
 | `PromoteToCompanyUseCase` | `team_skill_id → UUID` | 팀 → 전사 승격 (복제: 동일 정책, 원본 promoted_to_company_id 마킹) |
 | `SearchSkillsUseCase` | `query_embedding, scope, limit, lifecycle_state=PUBLISHED → list[Skill]` | 하이브리드 검색 — ai_agent Composer 호출 (repo.search 위임). 기본 PUBLISHED만(ADR-0020 (b), 미검토 오염 방지) |
 | `ApproveSkillUseCase` | `skill_id, scope, reviewer_id, approved, comment` | 게시 승인 REVIEW → APPROVED/DRAFT + `ApprovalWorkflow` 레코드 저장(ADR-0020 + 감사 추적) |
-| `PublishSkillUseCase` | `skill_id, scope` | 게시 APPROVED → PUBLISHED (storage 이전). **publish 시 staging → NodeDefinition 생성은 ① 머지 후 추가 예정**(ADR-0020 Q1) |
+| `PublishSkillUseCase` | `skill_id, scope` (생성자 +`node_def_repo`) | 게시 APPROVED → PUBLISHED + **publish 시 `node_spec_staging` → `NodeDefinition` 생성·upsert + `node_definition_id` 연결**(ADR-0020 Option B/Q1, ②d). scope별 owner/team 격리(personal=owner_user_id, team=team_id, company=전역). nodes_graph `NodeDefinitionRepository` 의존 |
 
 ## 의존 관계
 

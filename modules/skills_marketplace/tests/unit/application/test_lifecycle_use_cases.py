@@ -45,6 +45,11 @@ class _InMemorySkillRepo:
         return approval
 
 
+class _NodeDefRepo:
+    async def upsert(self, node_def):
+        return node_def
+
+
 def _personal(skill_id, state):
     now = datetime.now(UTC)
     return MarketplacePersonalSkill(
@@ -89,7 +94,7 @@ async def test_publish_approved_to_published():
     sid = uuid4()
     await repo.save_personal(_personal(sid, SkillState.APPROVED))
 
-    await PublishSkillUseCase(repo).execute(sid, SkillScope.PERSONAL)
+    await PublishSkillUseCase(repo, _NodeDefRepo()).execute(sid, SkillScope.PERSONAL)
 
     updated = await repo.get_personal(sid)
     assert updated.lifecycle_state == SkillState.PUBLISHED
@@ -132,4 +137,4 @@ async def test_publish_from_draft_raises_invalid_transition():
 
     # DRAFT → PUBLISHED 직접 전이 금지
     with pytest.raises(ValidationError):
-        await PublishSkillUseCase(repo).execute(sid, SkillScope.PERSONAL)
+        await PublishSkillUseCase(repo, _NodeDefRepo()).execute(sid, SkillScope.PERSONAL)
