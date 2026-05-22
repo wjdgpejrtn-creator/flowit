@@ -14,7 +14,7 @@ pip install -e "modules/doc_parser[dev]"
 ## Quick Start
 
 ```python
-from doc_parser.domain.entities import Chunk, QualityGateResult, QualityMetrics
+from common_schemas import Chunk, QualityGateResult, QualityMetrics  # REQ-012 SSOT (0.11.0)
 from doc_parser.domain.services import (
     ChunkingService, QualityGate, PIIMaskingService, NormalizationService,
 )

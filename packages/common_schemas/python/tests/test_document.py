@@ -6,12 +6,18 @@ from pydantic import ValidationError
 from common_schemas.document import (
     AnalysisResult,
     BBox,
+    Chunk,
+    ChunkingStrategy,
     ContentBlock,
     DocumentBlock,
     FileMeta,
+    ParseCoverage,
     ParserMeta,
+    QualityGateResult,
+    QualityMetrics,
     SheetMeta,
     SourceRef,
+    WarningInfo,
 )
 
 
@@ -160,3 +166,102 @@ class TestAnalysisResult:
             few_shot_count=3,
         )
         assert ar.confidence == 0.95
+
+
+def _metrics() -> QualityMetrics:
+    return QualityMetrics(
+        korean_ratio=0.9,
+        broken_char_ratio=0.01,
+        blocks_per_page=12.0,
+        heading_ratio=0.1,
+        valid_table_ratio=1.0,
+        structural_chunk_ratio=0.8,
+        total_chunks=20,
+        avg_tokens=180.0,
+    )
+
+
+class TestWarningInfo:
+    def test_create(self):
+        w = WarningInfo(code="E0201", message="표 구조 불확실")
+        assert w.code == "E0201"
+        assert w.detail is None
+
+
+class TestQualityMetrics:
+    def test_create(self):
+        assert _metrics().total_chunks == 20
+
+    def test_frozen(self):
+        m = _metrics()
+        with pytest.raises(ValidationError):
+            m.total_chunks = 1
+
+
+class TestParseCoverage:
+    def test_defaults(self):
+        pc = ParseCoverage()
+        assert pc.total_pages == 0
+        assert pc.warnings == []
+
+    def test_frozen(self):
+        pc = ParseCoverage()
+        with pytest.raises(ValidationError):
+            pc.total_pages = 5
+
+
+class TestQualityGateResult:
+    def test_create(self):
+        r = QualityGateResult(
+            quality_status="success",
+            metrics=_metrics(),
+            warnings=[WarningInfo(code="E0201", message="x")],
+            error_codes=[],
+        )
+        assert r.quality_status == "success"
+        assert r.decision_reason is None
+        assert r.coverage.total_pages == 0  # default_factory=ParseCoverage
+
+    def test_invalid_status(self):
+        with pytest.raises(ValidationError):
+            QualityGateResult(
+                quality_status="bogus",
+                metrics=_metrics(),
+                warnings=[],
+                error_codes=[],
+            )
+
+
+class TestChunk:
+    @staticmethod
+    def _block() -> ContentBlock:
+        return ContentBlock(block_id=uuid4(), block_type="text", content="x")
+
+    def test_create_auto_id(self):
+        c = Chunk(block=self._block(), chunk_index=0, parent_document_id=uuid4())
+        assert c.chunk_id is not None
+        assert c.token_count == 0
+        assert c.chunk_type == "structural"
+        assert c.importance_score is None
+        assert c.embedding is None
+
+    def test_mutable(self):
+        # Chunk은 frozen 아님 — REQ-004 AI_Agent가 importance_score/embedding 후속 채움.
+        c = Chunk(block=self._block(), chunk_index=0, parent_document_id=uuid4())
+        c.importance_score = 0.7
+        assert c.importance_score == 0.7
+
+
+class TestChunkingStrategy:
+    def test_create(self):
+        s = ChunkingStrategy(max_tokens=512, overlap_tokens=64, token_estimator_mode="tiktoken")
+        assert s.max_tokens == 512
+
+    def test_frozen(self):
+        s = ChunkingStrategy(max_tokens=512, overlap_tokens=64, token_estimator_mode="char_estimate")
+        with pytest.raises(ValidationError):
+            s.max_tokens = 1
+
+    def test_invalid_estimator_mode(self):
+        with pytest.raises(ValidationError):
+            ChunkingStrategy(max_tokens=512, overlap_tokens=64, token_estimator_mode="bad")

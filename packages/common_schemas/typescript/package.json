@@ -1,6 +1,6 @@
 {
   "name": "@workflow-automation/common_schemas",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "main": "src/generated/index.ts",
   "types": "src/generated/index.ts",
