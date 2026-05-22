@@ -10,11 +10,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from ..domain.services.permission_resolver import PermissionResolver
 from .jwt_adapter import JWTAdapter
 
+# ADR-0021 — 단일 출처 HttpOnly 쿠키 인증의 access token 쿠키 이름.
+# api_server `app/cookies.py`가 이 상수를 import해 set 시점과 추출 시점을 일치시킨다 (교차 모듈 계약).
+ACCESS_TOKEN_COOKIE = "access_token"
+
 
 class AuthMiddleware(BaseHTTPMiddleware):
     # 기본 익명 허용 경로. service-local 확장은 __init__의 `extra_public_paths` 인자 사용
     # (private `_PUBLIC_PATHS` 직접 확장보다 권장 — base 변경 시 silent break 방지).
-    _PUBLIC_PATHS = frozenset({"/api/v1/auth/callback", "/api/v1/auth/login", "/healthz", "/docs", "/openapi.json"})
+    _PUBLIC_PATHS = frozenset({"/api/v1/auth/callback", "/healthz", "/docs", "/openapi.json"})
 
     def __init__(
         self,
@@ -40,7 +44,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             return auth_header.removeprefix("Bearer ") or None
-        return request.cookies.get("access_token") or None
+        return request.cookies.get(ACCESS_TOKEN_COOKIE) or None
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         if request.url.path in self._public_paths:

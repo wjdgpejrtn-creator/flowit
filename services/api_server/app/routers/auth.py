@@ -9,9 +9,9 @@ from auth.adapters.oauth.google_oauth_client import GoogleOAuthClient
 from auth.application.use_cases.authenticate_use_case import AuthenticateUseCase
 from auth.application.use_cases.refresh_token_use_case import RefreshTokenUseCase
 from auth.domain.ports.session_repository import SessionRepository
-from auth.domain.value_objects.token_pair import TokenPair
 from common_schemas import PermissionSource
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
+from common_schemas.exceptions import AuthorizationError
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -36,10 +36,6 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 # Redis SETEX로 10분 TTL 부여 → callback에서 GETDEL로 검증 + 소진 (replay 방지).
 OAUTH_STATE_KEY_PREFIX = "oauth_state:"
 OAUTH_STATE_TTL_SECONDS = 600
-
-
-class LoginRequest(BaseModel):
-    code: str
 
 
 class AuthorizeResponse(BaseModel):
@@ -86,18 +82,6 @@ async def _consume_oauth_state(state: str | None, redis: aioredis.Redis | None, 
         raise HTTPException(status_code=401, detail="Invalid or expired OAuth state (CSRF check)")
 
 
-@router.post("/login", response_model=TokenPair)
-async def login(
-    req: LoginRequest = Body(...),
-    use_case: AuthenticateUseCase = Depends(get_authenticate_use_case),
-) -> TokenPair:
-    try:
-        return await use_case.execute(req.code)
-    except Exception as exc:
-        # Google OAuth 실패(invalid code) 등은 401로 표면화
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {exc}") from exc
-
-
 @router.get("/callback")
 async def callback(
     code: str = Query(..., description="Google OAuth authorization code"),
@@ -138,7 +122,14 @@ async def refresh(
     if not refresh_token:
         raise HTTPException(status_code=401, detail="Missing refresh token cookie")
 
-    tokens = await use_case.execute(refresh_token)
+    try:
+        tokens = await use_case.execute(refresh_token)
+    except AuthorizationError as exc:
+        # 만료·무효 refresh 토큰 / 만료된 session = 재인증이 필요한 정상 케이스 → 401.
+        # /callback과 달리 외부 호출이 없으므로 AuthorizationError만 잡고, 그 외 예외(DB 장애 등)는
+        # 500으로 전파해 모니터링에 실제 장애가 드러나도록 둔다.
+        raise HTTPException(status_code=401, detail="Refresh token invalid or expired") from exc
+
     response = JSONResponse({"expires_in": tokens.expires_in})
     set_auth_cookies(response, tokens, settings)
     return response

@@ -18,6 +18,7 @@ from app.main import create_app
 from auth.domain.entities.session import Session
 from auth.domain.entities.user import User
 from auth.domain.value_objects.token_pair import TokenPair
+from common_schemas.exceptions import AuthorizationError
 from fastapi.testclient import TestClient
 
 
@@ -45,38 +46,6 @@ def test_authorize_returns_url(app, monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["authorization_url"].startswith("https://accounts.google.com")
     assert len(body["state"]) > 16
 
-    app.dependency_overrides.clear()
-
-
-def test_login_exchanges_code_for_token_pair(app) -> None:
-    fake_uc = MagicMock()
-    fake_uc.execute = AsyncMock(
-        return_value=TokenPair(access_token="acc.jwt", refresh_token="ref.jwt", expires_in=3600)
-    )
-    app.dependency_overrides[get_authenticate_use_case] = lambda: fake_uc
-
-    client = TestClient(app)
-    resp = client.post("/api/v1/auth/login", json={"code": "google-auth-code"})
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["access_token"] == "acc.jwt"
-    assert body["refresh_token"] == "ref.jwt"
-    assert body["token_type"] == "Bearer"
-    fake_uc.execute.assert_awaited_once_with("google-auth-code")
-
-    app.dependency_overrides.clear()
-
-
-def test_login_failure_returns_401(app) -> None:
-    fake_uc = MagicMock()
-    fake_uc.execute = AsyncMock(side_effect=Exception("invalid code"))
-    app.dependency_overrides[get_authenticate_use_case] = lambda: fake_uc
-
-    client = TestClient(app)
-    resp = client.post("/api/v1/auth/login", json={"code": "bad"})
-
-    assert resp.status_code == 401
     app.dependency_overrides.clear()
 
 
@@ -132,6 +101,21 @@ def test_refresh_without_cookie_returns_401(app) -> None:
 
     client = TestClient(app)
     resp = client.post("/api/v1/auth/refresh")
+    assert resp.status_code == 401
+
+    app.dependency_overrides.clear()
+
+
+def test_refresh_with_invalid_token_returns_401(app) -> None:
+    """만료·무효 refresh 토큰 = 재인증 필요한 정상 케이스 → 500/403이 아닌 401."""
+    fake_uc = MagicMock()
+    fake_uc.execute = AsyncMock(side_effect=AuthorizationError("Session expired", code="E-AUTH-006"))
+    app.dependency_overrides[get_refresh_token_use_case] = lambda: fake_uc
+
+    client = TestClient(app)
+    client.cookies.set("refresh_token", "expired.jwt")
+    resp = client.post("/api/v1/auth/refresh")
+
     assert resp.status_code == 401
 
     app.dependency_overrides.clear()

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from auth.adapters.middleware import ACCESS_TOKEN_COOKIE
 from auth.domain.value_objects.token_pair import TokenPair
 from fastapi import Response
 
 from app.config import Settings
 
 # ADR-0021 — 단일 출처 토폴로지의 HttpOnly 쿠키 인증.
-# 쿠키 이름은 modules/auth AuthMiddleware의 토큰 추출과 계약상 일치해야 한다.
-ACCESS_COOKIE = "access_token"
+# access token 쿠키 이름은 modules/auth AuthMiddleware와 SSOT 공유 (교차 모듈 계약).
+ACCESS_COOKIE = ACCESS_TOKEN_COOKIE
 REFRESH_COOKIE = "refresh_token"
 
 # refresh_token TTL = access TTL * 7 — AuthenticateUseCase / RefreshTokenUseCase 계약과 동일.
