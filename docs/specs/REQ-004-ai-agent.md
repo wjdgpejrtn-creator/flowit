@@ -343,7 +343,7 @@ class AgentProtocolResponse(BaseModel):
 
 ### 엔드포인트 (각 Modal app)
 
-- `POST /v1/agent/route` — `agent-composer`, `agent-skills-builder`, `agent-personalization` 동일
+- `POST /v1/agent/route` — `agent-composer`, `agent-skills-builder`, `agent-personalization` 동일. `agent-skills-builder`는 `payload.source_type`(sop/industry_default/functional_domain)로 분기, **`source_type=sop`은 `payload.step`(extract/confirm) 추가**로 wizard 2단계 라우팅(ADR-0020 Q8 / 미지정 시 extract). 호출측(orchestrator/프론트)이 step 채움
 - `GET /v1/health` — health check (REST 표준 + 운영 도구 호환성, 2026-05-14 정정)
 
 #### `agent-composer` 전용 엔드포인트 (2026-05-22 추가)

@@ -14,10 +14,12 @@ routing:
     POST /v1/agent/route
         body: AgentProtocolRequest
             payload.source_type ∈ {"sop", "industry_default", "functional_domain"}
+            sop은 payload.step ∈ {"extract", "confirm"} 추가 (wizard 2단계, ADR-0020 Q8 / 기본 extract)
         → 분기:
-            "sop"               → BuildFromSOPUseCase.execute(user_id, document, personal_memory)
-            "industry_default"  → BuildFromIndustryDefaultUseCase.execute(user_id, industry_code)
-            "functional_domain" → BuildFromFunctionalDomainUseCase.execute(user_id, domain_code)
+            "sop" + step=extract → BuildFromSOPUseCase.extract_draft(user_id, document, personal_memory)
+            "sop" + step=confirm → BuildFromSOPUseCase.confirm(user_id, skills)
+            "industry_default"   → BuildFromIndustryDefaultUseCase.execute(user_id, industry_code)
+            "functional_domain"  → BuildFromFunctionalDomainUseCase.execute(user_id, domain_code)
         → 각 use case가 AsyncGenerator[SSEFrame] yield
         → SSE 텍스트 스트림 ("data: <json>\\n\\n") 으로 변환해 응답
     GET /v1/health
