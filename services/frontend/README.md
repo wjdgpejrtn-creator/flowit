@@ -145,7 +145,7 @@ import {
 
 | 서비스 | 설명 |
 |--------|------|
-| `apiClient` | Axios/Fetch 래퍼, JWT 자동 첨부, 에러 인터셉터 |
+| `apiClient` | Fetch 래퍼, HttpOnly 쿠키 기반 인증, 자동 토큰 갱신 |
 | `workflowApi` | `/workflows` 엔드포인트 호출 함수 |
 | `agentApi` | `/agents` 엔드포인트 호출 함수 |
 | `documentApi` | `/documents` 엔드포인트 호출 함수 |
@@ -157,7 +157,7 @@ import {
 |-------|------|
 | `workflowStore` | 현재 편집 중인 WorkflowSchema 상태 |
 | `agentStore` | AgentState + 메시지 히스토리 |
-| `authStore` | 인증 토큰 + 사용자 정보 |
+| `authStore` | 사용자 정보 (인증은 HttpOnly 쿠키, JS는 토큰 비접근) |
 
 ## React Flow ↔ common_schemas 어댑터
 

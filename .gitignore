@@ -19,6 +19,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# frontend src/lib은 소스 코드 — Python lib/ 패턴 예외 처리
+!services/frontend/src/lib/
 parts/
 sdist/
 var/
