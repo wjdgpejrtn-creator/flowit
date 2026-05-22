@@ -474,22 +474,21 @@ class YamlConfigLoader(ConfigLoaderPort):
 ✅ Step 19: adapters/parsers/pdf_parser.py
 ✅ Step 20: adapters/parsers/docx_parser.py
 ✅ Step 21: adapters/parsers/xlsx_parser.py
-⚠️ Step 22: adapters/parsers/csv_parser.py        (pandas → stdlib csv 교체 필요)
+✅ Step 22: adapters/parsers/csv_parser.py        (pandas → stdlib csv 교체 필요)
 ✅ Step 23: adapters/parsers/pptx_parser.py
 ✅ Step 24: adapters/parsers/hwp_parser.py
-⚠️ Step 25: adapters/parsers/hwpx_parser.py       (xml.etree → lxml 교체 필요)
+✅ Step 25: adapters/parsers/hwpx_parser.py       (xml.etree → lxml 교체 필요)
 ✅ Step 26: adapters/parsers/__init__.py
-
-🔜 Step 27: domain/entities/quality.py            (value_objects/ → entities/ 이동)
-🔜 Step 28: domain/entities/pii.py                (PIIMaskRule 신규)
-🔜 Step 29: domain/entities/chunk.py 수정          (ChunkingStrategy 추가)
-🔜 Step 30: domain/ports/repository_port.py       (DocumentRepositoryPort 신규)
-🔜 Step 31: domain/ports/config_port.py           (ConfigLoaderPort 신규)
-🔜 Step 32: domain/services/parser_factory.py     (adapters/ → domain/services/ 이동)
-🔜 Step 33: application/use_cases/parsing_pipeline.py  (ParsingPipeline 신규)
-🔜 Step 34: adapters/parsers/markdown_parser.py   (MarkdownParser 신규)
-🔜 Step 35: adapters/config/yaml_config_loader.py (YamlConfigLoader 신규)
-🔜 Step 36: adapters/persistence/postgres_document_repo.py (REQ-001 확정 후)
+✅ Step 27: domain/entities/quality.py            (value_objects/ → entities/ 이동)
+✅ Step 28: domain/entities/pii.py                (PIIMaskRule 신규)
+✅ Step 29: domain/entities/chunk.py 수정          (ChunkingStrategy 추가)
+✅ Step 30: domain/ports/repository_port.py       (DocumentRepositoryPort 신규)
+✅ Step 31: domain/ports/config_port.py           (ConfigLoaderPort 신규)
+✅ Step 32: domain/services/parser_factory.py     (adapters/ → domain/services/ 이동)
+✅ Step 33: application/use_cases/parsing_pipeline.py  (ParsingPipeline 신규)
+✅ Step 34: adapters/parsers/markdown_parser.py   (MarkdownParser 신규)
+✅ Step 35: adapters/config/yaml_config_loader.py (YamlConfigLoader 신규)
+✅ Step 36: adapters/persistence/postgres_document_repo.py (REQ-001 확정 후)
 ```
 
 ---
