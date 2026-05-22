@@ -83,7 +83,7 @@ services/frontend/         ← common_schemas/typescript 타입만
 - `domain/` 레이어에서 FastAPI, SQLAlchemy, LangGraph, Celery 등 프레임워크 import 금지
 - `application/` 레이어에서 구체 Adapter 직접 import 금지 (Port ABC만 참조)
 - ORM 모델(`storage/orm/`)이 도메인 경계를 넘어가는 것 금지
-- `modules/` 간 직접 import 시 반드시 상대 모듈의 `domain/ports/` 또는 `domain/entities/`만 참조
+- `modules/` 간 직접 import 시 반드시 상대 모듈의 `domain/ports/`, `domain/entities/` 또는 `domain/value_objects/`만 참조 (셋 다 안정 도메인 계층 — use case 입력 계약으로 노출되는 VO 포함)
 
 ---
 
@@ -146,6 +146,7 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 | storage | skills_marketplace의 `domain/ports` | `from skills_marketplace.domain.ports import SkillRepository` (ABC 구현을 위해 — ADR-0017 + 5/20 합의: Port 정의는 skills_marketplace, 구현은 storage) |
 | skills_marketplace | nodes_graph의 `domain/ports` | `from nodes_graph.domain.ports import NodeDefinitionRepository` (스킬 ↔ 노드 카탈로그 연결) |
 | ai_agent | skills_marketplace의 `application/use_cases` | `from skills_marketplace.application.use_cases import SearchSkillsUseCase` (Composer가 노드 후보 검토 시) |
+| ai_agent | skills_marketplace의 `domain/value_objects` | `from skills_marketplace.domain.value_objects import NodeSpecStaging` (Skills Builder가 `CreateDraftSkillUseCase` 입력 계약 VO 생성 시 — ADR-0020 ③-a wizard, PR #151) |
 | execution_engine | toolset의 `application/use_cases` | `from toolset.application.use_cases import ExecuteToolUseCase` |
 | execution_engine | nodes_graph의 `domain/services` | `from nodes_graph.domain.services import GraphValidator` |
 

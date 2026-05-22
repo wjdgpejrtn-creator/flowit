@@ -14,10 +14,12 @@ routing:
     POST /v1/agent/route
         body: AgentProtocolRequest
             payload.source_type ∈ {"sop", "industry_default", "functional_domain"}
+            sop은 payload.step ∈ {"extract", "confirm"} 추가 (wizard 2단계, ADR-0020 Q8 / 기본 extract)
         → 분기:
-            "sop"               → BuildFromSOPUseCase.execute(user_id, document, personal_memory)
-            "industry_default"  → BuildFromIndustryDefaultUseCase.execute(user_id, industry_code)
-            "functional_domain" → BuildFromFunctionalDomainUseCase.execute(user_id, domain_code)
+            "sop" + step=extract → BuildFromSOPUseCase.extract_draft(user_id, document, personal_memory)
+            "sop" + step=confirm → BuildFromSOPUseCase.confirm(user_id, skills)
+            "industry_default"   → BuildFromIndustryDefaultUseCase.execute(user_id, industry_code)
+            "functional_domain"  → BuildFromFunctionalDomainUseCase.execute(user_id, domain_code)
         → 각 use case가 AsyncGenerator[SSEFrame] yield
         → SSE 텍스트 스트림 ("data: <json>\\n\\n") 으로 변환해 응답
     GET /v1/health
@@ -47,12 +49,11 @@ sub_agent_modal_deploy.md §3.2 + §5 참조).
 - ModalEmbeddingAdapter는 httpx 호출이라 즉시 동작.
 - PgNodeDefinitionRepository는 황대원 5/15 PR에 머지된 구현체 그대로 사용.
 """
-import json
 import os
-from typing import Any, AsyncIterator, Literal
+from collections.abc import AsyncIterator
+from typing import Any, Literal
 
 import modal
-
 
 APP_NAME = "agent-skills-builder"
 
@@ -83,7 +84,7 @@ def _sse_bytes(response: Any) -> bytes:
     SSE 포맷: 'data: <json>\\n\\n'
     """
     body = response.model_dump_json()
-    return f"data: {body}\n\n".encode("utf-8")
+    return f"data: {body}\n\n".encode()
 
 
 def _done_frame_bytes() -> bytes:
@@ -176,12 +177,11 @@ class SkillsBuilderAgent:
         import tempfile
         from pathlib import Path
 
+        from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
+        from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
         from services.common.gcp_secrets import load_secrets_to_env
-
-        from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
-        from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
 
         # 1) GCP SA JSON을 임시 파일로 풀고 ADC 환경변수 지정
         sa_payload = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
@@ -240,12 +240,10 @@ class SkillsBuilderAgent:
 
     @modal.asgi_app()
     def fastapi(self):
-        import asyncio
-
-        from fastapi import Body, FastAPI, HTTPException
-        from fastapi.responses import StreamingResponse
 
         from common_schemas.agent_protocol import AgentProtocolRequest
+        from fastapi import Body, FastAPI, HTTPException
+        from fastapi.responses import StreamingResponse
 
         api = FastAPI(title=APP_NAME, version="1.0")
 
@@ -313,10 +311,6 @@ class SkillsBuilderAgent:
         로 래핑. next_action은 ResultFrame에서 "complete", ErrorFrame에서
         "error", 중간 진행 프레임에서 "continue"로 설정 (Literal 세 값 spec).
         """
-        from common_schemas import DocumentBlock
-        from common_schemas.agent_protocol import AgentProtocolResponse
-        from common_schemas.transport import ErrorFrame, ResultFrame
-
         from ai_agent.application.agents.skills_builder.build_from_functional_domain_use_case import (
             BuildFromFunctionalDomainUseCase,
         )
@@ -326,6 +320,11 @@ class SkillsBuilderAgent:
         from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
             BuildFromSOPUseCase,
         )
+        from common_schemas import DocumentBlock
+        from common_schemas.agent_protocol import AgentProtocolResponse
+        from common_schemas.transport import ErrorFrame
+        from skills_marketplace.application.use_cases import CreateDraftSkillUseCase
+        from storage.repositories.pg_marketplace_skill_repository import PgMarketplaceSkillRepository
         from storage.repositories.pg_node_definition_repository import PgNodeDefinitionRepository
 
         # AgentProtocolRequest 필드: session_id/user_id/state/personal_memory는 top-level,
@@ -345,9 +344,29 @@ class SkillsBuilderAgent:
                 use_case = BuildFromFunctionalDomainUseCase(repo, self._embedder)
                 stream = use_case.execute(req.user_id, payload["domain_code"])
             elif source_type == "sop":
-                use_case = BuildFromSOPUseCase(repo, self._embedder, self._llm)
-                document = DocumentBlock.model_validate(payload["document"])
-                stream = use_case.execute(req.user_id, document, req.personal_memory)
+                # wizard 2단계(ADR-0020 Q8): extract_draft(추출·검토용, 저장X) / confirm(편집→DRAFT).
+                # confirm은 CreateDraftSkillUseCase(SkillRepository=PgMarketplaceSkillRepository, PR #147) 경유.
+                use_case = BuildFromSOPUseCase(
+                    CreateDraftSkillUseCase(PgMarketplaceSkillRepository(session)),
+                    self._embedder,
+                    self._llm,
+                )
+                step = payload.get("step", "extract")
+                if step == "extract":
+                    document = DocumentBlock.model_validate(payload["document"])
+                    stream = use_case.extract_draft(req.user_id, document, req.personal_memory)
+                elif step == "confirm":
+                    stream = use_case.confirm(req.user_id, payload.get("skills", []))
+                else:
+                    yield _sse_bytes(
+                        AgentProtocolResponse(
+                            frames=[],
+                            state_delta={"error": "E_SOP_STEP_INVALID", "step": step},
+                            next_action="error",
+                        )
+                    )
+                    yield _done_frame_bytes()
+                    return
             else:
                 yield _sse_bytes(
                     AgentProtocolResponse(
