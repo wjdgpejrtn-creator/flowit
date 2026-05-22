@@ -46,6 +46,7 @@ class ApproveSkillUseCase:
             ApprovalWorkflow(
                 approval_id=uuid4(),
                 skill_id=skill_id,
+                scope=scope,  # 조장 A안: use case가 가진 scope를 ApprovalWorkflow로 전달 (storage mapper 직결)
                 reviewer_id=reviewer_id,
                 status="approved" if approved else "rejected",
                 comment=comment,
