@@ -79,7 +79,7 @@ gs://{SKILLS_MARKETPLACE_BUCKET}/skills/{skill_id}/templates/ (선택)
 
 - **근거 (DDD 응집도)**: 한 스킬 = `NodeDefinition`(메타) + `SkillDocument`(지침서) = **같은 aggregate의 두 형태**. 메타(`SkillRepository`)가 skills_marketplace 소유이므로 지침서(`SkillDocumentStore`)도 동일 도메인 소유 = aggregate 완결. ai_agent(Skills Builder)는 스킬을 **생성하는 application service**일 뿐 소유 도메인 아님 (생성 주체 ≠ 소유 도메인).
 - **PersonalMemoryStore 선례 부적용**: `ai_agent.PersonalMemoryStore`(GCS)는 `PersonalMemory`가 ai_agent **자체 도메인**(사용자 패턴/기억)이라 ai_agent 소유 정합. `SkillDocument`는 마켓플레이스 산출물이라 케이스 다름.
-- **위치**: `SkillDocument` 모델 = `skills_marketplace/domain/entities/skill_document.py`, `SkillDocumentStore` Port = `skills_marketplace/domain/ports/skill_document_store.py` (PR #98 신설 완료). GCS adapter 구현 위치는 PR-2d/2e 결정.
+- **위치**: `SkillDocument` 모델 = `common_schemas/skill_document.py`(PR #111 SSOT 이동, skills_marketplace는 재노출 shim), `SkillDocumentStore` Port = `skills_marketplace/domain/ports/skill_document_store.py` (PR #98 신설 완료). **GCS adapter 구현 = `storage/adapters/GcsSkillDocumentStore` (조장, PR #160 — 2026-05-24 협의 "md 문서 저장이라 storage" 확정). 기존 `ObjectStoragePort` 조합 + `save() → str(gs:// URI)`.**
 - **정정 비용 0**: 코드 미구현 상태(ADR 계획만)였어서 ai_agent에 만든 것을 옮기는 게 아니라 처음부터 skills_marketplace에 신설.
 
 #### SkillDocument SSOT 재정정 (2026-05-20 PR #106·#111 리뷰 — common_schemas 승격)
@@ -136,7 +136,7 @@ Skills Builder = **스킬 생성 전용**. 워크플로우 생성 안 함 (Compo
 - **이중 저장 비용** — `NodeDefinition` DB + `SkillDocument` GCS 동시 쓰기, 두 저장소 일관성 관리 필요
 - **변환 비용** — Skills Builder가 SkillNode 추출 후 NodeDefinition + SkillDocument 둘 다 생성
 - **`modules/skills_marketplace/` 의존** — PR-2d 신설 (이번 주말, 조장 영역) 대기 후 박아름 코드 변경 PR 가능
-- **`SkillDocumentStore` Port 신설 필요** — Port + `SkillDocument` 모델은 `skills_marketplace/domain` 소유 (2026-05-20 박아름 결정 정정 — 아래 §"SkillDocument 소유권" 참조). GCS adapter 구현 위치(storage vs skills_marketplace)는 PR-2d/2e 후속
+- **`SkillDocumentStore` Port 신설 필요** — Port = `skills_marketplace/domain` 소유, `SkillDocument` 모델은 common_schemas SSOT(PR #111) (2026-05-20 박아름 결정 정정 — 아래 §"SkillDocument 소유권" 참조). GCS adapter 구현 위치 = `storage/adapters` 확정 (조장, PR #160)
 - **SOP 추출 LLM 프롬프트 갱신** — `BuildFromSOPUseCase`의 LLM이 markdown instructions까지 생성하도록 프롬프트 보강
 
 ### Follow-ups
@@ -147,7 +147,7 @@ Skills Builder = **스킬 생성 전용**. 워크플로우 생성 안 함 (Compo
   - `BuildFromXxxUseCase` 산출물 변경 — NodeDefinition + SkillDocument 동시 생성. ai_agent는 `from skills_marketplace.domain.ports import SkillDocumentStore` 주입받아 생성만 (생성 주체 ≠ 소유 도메인)
   - `nodes_graph.NodeDefinitionRepository` → `skills_marketplace.SkillRepository` 의존성 교체
   - seed JSON 갱신 — `instructions` 필드 추가
-- ⏳ `SkillDocumentStore` GCS adapter 구현 (위치 PR-2d/2e 결정 — storage object storage vs skills_marketplace/adapters)
+- ✅ `SkillDocumentStore` GCS adapter 구현 — `storage/adapters/GcsSkillDocumentStore` (조장, PR #160, 2026-05-24 협의 확정). `ObjectStoragePort` 조합 + `save() → str(gs:// URI)` + `GCSAdapter.download` NotFound 정규화. ⚠️ 잔여: 버킷 결정 — ADR은 `SKILLS_MARKETPLACE_BUCKET`(전용)인데 PR factory가 `GCS_BUCKET_NAME`(일반) 사용 → 머지 전 정정/결정 필요(PR #160 리뷰)
 - ⏳ Composer 검색 흐름 갱신 (신정혜 영역, ADR-0017 적용 시)
 
 ## Alternatives Considered
