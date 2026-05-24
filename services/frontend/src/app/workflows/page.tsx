@@ -1,35 +1,42 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
-import RiskPill from '@/components/common/RiskPill';
-import StatusPill from '@/components/common/StatusPill';
 import ScopePill from '@/components/common/ScopePill';
 import Skel from '@/components/common/Skel';
-import { RiskLevel, ExecutionStatus } from '@common/generated';
+import { listWorkflows } from '@/lib/api/workflowApi';
+import type { WorkflowSchema } from '@common/generated';
 
-type WorkflowItem = {
-  id: string;
-  name: string;
-  status: `${ExecutionStatus}`;
-  risk: RiskLevel;
-  scope: 'private' | 'team' | 'public';
-  nodes: number;
-  when: string;
-};
+const TABLE_HEAD = ['이름', 'SCOPE', '노드', '상태', '수정'];
+const TABS = [
+  { label: 'My', key: 'my' },
+  { label: 'Team', key: 'team' },
+  { label: 'Public', key: 'public' },
+] as const;
 
-const ITEMS: WorkflowItem[] = [
-  { id: '1', name: '주간 회의록 요약',  status: ExecutionStatus.COMPLETED, risk: RiskLevel.HIGH,       scope: 'private', nodes: 4, when: '3시간 전' },
-  { id: '2', name: '견적 PDF 분류',    status: ExecutionStatus.RUNNING,   risk: RiskLevel.MEDIUM,     scope: 'team',    nodes: 6, when: '진행 중' },
-  { id: '3', name: 'CS 티켓 라우팅',   status: ExecutionStatus.FAILED,    risk: RiskLevel.RESTRICTED, scope: 'team',    nodes: 8, when: '12분 전' },
-  { id: '4', name: 'OKR 주간 요약',    status: ExecutionStatus.COMPLETED, risk: RiskLevel.LOW,        scope: 'public',  nodes: 5, when: '어제' },
-  { id: '5', name: '예산 알림 봇',     status: ExecutionStatus.PAUSED,    risk: RiskLevel.MEDIUM,     scope: 'team',    nodes: 3, when: '2일 전' },
-  { id: '6', name: '뉴스 클리핑',      status: ExecutionStatus.COMPLETED, risk: RiskLevel.LOW,        scope: 'public',  nodes: 7, when: '3일 전' },
-];
+export default function WorkflowListPage() {
+  const searchParams = useSearchParams();
+  const activeTab = searchParams.get('tab') ?? 'my';
 
-const TABLE_HEAD = ['이름', 'SCOPE', '위험도', '노드', '마지막 실행', '수정'];
+  const [workflows, setWorkflows] = useState<WorkflowSchema[]>([]);
+  const [loading, setLoading] = useState(true);
 
-export default function WorkflowListPage({ searchParams }: { searchParams: { tab?: string } }) {
-  const activeTab = searchParams.tab ?? 'my';
+  useEffect(() => {
+    setLoading(true);
+    listWorkflows()
+      .then(setWorkflows)
+      .catch(() => setWorkflows([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered =
+    activeTab === 'my'
+      ? workflows
+      : workflows.filter((w) => w.scope === activeTab);
+
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
       <AppBar />
@@ -39,7 +46,7 @@ export default function WorkflowListPage({ searchParams }: { searchParams: { tab
         <div className="flex items-center justify-between">
           {/* Tabs */}
           <div className="flex gap-2">
-            {([['My', 'my', 6], ['Team', 'team', 23], ['Public', 'public', 117]] as const).map(([label, key, count]) => (
+            {TABS.map(({ label, key }) => (
               <Link
                 key={key}
                 href={`/workflows?tab=${key}`}
@@ -50,16 +57,17 @@ export default function WorkflowListPage({ searchParams }: { searchParams: { tab
                     : 'bg-[var(--color-surface)] text-[var(--color-ink)] hover:bg-[var(--color-paper2)]',
                 ].join(' ')}
               >
-                {label} <span className="font-mono text-[11px] opacity-70">{count}</span>
+                {label}{' '}
+                <span className="font-mono text-[11px] opacity-70">
+                  {key === 'my' ? workflows.length : filtered.length}
+                </span>
               </Link>
             ))}
           </div>
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            <div
-              className="text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-[8px] py-[2px] bg-[var(--color-surface)] text-[var(--color-ink3)]"
-            >
+            <div className="text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-[8px] py-[2px] bg-[var(--color-surface)] text-[var(--color-ink3)]">
               🔍 검색…
             </div>
             <Link href="/agent?mode=edit">
@@ -72,9 +80,7 @@ export default function WorkflowListPage({ searchParams }: { searchParams: { tab
         </div>
 
         {/* Table */}
-        <div
-          className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] overflow-hidden"
-        >
+        <div className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] overflow-hidden">
           {/* Header */}
           <div
             className="flex items-center font-mono text-[11px] text-[var(--color-ink4)] px-[10px] py-[6px] border-b border-[var(--color-ink4)]"
@@ -85,27 +91,52 @@ export default function WorkflowListPage({ searchParams }: { searchParams: { tab
             <span style={{ flex: 0.7 }}>{TABLE_HEAD[2]}</span>
             <span style={{ flex: 0.7 }}>{TABLE_HEAD[3]}</span>
             <span style={{ flex: 1 }}>{TABLE_HEAD[4]}</span>
-            <span style={{ flex: 1 }}>{TABLE_HEAD[5]}</span>
           </div>
 
+          {/* Skeleton */}
+          {loading && (
+            <div className="flex flex-col gap-[6px] p-[10px]">
+              {[1, 2, 3].map((i) => (
+                <Skel key={i} className="h-[32px] w-full" />
+              ))}
+            </div>
+          )}
+
+          {/* Empty */}
+          {!loading && filtered.length === 0 && (
+            <div className="px-[10px] py-[24px] text-center text-[13px] text-[var(--color-ink3)]">
+              워크플로우가 없습니다.
+            </div>
+          )}
+
           {/* Rows */}
-          {ITEMS.map((item, i) => (
-            <Link
-              key={item.id}
-              href={`/workflows/${item.id}`}
-              className={[
-                'flex items-center px-[10px] py-[8px] no-underline text-[var(--color-ink)] hover:bg-[var(--color-paper2)]',
-                i < ITEMS.length - 1 ? 'border-b border-[var(--color-ink4)]' : '',
-              ].join(' ')}
-            >
-              <span className="font-bold" style={{ flex: 2 }}>{item.name}</span>
-              <span style={{ flex: 1 }}><ScopePill scope={item.scope} /></span>
-              <span style={{ flex: 0.7 }}><RiskPill level={item.risk} /></span>
-              <span className="font-mono text-[11px]" style={{ flex: 0.7 }}>{item.nodes}개</span>
-              <span style={{ flex: 1 }}><StatusPill status={item.status} /></span>
-              <span className="text-[13px] text-[var(--color-ink3)]" style={{ flex: 1 }}>{item.when}</span>
-            </Link>
-          ))}
+          {!loading &&
+            filtered.map((item, i) => (
+              <Link
+                key={item.workflow_id}
+                href={`/workflows/${item.workflow_id}`}
+                className={[
+                  'flex items-center px-[10px] py-[8px] no-underline text-[var(--color-ink)] hover:bg-[var(--color-paper2)]',
+                  i < filtered.length - 1 ? 'border-b border-[var(--color-ink4)]' : '',
+                ].join(' ')}
+              >
+                <span className="font-bold" style={{ flex: 2 }}>
+                  {item.name}
+                </span>
+                <span style={{ flex: 1 }}>
+                  <ScopePill scope={item.scope} />
+                </span>
+                <span className="font-mono text-[11px]" style={{ flex: 0.7 }}>
+                  {item.nodes.length}개
+                </span>
+                <span className="text-[11px] text-[var(--color-ink3)]" style={{ flex: 0.7 }}>
+                  {item.is_draft ? '초안' : '활성'}
+                </span>
+                <span className="text-[13px] text-[var(--color-ink3)]" style={{ flex: 1 }}>
+                  —
+                </span>
+              </Link>
+            ))}
         </div>
       </div>
     </div>
