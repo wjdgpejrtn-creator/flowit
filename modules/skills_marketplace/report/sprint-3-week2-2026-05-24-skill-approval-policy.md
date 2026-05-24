@@ -4,7 +4,7 @@
 
 ADR-0020 **위임2** — Skills Marketplace 게시 lifecycle(승인/게시)의 **actor 인가(role base) enforcement** 구현. 조장 role 인프라(PR #157) 위에 skills_marketplace `SkillApprovalPolicy`를 얹어 scope별 승인 권한을 강제한다.
 
-- **PR**: (생성 후 기재)
+- **PR**: [#158 feat(req-013): SkillApprovalPolicy](https://github.com/billionaireahreum/Workflow_Automation/pull/158)
 - **branch**: `feature/req-013-skills-marketplace` → base=`development` ([[feedback_branch_strategy]])
 - **선결**: PR #157 (조장, 박아름 리뷰 ① SSOT 통합 반영 후 머지 2026-05-24) — `common_schemas.UserRole` SSOT 4종 + `PermissionResolver` 매니저 정책 + DB `021`
 
