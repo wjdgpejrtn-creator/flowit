@@ -31,6 +31,12 @@ variable "agent_secret_names" {
     # Cloud SQL IAM 공통 (composer / personalization / skills-builder)
     "cloud-sql-instance",
     "db-iam-user",
+    # worker 전용 (PR-A prep, REQ-011 worker SA 분리) — api_server 전환 시 db-iam-user를
+    # workflow-api-staging-sa email로 덮어쓴 결과, worker가 latest version으로 fetch 시
+    # cloudsql-iam-modal 토큰 sub와 PG connect user 불일치로 인증 실패하는 폭탄 회피용
+    # 별도 secret. PR-B 단계에서 worker SA email 값 add + worker module
+    # secret_env_vars.DB_IAM_USER → 본 secret_id로 swap. 메모리 staging_db_state §"⚠️"
+    "db-iam-user-worker",
     "db-name",
     # LLM base endpoints (3 sub-agent 공통)
     "llm-base-url",
