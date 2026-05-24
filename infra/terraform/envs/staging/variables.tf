@@ -57,6 +57,11 @@ variable "agent_secret_names" {
     "google-client-id",     # Google OAuth Client ID
     "google-client-secret", # Google OAuth Client Secret
     "google-redirect-uri",  # OAuth callback URL (staging Cloud Run public hostname)
+    # agent-skills-builder 전용 (REQ-013/REQ-004, PR #171 doc_store wiring 활성화)
+    # 값은 skills_marketplace_bucket name(`<project>-skills-marketplace-staging`).
+    # agent-skills-builder/main.py:219가 load_secrets_to_env로 읽고, 미등록 시 doc_store=None
+    # 비활성 fallback. 본 PR 머지·apply 후 수동으로 bucket name을 v1로 add 필요.
+    "skills-marketplace-bucket",
   ]
 }
 
