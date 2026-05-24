@@ -5,7 +5,7 @@
 
 ## 요약
 
-2026-05-24 박아름 사이클 — 6개 PR 머지 완료(development `c84706f`). ADR-0020 위임2(게시 인가)와 ADR-0017 SkillDocument 이중 저장 "지침서" 측 **호출부 배선**이 끝나, SOP wizard 추출 → personal DRAFT 생성 시 SKILL.md를 GCS에 저장하는 경로가 코드 레벨에서 완성됐다(실제 활성화는 api_server `doc_store` 주입 후속). `/auth/me`는 프론트 userName 연결용 `email`/`name`을 반환한다.
+2026-05-24 박아름 사이클 — 7개 PR 머지 완료(development `c84706f`). ADR-0020 위임2(게시 인가)와 ADR-0017 SkillDocument 이중 저장 "지침서" 측 **호출부 배선**이 끝나, SOP wizard 추출 → personal DRAFT 생성 시 SKILL.md를 GCS에 저장하는 경로가 코드 레벨에서 완성됐다(실제 활성화는 `services/agents/agent-skills-builder/main.py` `doc_store` 주입 후속). `/auth/me`는 프론트 userName 연결용 `email`/`name`을 반환한다.
 
 ## 완료 (머지)
 
@@ -45,11 +45,11 @@
 
 ## 잔여 (박아름 / 협업)
 
-1. **api_server `doc_store` 주입 wiring** (박아름) — composition root에서 `CreateDraftSkillUseCase`에 `GcsSkillDocumentStore(...)` 주입 → SkillDocument 실제 GCS 저장 활성화. + staging redeploy(조장 Notice — #165 `execute(instructions=)` 런타임 정합).
+1. **`doc_store` 주입 wiring** (박아름) — **`services/agents/agent-skills-builder/main.py`**(Modal Skills Builder 서비스, `CreateDraftSkillUseCase` 실제 조립 위치 `main.py:350`) composition root에서 `doc_store=GcsSkillDocumentStore(...)` 주입 → SkillDocument 실제 GCS 저장 활성화. (api_server엔 호출부 0건) + staging redeploy(조장 Notice — #165 `execute(instructions=)` 런타임 정합).
 2. **프론트 userName 연결** (가원, REQ-010) — `useAuth.ts`의 `userName: ''` → `userName: user.name`(+ `me()` 응답 타입 MeResponse). 연결 시 PR #149 must-fix(AppBar ` · User`) 완전 해소.
 3. **staging smoke 검증** — 조장 terraform/api_server deploy 대기.
 
 ## 다음 단계
 
-1. api_server `doc_store` 주입 wiring (composition root 위치 확인 후)
+1. `services/agents/agent-skills-builder/main.py` `doc_store` 주입 wiring (`main.py:350` CreateDraftSkillUseCase 조립부)
 2. 가원 프론트 연결 + staging redeploy 후 e2e 확인

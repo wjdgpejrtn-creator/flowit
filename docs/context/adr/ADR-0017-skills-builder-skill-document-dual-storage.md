@@ -148,7 +148,7 @@ Skills Builder = **스킬 생성 전용**. 워크플로우 생성 안 함 (Compo
   - `skills_marketplace.SkillRepository` 의존성 교체(`CreateDraftSkillUseCase`)
   - seed JSON `instructions` 필드 추가
 - ✅ `SkillDocumentStore` GCS adapter 구현 = `storage/adapters/gcs_skill_document_store.py` (PR #160). `save()→str(gs:// URI)` 반환 — bucket 이름이 호출부로 누수되지 않도록 어댑터가 forward. SKILL.md = YAML frontmatter(name/description) + markdown body(instructions). 키: `skills/{skill_id}/SKILL.md`. production = `SKILLS_MARKETPLACE_BUCKET` env(전용 버킷, PR #161 인프라)
-- ✅ 호출부 배선 (박아름): Port `save()→str` + `CreateDraftSkillUseCase`(`doc_store`/`instructions`, PR #164). **잔여: api_server composition root에서 `doc_store` 주입 시 GCS 저장 활성화**(미주입 시 문서 미저장, 하위호환)
+- ✅ 호출부 배선 (박아름): Port `save()→str` + `CreateDraftSkillUseCase`(`doc_store`/`instructions`, PR #164). **잔여: `services/agents/agent-skills-builder/main.py`(Modal Skills Builder 서비스, CreateDraftSkillUseCase 조립부 `main.py:350`) composition root에서 `doc_store` 주입 시 GCS 저장 활성화**(미주입 시 문서 미저장, 하위호환. api_server엔 호출부 없음)
 - ⏳ Composer 검색 흐름 갱신 (신정혜 영역, ADR-0017 적용 시)
 
 ## Alternatives Considered
