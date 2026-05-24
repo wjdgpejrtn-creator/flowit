@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from common_schemas.exceptions import NotFoundError
+
 from ..domain.ports.object_storage_port import ObjectStoragePort
 
 if TYPE_CHECKING:
@@ -30,9 +32,16 @@ class GCSAdapter(ObjectStoragePort):
         return f"gs://{self._bucket_name}/{key}"
 
     async def download(self, key: str) -> bytes:
+        # ObjectStoragePort 계약 정합: 키 부재 시 NotFoundError(E-STORAGE-001) —
+        # LocalStorageAdapter와 일관. 호출자가 google.cloud 예외에 결합되지 않도록 정규화.
+        from google.cloud.exceptions import NotFound as _GcsNotFound
+
         bucket = self._get_bucket()
         blob = bucket.blob(key)
-        return blob.download_as_bytes()
+        try:
+            return blob.download_as_bytes()
+        except _GcsNotFound as exc:
+            raise NotFoundError(f"File not found: {key}", code="E-STORAGE-001") from exc
 
     async def delete(self, key: str) -> None:
         bucket = self._get_bucket()
