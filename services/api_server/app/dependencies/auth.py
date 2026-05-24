@@ -22,7 +22,9 @@ from storage.repositories.pg_oauth_repository import PgOAuthRepository
 from storage.repositories.pg_session_repository import PgSessionRepository
 from storage.repositories.pg_user_repository import PgUserRepository
 
+from app.config import Settings
 from app.dependencies.database import get_db
+from app.dependencies.settings import get_settings
 
 
 @lru_cache(maxsize=1)
@@ -35,9 +37,12 @@ def get_cipher() -> CipherPort:
     return AESGCMCipher()
 
 
-@lru_cache(maxsize=1)
-def get_google_oauth() -> OAuthClientPort:
-    return GoogleOAuthClient()
+def get_google_oauth(settings: Settings = Depends(get_settings)) -> OAuthClientPort:
+    return GoogleOAuthClient(
+        client_id=settings.google_client_id,
+        client_secret=settings.google_client_secret,
+        redirect_uri=settings.google_redirect_uri,
+    )
 
 
 @lru_cache(maxsize=1)
