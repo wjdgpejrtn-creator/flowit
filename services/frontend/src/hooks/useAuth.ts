@@ -17,7 +17,7 @@ export function useAuth() {
       // PermissionSource 반환 — email/dept 미제공 (백엔드 /auth/me 확장 결정 대기)
       const user = await me();
       setAuth({
-        role: user.role === 'Admin' ? 'Admin' : 'User',
+        role: user.role,
         userId: user.user_id,
         userName: '',          // 백엔드 /auth/me에 email 추가 후 교체 예정
         dept: user.department_id,
