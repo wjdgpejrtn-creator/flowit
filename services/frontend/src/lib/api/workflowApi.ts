@@ -18,6 +18,10 @@ export interface ControlResponse {
   task_id: string;
 }
 
+export async function listWorkflows(limit = 50, offset = 0): Promise<WorkflowSchema[]> {
+  return apiJson<WorkflowSchema[]>(`/api/v1/workflows?limit=${limit}&offset=${offset}`);
+}
+
 export async function getWorkflow(id: string): Promise<WorkflowSchema> {
   return apiJson<WorkflowSchema>(`/api/v1/workflows/${id}`);
 }
