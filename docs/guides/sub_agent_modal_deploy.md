@@ -226,6 +226,8 @@ class SkillsBuilderAgent:
             "llm-base-url":       "LLM_BASE_URL",
             "embedding-base-url": "EMBEDDING_BASE_URL",
             # personalization은 "gcs-personal-bucket": "GCS_PERSONAL_BUCKET" 추가
+            # skills_builder는 (선택) "skills-marketplace-bucket": "SKILLS_MARKETPLACE_BUCKET" — ADR-0017
+            #   SkillDocument GCS 저장용. 미설정 secret이면 tolerant skip(doc_store 비활성), PR #171
         })
 
         # 3) Cloud SQL Python Connector — IAM 인증 (비밀번호 없음)

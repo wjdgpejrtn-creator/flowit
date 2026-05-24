@@ -387,6 +387,7 @@ VPC 내부 통신만 허용 (옵션 C). Modal app 외부 노출 금지. mTLS는 
 | `ORCHESTRATOR_URL` | api_server | Orchestrator Modal endpoint |
 | `COMPOSER_URL` / `SKILLS_BUILDER_URL` / `PERSONALIZATION_URL` | orchestrator | Sub-agent endpoint |
 | `GCS_PERSONAL_BUCKET` | personalization | `workflow-automation-personal` |
+| `SKILLS_MARKETPLACE_BUCKET` 🆕 | skills_builder | SkillDocument(SKILL.md) GCS 전용 버킷 (Secret Manager key: `skills-marketplace-bucket`, ADR-0017). 미설정 시 `doc_store` 비활성(문서 미저장, deploy-safe) — PR #171 |
 | `GCS_SESSION_BUCKET` 🆕 | composer | SSE 세션 프레임 저장 버킷 (`GCSSessionFrameStore` 사용, Secret Manager key: `gcs-session-bucket`) |
 | `EXECUTION_ENGINE_URL` 🆕 | composer | 실행 엔진 API base URL (Secret Manager key: `execution-engine-url`, PR #135) |
 | `AGENT_MAX_TURNS` | composer | 25 |

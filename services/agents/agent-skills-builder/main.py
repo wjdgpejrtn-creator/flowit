@@ -30,12 +30,14 @@ deploy:
 
 환경 변수 (Modal Secret 2개 마운트):
 
-    agent-skills-builder-secret (sub-agent 담당자 박아름이 등록 — 5 키):
+    agent-skills-builder-secret (sub-agent 담당자 박아름이 등록 — GCP Secret Manager, 5 키 + 선택 1):
         LLM_BASE_URL                          llm-base ASGI base URL (예: https://...modal.run)
         EMBEDDING_BASE_URL                    BGE-M3 ASGI base URL (보통 LLM_BASE_URL과 동일)
         CLOUD_SQL_INSTANCE                    "<PROJECT>:<REGION>:<INSTANCE>" 형식
         DB_IAM_USER                           공용 SA 풀 이메일 (cloudsql-iam-modal@...)
         DB_NAME                               workflow_automation
+        SKILLS_MARKETPLACE_BUCKET (선택)      SkillDocument GCS 전용 버킷명 (Secret: skills-marketplace-bucket,
+                                              ADR-0017). 미설정 시 boot tolerant skip → doc_store 비활성(문서 미저장)
 
     cloudsql-iam-sa (조장 1회 등록 — 1 키, 공용):
         GOOGLE_APPLICATION_CREDENTIALS_JSON   공용 GCP SA JSON key (cloud-sql-python-connector 인증용)
@@ -121,6 +123,10 @@ image = (
         "cloud-sql-python-connector[asyncpg]>=1.12",
         # GCP Secret Manager (런타임 secret pull, 2026-05-19 마이그레이션)
         "google-cloud-secret-manager>=2.20",
+        # GCS + YAML — SkillDocument(SKILL.md) 이중 저장 (ADR-0017, GcsSkillDocumentStore).
+        # 이미지는 storage pyproject deps를 자동설치하지 않으므로 명시 핀 (gcs adapter 런타임 import).
+        "google-cloud-storage>=2.14",
+        "pyyaml>=6.0",
         # Transitive: storage.mappers → toolset.runtime_validator → import jsonschema.
         # 박아름 use case가 toolset 직접 사용 안 하지만 storage import 체인으로 끌려옴.
         "jsonschema>=4.0",
@@ -174,12 +180,15 @@ class SkillsBuilderAgent:
         등록되어 이후 request도 동일 loop라 ConnectorLoopError 발생 안 함.
         boot()의 sync loop와는 분리되어 있어도 정합.
         """
+        import logging
         import tempfile
         from pathlib import Path
 
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from storage.adapters.gcs_adapter import GCSAdapter
+        from storage.adapters.gcs_skill_document_store import GcsSkillDocumentStore
 
         from services.common.gcp_secrets import load_secrets_to_env
 
@@ -198,9 +207,30 @@ class SkillsBuilderAgent:
             "embedding-base-url": "EMBEDDING_BASE_URL",
         })
 
-        # 2) 어댑터 wiring (RPC LLM + HTTP embedding) — async 의존 없음
+        # 2-1) skills-marketplace-bucket(ADR-0017 SkillDocument GCS 저장)은 조장 인프라(전용
+        # 버킷 GCP Secret + SA Storage 권한) 준비 시 활성화. 둘 중 무엇이 빠져도 boot는 깨지
+        # 않고 doc_store=None(문서 미저장, 현행 유지)으로 deploy-safe하다. 단 원인을 구분 로깅:
+        #   - NotFound: secret 미등록 = 롤아웃 중 정상(info)
+        #   - 그 외(PermissionDenied/RuntimeError 등): 설정·권한 오류 = 확인 필요(error, 강한 신호)
+        from google.api_core.exceptions import NotFound as _SecretNotFound
+
+        _log = logging.getLogger(APP_NAME)
+        try:
+            load_secrets_to_env({"skills-marketplace-bucket": "SKILLS_MARKETPLACE_BUCKET"})
+        except _SecretNotFound:
+            _log.info("SKILLS_MARKETPLACE_BUCKET secret 미등록 — SkillDocument GCS 저장 비활성(정상, 인프라 대기)")
+        except Exception as exc:  # PermissionDenied/RuntimeError 등 — 설정·권한 오류
+            _log.error("SKILLS_MARKETPLACE_BUCKET 로드 실패(권한/설정 확인 필요) — GCS 저장 비활성: %s", exc)
+
+        # 2-2) 어댑터 wiring (RPC LLM + HTTP embedding) — async 의존 없음
         self._llm = ModalLLMAdapter()
         self._embedder = ModalEmbeddingAdapter()
+
+        # ADR-0017 이중 저장 "지침서" 측 — SOP confirm 시 SkillDocument를 GCS에 저장.
+        # 버킷 env가 있을 때만 주입(없으면 None=문서 미저장, 하위호환). GCSAdapter는 bucket_name이
+        # None이면 GCS_BUCKET_NAME으로 silent fallback하므로 명시 가드 (전용 버킷만 사용).
+        _bucket = os.environ.get("SKILLS_MARKETPLACE_BUCKET")
+        self._doc_store = GcsSkillDocumentStore(GCSAdapter(bucket_name=_bucket)) if _bucket else None
 
         # 3) Cloud SQL Connector — getconn() 안에서 lazy 초기화 + loop 명시 바인딩
         self._connector = None
@@ -347,7 +377,10 @@ class SkillsBuilderAgent:
                 # wizard 2단계(ADR-0020 Q8): extract_draft(추출·검토용, 저장X) / confirm(편집→DRAFT).
                 # confirm은 CreateDraftSkillUseCase(SkillRepository=PgMarketplaceSkillRepository, PR #147) 경유.
                 use_case = BuildFromSOPUseCase(
-                    CreateDraftSkillUseCase(PgMarketplaceSkillRepository(session)),
+                    CreateDraftSkillUseCase(
+                        PgMarketplaceSkillRepository(session),
+                        doc_store=self._doc_store,  # ADR-0017 — 주입 시 GCS 저장(미설정 시 None=미저장)
+                    ),
                     self._embedder,
                     self._llm,
                 )
