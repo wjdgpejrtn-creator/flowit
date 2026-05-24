@@ -206,3 +206,92 @@ def test_workflows_require_bearer(app) -> None:
     client = TestClient(app)
     resp = client.get(f"/api/v1/workflows/{uuid4()}")
     assert resp.status_code == 401
+    list_resp = client.get("/api/v1/workflows")
+    assert list_resp.status_code == 401
+
+
+# ── GET /api/v1/workflows (목록 조회) ───────────────────────────────────────
+
+
+def _wf(workflow_id, owner_user_id, name: str = "wf") -> WorkflowSchema:
+    return WorkflowSchema(
+        workflow_id=workflow_id,
+        owner_user_id=owner_user_id,
+        name=name,
+        scope="private",
+        is_draft=False,
+        nodes=[],
+        connections=[],
+    )
+
+
+def test_list_workflows_returns_owned(app) -> None:
+    user_id = uuid4()
+    _override_permission(app, user_id)
+    wf1, wf2 = uuid4(), uuid4()
+
+    repo = MagicMock()
+    repo.list_by_owner = AsyncMock(return_value=[_wf(wf1, user_id, "first"), _wf(wf2, user_id, "second")])
+    app.dependency_overrides[get_workflow_repository] = lambda: repo
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/workflows", headers={"Authorization": f"Bearer {_bearer()}"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 2
+    assert {item["workflow_id"] for item in body} == {str(wf1), str(wf2)}
+    repo.list_by_owner.assert_awaited_once_with(owner_user_id=user_id, limit=50, offset=0)
+
+    app.dependency_overrides.clear()
+
+
+def test_list_workflows_empty(app) -> None:
+    _override_permission(app, uuid4())
+    repo = MagicMock()
+    repo.list_by_owner = AsyncMock(return_value=[])
+    app.dependency_overrides[get_workflow_repository] = lambda: repo
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/workflows", headers={"Authorization": f"Bearer {_bearer()}"})
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+    app.dependency_overrides.clear()
+
+
+def test_list_workflows_forwards_pagination(app) -> None:
+    user_id = uuid4()
+    _override_permission(app, user_id)
+    repo = MagicMock()
+    repo.list_by_owner = AsyncMock(return_value=[])
+    app.dependency_overrides[get_workflow_repository] = lambda: repo
+
+    client = TestClient(app)
+    resp = client.get(
+        "/api/v1/workflows?limit=10&offset=20",
+        headers={"Authorization": f"Bearer {_bearer()}"},
+    )
+
+    assert resp.status_code == 200
+    repo.list_by_owner.assert_awaited_once_with(owner_user_id=user_id, limit=10, offset=20)
+
+    app.dependency_overrides.clear()
+
+
+def test_list_workflows_limit_bounds(app) -> None:
+    """limit ∈ [1, 100], offset ≥ 0 — FastAPI Query 검증 → 422."""
+    _override_permission(app, uuid4())
+    repo = MagicMock()
+    repo.list_by_owner = AsyncMock(return_value=[])
+    app.dependency_overrides[get_workflow_repository] = lambda: repo
+
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {_bearer()}"}
+    assert client.get("/api/v1/workflows?limit=0", headers=headers).status_code == 422
+    assert client.get("/api/v1/workflows?limit=101", headers=headers).status_code == 422
+    assert client.get("/api/v1/workflows?offset=-1", headers=headers).status_code == 422
+    repo.list_by_owner.assert_not_awaited()
+
+    app.dependency_overrides.clear()
