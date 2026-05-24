@@ -197,7 +197,7 @@ class BuildFromSOPUseCase:
                 "node_type": ext.node_type,
                 "name": ext.name,
                 "description": ext.description,
-                "instructions": ext.instructions,  # SkillDocument(SKILL.md) — confirm/GCS 후속에서 저장
+                "instructions": ext.instructions,  # SKILL.md 본문 — confirm이 GCS 저장(use case 경유)
                 "staging": staging.model_dump(mode="json"),
             })
 
@@ -240,6 +240,9 @@ class BuildFromSOPUseCase:
                 staging = NodeSpecStaging(**skill["staging"])
                 name = skill["name"]
                 description = skill["description"]
+                # SKILL.md 본문(ADR-0017) — 편집된 입력이라 str 아니거나 빈 값이면 미저장(None) 격리.
+                raw_instr = skill.get("instructions")
+                instructions = raw_instr if isinstance(raw_instr, str) and raw_instr.strip() else None
                 if staging.category not in _ALLOWED_CATEGORIES:
                     raise ValueError(
                         f"category '{staging.category}'가 DB CHECK 8영문에 없음: {sorted(_ALLOWED_CATEGORIES)}"
@@ -265,6 +268,7 @@ class BuildFromSOPUseCase:
                     description=description,
                     node_spec_staging=staging,
                     embedding=embedding,
+                    instructions=instructions,  # ADR-0017 — SKILL.md 본문 → GCS 저장(use case 경유)
                 )
             except Exception as e:
                 failed.append({"node_type": node_type, "stage": "create_draft", "error": str(e)})

@@ -211,6 +211,7 @@ async def test_confirm_creates_draft_skills():
     assert call["node_spec_staging"].category == "action"
     assert call["node_spec_staging"].required_connections == ["slack"]
     assert call["embedding"] == [0.1] * 768
+    assert call["instructions"] == "## When to use\n..."  # ADR-0017 — SKILL.md 본문 전달
     assert len(embedder.calls) == 1
 
 
@@ -218,6 +219,26 @@ async def test_confirm_creates_draft_skills():
 async def test_confirm_empty_skills_yields_error():
     frames = [f async for f in _make_uc().confirm(uuid4(), [])]
     assert any(isinstance(f, ErrorFrame) for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_confirm_missing_instructions_passes_none():
+    # 신뢰 경계: instructions 누락(편집으로 제거)돼도 DRAFT는 생성, instructions=None 전달(문서 미저장)
+    draft = _FakeCreateDraftSkill()
+    skills = [{
+        "node_type": "sop_x", "name": "스킬", "description": "설명",
+        "staging": {
+            "category": "action", "input_schema": {}, "output_schema": {},
+            "risk_level": "Low", "required_connections": [], "service_type": None,
+        },
+    }]
+
+    frames = [f async for f in _make_uc(draft=draft).confirm(uuid4(), skills)]
+
+    result = frames[-1]
+    assert isinstance(result, ResultFrame)
+    assert len(result.payload["skill_ids"]) == 1
+    assert draft.calls[0]["instructions"] is None
 
 
 # ----------------------------------------------------------------------
