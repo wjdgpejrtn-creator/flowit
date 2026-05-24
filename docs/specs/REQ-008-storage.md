@@ -39,7 +39,7 @@
 
 | Port | 메서드 |
 |------|--------|
-| `ObjectStoragePort` | upload(key, data, metadata)→url, download(key)→bytes, delete(key)→None, presign(key, ttl)→url |
+| `ObjectStoragePort` | upload(key, data, metadata)→url, download(key)→bytes (키 부재 시 `NotFoundError(E-STORAGE-001)`), delete(key)→None, presign(key, ttl)→url |
 | `VirusScanPort` | scan(data)→ScanResult |
 | `StorageEventPort` | emit(event)→None |
 
@@ -56,9 +56,10 @@
 
 | Adapter | 설명 |
 |---------|------|
-| `GCSAdapter` | Google Cloud Storage 클라이언트 구현 |
+| `GCSAdapter` | Google Cloud Storage 클라이언트 구현. `download` 키 부재 시 `google.cloud.exceptions.NotFound` → `NotFoundError(E-STORAGE-001)`로 정규화(PR #160 — `LocalStorageAdapter`와 일관 contract) |
 | `ClamAVAdapter` | 바이러스 스캔 (ClamAV daemon) |
 | `LocalStorageAdapter` | 로컬 개발용 파일시스템 저장소 |
+| `GcsSkillDocumentStore` | `skills_marketplace.SkillDocumentStore` Port 구현 (ADR-0017 이중 저장 "지침서" 측, PR #160). `ObjectStoragePort` 생성자 주입(production `GCSAdapter`, 테스트 `LocalStorageAdapter` swap). `save(skill_id, doc) → str(gs:// URI)` / `load(skill_id) → SkillDocument \| None`. SKILL.md = YAML frontmatter(name/description) + markdown body(instructions), 키: `skills/{skill_id}/SKILL.md`. production bucket = `SKILLS_MARKETPLACE_BUCKET` (일반 업로드 `GCS_BUCKET_NAME`과 분리) |
 
 ### Repository 구현체 (다른 모듈의 Port ABC 구현)
 
