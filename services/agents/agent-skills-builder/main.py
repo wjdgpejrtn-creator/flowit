@@ -30,12 +30,14 @@ deploy:
 
 환경 변수 (Modal Secret 2개 마운트):
 
-    agent-skills-builder-secret (sub-agent 담당자 박아름이 등록 — 5 키):
+    agent-skills-builder-secret (sub-agent 담당자 박아름이 등록 — GCP Secret Manager, 5 키 + 선택 1):
         LLM_BASE_URL                          llm-base ASGI base URL (예: https://...modal.run)
         EMBEDDING_BASE_URL                    BGE-M3 ASGI base URL (보통 LLM_BASE_URL과 동일)
         CLOUD_SQL_INSTANCE                    "<PROJECT>:<REGION>:<INSTANCE>" 형식
         DB_IAM_USER                           공용 SA 풀 이메일 (cloudsql-iam-modal@...)
         DB_NAME                               workflow_automation
+        SKILLS_MARKETPLACE_BUCKET (선택)      SkillDocument GCS 전용 버킷명 (Secret: skills-marketplace-bucket,
+                                              ADR-0017). 미설정 시 boot tolerant skip → doc_store 비활성(문서 미저장)
 
     cloudsql-iam-sa (조장 1회 등록 — 1 키, 공용):
         GOOGLE_APPLICATION_CREDENTIALS_JSON   공용 GCP SA JSON key (cloud-sql-python-connector 인증용)
