@@ -20,13 +20,19 @@ class SkillDocumentStore(ABC):
     등재하므로 domain/ports 직접 의존을 만들지 않기 위함 (조장 리뷰 #98). 구현체 DI 주입은
     skills_marketplace use case 생성자에서 받는다.
 
-    NOTE: GCS adapter 구현 위치(storage/adapters vs skills_marketplace/adapters)는
-    PR-2d/2e 후속 결정. 경로 패턴: `gs://{bucket}/skills/{skill_id}/SKILL.md`.
+    GCS adapter 구현 위치 = `storage/adapters/`, 담당 = 조장 (2026-05-24 협의 — "스킬이 결국
+    md 문서 저장이라 storage"). 기존 ObjectStoragePort(GCSAdapter/LocalStorageAdapter)를 조합한다.
+    경로 패턴: `gs://{bucket}/skills/{skill_id}/SKILL.md`.
     """
 
     @abstractmethod
-    async def save(self, skill_id: UUID, document: SkillDocument) -> None:
-        """SkillDocument를 GCS에 SKILL.md(+scripts/templates)로 저장."""
+    async def save(self, skill_id: UUID, document: SkillDocument) -> str:
+        """SkillDocument를 GCS에 SKILL.md(+scripts/templates)로 저장하고 저장 URI를 반환.
+
+        반환: `gs://{bucket}/skills/{skill_id}/SKILL.md`. 호출부(skills_marketplace use case)가
+        이 URI를 skill metadata의 `skill_document_uri`로 세팅한다. bucket은 어댑터(storage)만
+        알기 때문에 URI는 어댑터가 반환한다 (호출부가 bucket을 알면 인프라 설정 누수 — 2026-05-24 결정).
+        """
         ...
 
     @abstractmethod
