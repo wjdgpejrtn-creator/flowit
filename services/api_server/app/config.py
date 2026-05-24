@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     db_port: int = Field(default=5432, alias="DB_PORT")
     db_password: str | None = Field(default=None, alias="DB_PASSWORD")
 
+    google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
+    google_redirect_uri: str = Field(default="", alias="GOOGLE_REDIRECT_URI")
+
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 

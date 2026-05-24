@@ -28,9 +28,13 @@ def app(env_minimum: None):
     return create_app(Settings())  # type: ignore[call-arg]
 
 
-def _override_permission(app) -> None:
-    """AuthMiddleware 우회 — reviewer_id 검증용 고정 user_id 주입."""
-    # role="User" — Admin은 서비스 운영자 전용. 스킬 거버넌스 행위자는 일반 User.
+def _override_permission(app) -> PermissionSource:
+    """AuthMiddleware 우회 — actor(user_id/role/department_id) 주입.
+
+    role="User"로 설정 — 라우트 단위 테스트는 use case를 mock하므로 actor 인자
+    pass-through만 검증한다(실제 인가 판정은 `SkillApprovalPolicy` 단위 테스트 영역).
+    반환된 PermissionSource로 호출자가 `actor_department_id` 등 검증에 활용 가능.
+    """
     fake_permission = PermissionSource(
         user_id=_REVIEWER_ID,
         role="User",  # type: ignore[arg-type]
@@ -40,6 +44,7 @@ def _override_permission(app) -> None:
         risk_ceiling="High",
     )
     app.dependency_overrides[get_permission_source] = lambda: fake_permission
+    return fake_permission
 
 
 def _bearer_token() -> str:
@@ -65,7 +70,7 @@ def test_approve_skill_approved(app) -> None:
     use_case = MagicMock()
     use_case.execute = AsyncMock(return_value=None)
     app.dependency_overrides[get_approve_skill_use_case] = lambda: use_case
-    _override_permission(app)
+    perm = _override_permission(app)
 
     skill_id = uuid4()
     client = TestClient(app)
@@ -84,6 +89,8 @@ def test_approve_skill_approved(app) -> None:
         reviewer_id=_REVIEWER_ID,
         approved=True,
         comment="LGTM",
+        actor_role="User",
+        actor_department_id=perm.department_id,
     )
     app.dependency_overrides.clear()
 
@@ -92,7 +99,7 @@ def test_approve_skill_rejected(app) -> None:
     use_case = MagicMock()
     use_case.execute = AsyncMock(return_value=None)
     app.dependency_overrides[get_approve_skill_use_case] = lambda: use_case
-    _override_permission(app)
+    perm = _override_permission(app)
 
     skill_id = uuid4()
     client = TestClient(app)
@@ -110,6 +117,8 @@ def test_approve_skill_rejected(app) -> None:
         reviewer_id=_REVIEWER_ID,
         approved=False,
         comment=None,
+        actor_role="User",
+        actor_department_id=perm.department_id,
     )
     app.dependency_overrides.clear()
 
@@ -118,7 +127,7 @@ def test_publish_skill(app) -> None:
     use_case = MagicMock()
     use_case.execute = AsyncMock(return_value=None)
     app.dependency_overrides[get_publish_skill_use_case] = lambda: use_case
-    _override_permission(app)
+    perm = _override_permission(app)
 
     skill_id = uuid4()
     client = TestClient(app)
@@ -131,7 +140,13 @@ def test_publish_skill(app) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body == {"skill_id": str(skill_id), "scope": "company", "action": "published"}
-    use_case.execute.assert_awaited_once_with(skill_id=skill_id, scope="company")
+    use_case.execute.assert_awaited_once_with(
+        skill_id=skill_id,
+        scope="company",
+        actor_user_id=_REVIEWER_ID,
+        actor_role="User",
+        actor_department_id=perm.department_id,
+    )
     app.dependency_overrides.clear()
 
 
