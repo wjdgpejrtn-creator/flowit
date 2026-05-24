@@ -15,28 +15,43 @@ from app.dependencies.auth import (
 )
 
 
-async def get_permission_source(
+async def get_current_user(
     request: Request,
     user_repo: UserRepository = Depends(get_user_repository),
-    session_repo: SessionRepository = Depends(get_session_repository),
-    resolver: PermissionResolver = Depends(get_permission_resolver),
-) -> PermissionSource:
-    """JWT 검증 후 AuthMiddleware가 채운 `request.state.user_id`/`session_hash`로부터
-    User + Session을 조회해 PermissionSource를 구성.
+) -> User:
+    """AuthMiddleware가 채운 `request.state.user_id`로 현재 User를 조회.
 
-    department_id가 NULL인 사용자는 `user_id`로 fallback (single-tenant 운영 patch —
-    onboarding flow에서 정식 할당하는 후속 PR 예정).
+    User 조회의 **단일 소스** — `get_permission_source`도 본 의존성을 경유한다. FastAPI가
+    한 요청 내에서 동일 의존성을 캐싱하므로, `/auth/me`처럼 user(프로필)와 permission(인가)을
+    함께 쓰는 라우트에서도 User DB 조회는 1회로 합쳐진다 (PR #163 리뷰 — 이중 조회 제거).
     """
     user_id = getattr(request.state, "user_id", None)
-    session_hash = getattr(request.state, "session_hash", None)
-    if user_id is None or not session_hash:
+    if user_id is None:
         raise AuthorizationError("Authentication required", code="E-AUTH-003")
-
     user = await user_repo.find_by_id(user_id)
     if user is None:
         raise NotFoundError(f"User {user_id} not found")
     if not user.is_active:
         raise AuthorizationError("User is inactive", code="E-AUTH-004")
+    return user
+
+
+async def get_permission_source(
+    request: Request,
+    user: User = Depends(get_current_user),
+    session_repo: SessionRepository = Depends(get_session_repository),
+    resolver: PermissionResolver = Depends(get_permission_resolver),
+) -> PermissionSource:
+    """JWT 검증 후 AuthMiddleware가 채운 `session_hash`로 Session을 조회해 PermissionSource를 구성.
+
+    User는 `get_current_user`에서 공유받는다 (FastAPI 의존성 캐싱 — 동일 요청 내 User 조회 1회).
+
+    department_id가 NULL인 사용자는 `user_id`로 fallback (single-tenant 운영 patch —
+    onboarding flow에서 정식 할당하는 후속 PR 예정).
+    """
+    session_hash = getattr(request.state, "session_hash", None)
+    if not session_hash:
+        raise AuthorizationError("Authentication required", code="E-AUTH-003")
 
     session = await session_repo.find_by_hash(session_hash)
     if session is None or session.is_revoked or session.is_expired():
@@ -54,24 +69,3 @@ async def get_permission_source(
         department_id=department_id,
         session_id=session.session_id,
     )
-
-
-async def get_current_user(
-    request: Request,
-    user_repo: UserRepository = Depends(get_user_repository),
-) -> User:
-    """AuthMiddleware가 채운 `request.state.user_id`로 현재 User를 조회.
-
-    사용자 프로필(email/name 등)이 필요한 라우트용(`/auth/me`). 인가 컨텍스트는
-    `get_permission_source`를 쓰고, 본 의존성은 프로필 노출 전용으로 분리한다 —
-    PermissionSource(공유 authz 컨텍스트)에 PII를 싣지 않기 위함.
-    """
-    user_id = getattr(request.state, "user_id", None)
-    if user_id is None:
-        raise AuthorizationError("Authentication required", code="E-AUTH-003")
-    user = await user_repo.find_by_id(user_id)
-    if user is None:
-        raise NotFoundError(f"User {user_id} not found")
-    if not user.is_active:
-        raise AuthorizationError("User is inactive", code="E-AUTH-004")
-    return user
