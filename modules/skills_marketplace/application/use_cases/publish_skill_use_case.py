@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from common_schemas import UserRole
 from common_schemas.exceptions import NotFoundError
 from nodes_graph.domain.entities.node_definition import NodeDefinition
 from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRepository
 
 from ...domain.ports.skill_repository import SkillRepository
+from ...domain.services.skill_approval_policy import SkillApprovalPolicy
 from ...domain.services.skill_lifecycle import SkillLifecycle
 from ...domain.value_objects.skill_scope import SkillScope
 from ...domain.value_objects.skill_state import SkillState
@@ -29,10 +31,28 @@ class PublishSkillUseCase:
         self._repo = repo
         self._node_def_repo = node_def_repo
 
-    async def execute(self, skill_id: UUID, scope: SkillScope) -> None:
+    async def execute(
+        self,
+        skill_id: UUID,
+        scope: SkillScope,
+        *,
+        actor_user_id: UUID,
+        actor_role: UserRole,
+        actor_department_id: UUID | None = None,
+    ) -> None:
         skill = await self._get(skill_id, scope)
         if skill is None:
             raise NotFoundError(f"Skill {skill_id} (scope={scope.value}) not found")
+
+        # ADR-0020 위임2: scope별 actor 인가. 실패 시 AuthorizationError.
+        SkillApprovalPolicy.authorize(
+            scope=scope,
+            actor_user_id=actor_user_id,
+            actor_role=actor_role,
+            actor_department_id=actor_department_id,
+            skill_owner_user_id=getattr(skill, "owner_user_id", None),
+            skill_team_id=getattr(skill, "team_id", None),
+        )
 
         new_state = SkillLifecycle.transition(SkillState(skill.lifecycle_state), SkillState.PUBLISHED)
         changes: dict = {"lifecycle_state": new_state, "updated_at": datetime.now(UTC)}

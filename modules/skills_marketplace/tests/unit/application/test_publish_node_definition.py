@@ -59,6 +59,7 @@ def _staging() -> NodeSpecStaging:
 
 
 # ADR-0020 Q1 + ②(d): publish(APPROVED→PUBLISHED) 시 staging → NodeDefinition 생성 (Option B)
+# (위임2 인가: personal=owner / team=team_manager+dept 로 actor 전달)
 
 
 @pytest.mark.asyncio
@@ -72,7 +73,9 @@ async def test_publish_personal_creates_node_definition():
         embedding=[0.1] * 768, created_at=_NOW, updated_at=_NOW,
     )
 
-    await PublishSkillUseCase(repo, node_def_repo).execute(sid, SkillScope.PERSONAL)
+    await PublishSkillUseCase(repo, node_def_repo).execute(
+        sid, SkillScope.PERSONAL, actor_user_id=owner, actor_role="User"
+    )
 
     # staging + skill 메타 → NodeDefinition 생성·upsert
     assert len(node_def_repo.upserted) == 1
@@ -106,7 +109,10 @@ async def test_publish_team_scope_isolates_team_id():
         created_at=_NOW, updated_at=_NOW,
     )
 
-    await PublishSkillUseCase(repo, node_def_repo).execute(sid, SkillScope.TEAM)
+    # team publish 인가: 같은 부서(team_id) team_manager
+    await PublishSkillUseCase(repo, node_def_repo).execute(
+        sid, SkillScope.TEAM, actor_user_id=uuid4(), actor_role="team_manager", actor_department_id=tid
+    )
 
     nd = node_def_repo.upserted[0]
     assert nd.team_id == tid          # team scope → team_id 격리
@@ -119,14 +125,16 @@ async def test_publish_skips_node_definition_when_already_linked():
     # node_definition_id가 이미 있으면(재게시 등) 중복 생성 안 함
     repo = _SkillRepo()
     node_def_repo = _NodeDefRepo()
-    sid = uuid4()
+    sid, owner = uuid4(), uuid4()
     repo.personal[sid] = MarketplacePersonalSkill(
-        skill_id=sid, owner_user_id=uuid4(), name="x", description="x",
+        skill_id=sid, owner_user_id=owner, name="x", description="x",
         node_definition_id=uuid4(), lifecycle_state=SkillState.APPROVED,
         created_at=_NOW, updated_at=_NOW,
     )
 
-    await PublishSkillUseCase(repo, node_def_repo).execute(sid, SkillScope.PERSONAL)
+    await PublishSkillUseCase(repo, node_def_repo).execute(
+        sid, SkillScope.PERSONAL, actor_user_id=owner, actor_role="User"
+    )
 
     assert len(node_def_repo.upserted) == 0
     assert repo.personal[sid].lifecycle_state == SkillState.PUBLISHED
