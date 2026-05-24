@@ -253,7 +253,7 @@ class ElapsedDetail(BaseModel):
     quality_gate_ms: int = 0
 ```
 
-### 6-2. chunk.py ✅ (ChunkingStrategy 추가 필요)
+### 6-2. chunk.py ✅
 
 ```python
 class ChunkOverlapMeta(BaseModel):
@@ -278,7 +278,7 @@ class ChunkingStrategy(BaseModel):
     token_estimator_mode: Literal["tiktoken", "char_estimate"]
 ```
 
-### 6-3. quality.py 🔜 신규 (value_objects/quality.py 에서 이동 + QualityConfig 추가)
+### 6-3. quality.py ✅
 
 ```python
 class QualityMetrics(BaseModel):
@@ -315,7 +315,7 @@ class QualityConfig(BaseModel):
     warn_threshold_count: int
 ```
 
-### 6-4. pii.py 🔜 신규
+### 6-4. pii.py ✅
 
 ```python
 class PIIMaskRule(BaseModel):
@@ -338,19 +338,19 @@ class ParserPort(ABC):
     def supports(self, mime_type: str) -> bool: ...
 ```
 
-### 7-2. repository_port.py 🔜 신규
+### 7-2. repository_port.py ✅
 
 ```python
 class DocumentRepositoryPort(ABC):
     @abstractmethod
-    def save(self, document: DocumentBlock) -> UUID: ...
+    async def save(self, document: DocumentBlock) -> UUID: ...
     @abstractmethod
-    def save_chunks(self, chunks: list[Chunk]) -> None: ...
+    async def save_chunks(self, chunks: list[Chunk]) -> None: ...
     @abstractmethod
-    def save_quality_log(self, result: QualityGateResult, document_id: UUID) -> None: ...
+    async def save_quality_log(self, result: QualityGateResult, document_id: UUID) -> None: ...
 ```
 
-### 7-3. config_port.py 🔜 신규
+### 7-3. config_port.py ✅
 
 ```python
 class ConfigLoaderPort(ABC):
@@ -397,7 +397,7 @@ class PIIMaskingService:
     def mask(self, blocks: list[ContentBlock], rules: list[PIIMaskRule]) -> list[ContentBlock]: ...
 ```
 
-### 8-5. parser_factory.py 🔜 이동 (adapters/ → domain/services/)
+### 8-5. parser_factory.py ✅
 
 ```python
 class ParserFactory:
@@ -416,11 +416,11 @@ class ParserFactory:
 | `PdfParser` | `PyMuPDF(fitz)` + `pdfplumber` | 본문: fitz, 표: pdfplumber |
 | `DocxParser` | `python-docx` | 서식 보존 제외 |
 | `XlsxParser` | `openpyxl` | `read_only=True` 모드 |
-| `CsvParser` | stdlib `csv` | ⚠️ pandas → csv 교체 필요 |
+| `CsvParser` | stdlib `csv` | - |
 | `PptxParser` | `python-pptx` | 이미지 내 텍스트 제외 |
 | `HwpParser` | `pyhwp / hwp5txt` | 표·서식·각주 제한 |
-| `HwpxParser` | `lxml` | ⚠️ xml.etree → lxml 교체 필요 |
-| `MarkdownParser` | `markdown-it-py` | 🔜 신규 |
+| `HwpxParser` | `lxml` | - |
+| `MarkdownParser` | `markdown-it-py` | - |
 
 ### 9-2. PdfParser 특이사항
 
@@ -440,7 +440,7 @@ class PostgresDocumentRepository(DocumentRepositoryPort):
     ...
 ```
 
-### 9-4. config/ 🔜 신규
+### 9-4. config/ ✅
 
 ```python
 class YamlConfigLoader(ConfigLoaderPort):
@@ -506,9 +506,9 @@ tests/
 │   │   ├── test_pii_masking.py
 │   │   ├── test_chunking_service.py
 │   │   └── test_quality_gate.py
-│   └── application/               ← 🔜 미구현
+│   └── application/               ← ✅ 완료
 └── integration/
-    └── adapters/                  ← 🔜 미구현
+    └── adapters/                  ← ✅ 완료
 ```
 
 | 테스트 대상 | 주요 케이스 |
