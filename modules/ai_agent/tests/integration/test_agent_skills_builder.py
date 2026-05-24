@@ -25,7 +25,6 @@ from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolRes
 from common_schemas.enums import AgentMode, ExecutionStatus
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame
 
-
 # ----------------------------------------------------------------------
 # Inline 헬퍼 (conftest 미사용 정책)
 # ----------------------------------------------------------------------
@@ -278,11 +277,16 @@ def test_build_from_functional_domain_use_case_signature_compat():
 
 
 def test_build_from_sop_use_case_signature_compat():
-    """main.py: use_case.execute(req.user_id, document, req.personal_memory)."""
+    """main.py wizard 2단계(ADR-0020 Q8, PR #151) 호출 시그니처 정합:
+    extract: use_case.extract_draft(req.user_id, document, req.personal_memory)
+    confirm: use_case.confirm(req.user_id, skills)
+    """
     from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
         BuildFromSOPUseCase,
     )
 
-    sig = inspect.signature(BuildFromSOPUseCase.execute)
-    params = list(sig.parameters.keys())
-    assert params[:4] == ["self", "user_id", "document", "personal_memory"]
+    extract_params = list(inspect.signature(BuildFromSOPUseCase.extract_draft).parameters.keys())
+    assert extract_params[:4] == ["self", "user_id", "document", "personal_memory"]
+
+    confirm_params = list(inspect.signature(BuildFromSOPUseCase.confirm).parameters.keys())
+    assert confirm_params[:3] == ["self", "user_id", "skills"]

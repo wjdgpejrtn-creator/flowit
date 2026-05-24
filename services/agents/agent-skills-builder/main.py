@@ -121,6 +121,10 @@ image = (
         "cloud-sql-python-connector[asyncpg]>=1.12",
         # GCP Secret Manager (런타임 secret pull, 2026-05-19 마이그레이션)
         "google-cloud-secret-manager>=2.20",
+        # GCS + YAML — SkillDocument(SKILL.md) 이중 저장 (ADR-0017, GcsSkillDocumentStore).
+        # 이미지는 storage pyproject deps를 자동설치하지 않으므로 명시 핀 (gcs adapter 런타임 import).
+        "google-cloud-storage>=2.14",
+        "pyyaml>=6.0",
         # Transitive: storage.mappers → toolset.runtime_validator → import jsonschema.
         # 박아름 use case가 toolset 직접 사용 안 하지만 storage import 체인으로 끌려옴.
         "jsonschema>=4.0",
@@ -174,12 +178,15 @@ class SkillsBuilderAgent:
         등록되어 이후 request도 동일 loop라 ConnectorLoopError 발생 안 함.
         boot()의 sync loop와는 분리되어 있어도 정합.
         """
+        import logging
         import tempfile
         from pathlib import Path
 
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from storage.adapters.gcs_adapter import GCSAdapter
+        from storage.adapters.gcs_skill_document_store import GcsSkillDocumentStore
 
         from services.common.gcp_secrets import load_secrets_to_env
 
@@ -198,9 +205,25 @@ class SkillsBuilderAgent:
             "embedding-base-url": "EMBEDDING_BASE_URL",
         })
 
-        # 2) 어댑터 wiring (RPC LLM + HTTP embedding) — async 의존 없음
+        # 2-1) skills-marketplace-bucket(ADR-0017 SkillDocument GCS 저장)은 조장 인프라(전용
+        # 버킷 GCP Secret + SA Storage 권한) 준비 시 활성화. 미설정이면 tolerant skip →
+        # doc_store 미주입(문서 미저장, 현행 유지)이라 boot/deploy는 안전.
+        try:
+            load_secrets_to_env({"skills-marketplace-bucket": "SKILLS_MARKETPLACE_BUCKET"})
+        except Exception as exc:  # NotFound/PermissionDenied 등 — 미설정 시 비활성
+            logging.getLogger(APP_NAME).warning(
+                "SKILLS_MARKETPLACE_BUCKET 미로드 — SkillDocument GCS 저장 비활성: %s", exc
+            )
+
+        # 2-2) 어댑터 wiring (RPC LLM + HTTP embedding) — async 의존 없음
         self._llm = ModalLLMAdapter()
         self._embedder = ModalEmbeddingAdapter()
+
+        # ADR-0017 이중 저장 "지침서" 측 — SOP confirm 시 SkillDocument를 GCS에 저장.
+        # 버킷 env가 있을 때만 주입(없으면 None=문서 미저장, 하위호환). GCSAdapter는 bucket_name이
+        # None이면 GCS_BUCKET_NAME으로 silent fallback하므로 명시 가드 (전용 버킷만 사용).
+        _bucket = os.environ.get("SKILLS_MARKETPLACE_BUCKET")
+        self._doc_store = GcsSkillDocumentStore(GCSAdapter(bucket_name=_bucket)) if _bucket else None
 
         # 3) Cloud SQL Connector — getconn() 안에서 lazy 초기화 + loop 명시 바인딩
         self._connector = None
@@ -347,7 +370,10 @@ class SkillsBuilderAgent:
                 # wizard 2단계(ADR-0020 Q8): extract_draft(추출·검토용, 저장X) / confirm(편집→DRAFT).
                 # confirm은 CreateDraftSkillUseCase(SkillRepository=PgMarketplaceSkillRepository, PR #147) 경유.
                 use_case = BuildFromSOPUseCase(
-                    CreateDraftSkillUseCase(PgMarketplaceSkillRepository(session)),
+                    CreateDraftSkillUseCase(
+                        PgMarketplaceSkillRepository(session),
+                        doc_store=self._doc_store,  # ADR-0017 — 주입 시 GCS 저장(미설정 시 None=미저장)
+                    ),
                     self._embedder,
                     self._llm,
                 )
