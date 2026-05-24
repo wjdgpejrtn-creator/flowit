@@ -66,3 +66,10 @@ class TestUserRepositoryPort:
     def test_is_abstract(self) -> None:
         with pytest.raises(TypeError):
             UserRepository()  # type: ignore[abstract]
+
+
+def test_user_role_is_common_schemas_ssot() -> None:
+    """auth.UserRole은 common_schemas.UserRole의 re-export — 두 곳 독립 정의 방지 (PR #157 review ①)."""
+    from common_schemas import UserRole as CSUserRole
+
+    assert UserRole is CSUserRole
