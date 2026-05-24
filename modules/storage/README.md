@@ -49,9 +49,10 @@ from storage.repositories import (
 | 포트 | 메서드 | 구현체 |
 |------|--------|--------|
 | `ObjectStoragePort` | `upload(key, data, metadata) → url` | `GCSAdapter` (프로덕션) |
-| | `download(key) → bytes` | `LocalStorageAdapter` (로컬 개발) |
+| | `download(key) → bytes` (키 부재 시 `NotFoundError(E-STORAGE-001)`) | `LocalStorageAdapter` (로컬 개발) |
 | | `delete(key) → None` | |
 | | `presign(key, ttl) → url` | |
+| `SkillDocumentStore` (skills_marketplace Port) | `save(skill_id, SkillDocument) → None`, `load(skill_id) → SkillDocument \| None` | `GcsSkillDocumentStore` — `ObjectStoragePort` 생성자 주입(production GCSAdapter, 테스트 LocalStorageAdapter). SKILL.md = YAML frontmatter(name/description) + markdown body(instructions). 키: `skills/{skill_id}/SKILL.md` (ADR-0017) |
 
 ### marketplace/ — 스킬 마켓플레이스 하위 도메인
 
