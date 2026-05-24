@@ -45,8 +45,10 @@
   - 직무 5종 (`seeds/functional_domain_defaults/`): customer_support / document_data / hr / it_ops / marketing
 - [x] Modal app (`services/agents/agent-skills-builder/main.py`) — source_type 분기 + sop step(extract/confirm) 라우팅
 - [x] Modal 배포 — `agent-skills-builder` `/v1/health` 200 (GCP Secret Manager 패턴, 2026-05-19 검증)
-- [x] 단위 테스트 — skills_builder 115 passed (wizard 정상/실패경로 격리 포함)
+- [x] 단위 테스트 — skills_builder 116 passed (wizard 정상/실패경로 격리 + confirm instructions 전달/누락 포함)
 - [x] integration test — `tests/integration/test_agent_skills_builder.py`
+- [x] ADR-0017 SkillDocument 이중 저장 배선 (PR #164/#165) — `confirm`이 `instructions`(SKILL.md 본문)를 `CreateDraftSkillUseCase.execute(instructions=)`로 전달(신뢰경계 str/빈값 None 격리). 실제 GCS 저장은 use case가 주입받은 `SkillDocumentStore`(storage `GcsSkillDocumentStore`, `save()→str`)가 수행
+  - [ ] **잔여**: api_server composition root에서 `CreateDraftSkillUseCase`에 `doc_store` 주입 → GCS 저장 활성화 (미주입 시 문서 미저장, 하위호환)
 
 ## 의존성
 
