@@ -237,6 +237,9 @@ def test_me_returns_permission_source_for_authenticated_user(app) -> None:
     assert body["department_id"] == str(dept_id)
     assert body["risk_ceiling"] == "Restricted"  # Admin
     assert "Public" in body["granted_scopes"]
+    # MeResponse = PermissionSource 필드 + 프로필(email/name) — 프론트 useAuth userName 연결용
+    assert body["email"] == "alice@example.com"
+    assert body["name"] == "Alice"
 
     app.dependency_overrides.clear()
 

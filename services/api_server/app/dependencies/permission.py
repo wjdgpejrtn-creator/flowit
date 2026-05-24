@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from fastapi import Depends, Request
-
+from auth.domain.entities.user import User
 from auth.domain.ports.session_repository import SessionRepository
 from auth.domain.ports.user_repository import UserRepository
 from auth.domain.services.permission_resolver import PermissionResolver
 from common_schemas import PermissionSource
 from common_schemas.exceptions import AuthorizationError, NotFoundError
+from fastapi import Depends, Request
 
 from app.dependencies.auth import (
     get_permission_resolver,
@@ -54,3 +54,24 @@ async def get_permission_source(
         department_id=department_id,
         session_id=session.session_id,
     )
+
+
+async def get_current_user(
+    request: Request,
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> User:
+    """AuthMiddleware가 채운 `request.state.user_id`로 현재 User를 조회.
+
+    사용자 프로필(email/name 등)이 필요한 라우트용(`/auth/me`). 인가 컨텍스트는
+    `get_permission_source`를 쓰고, 본 의존성은 프로필 노출 전용으로 분리한다 —
+    PermissionSource(공유 authz 컨텍스트)에 PII를 싣지 않기 위함.
+    """
+    user_id = getattr(request.state, "user_id", None)
+    if user_id is None:
+        raise AuthorizationError("Authentication required", code="E-AUTH-003")
+    user = await user_repo.find_by_id(user_id)
+    if user is None:
+        raise NotFoundError(f"User {user_id} not found")
+    if not user.is_active:
+        raise AuthorizationError("User is inactive", code="E-AUTH-004")
+    return user

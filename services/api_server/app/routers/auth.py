@@ -10,7 +10,7 @@ from auth.adapters.oauth.google_oauth_client import GoogleOAuthClient
 from auth.application.use_cases.authenticate_use_case import AuthenticateUseCase
 from auth.application.use_cases.grant_user_role_use_case import GrantUserRoleUseCase
 from auth.application.use_cases.refresh_token_use_case import RefreshTokenUseCase
-from auth.domain.entities.user import UserRole
+from auth.domain.entities.user import User, UserRole
 from auth.domain.ports.session_repository import SessionRepository
 from common_schemas import PermissionSource
 from common_schemas.exceptions import AuthorizationError
@@ -29,7 +29,7 @@ from app.dependencies.auth import (
     get_session_repository,
 )
 from app.dependencies.clients import get_redis
-from app.dependencies.permission import get_permission_source
+from app.dependencies.permission import get_current_user, get_permission_source
 from app.dependencies.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -169,11 +169,24 @@ async def logout(
     return response
 
 
-@router.get("/me", response_model=PermissionSource)
+class MeResponse(PermissionSource):
+    """`/auth/me` 응답 — 인가 컨텍스트(PermissionSource) + 사용자 프로필(email/name).
+
+    PermissionSource를 상속해 모든 authz 필드를 그대로 노출하고 프로필 필드만 추가한다.
+    email/name은 인가가 아니라 표시용이므로 공유 PermissionSource에는 싣지 않고 본 응답에서만
+    합성한다 (프론트 useAuth가 userName 등에 사용).
+    """
+
+    email: str
+    name: str
+
+
+@router.get("/me", response_model=MeResponse)
 async def me(
     permission: PermissionSource = Depends(get_permission_source),
-) -> PermissionSource:
-    return permission
+    user: User = Depends(get_current_user),
+) -> MeResponse:
+    return MeResponse(**permission.model_dump(), email=user.email, name=user.name)
 
 
 class GrantRoleRequest(BaseModel):
