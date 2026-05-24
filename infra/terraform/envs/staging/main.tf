@@ -151,6 +151,32 @@ module "personal_memory_bucket" {
 }
 
 # ---------------------------------------------------------------------------
+# GCS — skills marketplace SkillDocument bucket (ADR-0017 이중 저장 "지침서" 측)
+# api_server가 SkillDocumentStore(skills_marketplace Port) DI로 read/write.
+# 일반 업로드 GCS_BUCKET_NAME과 분리 — 스킬 문서가 일반 파일과 같은 버킷에 섞이지 않도록.
+# 키 패턴: gs://{bucket}/skills/{skill_id}/SKILL.md
+# ---------------------------------------------------------------------------
+module "skills_marketplace_bucket" {
+  source = "../../modules/gcs"
+
+  project_id    = var.project_id
+  location      = var.region
+  bucket_name   = "${var.project_id}-skills-marketplace-${var.environment}"
+  storage_class = "STANDARD"
+  force_destroy = true # staging only
+
+  # api_server SA + 팀 — api_server가 consumer(SkillDocumentStore DI factory),
+  # 팀원은 debugging/seed 용도. personal_memory와 달리 api_server SA를 명시적 포함.
+  writer_members = distinct(concat(
+    var.agent_secret_accessors,
+    var.api_server_service_account != "" ? ["serviceAccount:${var.api_server_service_account}"] : [],
+  ))
+  reader_members = []
+
+  labels = merge(local.common_labels, { role = "skills-marketplace" })
+}
+
+# ---------------------------------------------------------------------------
 # Memorystore (Redis) — execution_engine Celery broker + api_server SSE pub/sub
 # REQ-007/009 (ADR-0015 §F2-2 후속 호출 경로 B 트리거)
 # ---------------------------------------------------------------------------
@@ -219,6 +245,9 @@ module "api_server" {
     # OAuth 콜백(GET /api/v1/auth/callback) 처리 후 브라우저를 돌려보낼 프론트 주소.
     # 2단계 apply — 프론트 배포(module.frontend) 후 var.frontend_url을 채우면 반영된다.
     FRONTEND_URL = var.frontend_url
+    # SkillDocumentStore(ADR-0017 이중 저장) — 일반 GCS_BUCKET_NAME과 분리된 전용 버킷.
+    # secret 아닌 단순 이름이라 plaintext env (secret_env_vars 아님).
+    SKILLS_MARKETPLACE_BUCKET = module.skills_marketplace_bucket.bucket_name
   }
 
   # PR #80 GCP Secret Manager + 본 PR-C 신규 추가(jwt/encryption/google) — Cloud Run이 직접 주입.
@@ -237,7 +266,7 @@ module "api_server" {
 
   labels = merge(local.common_labels, { role = "api-server" })
 
-  depends_on = [module.networking, module.redis, module.agent_secrets]
+  depends_on = [module.networking, module.redis, module.agent_secrets, module.skills_marketplace_bucket]
 }
 
 # ---------------------------------------------------------------------------
