@@ -3,7 +3,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from common_schemas.security import PermissionSource, PlaintextCredential
+from common_schemas.security import PermissionSource, PlaintextCredential, UserRole
 
 
 class TestPermissionSource:
@@ -53,6 +53,12 @@ class TestPermissionSource:
         )
         with pytest.raises(ValidationError):
             ps.role = "Admin"
+
+
+class TestUserRole:
+    def test_literal_members(self):
+        """SSOT: auth UserRole · PermissionSource.role · DB 021 CHECK가 공유하는 4종."""
+        assert set(UserRole.__args__) == {"User", "team_manager", "company_manager", "Admin"}
 
 
 class TestPlaintextCredential:

@@ -9,19 +9,23 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 ## [0.12.0] - 2026-05-23
 
+### Added — `UserRole` named Literal (PR #157 review ① SSOT 통합)
+- `security.py`: `UserRole = Literal["User", "team_manager", "company_manager", "Admin"]` 신설. `PermissionSource.role: UserRole`로 참조. `auth.domain.entities.user.UserRole`은 본 심볼의 re-export로 전환되어 두 곳 독립 정의로 인한 drift(향후 role 추가 시 한쪽만 바뀌면 런타임 ValidationError) 위험 제거.
+
 ### Changed — `PermissionSource.role`에 매니저 역할 2종 추가 (스킬 마켓플레이스 RBAC, PR #150 위임2)
-- `security.py`: `PermissionSource.role` Literal `["User", "Admin"]` → `["User", "team_manager", "company_manager", "Admin"]`. 스킬 마켓플레이스 team/company scope 승인 인가용 — `SkillApprovalPolicy`가 `actor.role`로 승인 권한을 판정한다.
-- 짝 변경: `auth` `UserRole` Literal, `users.role` CHECK (`database/schemas/021_user_roles_expand.sql`). 세 곳이 동일 4종 집합을 공유한다.
+- `security.py`: `PermissionSource.role` Literal `["User", "Admin"]` → `["User", "team_manager", "company_manager", "Admin"]` (현재는 `UserRole` named alias로 표현). 스킬 마켓플레이스 team/company scope 승인 인가용 — `SkillApprovalPolicy`가 `actor.role`로 승인 권한을 판정한다.
+- 짝 변경: `users.role` CHECK (`database/schemas/021_user_roles_expand.sql`). `auth` 측은 common_schemas re-export로 자동 정합.
 
 ### Changed
-- TypeScript codegen: `PermissionSource.role` union이 4종으로 `generated/index.ts`에 자동 반영.
-- `test_security.py` — `team_manager`/`company_manager` 허용 검증 1건 추가.
+- TypeScript codegen: `PermissionSource.role` union이 4종으로 `generated/index.ts`에 자동 반영 (pydantic2ts는 named alias도 인라인 union으로 직렬화 — 소비자 무영향).
+- `test_security.py` — `team_manager`/`company_manager` 허용 검증 + `UserRole.__args__` 4-set 검증 추가.
+- `auth/tests/unit/domain/test_user.py` — `auth.UserRole is common_schemas.UserRole` SSOT identity 검증 추가.
 
 ### Symbols
-- 66 → 66 (신규 top-level export 없음 — 기존 `PermissionSource`의 Literal widening만).
+- 66 → 67 (`UserRole` 신규 top-level export).
 
 ### Migration notes
-- 순수 additive (Literal widening) — 기존 `"User"`/`"Admin"` 값은 그대로 유효. `PermissionSource.role`를 분기하는 소비자는 신규 2종 케이스 추가를 권장하나, 미처리해도 기존 동작은 깨지지 않는다.
+- 순수 additive — `PermissionSource.role` 기존 `"User"`/`"Admin"` 값 유효. `from common_schemas import UserRole` 신규 가능, `from auth.domain.entities.user import UserRole`도 그대로 동작(re-export shim).
 
 ## [0.11.0] - 2026-05-22
 
