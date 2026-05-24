@@ -5,7 +5,7 @@
 
 ## 요약
 
-2026-05-24 박아름 사이클 — 7개 PR 머지 완료(development `c84706f`). ADR-0020 위임2(게시 인가)와 ADR-0017 SkillDocument 이중 저장 "지침서" 측 **호출부 배선**이 끝나, SOP wizard 추출 → personal DRAFT 생성 시 SKILL.md를 GCS에 저장하는 경로가 코드 레벨에서 완성됐다(실제 활성화는 `services/agents/agent-skills-builder/main.py` `doc_store` 주입 후속). `/auth/me`는 프론트 userName 연결용 `email`/`name`을 반환한다.
+2026-05-24 박아름 사이클 — 8개 PR 머지 완료(`#158/#159/#160/#161/#163/#164/#165/#171`, development `c495396`. + 문서 동기화 #167). ADR-0020 위임2(게시 인가)와 ADR-0017 SkillDocument 이중 저장이 **`doc_store` 주입(#171)까지 머지**돼 SOP wizard `confirm` → personal DRAFT 생성 시 SKILL.md를 GCS에 저장하는 경로가 **코드 전부 완성**. 실제 GCS 저장 활성화는 조장 인프라(전용 버킷 GCP Secret + Modal SA Storage 권한) + Modal 재배포만 남음. `/auth/me`는 프론트 userName 연결용 `email`/`name`을 반환한다.
 
 ## 완료 (머지)
 
@@ -23,6 +23,7 @@
 | **#161** | 조장 | `SKILLS_MARKETPLACE_BUCKET` 전용 버킷 인프라 (박아름 M1 리뷰 반영) |
 | **#164** | 박아름 | Port `SkillDocumentStore.save() → str` + `CreateDraftSkillUseCase`에 `doc_store`(Optional)/`instructions` 추가 — skill_id를 use case가 생성해 문서저장→메타저장 ordering 일관 처리. doc_store/instructions 둘 중 하나라도 없으면 미저장(하위호환) |
 | **#165** | 박아름 | `BuildFromSOPUseCase.confirm`이 드롭하던 `instructions`를 `CreateDraftSkillUseCase.execute(instructions=)`로 전달 — confirm 신뢰경계(str/빈값 None 격리) |
+| **#171** | 박아름 | agent-skills-builder Modal composition root(`main.py`)에서 `CreateDraftSkillUseCase`에 `doc_store` 주입 + image `google-cloud-storage`/`pyyaml` + boot 버킷 tolerant 로드(NotFound=info / 권한·설정오류=error 구분). 버킷 env 미설정 시 `doc_store=None`(문서 미저장, deploy-safe) |
 
 - 흐름: `extract_draft`(추출) → `confirm`(instructions 전달) → `CreateDraftSkillUseCase`(skill_id 생성 → `doc_store.save` → 반환 URI를 `skill_document_uri`에 세팅) → 메타 저장.
 
@@ -33,8 +34,8 @@
 
 ### 검증
 
-- skills_marketplace **67** / skills_builder **116** / api_server auth **11** passed, 전건 ruff clean.
-- 자체 3축 리뷰(클린아키/타모듈 import/스펙 정합) — 위반 0. 조장 3 PR 전건 Approve.
+- skills_marketplace **67** / skills_builder **116** / api_server auth **11** / agent-skills-builder integration **20** passed, 전건 ruff clean.
+- 자체 3축 리뷰(클린아키/타모듈 import/스펙 정합) — 위반 0. 조장 박아름 4 PR(#163/#164/#165/#171) 전건 Approve.
 
 ### 스펙 정합 (동기화 완료)
 
@@ -43,13 +44,16 @@
 - REQ-009 L94(`/auth/me` → `MeResponse`)
 - ADR-0017 §위치/Follow-up
 
-## 잔여 (박아름 / 협업)
+## 잔여 (전부 박아름 코드 외 — 인프라/협업 대기)
 
-1. **`doc_store` 주입 wiring** (박아름) — **`services/agents/agent-skills-builder/main.py`**(Modal Skills Builder 서비스, `CreateDraftSkillUseCase` 실제 조립 위치 `main.py:350`) composition root에서 `doc_store=GcsSkillDocumentStore(...)` 주입 → SkillDocument 실제 GCS 저장 활성화. (api_server엔 호출부 0건) + staging redeploy(조장 Notice — #165 `execute(instructions=)` 런타임 정합).
-2. **프론트 userName 연결** (가원, REQ-010) — `useAuth.ts`의 `userName: ''` → `userName: user.name`(+ `me()` 응답 타입 MeResponse). 연결 시 PR #149 must-fix(AppBar ` · User`) 완전 해소.
-3. **staging smoke 검증** — 조장 terraform/api_server deploy 대기.
+> 박아름 코드·테스트·문서·셀프리뷰·PR 전부 완료. 카톡 3건(가원/조장/신정혜) 발송 完(2026-05-24).
+
+1. **Modal 재배포 + staging smoke** (박아름, 조장 인프라 후) — `doc_store` wiring은 #171 머지 完. 조장이 ① GCP Secret `skills-marketplace-bucket`(env명 #161 terraform 일치 확인) + ② Modal SA Storage 권한을 확인해주면, agent-skills-builder 재배포 → SOP confirm → GCS `skills/{skill_id}/SKILL.md` 생성 smoke.
+2. **프론트 userName 연결** (가원, REQ-010) — `useAuth.ts`의 `userName: ''` → `userName: user.name`(+ `me()` 응답 타입 MeResponse). 연결 시 PR #149 must-fix(AppBar ` · User`) 완전 해소. #163 머지로 unblock.
+3. **Composer SkillRetriever** (신정혜, ADR-0017 §3) — `SearchSkillsUseCase` 소비. FYI 핸드오프.
+4. **staging deploy / 인프라** (조장) — terraform/api_server + 위 ①② secret·SA 권한.
 
 ## 다음 단계
 
-1. `services/agents/agent-skills-builder/main.py` `doc_store` 주입 wiring (`main.py:350` CreateDraftSkillUseCase 조립부)
-2. 가원 프론트 연결 + staging redeploy 후 e2e 확인
+1. (조장) 인프라 2건 확인 → (박아름) agent-skills-builder Modal 재배포 + staging smoke
+2. (가원) 프론트 연결 / (신정혜) Composer SkillRetriever — 별도 트랙
