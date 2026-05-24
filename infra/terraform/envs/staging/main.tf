@@ -393,7 +393,10 @@ module "execution_engine_worker" {
   secret_env_vars = {
     REDIS_URL          = { secret_id = "redis-url", version = "latest" }
     CLOUD_SQL_INSTANCE = { secret_id = "cloud-sql-instance", version = "latest" }
-    DB_IAM_USER        = { secret_id = "db-iam-user", version = "latest" }
+    # worker 전용 db-iam-user-worker (PR-B switch) — api_server PR-B로 db-iam-user latest가
+    # workflow-api-staging-sa email로 덮어쓰여 worker cold start 시 인증 깨질 폭탄 회피.
+    # 값(worker SA full email)은 PR-A 후속 수동 prereq로 add 완료.
+    DB_IAM_USER        = { secret_id = "db-iam-user-worker", version = "latest" }
     DB_NAME            = { secret_id = "db-name", version = "latest" }
     LLM_BASE_URL       = { secret_id = "llm-base-url", version = "latest" }
     EMBEDDING_BASE_URL = { secret_id = "embedding-base-url", version = "latest" }
