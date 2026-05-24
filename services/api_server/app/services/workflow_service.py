@@ -27,3 +27,16 @@ class WorkflowService:
         if result is None:
             raise NotFoundError(f"Workflow {workflow_id} not found", code="E-WF-001")
         return result
+
+    async def list_for(
+        self,
+        permission: PermissionSource,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[WorkflowSchema]:
+        """본인 소유 워크플로우 목록(최신순). scope 기반 team/public 가시성은 별도 필요 시 추가."""
+        return await self._repo.list_by_owner(
+            owner_user_id=permission.user_id,
+            limit=limit,
+            offset=offset,
+        )
