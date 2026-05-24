@@ -208,14 +208,19 @@ class SkillsBuilderAgent:
         })
 
         # 2-1) skills-marketplace-bucket(ADR-0017 SkillDocument GCS 저장)은 조장 인프라(전용
-        # 버킷 GCP Secret + SA Storage 권한) 준비 시 활성화. 미설정이면 tolerant skip →
-        # doc_store 미주입(문서 미저장, 현행 유지)이라 boot/deploy는 안전.
+        # 버킷 GCP Secret + SA Storage 권한) 준비 시 활성화. 둘 중 무엇이 빠져도 boot는 깨지
+        # 않고 doc_store=None(문서 미저장, 현행 유지)으로 deploy-safe하다. 단 원인을 구분 로깅:
+        #   - NotFound: secret 미등록 = 롤아웃 중 정상(info)
+        #   - 그 외(PermissionDenied/RuntimeError 등): 설정·권한 오류 = 확인 필요(error, 강한 신호)
+        from google.api_core.exceptions import NotFound as _SecretNotFound
+
+        _log = logging.getLogger(APP_NAME)
         try:
             load_secrets_to_env({"skills-marketplace-bucket": "SKILLS_MARKETPLACE_BUCKET"})
-        except Exception as exc:  # NotFound/PermissionDenied 등 — 미설정 시 비활성
-            logging.getLogger(APP_NAME).warning(
-                "SKILLS_MARKETPLACE_BUCKET 미로드 — SkillDocument GCS 저장 비활성: %s", exc
-            )
+        except _SecretNotFound:
+            _log.info("SKILLS_MARKETPLACE_BUCKET secret 미등록 — SkillDocument GCS 저장 비활성(정상, 인프라 대기)")
+        except Exception as exc:  # PermissionDenied/RuntimeError 등 — 설정·권한 오류
+            _log.error("SKILLS_MARKETPLACE_BUCKET 로드 실패(권한/설정 확인 필요) — GCS 저장 비활성: %s", exc)
 
         # 2-2) 어댑터 wiring (RPC LLM + HTTP embedding) — async 의존 없음
         self._llm = ModalLLMAdapter()
