@@ -8,18 +8,29 @@ import Btn from '@/components/common/Btn';
 import ScopePill from '@/components/common/ScopePill';
 import Skel from '@/components/common/Skel';
 import { listWorkflows } from '@/lib/api/workflowApi';
+import { useAuthStore } from '@/stores/authStore';
 import type { WorkflowSchema } from '@common/generated';
 
 const TABLE_HEAD = ['이름', 'SCOPE', '노드', '상태', '수정'];
-const TABS = [
+const ALL_TABS = [
   { label: 'My', key: 'my' },
   { label: 'Team', key: 'team' },
   { label: 'Public', key: 'public' },
 ] as const;
 
+type TabKey = (typeof ALL_TABS)[number]['key'];
+
+function visibleTabs(role: string): typeof ALL_TABS[number][] {
+  if (role === 'company_manager' || role === 'Admin') return [...ALL_TABS];
+  if (role === 'team_manager') return ALL_TABS.slice(0, 2);
+  return ALL_TABS.slice(0, 1);
+}
+
 function WorkflowListContent() {
   const searchParams = useSearchParams();
-  const activeTab = searchParams.get('tab') ?? 'my';
+  const { role } = useAuthStore();
+  const tabs = visibleTabs(role);
+  const activeTab = (searchParams.get('tab') as TabKey) ?? 'my';
 
   const [workflows, setWorkflows] = useState<WorkflowSchema[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,7 +54,7 @@ function WorkflowListContent() {
       <div className="flex items-center justify-between">
         {/* Tabs */}
         <div className="flex gap-2">
-          {TABS.map(({ label, key }) => (
+          {tabs.map(({ label, key }) => (
             <Link
               key={key}
               href={`/workflows?tab=${key}`}
