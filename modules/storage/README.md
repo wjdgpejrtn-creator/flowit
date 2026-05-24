@@ -52,7 +52,7 @@ from storage.repositories import (
 | | `download(key) → bytes` (키 부재 시 `NotFoundError(E-STORAGE-001)`) | `LocalStorageAdapter` (로컬 개발) |
 | | `delete(key) → None` | |
 | | `presign(key, ttl) → url` | |
-| `SkillDocumentStore` (skills_marketplace Port) | `save(skill_id, SkillDocument) → None`, `load(skill_id) → SkillDocument \| None` | `GcsSkillDocumentStore` — `ObjectStoragePort` 생성자 주입(production GCSAdapter, 테스트 LocalStorageAdapter). SKILL.md = YAML frontmatter(name/description) + markdown body(instructions). 키: `skills/{skill_id}/SKILL.md` (ADR-0017) |
+| `SkillDocumentStore` (skills_marketplace Port) | `save(skill_id, SkillDocument) → str (gs:// URI)`, `load(skill_id) → SkillDocument \| None` | `GcsSkillDocumentStore` — `ObjectStoragePort` 생성자 주입(production GCSAdapter, 테스트 LocalStorageAdapter). SKILL.md = YAML frontmatter(name/description) + markdown body(instructions). 키: `skills/{skill_id}/SKILL.md`. `save` 반환 URI는 호출부가 `skill_document_uri` 메타에 세팅 (bucket 이름이 use case에 누수되지 않도록 어댑터가 forward — ADR-0017) |
 
 ### marketplace/ — 스킬 마켓플레이스 하위 도메인
 

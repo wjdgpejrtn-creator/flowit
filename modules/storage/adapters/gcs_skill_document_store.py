@@ -41,9 +41,14 @@ class GcsSkillDocumentStore(SkillDocumentStore):
     def __init__(self, object_storage: ObjectStoragePort) -> None:
         self._storage = object_storage
 
-    async def save(self, skill_id: UUID, document: SkillDocument) -> None:
+    async def save(self, skill_id: UUID, document: SkillDocument) -> str:
+        """SKILL.md로 저장 후 `gs://{bucket}/{key}` URI 반환 — 호출부가 그 값을
+        `skill_document_uri` 메타에 세팅. bucket 이름은 storage/infra 영역이라
+        호출부(skills_marketplace use case)가 알면 config 누수.
+        `ObjectStoragePort.upload`이 이미 URI를 반환하므로 그 값을 그대로 forward.
+        """
         content = _serialize(document).encode("utf-8")
-        await self._storage.upload(_key(skill_id), content, metadata={})
+        return await self._storage.upload(_key(skill_id), content, metadata={})
 
     async def load(self, skill_id: UUID) -> SkillDocument | None:
         try:

@@ -59,6 +59,19 @@ async def test_save_uses_deterministic_key(store: GcsSkillDocumentStore, storage
 
 
 @pytest.mark.asyncio
+async def test_save_returns_object_storage_uri(store: GcsSkillDocumentStore, storage_dir: Path) -> None:
+    """save → URI 반환 — 호출부가 bucket 이름을 모른 채 `skill_document_uri`에 세팅 가능.
+    LocalStorageAdapter는 `file://{path}` 반환, GCSAdapter는 `gs://{bucket}/{key}` 반환."""
+    skill_id = uuid4()
+    uri = await store.save(
+        skill_id,
+        SkillDocument(skill_id=skill_id, name="x", description="y", instructions="z"),
+    )
+    expected_path = storage_dir / f"skills/{skill_id}/SKILL.md"
+    assert uri == f"file://{expected_path}"
+
+
+@pytest.mark.asyncio
 async def test_description_with_special_chars_round_trip(store: GcsSkillDocumentStore) -> None:
     """description이 콜론/줄바꿈 포함 자유 텍스트라도 YAML safe_dump/safe_load로 round-trip."""
     skill_id = uuid4()
