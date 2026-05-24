@@ -27,7 +27,7 @@ from .exceptions import (
 )
 from .handoff import EvaluationResult, HandoffPayload
 from .node import NodeContext
-from .security import PermissionSource, PlaintextCredential
+from .security import PermissionSource, PlaintextCredential, UserRole
 from .skill_document import SkillDocument
 from .transport import (
     AgentNodeFrame,
@@ -127,6 +127,7 @@ __all__ = [
     # security
     "PermissionSource",
     "PlaintextCredential",
+    "UserRole",
     # handoff
     "EvaluationResult",
     "HandoffPayload",
