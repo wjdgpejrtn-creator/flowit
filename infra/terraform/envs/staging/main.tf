@@ -323,7 +323,7 @@ resource "google_service_account" "worker" {
   count        = var.enable_execution_engine_worker ? 1 : 0
   project      = var.project_id
   account_id   = "workflow-worker-${var.environment}-sa"
-  display_name = "REQ-007 execution_engine worker Cloud Run runtime SA (least privilege, 공용 cloudsql-iam-modal 대체)"
+  display_name = "REQ-007 worker SA (least privilege, cloudsql-iam-modal 대체)"
 }
 
 # Cloud SQL IAM auth — cloud-sql-python-connector(enable_iam_auth=True) 호출에 필요.
