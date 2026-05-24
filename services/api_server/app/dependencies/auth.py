@@ -6,6 +6,7 @@ from auth.adapters.cipher.aes_gcm import AESGCMCipher
 from auth.adapters.jwt_adapter import JWTAdapter
 from auth.adapters.oauth.google_oauth_client import GoogleOAuthClient
 from auth.application.use_cases.authenticate_use_case import AuthenticateUseCase
+from auth.application.use_cases.grant_user_role_use_case import GrantUserRoleUseCase
 from auth.application.use_cases.refresh_token_use_case import RefreshTokenUseCase
 from auth.domain.ports.cipher_port import CipherPort
 from auth.domain.ports.credential_repository import CredentialRepository
@@ -87,3 +88,9 @@ def get_refresh_token_use_case(
     jwt_adapter: JWTAdapter = Depends(get_jwt_adapter),
 ) -> RefreshTokenUseCase:
     return RefreshTokenUseCase(session_repo=session_repo, jwt_adapter=jwt_adapter)
+
+
+def get_grant_user_role_use_case(
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> GrantUserRoleUseCase:
+    return GrantUserRoleUseCase(user_repo=user_repo)

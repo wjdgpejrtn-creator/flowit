@@ -1,20 +1,18 @@
-"""Skills Builder — SOP 문서(DocumentBlock) → LLM → SkillNode → NodeDefinition upsert.
+"""Skills Builder — SOP 문서(DocumentBlock) → LLM → wizard extract_draft + confirm (ADR-0020 ③-a).
 
-REQ-004 spec §2.2 BuildFromSOPUseCase.
+REQ-004 spec §2.2 BuildFromSOPUseCase. wizard 1차(Q8): 추출 결과를 사용자가 검토·수정 후 확정.
 
-LLM 의존 작업이라 5/16 plan에 본격 구현 예정. 본 모듈은 **skeleton** —
-LLM 호출 부분은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base` Modal)
-배포 후 wiring만 하면 production-ready.
+LLM 호출은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base` Modal) 배포 후 wiring.
 
-흐름:
-    DocumentBlock (doc_parser 산출물)
-      + personal_memory (Orchestrator가 미리 로드한 list[MemoryEntry])
+흐름 (2단계 wizard):
+    [extract_draft] DocumentBlock + personal_memory(list[MemoryEntry])
       → JSON prompt 구성 (XML 금지 — 메모리 룰)
-      → LLM.generate_structured(prompt, ExtractedSkillNodeList) 호출
-      → 응답 검증 + SkillNode 변환
-      → NodeDefinition 변환 (embedding 포함)
-      → NodeDefinitionRepository.upsert()
-      → SSE 프레임 yield
+      → LLM.generate_structured(prompt, ExtractedSkillNodeList)
+      → 응답 검증 + NodeSpecStaging 변환 (NodeDefinition 미생성 — Option B)
+      → ResultFrame(payload.skills) — 사용자 검토·수정용, **저장 X**
+    [confirm] 편집된 skills
+      → embed(description) + CreateDraftSkillUseCase로 personal DRAFT 생성
+      → ResultFrame(payload.skill_ids). NodeDefinition은 publish 시점(②d)에 생성.
 
 ──────────────────────────────────────────────────────────────────────────────
 5/16 본격 구현 시 wiring 가이드 (신정혜 ModalLLMAdapter 완성 후)
@@ -31,17 +29,20 @@ LLM 호출 부분은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`l
    ``modules/ai_agent/adapters/llm/modal_embedding_adapter.py``의 ``ModalEmbeddingAdapter``가
    ``llm-base``의 ``POST /v1/embed`` HTTP endpoint 호출.
 
-3) Composition root (api_server 또는 운영 스크립트):
+3) Composition root (api_server 또는 운영 스크립트) — wizard 1차(ADR-0020 Q8):
    ```python
    from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
    from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
-   from storage.repositories import PgNodeDefinitionRepository  # 황대원 5/15
+   from skills_marketplace.application.use_cases import CreateDraftSkillUseCase
+   from storage.repositories import PgSkillRepository  # 조장 PR-2d (SkillRepository 3-scope 구현)
 
    use_case = BuildFromSOPUseCase(
-       node_def_repo=PgNodeDefinitionRepository(...),
+       create_draft_skill=CreateDraftSkillUseCase(PgSkillRepository(...)),
        embedder=ModalEmbeddingAdapter(base_url=os.environ["EMBEDDING_BASE_URL"]),
        llm=ModalLLMAdapter(),  # MODAL_TOKEN_ID/SECRET 환경변수 자동 사용
    )
+   # 2단계: extract_draft(user_id, document, personal_memory) → 사용자 검토·수정 → confirm(user_id, skills)
+   # NodeDefinition은 미생성(Option B) — publish 시점(PublishSkillUseCase ②d)에 staging→NodeDefinition.
    ```
 
 4) Modal app endpoint (박아름 5/17 plan):
@@ -58,24 +59,18 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator
 from typing import Any
-from uuid import UUID, uuid5
+from uuid import UUID
 
-from common_schemas import DocumentBlock, MemoryEntry, SkillDocument
+from common_schemas import DocumentBlock, MemoryEntry
 from common_schemas.enums import RiskLevel
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame, SSEFrame
-from nodes_graph.domain.entities.node_definition import NodeDefinition
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
-from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRepository
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from skills_marketplace.application.use_cases import CreateDraftSkillUseCase
+from skills_marketplace.domain.value_objects import NodeSpecStaging
 
 from ....domain.entities.skill_node import SkillNode
 from ....domain.ports.llm_port import LLMPort
-
-# uuid5 namespace for skills builder generated nodes (SOP source).
-# node_id = uuid5(_NS, f"sop:{document_id}:{node_type}") — 같은 SOP에서 추출된
-# 같은 node_type은 항상 같은 node_id 생성 → idempotent upsert.
-# industry_default와 다른 source라 prefix "sop:"로 namespace 분리.
-_SKILLS_BUILDER_NS = uuid5(UUID("00000000-0000-0000-0000-000000000000"), "workflow-automation.skills_builder")
 
 # DB CHECK 영문 8종 (`009_node_definitions.sql`).
 _ALLOWED_CATEGORIES = {"trigger", "action", "condition", "transform", "ai", "integration", "utility", "output"}
@@ -124,43 +119,38 @@ class _ExtractedSkillNodeList(BaseModel):
 
 
 class BuildFromSOPUseCase:
-    """SOP DocumentBlock → LLM → SkillNode 추출 → NodeDefinition upsert.
+    """SOP DocumentBlock → LLM 추출 → wizard extract_draft + confirm (ADR-0020 ③-a, Q8 wizard 1차).
 
-    Sprint 3 v1 skeleton:
-    - LLMPort.generate_structured 호출로 SkillNode 목록 추출
-    - JSON 형식 강제 (메모리 룰: LLM 입력/출력 무조건 JSON, XML 금지)
-    - 부분 실패 격리 (embed/upsert 단계만, convert는 fail-fast)
+    - extract_draft: 추출 결과(NodeSpecStaging + name/desc/instructions)만 반환, **저장 X** — 사용자 검토·수정용
+    - confirm: 편집 결과 → CreateDraftSkillUseCase로 personal DRAFT 생성 (Option B — NodeDefinition은 publish 시점)
+    - JSON 강제 (LLM 입출력), category/risk_level 검증
     """
 
     def __init__(
         self,
-        node_def_repo: NodeDefinitionRepository,
+        create_draft_skill: CreateDraftSkillUseCase,
         embedder: EmbedderPort,
         llm: LLMPort,
     ) -> None:
-        self._repo = node_def_repo
+        self._create_draft_skill = create_draft_skill
         self._embedder = embedder
         self._llm = llm
 
-    async def execute(
+    async def extract_draft(
         self,
         user_id: UUID,
         document: DocumentBlock,
         personal_memory: list[MemoryEntry] | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
-        """SOP DocumentBlock에서 SkillNode 추출 → nodes_graph 카탈로그 upsert.
+        """wizard 1단계 — SOP에서 SkillNode 추출 → 노드 스펙(staging) + 메타 반환. **저장 안 함**.
 
-        Args:
-            user_id: 호출 사용자
-            document: doc_parser 산출물 (text/heading/table 등 ContentBlock 포함)
-            personal_memory: Orchestrator가 미리 로드한 사용자 메모리 (LLM 프롬프트 컨텍스트)
+        사용자가 추출 결과를 검토·수정한 뒤 `confirm`으로 확정한다 (ADR-0020 Q8 wizard 1차).
 
         Yields:
-            AgentNodeFrame (진행) / ErrorFrame (개별 실패) / ResultFrame (최종)
+            AgentNodeFrame (진행) / ErrorFrame (실패) / ResultFrame(payload.skills) — 추출 결과 목록
         """
         personal_memory = personal_memory or []
 
-        # 1. DocumentBlock 검증
         if not document.blocks:
             yield ErrorFrame(
                 code="E_DOCUMENT_EMPTY",
@@ -169,20 +159,13 @@ class BuildFromSOPUseCase:
             return
 
         yield AgentNodeFrame(agent_node_name="skills_builder.sop.parse_document")
-
-        # 2. LLM 프롬프트 구성 (JSON 형식 강제)
         prompt = self._build_prompt(document, personal_memory)
-
         yield AgentNodeFrame(agent_node_name="skills_builder.sop.llm_extract")
 
-        # 3. LLM 호출 (generate_structured)
         try:
             extracted = await self._llm.generate_structured(prompt, _ExtractedSkillNodeList)
         except Exception as e:
-            yield ErrorFrame(
-                code="E_LLM_GENERATION_FAILED",
-                message=f"LLM 호출 실패: {e}",
-            )
+            yield ErrorFrame(code="E_LLM_GENERATION_FAILED", message=f"LLM 호출 실패: {e}")
             return
 
         if not isinstance(extracted, _ExtractedSkillNodeList):
@@ -199,82 +182,105 @@ class BuildFromSOPUseCase:
             )
             return
 
-        # 4. 각 추출 항목 처리 (부분 실패 격리 정책)
-        #
-        # - convert/validate 실패 (LLM 응답이 비유효): 전체 중단.
-        #   LLM 응답이 broken이면 일관성 위해 전체 재실행 권장.
-        # - embed/upsert 실패 (외부 의존성 runtime 오류): 해당 노드만 격리,
-        #   다른 노드 계속. ResultFrame.failed_node_types에 기록.
-        # - uuid5 deterministic(같은 SOP·node_type) → 부분 실패 후 재실행 안전.
-        upserted_node_types: list[str] = []
-        skill_documents: list[SkillDocument] = []
-        failed_node_types: list[dict] = []
-
+        # 각 추출 항목 → NodeSpecStaging 변환 (LLM 응답 비유효 시 전체 중단 — fail-fast)
+        skills: list[dict] = []
         for ext in extracted.skill_nodes:
             try:
-                node_def = self._convert_to_node_definition(ext, document.document_id)
+                staging = self._convert_to_staging(ext)
             except (KeyError, ValueError) as e:
                 yield ErrorFrame(
                     code="E_LLM_RESPONSE_INVALID",
                     message=f"LLM 추출 항목 변환 실패 ({ext.node_type}): {e}",
                 )
                 return
+            skills.append({
+                "node_type": ext.node_type,
+                "name": ext.name,
+                "description": ext.description,
+                "instructions": ext.instructions,  # SkillDocument(SKILL.md) — confirm/GCS 후속에서 저장
+                "staging": staging.model_dump(mode="json"),
+            })
 
-            # 임베딩 (외부 의존성 — 격리)
-            try:
-                node_def.embedding = await self._embedder.embed(node_def.description)
-            except Exception as e:
-                failed_node_types.append({
-                    "node_type": node_def.node_type,
-                    "stage": "embed",
-                    "error": str(e),
-                })
-                yield ErrorFrame(
-                    code="E_EMBEDDING_FAILED",
-                    message=f"임베딩 실패 ({node_def.node_type}): {e}",
-                )
-                continue
-
-            yield AgentNodeFrame(agent_node_name=f"skills_builder.sop.upsert.{node_def.node_type}")
-
-            # upsert (외부 의존성 — 격리)
-            try:
-                await self._repo.upsert(node_def)
-            except Exception as e:
-                failed_node_types.append({
-                    "node_type": node_def.node_type,
-                    "stage": "upsert",
-                    "error": str(e),
-                })
-                yield ErrorFrame(
-                    code="E_UPSERT_FAILED",
-                    message=f"upsert 실패 ({node_def.node_type}): {e}",
-                )
-                continue
-
-            upserted_node_types.append(node_def.node_type)
-            # ADR-0017: NodeDefinition upsert 성공분만 SkillDocument 수집 (common_schemas SSOT, type-safe).
-            # SkillDocument는 node가 아닌 지침서 → node_type 없이 skill_id(=node_id)로
-            # NodeDefinition과 연결 (조장 PR #106/#113 결정).
-            skill_documents.append(SkillDocument(
-                skill_id=node_def.node_id,
-                name=node_def.name,
-                description=node_def.description,
-                instructions=ext.instructions,
-            ))
-
-        # 5. 결과 프레임
         yield ResultFrame(
             intent="build_skill",
             payload={
                 "source_type": "sop",
                 "document_id": str(document.document_id),
                 "file_name": document.file_meta.file_name,
-                "upserted_count": len(upserted_node_types),
-                "failed_count": len(failed_node_types),
-                "node_types": upserted_node_types,
-                "skill_documents": [doc.model_dump(mode="json") for doc in skill_documents],
-                "failed_node_types": failed_node_types,
+                "skills": skills,  # 사용자 검토·수정 대상 (저장 전)
+                "user_id": str(user_id),
+            },
+        )
+
+    async def confirm(
+        self,
+        user_id: UUID,
+        skills: list[dict],
+    ) -> AsyncGenerator[SSEFrame, None]:
+        """wizard 2단계 — 사용자가 편집·확정한 추출 결과 → personal DRAFT 스킬 생성.
+
+        각 skill = `{node_type, name, description, instructions, staging:{...}}` (extract_draft 결과를
+        사용자가 편집한 형태). `CreateDraftSkillUseCase`로 DRAFT 생성 (Option B — NodeDefinition은 publish 시).
+
+        Yields:
+            AgentNodeFrame (진행) / ErrorFrame (격리) / ResultFrame(payload.skill_ids)
+        """
+        if not skills:
+            yield ErrorFrame(code="E_NO_SKILLS", message="확정할 스킬이 없음")
+            return
+
+        skill_ids: list[str] = []
+        failed: list[dict] = []
+
+        for skill in skills:
+            node_type = skill.get("node_type", "?")
+            # confirm = wizard 신뢰 경계 (사용자가 편집한 데이터). malformed 입력은 예외를 던지지 않고
+            # 격리된 ErrorFrame으로 — staging 파싱 + 필수 키 + category(extract와 동일 검증)를 재확인.
+            try:
+                staging = NodeSpecStaging(**skill["staging"])
+                name = skill["name"]
+                description = skill["description"]
+                if staging.category not in _ALLOWED_CATEGORIES:
+                    raise ValueError(
+                        f"category '{staging.category}'가 DB CHECK 8영문에 없음: {sorted(_ALLOWED_CATEGORIES)}"
+                    )
+            except (KeyError, TypeError, ValueError, ValidationError) as e:
+                failed.append({"node_type": node_type, "stage": "validate", "error": str(e)})
+                yield ErrorFrame(code="E_SKILL_INVALID", message=f"확정 입력 검증 실패 ({node_type}): {e}")
+                continue
+
+            try:
+                embedding = await self._embedder.embed(description)
+            except Exception as e:
+                failed.append({"node_type": node_type, "stage": "embed", "error": str(e)})
+                yield ErrorFrame(code="E_EMBEDDING_FAILED", message=f"임베딩 실패 ({node_type}): {e}")
+                continue
+
+            yield AgentNodeFrame(agent_node_name=f"skills_builder.sop.create_draft.{node_type}")
+
+            try:
+                sid = await self._create_draft_skill.execute(
+                    owner_user_id=user_id,
+                    name=name,
+                    description=description,
+                    node_spec_staging=staging,
+                    embedding=embedding,
+                )
+            except Exception as e:
+                failed.append({"node_type": node_type, "stage": "create_draft", "error": str(e)})
+                yield ErrorFrame(code="E_CREATE_DRAFT_FAILED", message=f"DRAFT 생성 실패 ({node_type}): {e}")
+                continue
+
+            skill_ids.append(str(sid))
+
+        yield ResultFrame(
+            intent="build_skill",
+            payload={
+                "source_type": "sop",
+                "skill_ids": skill_ids,
+                "created_count": len(skill_ids),
+                "failed_count": len(failed),
+                "failed": failed,
                 "user_id": str(user_id),
             },
         )
@@ -332,7 +338,10 @@ class BuildFromSOPUseCase:
 
         # 4) Few-shot 예시 (LLM 출력 품질 향상 — 형식·필드·카테고리 의도 명확화)
         few_shot_example = {
-            "input_sop_snippet": "고객 환불 요청이 접수되면 1) 매니저에게 슬랙 알림 2) 환불 금액이 5만원 초과면 승인 대기 3) 승인 후 결제 취소 API 호출",
+            "input_sop_snippet": (
+                "고객 환불 요청이 접수되면 1) 매니저에게 슬랙 알림 2) 환불 금액이 5만원 초과면 "
+                "승인 대기 3) 승인 후 결제 취소 API 호출"
+            ),
             "expected_output": {
                 "skill_nodes": [
                     {
@@ -441,25 +450,22 @@ class BuildFromSOPUseCase:
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     @staticmethod
-    def _convert_to_node_definition(
-        ext: _ExtractedSkillNode,
-        document_id: UUID,
-    ) -> NodeDefinition:
-        """LLM 추출 항목을 SkillNode 검증 → NodeDefinition 변환.
+    def _convert_to_staging(ext: _ExtractedSkillNode) -> NodeSpecStaging:
+        """LLM 추출 항목을 검증 → NodeSpecStaging 변환 (NodeDefinition은 publish 시 생성, Option B).
 
         검증:
         - category가 DB CHECK 8영문 내인지
-        - risk_level이 RiskLevel enum 내인지 (Pydantic이 자동 raise)
+        - risk_level이 RiskLevel enum 내인지 (`RiskLevel(...)` 변환 시 raise)
         """
         if ext.category not in _ALLOWED_CATEGORIES:
             raise ValueError(
                 f"category '{ext.category}'가 DB CHECK 8영문에 없음. 가능: {sorted(_ALLOWED_CATEGORIES)}"
             )
 
-        # SkillNode 검증 (Pydantic — risk_level이 RiskLevel enum이 아니면 raise)
+        # SkillNode 검증 (Pydantic — risk_level이 RiskLevel enum이 아니면 raise, source 일관성)
         SkillNode(
             source_type="sop",
-            source_id=str(document_id),
+            source_id="",
             name=ext.name,
             description=ext.description,
             inputs=ext.inputs,
@@ -467,19 +473,11 @@ class BuildFromSOPUseCase:
             risk_level=RiskLevel(ext.risk_level),
         )
 
-        return NodeDefinition(
-            node_id=uuid5(_SKILLS_BUILDER_NS, f"sop:{document_id}:{ext.node_type}"),
-            node_type=ext.node_type,
-            name=ext.name,
+        return NodeSpecStaging(
             category=ext.category,
-            version="1.0.0",
             input_schema=ext.inputs,
             output_schema=ext.outputs,
-            parameter_schema={},
             risk_level=RiskLevel(ext.risk_level),
             required_connections=ext.required_connections,
-            description=ext.description,
-            is_mvp=False,  # SOP 추출 = 사용자 도메인 노드, MVP 카탈로그 아님
             service_type=ext.service_type,
-            embedding=None,  # 호출자가 embedder로 채움
         )
