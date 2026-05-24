@@ -217,6 +217,47 @@ module "cloud_sql" {
 }
 
 # ---------------------------------------------------------------------------
+# api_server 전용 Cloud Run runtime SA — 공용 cloudsql-iam-modal에서 분리 (격리, PR-A 준비).
+# 본 PR(1단계, prep)은 SA 생성 + project IAM grant만 — Cloud Run 미전환 (tfvars 미변경).
+# 후속 PR(2단계, switch)에서 Cloud SQL IAM user 추가 + DB GRANT(수동) + db-iam-user
+# secret 갱신 + api_server_service_account tfvars → 본 SA 이메일로 전환 + Cloud Run
+# revision 재배포. 메모리 staging_db_state §"PG 16/IAM 함정 8종" 절차 적용 필요.
+# ---------------------------------------------------------------------------
+resource "google_service_account" "api_server" {
+  count        = var.enable_cloud_run ? 1 : 0
+  project      = var.project_id
+  account_id   = "workflow-api-${var.environment}-sa"
+  display_name = "REQ-009 api_server Cloud Run runtime SA (least privilege, 공용 cloudsql-iam-modal 대체)"
+}
+
+# Cloud SQL IAM auth — cloud-sql-python-connector(enable_iam_auth=True) 호출에 필요.
+resource "google_project_iam_member" "api_server_cloudsql_client" {
+  count   = var.enable_cloud_run ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.api_server[0].email}"
+}
+
+resource "google_project_iam_member" "api_server_cloudsql_instance_user" {
+  count   = var.enable_cloud_run ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudsql.instanceUser"
+  member  = "serviceAccount:${google_service_account.api_server[0].email}"
+}
+
+# Cloud Run default SA는 기본으로 logging.logWriter 보유 — 명시 SA 사용 시 직접 부여 필요.
+resource "google_project_iam_member" "api_server_log_writer" {
+  count   = var.enable_cloud_run ? 1 : 0
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.api_server[0].email}"
+}
+
+# bucket/AR/secret 접근은 본 SA를 tfvars(`api_server_service_account`)에 채우는
+# PR2에서 자동 활성화 — 기존 conditional(var.api_server_service_account != "")이
+# SA를 writer/reader/accessor에 자동 포함. 본 PR은 SA 생성만 (Cloud Run 미전환).
+
+# ---------------------------------------------------------------------------
 # Cloud Run — api_server (REQ-009) 배포 슬롯. 이미지 빌드 완료 시 활성화
 # var.enable_cloud_run = true + var.api_server_image 지정으로 활성화
 # ---------------------------------------------------------------------------
