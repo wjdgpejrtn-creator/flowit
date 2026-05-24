@@ -2,10 +2,10 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from common_schemas.exceptions import NotFoundError, ValidationError
+from common_schemas.exceptions import AuthorizationError, NotFoundError, ValidationError
 
 from skills_marketplace.application.use_cases import ApproveSkillUseCase, PublishSkillUseCase, SubmitSkillUseCase
-from skills_marketplace.domain.entities import MarketplacePersonalSkill
+from skills_marketplace.domain.entities import MarketplacePersonalSkill, MarketplaceTeamSkill
 from skills_marketplace.domain.value_objects import SkillScope, SkillState
 
 
@@ -64,13 +64,32 @@ def _personal(skill_id, state):
     )
 
 
+def _team(skill_id, state, team_id):
+    now = datetime.now(UTC)
+    return MarketplaceTeamSkill(
+        skill_id=skill_id,
+        team_id=team_id,
+        author_id=uuid4(),
+        name="팀스킬",
+        description="설명",
+        node_definition_id=uuid4(),
+        lifecycle_state=state,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 @pytest.mark.asyncio
 async def test_approve_review_to_approved():
     repo = _InMemorySkillRepo()
     sid = uuid4()
-    await repo.save_personal(_personal(sid, SkillState.REVIEW))
+    skill = _personal(sid, SkillState.REVIEW)
+    await repo.save_personal(skill)
 
-    await ApproveSkillUseCase(repo).execute(sid, SkillScope.PERSONAL, uuid4(), approved=True)
+    # personal self-review: actor(reviewer) == owner
+    await ApproveSkillUseCase(repo).execute(
+        sid, SkillScope.PERSONAL, skill.owner_user_id, approved=True, actor_role="User"
+    )
 
     updated = await repo.get_personal(sid)
     assert updated.lifecycle_state == SkillState.APPROVED
@@ -80,9 +99,12 @@ async def test_approve_review_to_approved():
 async def test_approve_reject_review_to_draft():
     repo = _InMemorySkillRepo()
     sid = uuid4()
-    await repo.save_personal(_personal(sid, SkillState.REVIEW))
+    skill = _personal(sid, SkillState.REVIEW)
+    await repo.save_personal(skill)
 
-    await ApproveSkillUseCase(repo).execute(sid, SkillScope.PERSONAL, uuid4(), approved=False)
+    await ApproveSkillUseCase(repo).execute(
+        sid, SkillScope.PERSONAL, skill.owner_user_id, approved=False, actor_role="User"
+    )
 
     updated = await repo.get_personal(sid)
     assert updated.lifecycle_state == SkillState.DRAFT
@@ -92,9 +114,12 @@ async def test_approve_reject_review_to_draft():
 async def test_publish_approved_to_published():
     repo = _InMemorySkillRepo()
     sid = uuid4()
-    await repo.save_personal(_personal(sid, SkillState.APPROVED))
+    skill = _personal(sid, SkillState.APPROVED)
+    await repo.save_personal(skill)
 
-    await PublishSkillUseCase(repo, _NodeDefRepo()).execute(sid, SkillScope.PERSONAL)
+    await PublishSkillUseCase(repo, _NodeDefRepo()).execute(
+        sid, SkillScope.PERSONAL, actor_user_id=skill.owner_user_id, actor_role="User"
+    )
 
     updated = await repo.get_personal(sid)
     assert updated.lifecycle_state == SkillState.PUBLISHED
@@ -104,10 +129,14 @@ async def test_publish_approved_to_published():
 async def test_approve_records_approval_workflow():
     # ADR-0020 (+): reviewer_id/comment를 받기만 하던 것을 ApprovalWorkflow 레코드로 저장 (감사 추적)
     repo = _InMemorySkillRepo()
-    sid, reviewer = uuid4(), uuid4()
-    await repo.save_personal(_personal(sid, SkillState.REVIEW))
+    sid = uuid4()
+    skill = _personal(sid, SkillState.REVIEW)
+    await repo.save_personal(skill)
+    reviewer = skill.owner_user_id  # personal: actor == owner
 
-    await ApproveSkillUseCase(repo).execute(sid, SkillScope.PERSONAL, reviewer, approved=True, comment="ok")
+    await ApproveSkillUseCase(repo).execute(
+        sid, SkillScope.PERSONAL, reviewer, approved=True, comment="ok", actor_role="User"
+    )
 
     assert len(repo.approvals) == 1
     rec = next(iter(repo.approvals.values()))
@@ -121,10 +150,13 @@ async def test_approve_records_approval_workflow():
 @pytest.mark.asyncio
 async def test_approve_reject_records_rejected_status():
     repo = _InMemorySkillRepo()
-    sid, reviewer = uuid4(), uuid4()
-    await repo.save_personal(_personal(sid, SkillState.REVIEW))
+    sid = uuid4()
+    skill = _personal(sid, SkillState.REVIEW)
+    await repo.save_personal(skill)
 
-    await ApproveSkillUseCase(repo).execute(sid, SkillScope.PERSONAL, reviewer, approved=False)
+    await ApproveSkillUseCase(repo).execute(
+        sid, SkillScope.PERSONAL, skill.owner_user_id, approved=False, actor_role="User"
+    )
 
     rec = next(iter(repo.approvals.values()))
     assert rec.status == "rejected"
@@ -134,11 +166,59 @@ async def test_approve_reject_records_rejected_status():
 async def test_publish_from_draft_raises_invalid_transition():
     repo = _InMemorySkillRepo()
     sid = uuid4()
-    await repo.save_personal(_personal(sid, SkillState.DRAFT))
+    skill = _personal(sid, SkillState.DRAFT)
+    await repo.save_personal(skill)
 
-    # DRAFT → PUBLISHED 직접 전이 금지
+    # 인가 통과(owner)했지만 DRAFT → PUBLISHED 직접 전이 금지
     with pytest.raises(ValidationError):
-        await PublishSkillUseCase(repo, _NodeDefRepo()).execute(sid, SkillScope.PERSONAL)
+        await PublishSkillUseCase(repo, _NodeDefRepo()).execute(
+            sid, SkillScope.PERSONAL, actor_user_id=skill.owner_user_id, actor_role="User"
+        )
+
+
+# ── ADR-0020 위임2: actor 인가 enforcement ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_approve_personal_rejects_non_owner():
+    repo = _InMemorySkillRepo()
+    sid = uuid4()
+    skill = _personal(sid, SkillState.REVIEW)
+    await repo.save_personal(skill)
+
+    # 소유자가 아닌 actor → 인가 거부 + 상태 미변경
+    with pytest.raises(AuthorizationError):
+        await ApproveSkillUseCase(repo).execute(
+            sid, SkillScope.PERSONAL, uuid4(), approved=True, actor_role="User"
+        )
+    assert (await repo.get_personal(sid)).lifecycle_state == SkillState.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_publish_team_manager_same_dept_authorized():
+    repo = _InMemorySkillRepo()
+    sid, dept = uuid4(), uuid4()
+    await repo.save_team(_team(sid, SkillState.APPROVED, team_id=dept))
+
+    await PublishSkillUseCase(repo, _NodeDefRepo()).execute(
+        sid, SkillScope.TEAM, actor_user_id=uuid4(), actor_role="team_manager", actor_department_id=dept
+    )
+
+    assert (await repo.get_team(sid)).lifecycle_state == SkillState.PUBLISHED
+
+
+@pytest.mark.asyncio
+async def test_publish_team_non_manager_denied():
+    repo = _InMemorySkillRepo()
+    sid, dept = uuid4(), uuid4()
+    await repo.save_team(_team(sid, SkillState.APPROVED, team_id=dept))
+
+    # 같은 부서지만 team_manager 아님 → 거부 + 상태 미변경
+    with pytest.raises(AuthorizationError):
+        await PublishSkillUseCase(repo, _NodeDefRepo()).execute(
+            sid, SkillScope.TEAM, actor_user_id=uuid4(), actor_role="User", actor_department_id=dept
+        )
+    assert (await repo.get_team(sid)).lifecycle_state == SkillState.APPROVED
 
 
 @pytest.mark.asyncio
