@@ -296,7 +296,10 @@ module "api_server" {
   secret_env_vars = {
     REDIS_URL            = { secret_id = "redis-url", version = "latest" }
     CLOUD_SQL_INSTANCE   = { secret_id = "cloud-sql-instance", version = "latest" }
-    DB_IAM_USER          = { secret_id = "db-iam-user", version = "latest" }
+    # api_server 전용 db-iam-user-api (옵션 C, 2026-05-25 사고 대응) — Modal sub-agents 3종이
+    # 공유하는 db-iam-user를 latest로 fetch하면 값 충돌로 인증 깨지는 폭탄 영구 격리.
+    # 값(api SA full email)은 PR-A(#179) 후속 수동 add 완료. 박아름 v6 사고와 동일 메커니즘.
+    DB_IAM_USER          = { secret_id = "db-iam-user-api", version = "latest" }
     DB_NAME              = { secret_id = "db-name", version = "latest" }
     JWT_SECRET_KEY       = { secret_id = "jwt-secret-key", version = "latest" }
     ENCRYPTION_KEY       = { secret_id = "encryption-key", version = "latest" }
