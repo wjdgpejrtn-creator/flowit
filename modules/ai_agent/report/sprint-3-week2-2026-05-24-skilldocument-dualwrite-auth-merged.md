@@ -48,12 +48,12 @@
 
 > 박아름 코드·테스트·문서·셀프리뷰·PR 전부 완료. 카톡 3건(가원/조장/신정혜) 발송 完(2026-05-24).
 
-1. **Modal 재배포 + staging smoke** (박아름, 조장 인프라 후) — `doc_store` wiring은 #171 머지 完. 조장이 ① GCP Secret `skills-marketplace-bucket`(env명 #161 terraform 일치 확인) + ② Modal SA Storage 권한을 확인해주면, agent-skills-builder 재배포 → SOP confirm → GCS `skills/{skill_id}/SKILL.md` 생성 smoke.
+1. **agent-skills-builder 재배포 完(2026-05-25 12:46, v6) — 단 e2e smoke 차단(`db:unreachable`)**: 조장 인프라 完(#178 secret + 8 accessor binding + bucket objectAdmin). 박아름 `modal deploy`로 v6 배포 → doc_store deps(google-cloud-storage/pyyaml) 정상, **부팅 성공**(ImportError 0). **그러나 `/v1/health`=`db:unreachable`(2회)** → `CreateDraftSkillUseCase.save_personal`(DB) 차단으로 e2e smoke 불가. DB 연결 로직 무변경(메모리상 5/19 `db:iam-connected`였음) → 최근 SA 격리 인프라(#168/#172/#174/#177)가 공유 `cloudsql-iam-modal` SA의 Cloud SQL DB IAM 접근에 영향 줬거나 staging 인스턴스 정지 의심 = **조장 DB/SA infra 확인 대기**(2026-05-25 카톡 발송). DB 복구 시 SOP confirm → GCS `skills/{skill_id}/SKILL.md` 생성 smoke.
 2. **프론트 userName 연결** (가원, REQ-010) — `useAuth.ts`의 `userName: ''` → `userName: user.name`(+ `me()` 응답 타입 MeResponse). 연결 시 PR #149 must-fix(AppBar ` · User`) 완전 해소. #163 머지로 unblock.
 3. **Composer SkillRetriever** (신정혜, ADR-0017 §3) — `SearchSkillsUseCase` 소비. FYI 핸드오프.
 4. **staging deploy / 인프라** (조장) — terraform/api_server + 위 ①② secret·SA 권한.
 
 ## 다음 단계
 
-1. (조장) 인프라 2건 확인 → (박아름) agent-skills-builder Modal 재배포 + staging smoke
+1. (조장) agent-skills-builder SA의 staging DB IAM 접근 복구(`db:unreachable`) → (박아름) e2e smoke (재배포 자체는 v6 完)
 2. (가원) 프론트 연결 / (신정혜) Composer SkillRetriever — 별도 트랙
