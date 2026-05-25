@@ -311,6 +311,49 @@ module "api_server" {
 }
 
 # ---------------------------------------------------------------------------
+# execution_engine worker 전용 Cloud Run runtime SA — 공용 cloudsql-iam-modal에서 분리 (격리, PR-A 준비).
+# api_server 분리(PR #168/#172)와 동일 2-PR 패턴. 본 PR(1단계, prep)은 SA 생성 + project IAM grant
+# + db-iam-user-worker secret 껍데기 생성만 — Cloud Run 미전환 (tfvars 미변경).
+# 후속 PR(2단계, switch)에서 Cloud SQL IAM user 추가 + DB GRANT(수동) + db-iam-user-worker secret
+# 값 add + execution_engine_worker_service_account tfvars → 본 SA 이메일로 전환 + worker module
+# secret_env_vars.DB_IAM_USER → db-iam-user-worker secret_id 변경 + Cloud Run revision 재배포.
+# 메모리 staging_db_state §"PG 16/IAM 함정 8종" + "⚠️ worker secret latency 폭탄" 절차 적용.
+# ---------------------------------------------------------------------------
+resource "google_service_account" "worker" {
+  count        = var.enable_execution_engine_worker ? 1 : 0
+  project      = var.project_id
+  account_id   = "workflow-worker-${var.environment}-sa"
+  display_name = "REQ-007 worker SA (least privilege, cloudsql-iam-modal 대체)"
+}
+
+# Cloud SQL IAM auth — cloud-sql-python-connector(enable_iam_auth=True) 호출에 필요.
+resource "google_project_iam_member" "worker_cloudsql_client" {
+  count   = var.enable_execution_engine_worker ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.worker[0].email}"
+}
+
+resource "google_project_iam_member" "worker_cloudsql_instance_user" {
+  count   = var.enable_execution_engine_worker ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudsql.instanceUser"
+  member  = "serviceAccount:${google_service_account.worker[0].email}"
+}
+
+# Cloud Run default SA는 기본으로 logging.logWriter 보유 — 명시 SA 사용 시 직접 부여 필요.
+resource "google_project_iam_member" "worker_log_writer" {
+  count   = var.enable_execution_engine_worker ? 1 : 0
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.worker[0].email}"
+}
+
+# AR/secret 접근은 본 SA를 tfvars(`execution_engine_worker_service_account`)에 채우는
+# PR2에서 자동 활성화 — 기존 conditional(var.execution_engine_worker_service_account != "")이
+# SA를 writer/reader/accessor에 자동 포함 (api_server PR #170 apply 18 add로 실증 완료).
+
+# ---------------------------------------------------------------------------
 # Cloud Run — REQ-007 execution_engine worker (Celery worker daemon)
 # 옵션 A: Cloud Run service + dummy HTTP probe + celery worker subprocess.
 # - min/max=1: 단일 worker 인스턴스 (큐 깊이 기반 스케일링은 후속)
@@ -350,7 +393,10 @@ module "execution_engine_worker" {
   secret_env_vars = {
     REDIS_URL          = { secret_id = "redis-url", version = "latest" }
     CLOUD_SQL_INSTANCE = { secret_id = "cloud-sql-instance", version = "latest" }
-    DB_IAM_USER        = { secret_id = "db-iam-user", version = "latest" }
+    # worker 전용 db-iam-user-worker (PR-B switch) — api_server PR-B로 db-iam-user latest가
+    # workflow-api-staging-sa email로 덮어쓰여 worker cold start 시 인증 깨질 폭탄 회피.
+    # 값(worker SA full email)은 PR-A 후속 수동 prereq로 add 완료.
+    DB_IAM_USER        = { secret_id = "db-iam-user-worker", version = "latest" }
     DB_NAME            = { secret_id = "db-name", version = "latest" }
     LLM_BASE_URL       = { secret_id = "llm-base-url", version = "latest" }
     EMBEDDING_BASE_URL = { secret_id = "embedding-base-url", version = "latest" }
