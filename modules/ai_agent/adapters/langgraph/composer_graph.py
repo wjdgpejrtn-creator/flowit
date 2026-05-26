@@ -20,7 +20,7 @@ import operator
 import os
 import time
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel
@@ -53,8 +53,10 @@ from nodes_graph.domain.services.graph_validator import GraphValidator
 from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
 from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 
+from ...domain.entities.memory_file import MemoryFile, MemoryFileRef
 from ...domain.entities.session_ref import SessionRef
 from ...domain.ports.llm_port import LLMPort
+from ...domain.ports.personal_memory_store import PersonalMemoryStore
 from ...domain.ports.node_registry import NodeRegistry
 from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.workflow_draft_store import WorkflowDraftStore
@@ -161,6 +163,7 @@ class LangGraphOrchestrator:
         llm: LLMPort | None = None,
         workflow_draft_store: WorkflowDraftStore | None = None,
         execution_engine_url: str | None = None,
+        personal_memory_store: PersonalMemoryStore | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -176,6 +179,7 @@ class LangGraphOrchestrator:
         self._llm = llm
         self._workflow_draft_store = workflow_draft_store
         self._execution_engine_url = execution_engine_url or os.getenv("EXECUTION_ENGINE_URL", "")
+        self._personal_memory_store = personal_memory_store
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -228,6 +232,8 @@ class LangGraphOrchestrator:
             "error": None,
             "agent_done": False,
             "agent_iterations": 0,
+            "skill_suggested": False,
+            "suggested_skills": [],
             "saved_workflow_id": None,
             "execution_id": None,
             "execution_result": None,
@@ -1013,8 +1019,49 @@ class LangGraphOrchestrator:
             ]
         }
 
-    # 16. memory_save_node — 세션 종료 후 메모리 저장 (AgentMemoryRepository는 DI 외부 처리)
+    # 16. memory_save_node — 워크플로우 생성 패턴을 GCS PersonalMemoryStore에 저장
     async def _memory_save_node(self, state: _State) -> dict:
+        if self._personal_memory_store is None:
+            return {}
+
+        try:
+            claimed = await self._personal_memory_store.claim_debounce_window(
+                state["user_id"], datetime.now(UTC), timedelta(minutes=5)
+            )
+            if not claimed:
+                return {}
+
+            workflow_id = state.get("saved_workflow_id")
+            intent = state.get("intent") or ""
+            if not workflow_id or not intent:
+                return {}
+
+            first_msg = state["messages"][0].get("content", "") if state["messages"] else ""
+            mem_file = MemoryFile(
+                filename=f"workflow_{workflow_id}.md",
+                name=f"workflow_{workflow_id}",
+                description=first_msg[:80],
+                memory_type="project",
+                body=(
+                    f"사용자 의도: {intent}\n"
+                    f"워크플로우 ID: {workflow_id}\n"
+                    f"QA 점수: {state.get('qa_score', 0.0)}\n"
+                    f"QA 시도: {state.get('qa_attempts', 0)}회\n"
+                ),
+            )
+            await self._personal_memory_store.save_file(state["user_id"], mem_file)
+
+            refs = await self._personal_memory_store.load_index(state["user_id"])
+            refs = [r for r in refs if r.filename != mem_file.filename]
+            refs.insert(0, MemoryFileRef(
+                name=mem_file.name,
+                filename=mem_file.filename,
+                description=mem_file.description,
+            ))
+            await self._personal_memory_store.save_index(state["user_id"], refs)
+        except Exception as exc:
+            _logger.warning("memory save 실패 (non-fatal): %s", exc)
+
         return {}
 
     @staticmethod

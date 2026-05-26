@@ -125,7 +125,7 @@ class AgentComposer:
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.memory.gcs_session_frame_store import GCSSessionFrameStore
         from ai_agent.adapters.memory.gcs_workflow_draft_store import GCSWorkflowDraftStore
-        from ai_agent.adapters.memory.gcs_memory_store import GcsMemoryStore
+        from ai_agent.adapters.memory.gcs_memory_store import GCSMemoryStore
         from ai_agent.adapters.node_registry_adapter import NodeRegistryAdapter
         from ai_agent.adapters.langgraph.composer_graph import LangGraphOrchestrator
         from ai_agent.application.agents.workflow_composer.approve_workflow_use_case import ApproveWorkflowUseCase
@@ -154,7 +154,7 @@ class AgentComposer:
         self._orchestrator_cls = LangGraphOrchestrator
         self._session_frame_store = GCSSessionFrameStore()
         self._workflow_draft_store = GCSWorkflowDraftStore()
-        self._personal_memory_store = GcsMemoryStore()
+        self._personal_memory_store = GCSMemoryStore()
         self._diff_service = WorkflowDiffService()
         self._execution_engine_url = os.getenv("EXECUTION_ENGINE_URL", "")
 
