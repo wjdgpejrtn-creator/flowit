@@ -1,4 +1,5 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 jest.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -65,7 +66,7 @@ describe('WorkflowListPage error handling', () => {
     });
 
     const retryBtn = screen.getByRole('button', { name: '다시 시도' });
-    fireEvent.click(retryBtn);
+    await userEvent.click(retryBtn);
 
     await waitFor(() => {
       expect(screen.queryByText('네트워크 연결을 확인해 주세요.')).not.toBeInTheDocument();
