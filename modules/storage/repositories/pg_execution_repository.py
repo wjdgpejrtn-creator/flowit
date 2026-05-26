@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common_schemas import NodeExecutionState
@@ -33,6 +33,26 @@ class PgExecutionRepository:
         if model is None:
             raise NotFoundError(f"Execution not found: {execution_id}", code="E-EXEC-001")
         return ExecutionMapper.to_domain(model)
+
+    async def get_node_states_summary(self, execution_id: UUID) -> dict[str, int]:
+        """node_execution_states(017)에서 status별 카운트 집계.
+
+        worker(services/execution_engine/.../postgres_execution_repo.py)가
+        update_node_state로 채우는 per-node live state(status: pending/running/
+        succeeded/failed/retrying/cancelled). 빈 결과(워커 미진입)는 빈 dict.
+
+        ORM(NodeExecutionStateModel) 미정의 — 단일 집계 쿼리라 raw SQL.
+        """
+        result = await self._session.execute(
+            text(
+                "SELECT status, COUNT(*) AS cnt "
+                "FROM node_execution_states "
+                "WHERE execution_id = :eid "
+                "GROUP BY status"
+            ),
+            {"eid": str(execution_id)},
+        )
+        return {row.status: int(row.cnt) for row in result}
 
     async def update_node_state(self, execution_id: UUID, state: NodeExecutionState) -> None:
         stmt = select(ExecutionModel).where(ExecutionModel.execution_id == execution_id)
