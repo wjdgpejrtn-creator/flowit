@@ -48,6 +48,13 @@ variable "agent_secret_names" {
     "embedding-base-url",
     # personalization 전용
     "gcs-personal-bucket",
+    # agent-composer 전용 (REQ-004, PR #184 머지 시점 활성화)
+    # gcs-session-bucket: GCSSessionFrameStore + GCSWorkflowDraftStore (env GCS_SESSION_BUCKET)
+    # execution-engine-url: composer가 workflow execute 호출(api_server URL, /api/v1/workflows/{id}/execute)
+    #   미설정 시 composer가 graceful skip이나 load_secrets_to_env가 NotFound raise → boot crash.
+    #   PR #184 머지 + composer Modal 재배포 전 등록 필수.
+    "gcs-session-bucket",
+    "execution-engine-url",
     # orchestrator → sub-agent 라우팅
     "composer-url",
     "skills-builder-url",
