@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useAuthStore } from '@/stores/authStore';
+import { useAuthStore, type Role } from '@/stores/authStore';
 import { useAuth } from '@/hooks/useAuth';
 
 interface NavItem {
@@ -13,7 +13,7 @@ interface NavItem {
 interface AppBarProps {
   dept?: string;
   userName?: string;
-  role?: 'User' | 'Admin';
+  role?: Role;
   notifCount?: number;
   navItems?: NavItem[];
 }
