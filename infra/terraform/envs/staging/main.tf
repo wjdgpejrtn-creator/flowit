@@ -195,42 +195,42 @@ import {
 
 import {
   to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::serviceAccount:<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"]
-  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/serviceAccount:<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket roles/secretmanager.secretAccessor serviceAccount:<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
 }
 
 import {
   to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::serviceAccount:<API_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"]
-  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/serviceAccount:<API_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket roles/secretmanager.secretAccessor serviceAccount:<API_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
 }
 
 import {
   to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::serviceAccount:<WORKER_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"]
-  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/serviceAccount:<WORKER_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket roles/secretmanager.secretAccessor serviceAccount:<WORKER_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
 }
 
 import {
   to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::user:<TEAM_MEMBER_1>@example.com"]
-  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/user:<TEAM_MEMBER_1>@example.com"
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket roles/secretmanager.secretAccessor user:<TEAM_MEMBER_1>@example.com"
 }
 
 import {
   to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::user:dhwang0803@gmail.com"]
-  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/user:dhwang0803@gmail.com"
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket roles/secretmanager.secretAccessor user:dhwang0803@gmail.com"
 }
 
 import {
   to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::user:<TEAM_MEMBER_2>@example.com"]
-  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/user:<TEAM_MEMBER_2>@example.com"
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket roles/secretmanager.secretAccessor user:<TEAM_MEMBER_2>@example.com"
 }
 
 import {
   to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::user:<TEAM_MEMBER_3>@example.com"]
-  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/user:<TEAM_MEMBER_3>@example.com"
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket roles/secretmanager.secretAccessor user:<TEAM_MEMBER_3>@example.com"
 }
 
 import {
   to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::user:<TEAM_MEMBER_4>@example.com"]
-  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/user:<TEAM_MEMBER_4>@example.com"
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket roles/secretmanager.secretAccessor user:<TEAM_MEMBER_4>@example.com"
 }
 
 module "session_frames_bucket" {
