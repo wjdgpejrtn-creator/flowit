@@ -26,6 +26,14 @@ function visibleTabs(role: string): typeof ALL_TABS[number][] {
   return ALL_TABS.slice(0, 1);
 }
 
+function toErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : '';
+  if (msg.startsWith('401')) return '로그인이 만료되었습니다.';
+  if (msg.startsWith('5')) return '서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+  if (msg === 'Failed to fetch' || msg === 'Load failed') return '네트워크 연결을 확인해 주세요.';
+  return '워크플로우 목록을 불러올 수 없습니다.';
+}
+
 function WorkflowListContent() {
   const searchParams = useSearchParams();
   const { role } = useAuthStore();
@@ -35,15 +43,16 @@ function WorkflowListContent() {
   const [workflows, setWorkflows] = useState<WorkflowSchema[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fetchKey, setFetchKey] = useState(0);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
     listWorkflows()
       .then(setWorkflows)
-      .catch(() => setError('워크플로우 목록을 불러올 수 없습니다.'))
+      .catch((err) => setError(toErrorMessage(err)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [fetchKey]);
 
   const filtered =
     activeTab === 'my'
@@ -104,8 +113,15 @@ function WorkflowListContent() {
 
         {/* Error */}
         {error && (
-          <div className="px-[10px] py-[24px] text-center text-[13px] text-red-600">
-            {error}
+          <div className="px-[10px] py-[24px] text-center text-[13px] text-red-600 flex flex-col items-center gap-2">
+            <span>{error}</span>
+            <button
+              type="button"
+              onClick={() => setFetchKey((k) => k + 1)}
+              className="text-[12px] px-3 py-1 border border-red-300 rounded bg-white text-red-600 hover:bg-red-50 cursor-pointer"
+            >
+              다시 시도
+            </button>
           </div>
         )}
 
