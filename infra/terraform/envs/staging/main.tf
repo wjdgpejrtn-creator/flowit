@@ -177,6 +177,78 @@ module "skills_marketplace_bucket" {
 }
 
 # ---------------------------------------------------------------------------
+# GCS — agent-composer SSE session frame + workflow draft 저장 버킷 (REQ-004)
+# GCSSessionFrameStore + GCSWorkflowDraftStore가 동일 버킷 사용 (env GCS_SESSION_BUCKET).
+# composer가 cloudsql-iam-modal SA로 write — var.agent_secret_accessors에 포함됨.
+# composer Modal 재배포 시 load_secrets_to_env(`gcs-session-bucket`)가 fetch.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Import blocks — gcs-personal-bucket state 복구 (2026-05-26 사고 후속)
+# `terraform state rm 9개` 후속으로 GCP에는 정상 존재하나 state만 stale. apply 시
+# 9 add 시도 → Error 409 "already exists" fail 회피. 머지·apply 후 별도 PR로
+# 본 import block 제거 (terraform best practice — import는 1회성).
+# ---------------------------------------------------------------------------
+import {
+  to = module.agent_secrets.google_secret_manager_secret.this["gcs-personal-bucket"]
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket"
+}
+
+import {
+  to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::serviceAccount:<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"]
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/serviceAccount:<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
+}
+
+import {
+  to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::serviceAccount:<API_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"]
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/serviceAccount:<API_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
+}
+
+import {
+  to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::serviceAccount:<WORKER_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"]
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/serviceAccount:<WORKER_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
+}
+
+import {
+  to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::user:<TEAM_MEMBER_1>@example.com"]
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/user:<TEAM_MEMBER_1>@example.com"
+}
+
+import {
+  to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::user:dhwang0803@gmail.com"]
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/user:dhwang0803@gmail.com"
+}
+
+import {
+  to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::user:<TEAM_MEMBER_2>@example.com"]
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/user:<TEAM_MEMBER_2>@example.com"
+}
+
+import {
+  to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::user:<TEAM_MEMBER_3>@example.com"]
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/user:<TEAM_MEMBER_3>@example.com"
+}
+
+import {
+  to = module.agent_secrets.google_secret_manager_secret_iam_member.accessor["gcs-personal-bucket::user:<TEAM_MEMBER_4>@example.com"]
+  id = "projects/<GCP_PROJECT_ID>/secrets/gcs-personal-bucket/roles/secretmanager.secretAccessor/user:<TEAM_MEMBER_4>@example.com"
+}
+
+module "session_frames_bucket" {
+  source = "../../modules/gcs"
+
+  project_id    = var.project_id
+  location      = var.region
+  bucket_name   = "${var.project_id}-session-frames-${var.environment}"
+  storage_class = "STANDARD"
+  force_destroy = true # staging only
+
+  writer_members = var.agent_secret_accessors # composer SA + 팀
+  reader_members = []
+
+  labels = merge(local.common_labels, { role = "session-frames" })
+}
+
+# ---------------------------------------------------------------------------
 # Memorystore (Redis) — execution_engine Celery broker + api_server SSE pub/sub
 # REQ-007/009 (ADR-0015 §F2-2 후속 호출 경로 B 트리거)
 # ---------------------------------------------------------------------------
