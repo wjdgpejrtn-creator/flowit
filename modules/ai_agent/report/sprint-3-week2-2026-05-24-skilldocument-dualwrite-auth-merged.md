@@ -1,6 +1,6 @@
 # Sprint 3 Week 2 — 박아름 작업 현황 (2026-05-24 사이클 + 5/26 e2e 종결)
 
-> ADR-0020 위임2 + ADR-0017 SkillDocument 이중 저장 호출부 배선 + `/auth/me` 프로필 노출
+> ADR-0020 위임2 + ADR-0017 SkillDocument 이중 저장(호출부 배선 → 5/26 e2e 검증 종결) + `/auth/me` 프로필 노출
 > 관련 ADR: `ADR-0020`(게시 lifecycle), `ADR-0017`(SkillDocument 이중 저장)
 
 ## 요약
@@ -42,8 +42,8 @@
 ### 스펙 정합 (동기화 완료)
 
 - REQ-013 §2.4(SkillDocumentStore 위치 `storage/adapters` 확정·`save→str`)·§2.5(`CreateDraftSkillUseCase` `instructions?`)·§2.1(SkillDocument SSOT=common_schemas)
-- REQ-004 §L135(confirm instructions 흐름)·L170(adapter 위치 확정)
-- REQ-009 L94(`/auth/me` → `MeResponse`)
+- REQ-004 §2.2 skills_builder(`BuildFromSOPUseCase.confirm` instructions 흐름 + `SkillDocumentStore` adapter 위치 = `storage/adapters`)
+- REQ-009 §2.2 Routes(`/auth/me` → `MeResponse`)
 - ADR-0017 §위치/Follow-up
 
 ## 잔여 (전부 박아름 코드 외 — 인프라/협업 대기)
@@ -61,7 +61,7 @@
    - **✅ 테스트 데이터 정리 完(2026-05-26)**: orphan `728940fc` + 성공 DRAFT `db3e3a45`(GCS SKILL.md 2건 `gcloud storage rm` + `personal_skills` row 1건 DELETE). 버킷 `skills/` 0건 / DB row 0건 확인. staging에 smoke 잔여물 없음.
 2. **프론트 userName 연결** (가원, REQ-010) — `useAuth.ts`의 `userName: ''` → `userName: user.name`(+ `me()` 응답 타입 MeResponse). 연결 시 PR #149 must-fix(AppBar ` · User`) 완전 해소. #163 머지로 unblock.
 3. **Composer SkillRetriever** (신정혜, ADR-0017 §3) — `SearchSkillsUseCase` 소비. FYI 핸드오프.
-4. **staging deploy / 인프라** (조장) — terraform/api_server + 위 ①② secret·SA 권한 + **DB GRANT(위 1번)**.
+4. **staging deploy / 인프라** (조장) — terraform/api_server + 버킷·SA secret(#161/#178/#179/#180) + **DB GRANT(위 1번)**. 본 사이클 관련 인프라는 전부 적용 完.
 
 ## 다음 단계
 
