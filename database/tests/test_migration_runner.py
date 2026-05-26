@@ -95,10 +95,23 @@ async def iam_engine():
 
 @pytest_asyncio.fixture(loop_scope="session")
 async def isolated_schema(iam_engine):
-    """매 테스트마다 고유한 schema를 생성하고, 끝나면 drop."""
+    """매 테스트마다 고유한 schema를 생성하고, 끝나면 drop.
+
+    schema에 `workflow_admin` GRANT CREATE/USAGE를 함께 부여 — MigrationRunner의
+    `_maybe_set_role`이 SET ROLE workflow_admin로 전환한 뒤 CREATE TABLE할 수 있도록.
+    workflow_admin role 부재 환경에서는 GRANT가 실패하므로 best-effort.
+    """
     schema = f"test_mig_{uuid.uuid4().hex[:12]}"
     async with iam_engine.begin() as conn:
         await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+        # workflow_admin에게 schema 권한 부여 (있으면). 없으면 silent skip.
+        has_role = (
+            await conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname='workflow_admin'"))
+        ).first()
+        if has_role is not None:
+            await conn.execute(
+                text(f'GRANT CREATE, USAGE ON SCHEMA "{schema}" TO workflow_admin')
+            )
     try:
         yield schema
     finally:
@@ -236,3 +249,44 @@ def test_invalid_schema_name_rejected(iam_engine, schemas_dir):
     """search_path SQL injection 방지 검증 — schema_name 정규식 위반은 ValueError."""
     with pytest.raises(ValueError, match="Invalid schema_name"):
         MigrationRunner(iam_engine, schemas_dir=schemas_dir, schema_name="public; DROP TABLE foo")
+
+
+@pytest.mark.asyncio
+async def test_set_role_workflow_admin_makes_created_table_owned_by_admin(
+    iam_engine, isolated_schema, schemas_dir,
+):
+    """SET ROLE workflow_admin → 신규 CREATE TABLE owner = workflow_admin.
+
+    박아름 020 personal_skills 사고(2026-05-26) 재발 방지 — owner가 caller IAM이면
+    ALTER DEFAULT PRIVILEGES FOR ROLE workflow_admin이 트리거 안 됨 → 신규 schema에서
+    cloudsql-iam-modal SA GRANT 자동 부여 누락. 본 테스트는 _maybe_set_role의 효과를
+    실측: 격리 schema 안 widgets 테이블 owner = workflow_admin인지 검증.
+
+    workflow_admin role이 없는 환경은 skip — SET ROLE이 no-op이라 owner = caller가
+    기존 동작.
+    """
+    async with iam_engine.connect() as conn:
+        has_role = (
+            await conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname='workflow_admin'"))
+        ).first()
+    if has_role is None:
+        pytest.skip("workflow_admin role not present — skip owner verification")
+
+    _write(schemas_dir, "001_widgets.sql", "CREATE TABLE widgets (id SERIAL PRIMARY KEY);")
+    runner = MigrationRunner(iam_engine, schemas_dir=schemas_dir, schema_name=isolated_schema)
+    await runner.run_schemas()
+
+    async with iam_engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT tableowner FROM pg_tables "
+                    "WHERE schemaname = :schema AND tablename = 'widgets'"
+                ),
+                {"schema": isolated_schema},
+            )
+        ).first()
+    assert row is not None, "widgets table not created"
+    assert row.tableowner == "workflow_admin", (
+        f"Expected owner=workflow_admin (after SET ROLE), got {row.tableowner}"
+    )
