@@ -93,8 +93,13 @@ class MigrationRunner:
         steps: list[MigrationStep] = []
         async with self._engine.begin() as conn:
             await self._set_search_path(conn)
-            await self._ensure_tracking_table(conn, tracking_path, dry_run=dry_run)
+            # _existing_tables는 SET ROLE 전 — information_schema는 caller가 SELECT
+            # 권한 가진 테이블만 노출. SET ROLE workflow_admin 후 조회하면 caller가
+            # 만든 (workflow_admin에 미부여) 테이블이 누락돼 BACKFILL 분류 실패 →
+            # DuplicateTableError 발생 사례 있었음.
             existing_tables = await self._existing_tables(conn)
+            await self._maybe_set_role(conn)
+            await self._ensure_tracking_table(conn, tracking_path, dry_run=dry_run)
             applied_records = await self._load_applied(conn)
 
             for sql_path in sql_files:
@@ -116,6 +121,32 @@ class MigrationRunner:
     async def _set_search_path(self, conn: AsyncConnection) -> None:
         # schema_name은 init에서 _VALID_SCHEMA_RE로 검증됨 → f-string 안전
         await conn.execute(text(f'SET search_path TO "{self._schema_name}", public'))
+
+    async def _maybe_set_role(self, conn: AsyncConnection) -> None:
+        """workflow_admin role이 존재하면 SET ROLE — 신규 CREATE TABLE owner를 자동
+        workflow_admin로 만들어 사후 ALTER OWNER + ALTER DEFAULT PRIVILEGES race 회피.
+
+        근거: staging에서 caller IAM(예: dhwang0803@gmail.com)이 CREATE하면 owner =
+        caller가 되어 (1) schema_migrations owner drift, (2) ALTER DEFAULT PRIVILEGES
+        FOR ROLE workflow_admin이 작동 안 함, (3) 신규 schema 적용 시 cloudsql-iam-modal
+        SA에 자동 GRANT 누락 — 박아름 020 personal_skills 사고(2026-05-26)에서 발현.
+        SET ROLE workflow_admin로 트랜잭션 내 모든 CREATE의 owner를 workflow_admin로
+        일관화하면 함정 #6/#11/#12 영구 해소 ([[staging-db-state]]).
+
+        role이 없는 환경(테스트 PG / 로컬)에서는 best-effort skip — 기존 caller role
+        사용. caller가 workflow_admin INHERIT 멤버여야 SET ROLE 권한 보유 (staging
+        IAM 사용자 전원 멤버 — [[staging-db-state]] §"workflow_admin 공유 ownership").
+
+        `SET LOCAL ROLE` — transaction scope만 적용. transaction commit/rollback 시
+        자동 RESET되어 connection pool 재사용 시 잔존 안 됨. `SET ROLE`(session-level)
+        사용 시 다음 transaction(예: 테스트 teardown DROP SCHEMA)이 workflow_admin
+        권한으로 실행돼 owner 권한 부족 fail 사례 있었음.
+        """
+        result = await conn.execute(
+            text("SELECT 1 FROM pg_roles WHERE rolname = 'workflow_admin'")
+        )
+        if result.first() is not None:
+            await conn.execute(text("SET LOCAL ROLE workflow_admin"))
 
     async def status(self) -> list[MigrationStep]:
         """Read-only view of what run_schemas() would do, without any side effects."""
@@ -214,6 +245,7 @@ class MigrationRunner:
         content = filepath.read_text(encoding="utf-8")
         async with self._engine.begin() as conn:
             await self._set_search_path(conn)
+            await self._maybe_set_role(conn)
             await _exec_multi_statement(conn, content)
 
 
