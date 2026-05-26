@@ -5,7 +5,9 @@
 
 ## 요약
 
-2026-05-24 박아름 사이클 — 8개 PR 머지 완료(`#158/#159/#160/#161/#163/#164/#165/#171`, development `c495396`. + 문서 동기화 #167). ADR-0020 위임2(게시 인가)와 ADR-0017 SkillDocument 이중 저장이 **`doc_store` 주입(#171)까지 머지**돼 SOP wizard `confirm` → personal DRAFT 생성 시 SKILL.md를 GCS에 저장하는 경로가 **코드 전부 완성**. 실제 GCS 저장 활성화는 조장 인프라(전용 버킷 GCP Secret + Modal SA Storage 권한) + Modal 재배포만 남음. `/auth/me`는 프론트 userName 연결용 `email`/`name`을 반환한다.
+2026-05-24 박아름 사이클 — 8개 PR 머지 완료(`#158/#159/#160/#161/#163/#164/#165/#171`, development `c495396`. + 문서 동기화 #167). ADR-0020 위임2(게시 인가)와 ADR-0017 SkillDocument 이중 저장이 **`doc_store` 주입(#171)까지 머지**돼 SOP wizard `confirm` → personal DRAFT 생성 시 SKILL.md를 GCS에 저장하는 경로가 **코드 전부 완성**. `/auth/me`는 프론트 userName 연결용 `email`/`name`을 반환한다.
+
+> **2026-05-26 갱신**: 조장 #178(버킷 secret/권한) + #179/#180(db-iam-user v4 복원, db:unreachable 해소) 후 **e2e smoke 실행 → ADR-0017 GCS 이중저장 절반(SKILL.md 쓰기)이 staging에서 동작 검증 完**. 남은 단일 블로커는 런타임 SA `cloudsql-iam-modal`의 `personal_skills` 테이블 **DB GRANT 누락**(조장 영역, 5/26 카톡 핸드오프). 상세는 아래 §잔여 1번.
 
 ## 완료 (머지)
 
@@ -48,12 +50,17 @@
 
 > 박아름 코드·테스트·문서·셀프리뷰·PR 전부 완료. 카톡 3건(가원/조장/신정혜) 발송 完(2026-05-24).
 
-1. **agent-skills-builder 재배포 完(2026-05-25 12:46, v6) — 단 e2e smoke 차단(`db:unreachable`)**: 조장 인프라 完(#178 secret + 8 accessor binding + bucket objectAdmin). 박아름 `modal deploy`로 v6 배포 → doc_store deps(google-cloud-storage/pyyaml) 정상, **부팅 성공**(ImportError 0). **그러나 `/v1/health`=`db:unreachable`(2회)** → `CreateDraftSkillUseCase.save_personal`(DB) 차단으로 e2e smoke 불가. DB 연결 로직 무변경(메모리상 5/19 `db:iam-connected`였음) → 최근 SA 격리 인프라(#168/#172/#174/#177)가 공유 `cloudsql-iam-modal` SA의 Cloud SQL DB IAM 접근에 영향 줬거나 staging 인스턴스 정지 의심 = **조장 DB/SA infra 확인 대기**(2026-05-25 카톡 발송). DB 복구 시 SOP confirm → GCS `skills/{skill_id}/SKILL.md` 생성 smoke.
+1. **e2e smoke 실행 完(2026-05-26) — 박아름 코드 경로 전부 통과, DB GRANT 한 건만 잔여**:
+   - **db:unreachable 해소**: 5/25 `db:unreachable`은 SA 격리 작업(#168/#172/#174/#177)이 공유 `db-iam-user` secret을 일시 흔든 것. 조장 #179(db-iam-user-api prep)/#180(api_server db-iam-user-api 전환, 옵션 C 3-secret 격리 완성) 후속으로 `db-iam-user` v4=`cloudsql-iam-modal` email 복원 → Modal sub-agent 3종 unblock. `GET /v1/health` = `db:iam-connected`(HTTP 200) 직접 확인.
+   - **smoke 결과**: `POST /v1/agent/route`(source_type=sop, step=confirm, owner=seed system_user). ✅ confirm 라우팅 / ✅ `embed`(llm-base BGE-M3) / ✅ `CreateDraftSkillUseCase` 진입 / ✅ **`doc_store.save()` → GCS `skills/{skill_id}/SKILL.md`** — `gcloud storage cat`으로 frontmatter(name/description)+markdown body 직렬화 확인. **ADR-0017 GCS 이중저장 절반 = 배포본 정상 배선 + 쓰기 동작 staging 검증 完**(신규 코드 검증).
+   - ❌ **`save_personal()`(session.merge=SELECT先)** → `asyncpg.InsufficientPrivilegeError: permission denied for table personal_skills`. DB 연결은 OK(health), **테이블 GRANT 누락**. terraform `google_sql_user.iam_users`는 Cloud SQL 인증 유저만 생성(`SELECT 1` 통과), PG 테이블 GRANT는 수동 관리(`docs/guides/cloud-sql-setup.md` §4/§4-1)인데 `personal_skills`(ADR-0020 `020_skills_marketplace_staging.sql`)가 런타임 SA `cloudsql-iam-modal`에 미부여. team/company_skills·skill_approvals 동반 누락 추정.
+   - **신규 단일 블로커 = 조장 DB GRANT** (PG 롤 `cloudsql-iam-modal@<GCP_PROJECT_ID>.iam`, 4테이블 SELECT/INSERT/UPDATE/DELETE + `ALTER DEFAULT PRIVILEGES`로 재발 방지). **2026-05-26 카톡 발송.** GRANT 적용 시 동일 smoke 재실행 → `created_count:1` + `skill_document_uri` non-null = full e2e 종결.
+   - **설계 노트(GCS-first ordering)**: `CreateDraftSkillUseCase`는 GCS save가 DB save보다 먼저 → DB 실패 시 GCS orphan(`skills/728940fc-…/SKILL.md`) 잔존(rollback 안 됨, skill_id=uuid4라 재시도마다 누적). ADR-0017 후속으로 보상 삭제 or 순서 검토 여지.
 2. **프론트 userName 연결** (가원, REQ-010) — `useAuth.ts`의 `userName: ''` → `userName: user.name`(+ `me()` 응답 타입 MeResponse). 연결 시 PR #149 must-fix(AppBar ` · User`) 완전 해소. #163 머지로 unblock.
 3. **Composer SkillRetriever** (신정혜, ADR-0017 §3) — `SearchSkillsUseCase` 소비. FYI 핸드오프.
-4. **staging deploy / 인프라** (조장) — terraform/api_server + 위 ①② secret·SA 권한.
+4. **staging deploy / 인프라** (조장) — terraform/api_server + 위 ①② secret·SA 권한 + **DB GRANT(위 1번)**.
 
 ## 다음 단계
 
-1. (조장) agent-skills-builder SA의 staging DB IAM 접근 복구(`db:unreachable`) → (박아름) e2e smoke (재배포 자체는 v6 完)
+1. (조장) `cloudsql-iam-modal`에 skills_marketplace 4테이블 GRANT → (박아름) 동일 smoke 재실행 = full e2e 종결 (재배포·코드·GCS는 完)
 2. (가원) 프론트 연결 / (신정혜) Composer SkillRetriever — 별도 트랙
