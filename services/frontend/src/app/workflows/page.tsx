@@ -11,7 +11,7 @@ import { listWorkflows } from '@/lib/api/workflowApi';
 import { useAuthStore } from '@/stores/authStore';
 import type { WorkflowSchema } from '@common/generated';
 
-const TABLE_HEAD = ['이름', 'SCOPE', '노드', '상태', '수정'];
+const TABLE_HEAD = ['이름', 'SCOPE', '노드', '상태'];
 const ALL_TABS = [
   { label: 'My', key: 'my' },
   { label: 'Team', key: 'team' },
@@ -34,12 +34,14 @@ function WorkflowListContent() {
 
   const [workflows, setWorkflows] = useState<WorkflowSchema[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     listWorkflows()
       .then(setWorkflows)
-      .catch(() => setWorkflows([]))
+      .catch(() => setError('워크플로우 목록을 불러올 수 없습니다.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -98,11 +100,17 @@ function WorkflowListContent() {
           <span style={{ flex: 1 }}>{TABLE_HEAD[1]}</span>
           <span style={{ flex: 0.7 }}>{TABLE_HEAD[2]}</span>
           <span style={{ flex: 0.7 }}>{TABLE_HEAD[3]}</span>
-          <span style={{ flex: 1 }}>{TABLE_HEAD[4]}</span>
         </div>
 
+        {/* Error */}
+        {error && (
+          <div className="px-[10px] py-[24px] text-center text-[13px] text-red-600">
+            {error}
+          </div>
+        )}
+
         {/* Skeleton */}
-        {loading && (
+        {loading && !error && (
           <div className="flex flex-col gap-[6px] p-[10px]">
             {[1, 2, 3].map((i) => (
               <Skel key={i} className="h-[32px] w-full" />
@@ -111,14 +119,14 @@ function WorkflowListContent() {
         )}
 
         {/* Empty */}
-        {!loading && filtered.length === 0 && (
+        {!loading && !error && filtered.length === 0 && (
           <div className="px-[10px] py-[24px] text-center text-[13px] text-[var(--color-ink3)]">
             워크플로우가 없습니다.
           </div>
         )}
 
         {/* Rows */}
-        {!loading &&
+        {!loading && !error &&
           filtered.map((item, i) => (
             <Link
               key={item.workflow_id}
@@ -139,9 +147,6 @@ function WorkflowListContent() {
               </span>
               <span className="text-[11px] text-[var(--color-ink3)]" style={{ flex: 0.7 }}>
                 {item.is_draft ? '초안' : '활성'}
-              </span>
-              <span className="text-[13px] text-[var(--color-ink3)]" style={{ flex: 1 }}>
-                —
               </span>
             </Link>
           ))}
