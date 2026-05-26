@@ -84,9 +84,16 @@ class AgentComposer:
             "llm-base-url":          "LLM_BASE_URL",
             "embedding-base-url":    "EMBEDDING_BASE_URL",
             "gcs-session-bucket":    "GCS_SESSION_BUCKET",
-            "gcs-personal-bucket":   "GCS_PERSONAL_BUCKET",
             "execution-engine-url":  "EXECUTION_ENGINE_URL",
         })
+        # gcs-personal-bucket: secret 미등록이어도 composer boot 실패 방지 (PR #171 패턴)
+        try:
+            load_secrets_to_env({"gcs-personal-bucket": "GCS_PERSONAL_BUCKET"})
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "gcs-personal-bucket secret 미등록 — personal memory 비활성: %s", exc
+            )
 
         # Connector를 getconn() 안에서 lazy 초기화 + 명시적 loop 바인딩
         # storage/orm/session_factory.py 동일 패턴 — ConnectorLoopError 해결

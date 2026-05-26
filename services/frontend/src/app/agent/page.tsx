@@ -8,9 +8,11 @@ import RiskPill from '@/components/common/RiskPill';
 import StatusPill from '@/components/common/StatusPill';
 import NodeCard from '@/components/common/NodeCard';
 import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/agentStore';
+import { useSSEStream } from '@/hooks/useSSEStream';
 import { ReactFlow, Background, Controls, Node, Edge, useNodesState, useEdgesState } from '@xyflow/react';
 import { RiskLevel } from '@common/generated';
 import type { NodeStatus } from '@/types';
+import { executeWorkflow } from '@/lib/api/workflowApi';
 import '@xyflow/react/dist/style.css';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -182,15 +184,44 @@ function ExecutionView() {
 export default function AgentPage() {
   const {
     mode, setMode,
+    sessionId,
     messages, addMessage,
     rationaleText,
     slotQuestion,
     currentStep,
+    readyToExecute, setReadyToExecute,
   } = useAgentStore();
 
   const [input, setInput] = useState('');
   const [activeSession, setActiveSession] = useState('s1');
+  const [executeLoading, setExecuteLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useSSEStream(sessionId, {
+    onResult: (frame) => {
+      const payload = frame.payload as Record<string, unknown> | undefined;
+      if (payload?.status === 'ready_to_execute') {
+        setReadyToExecute({
+          workflowId: payload.workflow_id as string,
+          message: (payload.message as string) ?? '워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.',
+        });
+      }
+    },
+  });
+
+  const handleExecute = async () => {
+    if (!readyToExecute) return;
+    setExecuteLoading(true);
+    try {
+      await executeWorkflow(readyToExecute.workflowId);
+      setReadyToExecute(null);
+      setMode('run');
+    } catch {
+      // 실행 실패는 run 모드로 전환하지 않고 버튼 유지
+    } finally {
+      setExecuteLoading(false);
+    }
+  };
 
   const displayMessages = messages.length > 0 ? messages : DUMMY_MESSAGES;
 
@@ -225,7 +256,7 @@ export default function AgentPage() {
             {DUMMY_SESSIONS.map((s) => (
               <button
                 key={s.id}
-                onClick={() => setActiveSession(s.id)}
+                onClick={() => { setActiveSession(s.id); setReadyToExecute(null); }}
                 className={[
                   'w-full text-left px-[8px] py-[6px] rounded-[4px_8px_4px_8px] text-[12px] border-[1.5px] leading-snug',
                   activeSession === s.id
@@ -305,6 +336,19 @@ export default function AgentPage() {
                       </div>
                     </div>
                   ))}
+                  {readyToExecute && (
+                    <div className="flex items-end gap-2 justify-start">
+                      <span className="w-[26px] h-[26px] rounded-full bg-[var(--color-agent)] text-white text-[10px] flex items-center justify-center flex-shrink-0 font-bold mb-[1px]">
+                        AI
+                      </span>
+                      <div className="max-w-[72%] px-[11px] py-[8px] text-[13px] leading-relaxed border-[1.5px] bg-[var(--color-surface)] border-[var(--color-ink)] rounded-[8px_12px_12px_4px]">
+                        <p className="mb-[8px]">{readyToExecute.message}</p>
+                        <Btn onClick={handleExecute} disabled={executeLoading} className="text-[12px]">
+                          {executeLoading ? '실행 중…' : '▶ 실행'}
+                        </Btn>
+                      </div>
+                    </div>
+                  )}
                   <div ref={bottomRef} />
                 </div>
 
