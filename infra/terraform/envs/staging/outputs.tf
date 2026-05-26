@@ -10,3 +10,13 @@ output "frontend_url" {
   description = "frontend Cloud Run URL — 단일 출처 진입점. var.frontend_url + google-redirect-uri secret에 반영"
   value       = try(module.frontend[0].service_url, "")
 }
+
+output "api_server_runtime_sa" {
+  description = "api_server 전용 Cloud Run runtime SA email (PR2 단계에서 tfvars `api_server_service_account`와 Cloud SQL IAM user 등록에 사용)"
+  value       = try(google_service_account.api_server[0].email, "")
+}
+
+output "worker_runtime_sa" {
+  description = "execution_engine worker 전용 Cloud Run runtime SA email (PR2 단계에서 tfvars `execution_engine_worker_service_account`와 Cloud SQL IAM user 등록에 사용)"
+  value       = try(google_service_account.worker[0].email, "")
+}

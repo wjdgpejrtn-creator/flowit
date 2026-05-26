@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from celery import Celery
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ai_agent.domain.ports.workflow_repository import WorkflowRepository
@@ -34,6 +34,17 @@ class ExecuteResponse(BaseModel):
 
 def _service(repo: WorkflowRepository = Depends(get_workflow_repository)) -> WorkflowService:
     return WorkflowService(repo=repo)
+
+
+@router.get("", response_model=list[WorkflowSchema])
+async def list_workflows(
+    limit: int = Query(50, ge=1, le=100, description="페이지 크기 (1-100, 기본 50)"),
+    offset: int = Query(0, ge=0, description="페이지 오프셋 (0부터)"),
+    permission: PermissionSource = Depends(get_permission_source),
+    service: WorkflowService = Depends(_service),
+) -> list[WorkflowSchema]:
+    """본인 소유 워크플로우 목록 (최신 갱신순). team/public scope 가시성은 후속."""
+    return await service.list_for(permission, limit=limit, offset=offset)
 
 
 @router.post("", response_model=WorkflowSchema, status_code=201)

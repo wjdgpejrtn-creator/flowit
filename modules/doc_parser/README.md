@@ -14,7 +14,7 @@ pip install -e "modules/doc_parser[dev]"
 ## Quick Start
 
 ```python
-from doc_parser.domain.entities import Chunk, QualityGateResult, QualityMetrics
+from common_schemas import Chunk, QualityGateResult, QualityMetrics  # REQ-012 SSOT (0.11.0)
 from doc_parser.domain.services import (
     ChunkingService, QualityGate, PIIMaskingService, NormalizationService,
 )
@@ -41,11 +41,13 @@ from doc_parser.application.use_cases import (
 
 ### domain/entities
 
+> `Chunk`, `QualityGateResult`, `QualityMetrics` 는 `common_schemas` SSOT (0.11.0). `from common_schemas import ...` 로 직접 import 권장.
+
 | 클래스 | 주요 필드 | 설명 |
 |--------|----------|------|
 | `Chunk` | `block: ContentBlock`, `importance_score: Optional[float]`, `embedding: Optional[list[float]]`, `chunk_index: int`, `parent_document_id: UUID` | 청킹 결과. `importance_score`는 REQ-004 IntentAnalyzer가 나중에 채움 |
-| `QualityGateResult` | `quality_status: Literal["success","warning","manual_correction_required","failed"]`, `metrics: QualityMetrics`, `warnings: list[str]`, `error_codes: list[str]`, `decision_reason: str` | 파서 품질 게이트 판정 결과 |
-| `QualityMetrics` | `text_length: int`, `korean_ratio: float`, `broken_char_ratio: float`, `blocks_per_page: float`, `heading_ratio: float`, `valid_table_ratio: float`, `structural_chunk_ratio: float`, `warning_count: int` | 품질 수치 메트릭 |
+| `QualityGateResult` | `quality_status: Literal["success","warning","manual_correction_required","failed"]`, `metrics: QualityMetrics`, `warnings: list[WarningInfo]`, `error_codes: list[str]`, `decision_reason: str`, `coverage: ParseCoverage` | 파서 품질 게이트 판정 결과 |
+| `QualityMetrics` | `korean_ratio: float`, `broken_char_ratio: float`, `blocks_per_page: float`, `heading_ratio: float`, `valid_table_ratio: float`, `structural_chunk_ratio: float`, `total_chunks: int`, `avg_tokens: float` | 품질 수치 메트릭 |
 
 ### domain/entities — Value Objects
 
@@ -77,9 +79,9 @@ from doc_parser.application.use_cases import (
 |------------|--------|----------|
 | `ParserPort` | `parse(file_path: str, file_meta: FileMeta) → DocumentBlock` | `doc_parser/adapters/parsers/` (자체 구현) |
 | | `supports(mime_type: str) → bool` | |
-| `DocumentRepositoryPort` | `save(document: DocumentBlock) → UUID` | `adapters/persistence/` (REQ-001 연동) |
-| | `save_chunks(chunks: list[Chunk]) → None` | |
-| | `save_quality_log(result: QualityGateResult, document_id: UUID) → None` | |
+| `DocumentRepositoryPort` | `async save(document: DocumentBlock) → UUID` | `adapters/persistence/` (REQ-001 연동) |
+| | `async save_chunks(chunks: list[Chunk]) → None` | |
+| | `async save_quality_log(result: QualityGateResult, document_id: UUID) → None` | |
 | `ConfigLoaderPort` | `load_quality_config() → QualityConfig` | `adapters/config/` |
 | | `load_chunking_strategy() → ChunkingStrategy` | |
 | | `load_pii_rules() → list[PIIMaskRule]` | |

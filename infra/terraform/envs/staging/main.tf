@@ -151,6 +151,32 @@ module "personal_memory_bucket" {
 }
 
 # ---------------------------------------------------------------------------
+# GCS — skills marketplace SkillDocument bucket (ADR-0017 이중 저장 "지침서" 측)
+# api_server가 SkillDocumentStore(skills_marketplace Port) DI로 read/write.
+# 일반 업로드 GCS_BUCKET_NAME과 분리 — 스킬 문서가 일반 파일과 같은 버킷에 섞이지 않도록.
+# 키 패턴: gs://{bucket}/skills/{skill_id}/SKILL.md
+# ---------------------------------------------------------------------------
+module "skills_marketplace_bucket" {
+  source = "../../modules/gcs"
+
+  project_id    = var.project_id
+  location      = var.region
+  bucket_name   = "${var.project_id}-skills-marketplace-${var.environment}"
+  storage_class = "STANDARD"
+  force_destroy = true # staging only
+
+  # api_server SA + 팀 — api_server가 consumer(SkillDocumentStore DI factory),
+  # 팀원은 debugging/seed 용도. personal_memory와 달리 api_server SA를 명시적 포함.
+  writer_members = distinct(concat(
+    var.agent_secret_accessors,
+    var.api_server_service_account != "" ? ["serviceAccount:${var.api_server_service_account}"] : [],
+  ))
+  reader_members = []
+
+  labels = merge(local.common_labels, { role = "skills-marketplace" })
+}
+
+# ---------------------------------------------------------------------------
 # Memorystore (Redis) — execution_engine Celery broker + api_server SSE pub/sub
 # REQ-007/009 (ADR-0015 §F2-2 후속 호출 경로 B 트리거)
 # ---------------------------------------------------------------------------
@@ -191,6 +217,47 @@ module "cloud_sql" {
 }
 
 # ---------------------------------------------------------------------------
+# api_server 전용 Cloud Run runtime SA — 공용 cloudsql-iam-modal에서 분리 (격리, PR-A 준비).
+# 본 PR(1단계, prep)은 SA 생성 + project IAM grant만 — Cloud Run 미전환 (tfvars 미변경).
+# 후속 PR(2단계, switch)에서 Cloud SQL IAM user 추가 + DB GRANT(수동) + db-iam-user
+# secret 갱신 + api_server_service_account tfvars → 본 SA 이메일로 전환 + Cloud Run
+# revision 재배포. 메모리 staging_db_state §"PG 16/IAM 함정 8종" 절차 적용 필요.
+# ---------------------------------------------------------------------------
+resource "google_service_account" "api_server" {
+  count        = var.enable_cloud_run ? 1 : 0
+  project      = var.project_id
+  account_id   = "workflow-api-${var.environment}-sa"
+  display_name = "REQ-009 api_server Cloud Run runtime SA (least privilege, 공용 cloudsql-iam-modal 대체)"
+}
+
+# Cloud SQL IAM auth — cloud-sql-python-connector(enable_iam_auth=True) 호출에 필요.
+resource "google_project_iam_member" "api_server_cloudsql_client" {
+  count   = var.enable_cloud_run ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.api_server[0].email}"
+}
+
+resource "google_project_iam_member" "api_server_cloudsql_instance_user" {
+  count   = var.enable_cloud_run ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudsql.instanceUser"
+  member  = "serviceAccount:${google_service_account.api_server[0].email}"
+}
+
+# Cloud Run default SA는 기본으로 logging.logWriter 보유 — 명시 SA 사용 시 직접 부여 필요.
+resource "google_project_iam_member" "api_server_log_writer" {
+  count   = var.enable_cloud_run ? 1 : 0
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.api_server[0].email}"
+}
+
+# bucket/AR/secret 접근은 본 SA를 tfvars(`api_server_service_account`)에 채우는
+# PR2에서 자동 활성화 — 기존 conditional(var.api_server_service_account != "")이
+# SA를 writer/reader/accessor에 자동 포함. 본 PR은 SA 생성만 (Cloud Run 미전환).
+
+# ---------------------------------------------------------------------------
 # Cloud Run — api_server (REQ-009) 배포 슬롯. 이미지 빌드 완료 시 활성화
 # var.enable_cloud_run = true + var.api_server_image 지정으로 활성화
 # ---------------------------------------------------------------------------
@@ -219,6 +286,9 @@ module "api_server" {
     # OAuth 콜백(GET /api/v1/auth/callback) 처리 후 브라우저를 돌려보낼 프론트 주소.
     # 2단계 apply — 프론트 배포(module.frontend) 후 var.frontend_url을 채우면 반영된다.
     FRONTEND_URL = var.frontend_url
+    # SkillDocumentStore(ADR-0017 이중 저장) — 일반 GCS_BUCKET_NAME과 분리된 전용 버킷.
+    # secret 아닌 단순 이름이라 plaintext env (secret_env_vars 아님).
+    SKILLS_MARKETPLACE_BUCKET = module.skills_marketplace_bucket.bucket_name
   }
 
   # PR #80 GCP Secret Manager + 본 PR-C 신규 추가(jwt/encryption/google) — Cloud Run이 직접 주입.
@@ -226,7 +296,10 @@ module "api_server" {
   secret_env_vars = {
     REDIS_URL            = { secret_id = "redis-url", version = "latest" }
     CLOUD_SQL_INSTANCE   = { secret_id = "cloud-sql-instance", version = "latest" }
-    DB_IAM_USER          = { secret_id = "db-iam-user", version = "latest" }
+    # api_server 전용 db-iam-user-api (옵션 C, 2026-05-25 사고 대응) — Modal sub-agents 3종이
+    # 공유하는 db-iam-user를 latest로 fetch하면 값 충돌로 인증 깨지는 폭탄 영구 격리.
+    # 값(api SA full email)은 PR-A(#179) 후속 수동 add 완료. 박아름 v6 사고와 동일 메커니즘.
+    DB_IAM_USER          = { secret_id = "db-iam-user-api", version = "latest" }
     DB_NAME              = { secret_id = "db-name", version = "latest" }
     JWT_SECRET_KEY       = { secret_id = "jwt-secret-key", version = "latest" }
     ENCRYPTION_KEY       = { secret_id = "encryption-key", version = "latest" }
@@ -237,8 +310,51 @@ module "api_server" {
 
   labels = merge(local.common_labels, { role = "api-server" })
 
-  depends_on = [module.networking, module.redis, module.agent_secrets]
+  depends_on = [module.networking, module.redis, module.agent_secrets, module.skills_marketplace_bucket]
 }
+
+# ---------------------------------------------------------------------------
+# execution_engine worker 전용 Cloud Run runtime SA — 공용 cloudsql-iam-modal에서 분리 (격리, PR-A 준비).
+# api_server 분리(PR #168/#172)와 동일 2-PR 패턴. 본 PR(1단계, prep)은 SA 생성 + project IAM grant
+# + db-iam-user-worker secret 껍데기 생성만 — Cloud Run 미전환 (tfvars 미변경).
+# 후속 PR(2단계, switch)에서 Cloud SQL IAM user 추가 + DB GRANT(수동) + db-iam-user-worker secret
+# 값 add + execution_engine_worker_service_account tfvars → 본 SA 이메일로 전환 + worker module
+# secret_env_vars.DB_IAM_USER → db-iam-user-worker secret_id 변경 + Cloud Run revision 재배포.
+# 메모리 staging_db_state §"PG 16/IAM 함정 8종" + "⚠️ worker secret latency 폭탄" 절차 적용.
+# ---------------------------------------------------------------------------
+resource "google_service_account" "worker" {
+  count        = var.enable_execution_engine_worker ? 1 : 0
+  project      = var.project_id
+  account_id   = "workflow-worker-${var.environment}-sa"
+  display_name = "REQ-007 worker SA (least privilege, cloudsql-iam-modal 대체)"
+}
+
+# Cloud SQL IAM auth — cloud-sql-python-connector(enable_iam_auth=True) 호출에 필요.
+resource "google_project_iam_member" "worker_cloudsql_client" {
+  count   = var.enable_execution_engine_worker ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.worker[0].email}"
+}
+
+resource "google_project_iam_member" "worker_cloudsql_instance_user" {
+  count   = var.enable_execution_engine_worker ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudsql.instanceUser"
+  member  = "serviceAccount:${google_service_account.worker[0].email}"
+}
+
+# Cloud Run default SA는 기본으로 logging.logWriter 보유 — 명시 SA 사용 시 직접 부여 필요.
+resource "google_project_iam_member" "worker_log_writer" {
+  count   = var.enable_execution_engine_worker ? 1 : 0
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.worker[0].email}"
+}
+
+# AR/secret 접근은 본 SA를 tfvars(`execution_engine_worker_service_account`)에 채우는
+# PR2에서 자동 활성화 — 기존 conditional(var.execution_engine_worker_service_account != "")이
+# SA를 writer/reader/accessor에 자동 포함 (api_server PR #170 apply 18 add로 실증 완료).
 
 # ---------------------------------------------------------------------------
 # Cloud Run — REQ-007 execution_engine worker (Celery worker daemon)
@@ -280,7 +396,10 @@ module "execution_engine_worker" {
   secret_env_vars = {
     REDIS_URL          = { secret_id = "redis-url", version = "latest" }
     CLOUD_SQL_INSTANCE = { secret_id = "cloud-sql-instance", version = "latest" }
-    DB_IAM_USER        = { secret_id = "db-iam-user", version = "latest" }
+    # worker 전용 db-iam-user-worker (PR-B switch) — api_server PR-B로 db-iam-user latest가
+    # workflow-api-staging-sa email로 덮어쓰여 worker cold start 시 인증 깨질 폭탄 회피.
+    # 값(worker SA full email)은 PR-A 후속 수동 prereq로 add 완료.
+    DB_IAM_USER        = { secret_id = "db-iam-user-worker", version = "latest" }
     DB_NAME            = { secret_id = "db-name", version = "latest" }
     LLM_BASE_URL       = { secret_id = "llm-base-url", version = "latest" }
     EMBEDDING_BASE_URL = { secret_id = "embedding-base-url", version = "latest" }

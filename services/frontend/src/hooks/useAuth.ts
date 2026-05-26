@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react';
 import { useAuthStore } from '@/stores/authStore';
-import { getAuthorizeUrl, me } from '@/lib/api/authApi';
+import { getAuthorizeUrl, me, type MeResponse } from '@/lib/api/authApi';
 
 export function useAuth() {
   const { isAuthenticated, userId, userName, dept, role, setAuth, clearAuth } = useAuthStore();
@@ -14,12 +14,11 @@ export function useAuth() {
       const res = await fetch('/api/v1/auth/refresh', { method: 'POST' });
       if (!res.ok) return false;
 
-      // PermissionSource 반환 — email/dept 미제공 (백엔드 /auth/me 확장 결정 대기)
-      const user = await me();
+      const user: MeResponse = await me();
       setAuth({
-        role: user.role === 'Admin' ? 'Admin' : 'User',
+        role: user.role,
         userId: user.user_id,
-        userName: '',          // 백엔드 /auth/me에 email 추가 후 교체 예정
+        userName: user.name,
         dept: user.department_id,
       });
       return true;

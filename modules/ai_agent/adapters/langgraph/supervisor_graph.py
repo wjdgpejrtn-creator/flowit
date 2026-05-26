@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from common_schemas.agent import AgentState, MemoryEntry
 from common_schemas.agent_protocol import AgentProtocolRequest
-from common_schemas.enums import AgentMode, ExecutionStatus, IntentType
+from common_schemas.enums import AgentMode, ExecutionStatus
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
@@ -42,11 +42,7 @@ from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 
 _logger = logging.getLogger(__name__)
 
-_COMPOSER = "composer"
-_SKILLS = "skills"
-_FINALIZE = "finalize"
 _MAX_SUPERVISOR_ITERATIONS = 10
-
 _RELAY_TOOLS = {"call_composer", "call_skills_builder"}
 
 
@@ -247,6 +243,11 @@ class LangGraphSupervisor:
 
         tool_frames = updates.get("collected_frames", [])
         pre_frames: list[AnySSEFrame] = [AgentNodeFrame(agent_node_name=action.tool_name)]
+
+        # relay 툴은 _relay()에서 live_queue로 이미 전송 — collected_frames 재방출 방지
+        if action.tool_name in _RELAY_TOOLS:
+            tool_frames = []
+
 
         return {
             **updates,

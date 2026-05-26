@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from typing import Literal
 from uuid import UUID
 
+from common_schemas import UserRole
 from common_schemas.types import UtcDatetime
 from pydantic import BaseModel
 
-
-UserRole = Literal["User", "Admin"]
+# Re-export so existing imports `from auth.domain.entities.user import UserRole` keep working.
+# SSOT is `common_schemas.UserRole` — see security.py docstring (PR #157 review ①).
+__all__ = ["User", "UserRole"]
 
 
 class User(BaseModel):

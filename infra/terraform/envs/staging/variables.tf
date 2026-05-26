@@ -28,9 +28,20 @@ variable "agent_secret_names" {
   description = "Modal sub-agent secret IDs managed in GCP Secret Manager"
   type        = list(string)
   default = [
-    # Cloud SQL IAM 공통 (composer / personalization / skills-builder)
+    # Cloud SQL IAM — Modal sub-agents 3종(composer/personalization/skills-builder) 전용 공용
+    # secret. 값은 cloudsql-iam-modal SA full email. api_server/worker 분리 후 본 secret은
+    # Modal sub-agents 전용으로 축소됨 — 다른 서비스가 latest fetch하면 값 충돌로 인증 실패
+    # (2026-05-25 박아름 agent-skills-builder v6 cold start 사고 사례).
     "cloud-sql-instance",
     "db-iam-user",
+    # worker 전용 (REQ-011 worker SA 분리, PR #174/#177) — api_server 전환 시 db-iam-user를
+    # workflow-api-staging-sa email로 덮어쓴 결과, worker가 latest version으로 fetch 시
+    # cloudsql-iam-modal 토큰 sub와 PG connect user 불일치로 인증 실패하는 폭탄 회피.
+    "db-iam-user-worker",
+    # api_server 전용 (옵션 C, 2026-05-25) — 동일 폭탄이 박아름 agent-skills-builder v6에서
+    # 발현하면서 발견. db-iam-user-api 신설 + api_server module secret_id swap → db-iam-user는
+    # Modal sub-agents 전용으로 복원. 각 서비스별 dedicated secret 패턴 완성.
+    "db-iam-user-api",
     "db-name",
     # LLM base endpoints (3 sub-agent 공통)
     "llm-base-url",
@@ -51,6 +62,11 @@ variable "agent_secret_names" {
     "google-client-id",     # Google OAuth Client ID
     "google-client-secret", # Google OAuth Client Secret
     "google-redirect-uri",  # OAuth callback URL (staging Cloud Run public hostname)
+    # agent-skills-builder 전용 (REQ-013/REQ-004, PR #171 doc_store wiring 활성화)
+    # 값은 skills_marketplace_bucket name(`<project>-skills-marketplace-staging`).
+    # agent-skills-builder/main.py:219가 load_secrets_to_env로 읽고, 미등록 시 doc_store=None
+    # 비활성 fallback. 본 PR 머지·apply 후 수동으로 bucket name을 v1로 add 필요.
+    "skills-marketplace-bucket",
   ]
 }
 

@@ -109,8 +109,9 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
-| `BuildFromSOPUseCase` | `user_id: UUID, document: DocumentBlock → AsyncGenerator[SSEFrame]` | SOP 문서 → SkillNode 추출 → `NodeDefinitionRepository.upsert()` |
-| `BuildFromIndustryDefaultUseCase` | `user_id: UUID, industry_code: str → AsyncGenerator[SSEFrame]` | 산업 seed (5종) → NodeDefinition 카탈로그 등록 |
+| `BuildFromSOPUseCase` | `extract_draft(user_id, document, personal_memory?)` / `confirm(user_id, skills) → AsyncGenerator[SSEFrame]` | SOP 문서 → LLM 추출 **wizard 2단계**(ADR-0020 Q8): 추출 검토 → `CreateDraftSkillUseCase`로 personal DRAFT. NodeDefinition은 publish 시점(Option B) |
+| `BuildFromIndustryDefaultUseCase` | `user_id: UUID, industry_code: str → AsyncGenerator[SSEFrame]` | 산업 seed(`ecommerce` 활성) → `NodeDefinitionRepository.upsert()` (seed auto-PUBLISHED, Q7) |
+| `BuildFromFunctionalDomainUseCase` | `user_id: UUID, domain_code: str → AsyncGenerator[SSEFrame]` | 직무 영역 seed(5종) → `NodeDefinitionRepository.upsert()` (seed auto-PUBLISHED, Q7) |
 
 #### personalization/ (Personalization — 햄햄/이가원)
 

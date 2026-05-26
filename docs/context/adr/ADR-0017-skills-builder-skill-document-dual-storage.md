@@ -79,7 +79,7 @@ gs://{SKILLS_MARKETPLACE_BUCKET}/skills/{skill_id}/templates/ (선택)
 
 - **근거 (DDD 응집도)**: 한 스킬 = `NodeDefinition`(메타) + `SkillDocument`(지침서) = **같은 aggregate의 두 형태**. 메타(`SkillRepository`)가 skills_marketplace 소유이므로 지침서(`SkillDocumentStore`)도 동일 도메인 소유 = aggregate 완결. ai_agent(Skills Builder)는 스킬을 **생성하는 application service**일 뿐 소유 도메인 아님 (생성 주체 ≠ 소유 도메인).
 - **PersonalMemoryStore 선례 부적용**: `ai_agent.PersonalMemoryStore`(GCS)는 `PersonalMemory`가 ai_agent **자체 도메인**(사용자 패턴/기억)이라 ai_agent 소유 정합. `SkillDocument`는 마켓플레이스 산출물이라 케이스 다름.
-- **위치**: `SkillDocument` 모델 = `skills_marketplace/domain/entities/skill_document.py`, `SkillDocumentStore` Port = `skills_marketplace/domain/ports/skill_document_store.py` (PR #98 신설 완료). GCS adapter 구현 위치는 PR-2d/2e 결정.
+- **위치**: `SkillDocument` 모델 = `skills_marketplace/domain/entities/skill_document.py`, `SkillDocumentStore` Port = `skills_marketplace/domain/ports/skill_document_store.py` (PR #98 신설 완료). GCS adapter 구현 = `storage/adapters/gcs_skill_document_store.py` (PR #160 확정 — `ObjectStoragePort` 조합으로 production `GCSAdapter`, 테스트 `LocalStorageAdapter` swap. `save()→str(gs:// URI)` — bucket 이름은 어댑터가 캡슐화하여 use case로 누수 X).
 - **정정 비용 0**: 코드 미구현 상태(ADR 계획만)였어서 ai_agent에 만든 것을 옮기는 게 아니라 처음부터 skills_marketplace에 신설.
 
 #### SkillDocument SSOT 재정정 (2026-05-20 PR #106·#111 리뷰 — common_schemas 승격)
@@ -136,18 +136,19 @@ Skills Builder = **스킬 생성 전용**. 워크플로우 생성 안 함 (Compo
 - **이중 저장 비용** — `NodeDefinition` DB + `SkillDocument` GCS 동시 쓰기, 두 저장소 일관성 관리 필요
 - **변환 비용** — Skills Builder가 SkillNode 추출 후 NodeDefinition + SkillDocument 둘 다 생성
 - **`modules/skills_marketplace/` 의존** — PR-2d 신설 (이번 주말, 조장 영역) 대기 후 박아름 코드 변경 PR 가능
-- **`SkillDocumentStore` Port 신설 필요** — Port + `SkillDocument` 모델은 `skills_marketplace/domain` 소유 (2026-05-20 박아름 결정 정정 — 아래 §"SkillDocument 소유권" 참조). GCS adapter 구현 위치(storage vs skills_marketplace)는 PR-2d/2e 후속
+- **`SkillDocumentStore` Port 신설 필요** — Port + `SkillDocument` 모델은 `skills_marketplace/domain` 소유 (2026-05-20 박아름 결정 정정 — 아래 §"SkillDocument 소유권" 참조). GCS adapter 구현 = `storage/adapters/gcs_skill_document_store.py` (PR #160 확정).
 - **SOP 추출 LLM 프롬프트 갱신** — `BuildFromSOPUseCase`의 LLM이 markdown instructions까지 생성하도록 프롬프트 보강
 
 ### Follow-ups
 
-- ⏳ `modules/skills_marketplace/` 신설 (ADR-0012 v3 PR-2d, 조장, 2026-05-25 주말 예정)
-- ✅ `SkillDocument` 모델 + `SkillDocumentStore` Port 신설 (`skills_marketplace/domain/entities` + `domain/ports`) — 2026-05-20 박아름 (PR #98). 소유권 정정: ai_agent → skills_marketplace (§"SkillDocument 소유권" 참조)
-- ⏳ Skills Builder 코드 변경 PR (박아름, skills_marketplace 머지 후):
-  - `BuildFromXxxUseCase` 산출물 변경 — NodeDefinition + SkillDocument 동시 생성. ai_agent는 `from skills_marketplace.domain.ports import SkillDocumentStore` 주입받아 생성만 (생성 주체 ≠ 소유 도메인)
-  - `nodes_graph.NodeDefinitionRepository` → `skills_marketplace.SkillRepository` 의존성 교체
-  - seed JSON 갱신 — `instructions` 필드 추가
-- ⏳ `SkillDocumentStore` GCS adapter 구현 (위치 PR-2d/2e 결정 — storage object storage vs skills_marketplace/adapters)
+- ✅ `modules/skills_marketplace/` 신설 (ADR-0012 v3 PR-2d, 조장, PR #98). 3계층 + SkillRepository storage 구현(PR #147/#148)
+- ✅ `SkillDocument` 모델 + `SkillDocumentStore` Port 신설 (`skills_marketplace/domain/entities` + `domain/ports`) — 2026-05-20 박아름 (PR #98). 소유권 정정: ai_agent → skills_marketplace (§"SkillDocument 소유권" 참조). 타입 SSOT은 PR #111로 common_schemas 승격(§"SSOT 재정정")
+- ✅ Skills Builder 코드 변경 (박아름, skills_marketplace 머지 후):
+  - `BuildFromXxxUseCase` 산출물 — `SkillDocument` 객체화(PR #123) + seed `instructions`→`SkillDocument` payload 수집. SOP는 `CreateDraftSkillUseCase` 경유 personal DRAFT(`BuildFromSOPUseCase.confirm`이 `instructions` 전달, PR #165)
+  - `skills_marketplace.SkillRepository` 의존성 교체(`CreateDraftSkillUseCase`)
+  - seed JSON `instructions` 필드 추가
+- ✅ `SkillDocumentStore` GCS adapter 구현 = `storage/adapters/gcs_skill_document_store.py` (PR #160). `save()→str(gs:// URI)` 반환 — bucket 이름이 호출부로 누수되지 않도록 어댑터가 forward. SKILL.md = YAML frontmatter(name/description) + markdown body(instructions). 키: `skills/{skill_id}/SKILL.md`. production = `SKILLS_MARKETPLACE_BUCKET` env(전용 버킷, PR #161 인프라)
+- ✅ 호출부 배선 (박아름): Port `save()→str` + `CreateDraftSkillUseCase`(`doc_store`/`instructions`, PR #164). **잔여: `services/agents/agent-skills-builder/main.py`(Modal Skills Builder 서비스, CreateDraftSkillUseCase 조립부 `main.py:350`) composition root에서 `doc_store` 주입 시 GCS 저장 활성화**(미주입 시 문서 미저장, 하위호환. api_server엔 호출부 없음)
 - ⏳ Composer 검색 흐름 갱신 (신정혜 영역, ADR-0017 적용 시)
 
 ## Alternatives Considered

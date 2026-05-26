@@ -14,7 +14,7 @@ const NAV_ITEMS = [
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
-      <AppBar role="Admin" userName="이팀장" dept="인사팀" />
+      <AppBar />
       <div className="flex-1 flex min-h-0">
         <SideNav title="👑 거버넌스" items={NAV_ITEMS} />
         <div className="flex-1 overflow-auto p-[14px]">

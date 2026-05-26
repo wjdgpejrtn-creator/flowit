@@ -17,7 +17,7 @@ enable_execution_engine_worker = true
 api_server_image              = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/api-server:phase-f-5"
 execution_engine_worker_image = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/execution-engine-worker:adr-0018-2b"
 
-# staging은 공용 SA 재활용 ([[sub_agent_cloud_sql_iam]] — Cloud SQL IAM + Secret Manager 권한 보유).
-# production 이관 시 서비스별 SA 분리.
-api_server_service_account              = "<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
-execution_engine_worker_service_account = "<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
+# api_server / worker 모두 dedicated SA (PR-A/B 2-PR 패턴으로 공용 cloudsql-iam-modal에서 분리, 격리).
+# 공용 cloudsql-iam-modal은 Modal sub-agents 3종(skills_builder/composer/personalization) 전용으로 축소.
+api_server_service_account              = "<API_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
+execution_engine_worker_service_account = "<WORKER_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"

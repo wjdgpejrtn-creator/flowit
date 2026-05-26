@@ -188,7 +188,7 @@ class PermissionResolver:
     def resolve(
         self,
         user_id: UUID,
-        role: Literal["User", "Admin"],
+        role: Literal["User", "team_manager", "company_manager", "Admin"],
         department_id: UUID,
         session_id: UUID,
         current_workflow_id: Optional[UUID] = None,

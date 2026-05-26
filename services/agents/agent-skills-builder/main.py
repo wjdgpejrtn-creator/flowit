@@ -14,10 +14,12 @@ routing:
     POST /v1/agent/route
         body: AgentProtocolRequest
             payload.source_type ∈ {"sop", "industry_default", "functional_domain"}
+            sop은 payload.step ∈ {"extract", "confirm"} 추가 (wizard 2단계, ADR-0020 Q8 / 기본 extract)
         → 분기:
-            "sop"               → BuildFromSOPUseCase.execute(user_id, document, personal_memory)
-            "industry_default"  → BuildFromIndustryDefaultUseCase.execute(user_id, industry_code)
-            "functional_domain" → BuildFromFunctionalDomainUseCase.execute(user_id, domain_code)
+            "sop" + step=extract → BuildFromSOPUseCase.extract_draft(user_id, document, personal_memory)
+            "sop" + step=confirm → BuildFromSOPUseCase.confirm(user_id, skills)
+            "industry_default"   → BuildFromIndustryDefaultUseCase.execute(user_id, industry_code)
+            "functional_domain"  → BuildFromFunctionalDomainUseCase.execute(user_id, domain_code)
         → 각 use case가 AsyncGenerator[SSEFrame] yield
         → SSE 텍스트 스트림 ("data: <json>\\n\\n") 으로 변환해 응답
     GET /v1/health
@@ -28,12 +30,14 @@ deploy:
 
 환경 변수 (Modal Secret 2개 마운트):
 
-    agent-skills-builder-secret (sub-agent 담당자 박아름이 등록 — 5 키):
+    agent-skills-builder-secret (sub-agent 담당자 박아름이 등록 — GCP Secret Manager, 5 키 + 선택 1):
         LLM_BASE_URL                          llm-base ASGI base URL (예: https://...modal.run)
         EMBEDDING_BASE_URL                    BGE-M3 ASGI base URL (보통 LLM_BASE_URL과 동일)
         CLOUD_SQL_INSTANCE                    "<PROJECT>:<REGION>:<INSTANCE>" 형식
         DB_IAM_USER                           공용 SA 풀 이메일 (cloudsql-iam-modal@...)
         DB_NAME                               workflow_automation
+        SKILLS_MARKETPLACE_BUCKET (선택)      SkillDocument GCS 전용 버킷명 (Secret: skills-marketplace-bucket,
+                                              ADR-0017). 미설정 시 boot tolerant skip → doc_store 비활성(문서 미저장)
 
     cloudsql-iam-sa (조장 1회 등록 — 1 키, 공용):
         GOOGLE_APPLICATION_CREDENTIALS_JSON   공용 GCP SA JSON key (cloud-sql-python-connector 인증용)
@@ -47,12 +51,11 @@ sub_agent_modal_deploy.md §3.2 + §5 참조).
 - ModalEmbeddingAdapter는 httpx 호출이라 즉시 동작.
 - PgNodeDefinitionRepository는 황대원 5/15 PR에 머지된 구현체 그대로 사용.
 """
-import json
 import os
-from typing import Any, AsyncIterator, Literal
+from collections.abc import AsyncIterator
+from typing import Any, Literal
 
 import modal
-
 
 APP_NAME = "agent-skills-builder"
 
@@ -83,7 +86,7 @@ def _sse_bytes(response: Any) -> bytes:
     SSE 포맷: 'data: <json>\\n\\n'
     """
     body = response.model_dump_json()
-    return f"data: {body}\n\n".encode("utf-8")
+    return f"data: {body}\n\n".encode()
 
 
 def _done_frame_bytes() -> bytes:
@@ -120,6 +123,10 @@ image = (
         "cloud-sql-python-connector[asyncpg]>=1.12",
         # GCP Secret Manager (런타임 secret pull, 2026-05-19 마이그레이션)
         "google-cloud-secret-manager>=2.20",
+        # GCS + YAML — SkillDocument(SKILL.md) 이중 저장 (ADR-0017, GcsSkillDocumentStore).
+        # 이미지는 storage pyproject deps를 자동설치하지 않으므로 명시 핀 (gcs adapter 런타임 import).
+        "google-cloud-storage>=2.14",
+        "pyyaml>=6.0",
         # Transitive: storage.mappers → toolset.runtime_validator → import jsonschema.
         # 박아름 use case가 toolset 직접 사용 안 하지만 storage import 체인으로 끌려옴.
         "jsonschema>=4.0",
@@ -173,15 +180,17 @@ class SkillsBuilderAgent:
         등록되어 이후 request도 동일 loop라 ConnectorLoopError 발생 안 함.
         boot()의 sync loop와는 분리되어 있어도 정합.
         """
+        import logging
         import tempfile
         from pathlib import Path
 
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-        from services.common.gcp_secrets import load_secrets_to_env
-
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from storage.adapters.gcs_adapter import GCSAdapter
+        from storage.adapters.gcs_skill_document_store import GcsSkillDocumentStore
+
+        from services.common.gcp_secrets import load_secrets_to_env
 
         # 1) GCP SA JSON을 임시 파일로 풀고 ADC 환경변수 지정
         sa_payload = os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
@@ -198,9 +207,30 @@ class SkillsBuilderAgent:
             "embedding-base-url": "EMBEDDING_BASE_URL",
         })
 
-        # 2) 어댑터 wiring (RPC LLM + HTTP embedding) — async 의존 없음
+        # 2-1) skills-marketplace-bucket(ADR-0017 SkillDocument GCS 저장)은 조장 인프라(전용
+        # 버킷 GCP Secret + SA Storage 권한) 준비 시 활성화. 둘 중 무엇이 빠져도 boot는 깨지
+        # 않고 doc_store=None(문서 미저장, 현행 유지)으로 deploy-safe하다. 단 원인을 구분 로깅:
+        #   - NotFound: secret 미등록 = 롤아웃 중 정상(info)
+        #   - 그 외(PermissionDenied/RuntimeError 등): 설정·권한 오류 = 확인 필요(error, 강한 신호)
+        from google.api_core.exceptions import NotFound as _SecretNotFound
+
+        _log = logging.getLogger(APP_NAME)
+        try:
+            load_secrets_to_env({"skills-marketplace-bucket": "SKILLS_MARKETPLACE_BUCKET"})
+        except _SecretNotFound:
+            _log.info("SKILLS_MARKETPLACE_BUCKET secret 미등록 — SkillDocument GCS 저장 비활성(정상, 인프라 대기)")
+        except Exception as exc:  # PermissionDenied/RuntimeError 등 — 설정·권한 오류
+            _log.error("SKILLS_MARKETPLACE_BUCKET 로드 실패(권한/설정 확인 필요) — GCS 저장 비활성: %s", exc)
+
+        # 2-2) 어댑터 wiring (RPC LLM + HTTP embedding) — async 의존 없음
         self._llm = ModalLLMAdapter()
         self._embedder = ModalEmbeddingAdapter()
+
+        # ADR-0017 이중 저장 "지침서" 측 — SOP confirm 시 SkillDocument를 GCS에 저장.
+        # 버킷 env가 있을 때만 주입(없으면 None=문서 미저장, 하위호환). GCSAdapter는 bucket_name이
+        # None이면 GCS_BUCKET_NAME으로 silent fallback하므로 명시 가드 (전용 버킷만 사용).
+        _bucket = os.environ.get("SKILLS_MARKETPLACE_BUCKET")
+        self._doc_store = GcsSkillDocumentStore(GCSAdapter(bucket_name=_bucket)) if _bucket else None
 
         # 3) Cloud SQL Connector — getconn() 안에서 lazy 초기화 + loop 명시 바인딩
         self._connector = None
@@ -240,12 +270,10 @@ class SkillsBuilderAgent:
 
     @modal.asgi_app()
     def fastapi(self):
-        import asyncio
-
-        from fastapi import Body, FastAPI, HTTPException
-        from fastapi.responses import StreamingResponse
 
         from common_schemas.agent_protocol import AgentProtocolRequest
+        from fastapi import Body, FastAPI, HTTPException
+        from fastapi.responses import StreamingResponse
 
         api = FastAPI(title=APP_NAME, version="1.0")
 
@@ -313,10 +341,6 @@ class SkillsBuilderAgent:
         로 래핑. next_action은 ResultFrame에서 "complete", ErrorFrame에서
         "error", 중간 진행 프레임에서 "continue"로 설정 (Literal 세 값 spec).
         """
-        from common_schemas import DocumentBlock
-        from common_schemas.agent_protocol import AgentProtocolResponse
-        from common_schemas.transport import ErrorFrame, ResultFrame
-
         from ai_agent.application.agents.skills_builder.build_from_functional_domain_use_case import (
             BuildFromFunctionalDomainUseCase,
         )
@@ -326,6 +350,11 @@ class SkillsBuilderAgent:
         from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
             BuildFromSOPUseCase,
         )
+        from common_schemas import DocumentBlock
+        from common_schemas.agent_protocol import AgentProtocolResponse
+        from common_schemas.transport import ErrorFrame
+        from skills_marketplace.application.use_cases import CreateDraftSkillUseCase
+        from storage.repositories.pg_marketplace_skill_repository import PgMarketplaceSkillRepository
         from storage.repositories.pg_node_definition_repository import PgNodeDefinitionRepository
 
         # AgentProtocolRequest 필드: session_id/user_id/state/personal_memory는 top-level,
@@ -345,9 +374,32 @@ class SkillsBuilderAgent:
                 use_case = BuildFromFunctionalDomainUseCase(repo, self._embedder)
                 stream = use_case.execute(req.user_id, payload["domain_code"])
             elif source_type == "sop":
-                use_case = BuildFromSOPUseCase(repo, self._embedder, self._llm)
-                document = DocumentBlock.model_validate(payload["document"])
-                stream = use_case.execute(req.user_id, document, req.personal_memory)
+                # wizard 2단계(ADR-0020 Q8): extract_draft(추출·검토용, 저장X) / confirm(편집→DRAFT).
+                # confirm은 CreateDraftSkillUseCase(SkillRepository=PgMarketplaceSkillRepository, PR #147) 경유.
+                use_case = BuildFromSOPUseCase(
+                    CreateDraftSkillUseCase(
+                        PgMarketplaceSkillRepository(session),
+                        doc_store=self._doc_store,  # ADR-0017 — 주입 시 GCS 저장(미설정 시 None=미저장)
+                    ),
+                    self._embedder,
+                    self._llm,
+                )
+                step = payload.get("step", "extract")
+                if step == "extract":
+                    document = DocumentBlock.model_validate(payload["document"])
+                    stream = use_case.extract_draft(req.user_id, document, req.personal_memory)
+                elif step == "confirm":
+                    stream = use_case.confirm(req.user_id, payload.get("skills", []))
+                else:
+                    yield _sse_bytes(
+                        AgentProtocolResponse(
+                            frames=[],
+                            state_delta={"error": "E_SOP_STEP_INVALID", "step": step},
+                            next_action="error",
+                        )
+                    )
+                    yield _done_frame_bytes()
+                    return
             else:
                 yield _sse_bytes(
                     AgentProtocolResponse(

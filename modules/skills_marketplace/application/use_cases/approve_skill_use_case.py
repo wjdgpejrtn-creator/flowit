@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from common_schemas import UserRole
 from common_schemas.exceptions import NotFoundError
 
 from ...domain.entities.approval_workflow import ApprovalWorkflow
 from ...domain.ports.skill_repository import SkillRepository
+from ...domain.services.skill_approval_policy import SkillApprovalPolicy
 from ...domain.services.skill_lifecycle import SkillLifecycle
 from ...domain.value_objects.skill_scope import SkillScope
 from ...domain.value_objects.skill_state import SkillState
@@ -30,10 +32,23 @@ class ApproveSkillUseCase:
         reviewer_id: UUID,
         approved: bool,
         comment: str | None = None,
+        *,
+        actor_role: UserRole,
+        actor_department_id: UUID | None = None,
     ) -> None:
         skill = await self._get(skill_id, scope)
         if skill is None:
             raise NotFoundError(f"Skill {skill_id} (scope={scope.value}) not found")
+
+        # ADR-0020 위임2: scope별 actor 인가 (reviewer가 곧 actor). 실패 시 AuthorizationError.
+        SkillApprovalPolicy.authorize(
+            scope=scope,
+            actor_user_id=reviewer_id,
+            actor_role=actor_role,
+            actor_department_id=actor_department_id,
+            skill_owner_user_id=getattr(skill, "owner_user_id", None),
+            skill_team_id=getattr(skill, "team_id", None),
+        )
 
         target = SkillState.APPROVED if approved else SkillState.DRAFT
         new_state = SkillLifecycle.transition(SkillState(skill.lifecycle_state), target)

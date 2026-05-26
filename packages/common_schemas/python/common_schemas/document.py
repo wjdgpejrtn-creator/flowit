@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .types import UtcDatetime
 
@@ -103,3 +103,88 @@ class AnalysisResult(BaseModel):
     prompt_version: str
     template_type: str
     few_shot_count: int
+
+
+# --- 파싱 품질/청킹 (REQ-006 doc_parser SSOT, REQ-012 이관) -----------------
+# doc_parser.domain.entities에서 이관 — storage/ai_agent가 경계를 넘어 공유하는 타입.
+
+
+class WarningInfo(BaseModel):
+    """파싱 중 발생한 경고. code는 README 에러코드(E0201 등) 기준."""
+
+    code: str
+    message: str
+    detail: Optional[dict[str, Any]] = None
+
+
+class QualityMetrics(BaseModel):
+    """파싱 품질 측정 지표 — QualityGate.evaluate()가 계산."""
+
+    model_config = ConfigDict(frozen=True)
+
+    korean_ratio: float
+    broken_char_ratio: float
+    blocks_per_page: float
+    heading_ratio: float
+    valid_table_ratio: float
+    structural_chunk_ratio: float
+    total_chunks: int
+    avg_tokens: float
+
+
+class ParseCoverage(BaseModel):
+    """파싱 커버리지 지표 — QualityGateResult에 포함."""
+
+    model_config = ConfigDict(frozen=True)
+
+    total_pages: int = 0
+    parsed_pages: int = 0
+    text_blocks: int = 0
+    table_blocks: int = 0
+    vision_blocks: int = 0
+    failed_blocks: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
+class QualityGateResult(BaseModel):
+    """품질 게이트 판정 결과 VO.
+
+    quality_status: success / warning / manual_correction_required / failed.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    quality_status: Literal[
+        "success",
+        "warning",
+        "manual_correction_required",
+        "failed",
+    ]
+    metrics: QualityMetrics
+    warnings: list[WarningInfo]
+    error_codes: list[str]
+    decision_reason: Optional[str] = None
+    coverage: ParseCoverage = Field(default_factory=ParseCoverage)
+
+
+class Chunk(BaseModel):
+    """청킹 결과 단위 엔티티. importance_score/embedding은 REQ-004 AI_Agent가 채움."""
+
+    chunk_id: UUID = Field(default_factory=uuid4)
+    block: ContentBlock
+    chunk_index: int
+    parent_document_id: UUID
+    token_count: int = 0
+    chunk_type: str = "structural"
+    importance_score: Optional[float] = None
+    embedding: Optional[list[float]] = None
+
+
+class ChunkingStrategy(BaseModel):
+    """청킹 전략 설정 VO (config/parser_quality.yaml에서 로드)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    max_tokens: int
+    overlap_tokens: int
+    token_estimator_mode: Literal["tiktoken", "char_estimate"]

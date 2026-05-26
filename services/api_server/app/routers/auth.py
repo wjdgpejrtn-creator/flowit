@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import logging
 import secrets
+from uuid import UUID
 
 import redis.asyncio as aioredis
 from auth.adapters.jwt_adapter import JWTAdapter
 from auth.adapters.oauth.google_oauth_client import GoogleOAuthClient
 from auth.application.use_cases.authenticate_use_case import AuthenticateUseCase
+from auth.application.use_cases.grant_user_role_use_case import GrantUserRoleUseCase
 from auth.application.use_cases.refresh_token_use_case import RefreshTokenUseCase
+from auth.domain.entities.user import User, UserRole
 from auth.domain.ports.session_repository import SessionRepository
 from common_schemas import PermissionSource
 from common_schemas.exceptions import AuthorizationError
@@ -20,12 +23,13 @@ from app.cookies import ACCESS_COOKIE, REFRESH_COOKIE, clear_auth_cookies, set_a
 from app.dependencies.auth import (
     get_authenticate_use_case,
     get_google_oauth,
+    get_grant_user_role_use_case,
     get_jwt_adapter,
     get_refresh_token_use_case,
     get_session_repository,
 )
 from app.dependencies.clients import get_redis
-from app.dependencies.permission import get_permission_source
+from app.dependencies.permission import get_current_user, get_permission_source
 from app.dependencies.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -165,8 +169,57 @@ async def logout(
     return response
 
 
-@router.get("/me", response_model=PermissionSource)
+class MeResponse(PermissionSource):
+    """`/auth/me` 응답 — 인가 컨텍스트(PermissionSource) + 사용자 프로필(email/name).
+
+    PermissionSource를 상속해 모든 authz 필드를 그대로 노출하고 프로필 필드만 추가한다.
+    email/name은 인가가 아니라 표시용이므로 공유 PermissionSource에는 싣지 않고 본 응답에서만
+    합성한다 (프론트 useAuth가 userName 등에 사용).
+    """
+
+    email: str
+    name: str
+
+
+@router.get("/me", response_model=MeResponse)
 async def me(
     permission: PermissionSource = Depends(get_permission_source),
-) -> PermissionSource:
-    return permission
+    user: User = Depends(get_current_user),
+) -> MeResponse:
+    return MeResponse(**permission.model_dump(), email=user.email, name=user.name)
+
+
+class GrantRoleRequest(BaseModel):
+    role: UserRole
+    department_id: UUID | None = None
+
+
+class GrantRoleResponse(BaseModel):
+    user_id: UUID
+    role: UserRole
+    department_id: UUID | None
+
+
+@router.put("/users/{user_id}/role", response_model=GrantRoleResponse)
+async def grant_user_role(
+    user_id: UUID,
+    body: GrantRoleRequest,
+    actor: PermissionSource = Depends(get_permission_source),
+    use_case: GrantUserRoleUseCase = Depends(get_grant_user_role_use_case),
+) -> GrantRoleResponse:
+    """Admin이 다른 사용자의 역할/소속 팀(department)을 변경한다 (스킬 마켓플레이스 RBAC).
+
+    인가는 use case에서 검증 — actor.role != 'Admin'이면 403(E-PERM-001).
+    team_manager 부여 시 department_id 필수(없으면 400). 도메인 예외는 error_handler가 HTTP로 매핑.
+    """
+    user = await use_case.execute(
+        actor=actor,
+        target_user_id=user_id,
+        role=body.role,
+        department_id=body.department_id,
+    )
+    return GrantRoleResponse(
+        user_id=user.user_id,
+        role=user.role,
+        department_id=user.department_id,
+    )
