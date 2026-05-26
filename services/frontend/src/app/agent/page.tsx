@@ -256,7 +256,7 @@ export default function AgentPage() {
             {DUMMY_SESSIONS.map((s) => (
               <button
                 key={s.id}
-                onClick={() => setActiveSession(s.id)}
+                onClick={() => { setActiveSession(s.id); setReadyToExecute(null); }}
                 className={[
                   'w-full text-left px-[8px] py-[6px] rounded-[4px_8px_4px_8px] text-[12px] border-[1.5px] leading-snug',
                   activeSession === s.id
