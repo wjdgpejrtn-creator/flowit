@@ -1,4 +1,4 @@
-# Sprint 3 Week 2 — 박아름 작업 현황 (2026-05-24, 사이클 마감)
+# Sprint 3 Week 2 — 박아름 작업 현황 (2026-05-24 사이클 + 5/26 e2e 종결)
 
 > ADR-0020 위임2 + ADR-0017 SkillDocument 이중 저장 호출부 배선 + `/auth/me` 프로필 노출
 > 관련 ADR: `ADR-0020`(게시 lifecycle), `ADR-0017`(SkillDocument 이중 저장)
@@ -55,15 +55,16 @@
    - **smoke 결과**: `POST /v1/agent/route`(source_type=sop, step=confirm, owner=seed system_user). ✅ confirm 라우팅 / ✅ `embed`(llm-base BGE-M3) / ✅ `CreateDraftSkillUseCase` 진입 / ✅ **`doc_store.save()` → GCS `skills/{skill_id}/SKILL.md`** — `gcloud storage cat`으로 frontmatter(name/description)+markdown body 직렬화 확인. **ADR-0017 GCS 이중저장 절반 = 배포본 정상 배선 + 쓰기 동작 staging 검증 完**(신규 코드 검증).
    - ❌ **`save_personal()`(session.merge=SELECT先)** → `asyncpg.InsufficientPrivilegeError: permission denied for table personal_skills`. DB 연결은 OK(health), **테이블 GRANT 누락**. terraform `google_sql_user.iam_users`는 Cloud SQL 인증 유저만 생성(`SELECT 1` 통과), PG 테이블 GRANT는 수동 관리(`docs/guides/cloud-sql-setup.md` §4/§4-1)인데 `personal_skills`(ADR-0020 `020_skills_marketplace_staging.sql`)가 런타임 SA `cloudsql-iam-modal`에 미부여. team/company_skills·skill_approvals 동반 누락 추정.
    - **조장 GRANT 즉시 fix(2026-05-26)**: 020 4테이블 모두 `cloudsql-iam-modal` GRANT 누락 + **`company_skills`는 전(全) SA 누락**까지 발견. 3 SA(`cloudsql-iam-modal`+`workflow-api-staging-sa`+`workflow-worker-staging-sa`)에 `GRANT ALL TABLES` + `USAGE,SELECT SEQUENCES` 일괄 + `workflow_admin` owner `ALTER DEFAULT PRIVILEGES`(신규 테이블 자동 GRANT). 검증 4테이블×3SA=12row×7priv.
-   - **✅ 재실행 full e2e PASS**: `created_count:1 / failed_count:0 / skill_ids=[db3e3a45-3690-42e0-a6f4-cd90d6f37665]`, HTTP 200. embed→create_draft(GCS save 先→DB `save_personal`)까지 전부 성공 = **ADR-0017 이중저장 e2e 완전 검증 종결**. (GCS save가 DB보다 먼저라 PASS 자체가 GCS+DB 양쪽 성공을 함의.)
+   - **✅ 재실행 full e2e PASS**: `created_count:1 / failed_count:0 / skill_ids=[db3e3a45-3690-42e0-a6f4-cd90d6f37665]`, HTTP 200. embed→create_draft(GCS save 先→DB `save_personal`)까지 전부 성공 = **ADR-0017 이중저장 e2e 완전 검증 종결**. (GCS save가 DB보다 먼저라 PASS 자체가 GCS+DB 양쪽 성공을 함의.) **이중저장 링크 입증**: 정리 시 SELECT한 `personal_skills` row의 `skill_document_uri` = `gs://…/skills/db3e3a45-…/SKILL.md`로 정확히 세팅됨(DB 메타 ↔ GCS 문서 연결 확인).
    - **⚠️ Modal 앱 드롭 사건(별건, 추적 필요)**: smoke 재실행 중 agent-skills-builder + llm-base 두 앱이 `modal-http: invalid function call` 404(앱 전체)로 드롭 → 박아름 `modal deploy` 재배포로 각각 복구(agent 29.9s / llm-base 4.8s, health 200 회복). 한 세션 2개 연속 드롭 = 워크스페이스에서 앱이 자꾸 stop되는 정황 → **조장/신정혜에 Modal 안정성 공유 권장**(원인 미확정).
-   - **설계 노트(GCS-first ordering)**: `CreateDraftSkillUseCase`는 GCS save가 DB save보다 먼저 → DB 실패 시 GCS orphan(`skills/728940fc-…/SKILL.md`, GRANT 누락 1차 실패분) 잔존(rollback 안 됨, skill_id=uuid4라 재시도마다 누적). ADR-0017 후속으로 보상 삭제 or 순서 검토 여지. **테스트 잔여물 정리 대상**: orphan `728940fc` + 성공 DRAFT `db3e3a45`(DB row+GCS).
+   - **설계 노트(GCS-first ordering)**: `CreateDraftSkillUseCase`는 GCS save가 DB save보다 먼저 → DB 실패 시 GCS orphan(`skills/728940fc-…/SKILL.md`, GRANT 누락 1차 실패분) 잔존(rollback 안 됨, skill_id=uuid4라 재시도마다 누적). ADR-0017 후속으로 보상 삭제 or 순서 검토 여지.
+   - **✅ 테스트 데이터 정리 完(2026-05-26)**: orphan `728940fc` + 성공 DRAFT `db3e3a45`(GCS SKILL.md 2건 `gcloud storage rm` + `personal_skills` row 1건 DELETE). 버킷 `skills/` 0건 / DB row 0건 확인. staging에 smoke 잔여물 없음.
 2. **프론트 userName 연결** (가원, REQ-010) — `useAuth.ts`의 `userName: ''` → `userName: user.name`(+ `me()` 응답 타입 MeResponse). 연결 시 PR #149 must-fix(AppBar ` · User`) 완전 해소. #163 머지로 unblock.
 3. **Composer SkillRetriever** (신정혜, ADR-0017 §3) — `SearchSkillsUseCase` 소비. FYI 핸드오프.
 4. **staging deploy / 인프라** (조장) — terraform/api_server + 위 ①② secret·SA 권한 + **DB GRANT(위 1번)**.
 
 ## 다음 단계
 
-1. ✅ **ADR-0017 SkillDocument 이중저장 e2e 종결**(2026-05-26) — 박아름 영역 코드/인프라 잔여 0. 남은 건 테스트 데이터 정리(orphan `728940fc` + DRAFT `db3e3a45`)뿐.
+1. ✅ **ADR-0017 SkillDocument 이중저장 e2e 종결**(2026-05-26) — 박아름 영역 코드/인프라/테스트데이터 정리까지 전부 完. 잔여 0.
 2. (조장/신정혜) Modal 워크스페이스 앱 드롭 정황 확인 — 별건, 추적 필요.
 3. (가원) 프론트 connection / (신정혜) Composer SkillRetriever — 별도 트랙
