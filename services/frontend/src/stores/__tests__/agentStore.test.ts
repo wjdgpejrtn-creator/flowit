@@ -10,6 +10,7 @@ beforeEach(() => {
     currentStep: null,
     rationaleText: '',
     slotQuestion: null,
+    readyToExecute: null,
     sseFrames: [],
   });
 });
@@ -73,5 +74,19 @@ describe('slotQuestion', () => {
     expect(useAgentStore.getState().slotQuestion).toEqual(q);
     useAgentStore.getState().setSlotQuestion(null);
     expect(useAgentStore.getState().slotQuestion).toBeNull();
+  });
+});
+
+describe('readyToExecute', () => {
+  it('setReadyToExecute sets workflow info', () => {
+    const state = { workflowId: 'wf-123', message: '실행 버튼을 클릭해 실행하세요.' };
+    useAgentStore.getState().setReadyToExecute(state);
+    expect(useAgentStore.getState().readyToExecute).toEqual(state);
+  });
+
+  it('setReadyToExecute clears to null', () => {
+    useAgentStore.getState().setReadyToExecute({ workflowId: 'wf-123', message: '...' });
+    useAgentStore.getState().setReadyToExecute(null);
+    expect(useAgentStore.getState().readyToExecute).toBeNull();
   });
 });

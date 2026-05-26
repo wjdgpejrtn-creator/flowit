@@ -54,6 +54,9 @@ interface AgentStoreState {
   slotQuestion: SlotFillQuestion | null;
   setSlotQuestion: (q: SlotFillQuestion | null) => void;
 
+  readyToExecute: { workflowId: string; message: string } | null;
+  setReadyToExecute: (state: { workflowId: string; message: string } | null) => void;
+
   sseFrames: string[];
   appendSSEFrame: (frame: string) => void;
 }
@@ -82,6 +85,9 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
 
   slotQuestion: null,
   setSlotQuestion: (q) => set({ slotQuestion: q }),
+
+  readyToExecute: null,
+  setReadyToExecute: (state) => set({ readyToExecute: state }),
 
   sseFrames: [],
   appendSSEFrame: (frame) =>
