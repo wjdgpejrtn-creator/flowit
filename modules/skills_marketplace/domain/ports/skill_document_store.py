@@ -39,3 +39,12 @@ class SkillDocumentStore(ABC):
     async def load(self, skill_id: UUID) -> SkillDocument | None:
         """skill_id의 SkillDocument 조회 (없으면 None)."""
         ...
+
+    @abstractmethod
+    async def delete(self, skill_id: UUID) -> None:
+        """skill_id의 SkillDocument(SKILL.md) 삭제. 멱등 — 객체가 없으면 no-op.
+
+        `DeletePersonalSkillUseCase`가 개인 스킬 삭제 시 GCS 잔여물(orphan)을 함께 정리하기 위해
+        호출한다 (2026-05-26 조장 결정 — 삭제 시 GCS SKILL.md도 제거). 구현은 storage.
+        """
+        ...
