@@ -44,8 +44,9 @@ celery_app.conf.update(
     ],
 )
 
-# Task 등록 — task 정의는 src/adapters/celery_tasks.py.
+# Task 등록 — task 정의는 src/adapters/celery_tasks.py + src/adapters/document_tasks.py.
 # autodiscover_tasks의 기본 related_name='tasks'라 파일명(celery_tasks)과 mismatch였고,
 # 패키지 경로도 "execution_engine.src.adapters"는 setuptools가 `src` 패키지로 등록하는 것과 어긋남.
 # 단일 모듈 명시 import로 확정 — import 시점에 @shared_task 데코레이터가 task를 등록한다.
 from .adapters import celery_tasks as _celery_tasks  # noqa: E402,F401
+from .adapters import document_tasks as _document_tasks  # noqa: E402,F401
