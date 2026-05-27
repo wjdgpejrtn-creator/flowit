@@ -18,7 +18,7 @@ jest.mock('next/navigation', () => ({
 
 let streamOnFrame: ((frame: Record<string, unknown>) => void) | null = null;
 const mockStreamCreateSession = jest.fn().mockImplementation(
-  (_req: unknown, onFrame: (frame: Record<string, unknown>) => void) => {
+  (_req: unknown, onFrame: (frame: Record<string, unknown>) => void, _signal?: AbortSignal) => {
     streamOnFrame = onFrame;
     return Promise.resolve();
   },
@@ -85,6 +85,7 @@ describe('AgentPage — handleSend SSE 연동', () => {
       expect(mockStreamCreateSession).toHaveBeenCalledWith(
         { message: '슬랙 알림 워크플로우', session_id: undefined },
         expect.any(Function),
+        expect.any(AbortSignal),
       );
     });
   });
@@ -123,8 +124,8 @@ describe('AgentPage — handleSend SSE 연동', () => {
     mockStreamCreateSession.mockImplementation(
       async (_req: unknown, onFrame: (frame: Record<string, unknown>) => void) => {
         onFrame({ frame_type: 'session', session_id: 'sid-1' });
-        onFrame({ frame_type: 'agent_node', node_name: 'security' });
-        onFrame({ frame_type: 'agent_node', node_name: 'intent' });
+        onFrame({ frame_type: 'agent_node', agent_node_name: 'security' });
+        onFrame({ frame_type: 'agent_node', agent_node_name: 'intent' });
       },
     );
 
@@ -145,7 +146,7 @@ describe('AgentPage — handleSend SSE 연동', () => {
         onFrame({ frame_type: 'session', session_id: 'sid-1' });
         onFrame({
           frame_type: 'result',
-          message: '워크플로우 완성!',
+          intent: 'create_workflow',
           payload: { status: 'ready_to_execute', workflow_id: 'wf-99', message: '실행 준비 완료' },
         });
       },
@@ -235,6 +236,7 @@ describe('AgentPage — handleSend SSE 연동', () => {
       expect(mockStreamCreateSession).toHaveBeenCalledWith(
         { message: '후속 메시지', session_id: 'existing-sid' },
         expect.any(Function),
+        expect.any(AbortSignal),
       );
     });
   });
@@ -243,5 +245,63 @@ describe('AgentPage — handleSend SSE 연동', () => {
     render(<AgentPage />);
     await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
     expect(mockStreamCreateSession).not.toHaveBeenCalled();
+  });
+
+  it('result frame의 payload.message가 채팅에 표시된다', async () => {
+    mockStreamCreateSession.mockImplementation(
+      async (_req: unknown, onFrame: (frame: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'session', session_id: 'sid-1' });
+        onFrame({
+          frame_type: 'result',
+          intent: 'create_workflow',
+          payload: { message: 'AI 응답입니다' },
+        });
+      },
+    );
+
+    render(<AgentPage />);
+
+    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    await userEvent.type(textarea, '테스트');
+    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('AI 응답입니다')).toBeInTheDocument();
+    });
+  });
+
+  it('slot_fill_question frame 수신 시 question이 표시된다', async () => {
+    mockStreamCreateSession.mockImplementation(
+      async (_req: unknown, onFrame: (frame: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'session', session_id: 'sid-1' });
+        onFrame({ frame_type: 'slot_fill_question', question: '대상 시트를 선택하세요', field_name: 'target_sheet' });
+      },
+    );
+
+    render(<AgentPage />);
+
+    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    await userEvent.type(textarea, '테스트');
+    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().slotQuestion).toEqual({
+        fieldName: 'target_sheet',
+        question: '대상 시트를 선택하세요',
+      });
+    });
+  });
+
+  it('AbortController signal이 streamCreateSession에 전달된다', async () => {
+    render(<AgentPage />);
+
+    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    await userEvent.type(textarea, '테스트');
+    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+
+    await waitFor(() => {
+      const call = mockStreamCreateSession.mock.calls[0];
+      expect(call[2]).toBeInstanceOf(AbortSignal);
+    });
   });
 });

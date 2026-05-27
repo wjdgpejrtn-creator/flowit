@@ -23,6 +23,7 @@ function mockReader(chunks: string[]) {
       }
       return Promise.resolve({ done: true, value: undefined });
     }),
+    releaseLock: jest.fn(),
   };
 }
 
@@ -60,9 +61,9 @@ describe('streamCreateSession', () => {
     mockApiFetch.mockResolvedValueOnce(
       mockResponse([framesToSSE([
         { frame_type: 'session', session_id: 'sid-1' },
-        { frame_type: 'agent_node', node_name: 'security' },
-        { frame_type: 'agent_node', node_name: 'intent' },
-        { frame_type: 'result', message: '완료', payload: { status: 'ready_to_execute', workflow_id: 'wf-1' } },
+        { frame_type: 'agent_node', agent_node_name: 'security' },
+        { frame_type: 'agent_node', agent_node_name: 'intent' },
+        { frame_type: 'result', intent: 'create_workflow', payload: { status: 'ready_to_execute', workflow_id: 'wf-1', message: '완료' } },
       ])]) as Response,
     );
 
@@ -70,14 +71,14 @@ describe('streamCreateSession', () => {
 
     expect(frames).toHaveLength(4);
     expect(frames.map((f) => f.frame_type)).toEqual(['session', 'agent_node', 'agent_node', 'result']);
-    expect(frames[1].node_name).toBe('security');
-    expect(frames[2].node_name).toBe('intent');
+    expect(frames[1].agent_node_name).toBe('security');
+    expect(frames[2].agent_node_name).toBe('intent');
   });
 
   it('청크가 분할된 SSE도 정상 파싱한다', async () => {
     const frames: Record<string, unknown>[] = [];
     const frame1 = JSON.stringify({ frame_type: 'session', session_id: 'sid-1' });
-    const frame2 = JSON.stringify({ frame_type: 'agent_node', node_name: 'security' });
+    const frame2 = JSON.stringify({ frame_type: 'agent_node', agent_node_name: 'security' });
     mockApiFetch.mockResolvedValueOnce(
       mockResponse([
         `data: ${frame1}\n`,
@@ -118,10 +119,10 @@ describe('streamCreateSession', () => {
 
     await streamCreateSession({ message: '테스트', session_id: 'existing' }, () => {});
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/agents/sessions', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/v1/agents/sessions', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ message: '테스트', session_id: 'existing' }),
-    });
+    }));
   });
 
   it('error frame을 올바르게 전달한다', async () => {

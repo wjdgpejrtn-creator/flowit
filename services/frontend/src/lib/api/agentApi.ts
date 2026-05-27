@@ -13,10 +13,12 @@ export interface AgentMessageRequest {
 export async function streamCreateSession(
   req: AgentMessageRequest,
   onFrame: (frame: Record<string, unknown>) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const res = await apiFetch('/api/v1/agents/sessions', {
     method: 'POST',
     body: JSON.stringify(req),
+    signal,
   });
 
   if (!res.ok) {
@@ -28,23 +30,27 @@ export async function streamCreateSession(
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop() ?? '';
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() ?? '';
 
-    for (const part of parts) {
-      for (const line of part.split('\n')) {
-        if (line.startsWith('data: ')) {
-          try {
-            onFrame(JSON.parse(line.slice(6)) as Record<string, unknown>);
-          } catch { /* skip malformed */ }
+      for (const part of parts) {
+        for (const line of part.split('\n')) {
+          if (line.startsWith('data: ')) {
+            try {
+              onFrame(JSON.parse(line.slice(6)) as Record<string, unknown>);
+            } catch { /* skip malformed */ }
+          }
         }
       }
     }
+  } finally {
+    reader.releaseLock();
   }
 }
 

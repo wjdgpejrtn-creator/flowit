@@ -4,7 +4,6 @@ import { useRef, useEffect, useState } from 'react';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import Steps from '@/components/common/Steps';
-import RiskPill from '@/components/common/RiskPill';
 import StatusPill from '@/components/common/StatusPill';
 import NodeCard from '@/components/common/NodeCard';
 import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/agentStore';
@@ -198,6 +197,11 @@ export default function AgentPage() {
   const [executeLoading, setExecuteLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   useSSEStream(sessionId, {
     onResult: (frame) => {
@@ -235,6 +239,10 @@ export default function AgentPage() {
     const text = input.trim();
     if (!text || streaming) return;
 
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     addMessage({ id: `m${Date.now()}`, role: 'user', content: text, timestamp: Date.now() });
     setInput('');
     setStreaming(true);
@@ -250,7 +258,7 @@ export default function AgentPage() {
               setSessionId(frame.session_id as string);
               break;
             case 'agent_node':
-              setCurrentStep(frame.node_name as AgentStep);
+              setCurrentStep(frame.agent_node_name as AgentStep);
               break;
             case 'rationale_delta':
               appendRationale(frame.delta as string);
@@ -258,8 +266,7 @@ export default function AgentPage() {
             case 'slot_fill_question':
               setSlotQuestion({
                 fieldName: frame.field_name as string,
-                label: frame.label as string,
-                risk: (frame.risk as RiskLevel) ?? RiskLevel.LOW,
+                question: frame.question as string,
               });
               break;
             case 'result': {
@@ -270,8 +277,9 @@ export default function AgentPage() {
                   message: (payload.message as string) ?? '워크플로우가 완성됐습니다.',
                 });
               }
-              if (typeof frame.message === 'string') {
-                addMessage({ id: `a${Date.now()}`, role: 'agent', content: frame.message, timestamp: Date.now() });
+              const msg = payload?.message;
+              if (typeof msg === 'string') {
+                addMessage({ id: `a${Date.now()}`, role: 'agent', content: msg, timestamp: Date.now() });
               }
               break;
             }
@@ -285,8 +293,10 @@ export default function AgentPage() {
               break;
           }
         },
+        controller.signal,
       );
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       addMessage({
         id: `e${Date.now()}`,
         role: 'agent',
@@ -476,8 +486,7 @@ export default function AgentPage() {
                   {slotQuestion ? (
                     <div className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] p-[10px] bg-[var(--color-surface)]">
                       <div className="flex items-center gap-2 mb-2">
-                        <RiskPill level={slotQuestion.risk} />
-                        <span className="text-[12px] font-bold">{slotQuestion.label}</span>
+                        <span className="text-[12px] font-bold">{slotQuestion.question}</span>
                       </div>
                       <input
                         type="text"
