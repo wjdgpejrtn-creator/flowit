@@ -177,6 +177,35 @@ module "skills_marketplace_bucket" {
 }
 
 # ---------------------------------------------------------------------------
+# GCS — 일반 사용자 업로드 documents 버킷 (REQ-006/009, 쿠쿠 doc_parser 입구)
+# api_server `POST /documents/upload`가 multipart 업로드 → 본 버킷에 write.
+# 후속 `POST /documents/{id}/analyze`가 worker Celery task로 dispatch →
+# worker가 download → 로컬 tmpfile → doc_parser `ParsingPipeline.execute(path, meta)`.
+# 키 패턴: gs://{bucket}/documents/{doc_id}/{filename}
+# Skills Marketplace SKILL.md(skills_marketplace_bucket)와 분리 — 일반 파일/스킬 문서 격리.
+# ---------------------------------------------------------------------------
+module "documents_bucket" {
+  source = "../../modules/gcs"
+
+  project_id    = var.project_id
+  location      = var.region
+  bucket_name   = "${var.project_id}-documents-${var.environment}"
+  storage_class = "STANDARD"
+  force_destroy = true # staging only
+
+  # api_server SA(upload/조회) + worker SA(analyze download) + 팀(디버깅/seed).
+  # skills_marketplace_bucket 패턴을 따라 두 Cloud Run SA를 명시적 포함.
+  writer_members = distinct(concat(
+    var.agent_secret_accessors,
+    var.api_server_service_account != "" ? ["serviceAccount:${var.api_server_service_account}"] : [],
+    var.execution_engine_worker_service_account != "" ? ["serviceAccount:${var.execution_engine_worker_service_account}"] : [],
+  ))
+  reader_members = []
+
+  labels = merge(local.common_labels, { role = "documents" })
+}
+
+# ---------------------------------------------------------------------------
 # GCS — agent-composer SSE session frame + workflow draft 저장 버킷 (REQ-004)
 # GCSSessionFrameStore + GCSWorkflowDraftStore가 동일 버킷 사용 (env GCS_SESSION_BUCKET).
 # composer가 cloudsql-iam-modal SA로 write — var.agent_secret_accessors에 포함됨.
@@ -310,13 +339,16 @@ module "api_server" {
     # SkillDocumentStore(ADR-0017 이중 저장) — 일반 GCS_BUCKET_NAME과 분리된 전용 버킷.
     # secret 아닌 단순 이름이라 plaintext env (secret_env_vars 아님).
     SKILLS_MARKETPLACE_BUCKET = module.skills_marketplace_bucket.bucket_name
+    # 일반 사용자 업로드 문서 버킷 (REQ-006/009 documents 라우터 입구) — Phase B 라우터가
+    # `os.getenv("DOCUMENTS_BUCKET")`로 읽고 `GCSAdapter(bucket_name=...)` 구성.
+    DOCUMENTS_BUCKET = module.documents_bucket.bucket_name
   }
 
   # PR #80 GCP Secret Manager + 본 PR-C 신규 추가(jwt/encryption/google) — Cloud Run이 직접 주입.
   # api_server는 startup 시 `os.getenv` + Settings(pydantic-settings)로 읽음. plaintext env 회피.
   secret_env_vars = {
-    REDIS_URL            = { secret_id = "redis-url", version = "latest" }
-    CLOUD_SQL_INSTANCE   = { secret_id = "cloud-sql-instance", version = "latest" }
+    REDIS_URL          = { secret_id = "redis-url", version = "latest" }
+    CLOUD_SQL_INSTANCE = { secret_id = "cloud-sql-instance", version = "latest" }
     # api_server 전용 db-iam-user-api (옵션 C, 2026-05-25 사고 대응) — Modal sub-agents 3종이
     # 공유하는 db-iam-user를 latest로 fetch하면 값 충돌로 인증 깨지는 폭탄 영구 격리.
     # 값(api SA full email)은 PR-A(#179) 후속 수동 add 완료. 박아름 v6 사고와 동일 메커니즘.
@@ -407,6 +439,9 @@ module "execution_engine_worker" {
 
   env_vars = {
     ENVIRONMENT = var.environment
+    # documents analyze task가 GCS에서 download → 로컬 tmpfile → doc_parser 실행 (REQ-006/009).
+    # api_server upload 측과 동일 버킷 — Phase B analyze task에서 `os.getenv("DOCUMENTS_BUCKET")`로 읽음.
+    DOCUMENTS_BUCKET = module.documents_bucket.bucket_name
   }
 
   # PR #80 GCP Secret Manager에서 직접 주입 — load_secrets_to_env 우회.
