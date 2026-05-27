@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from skills_marketplace.domain.entities.approval_workflow import ApprovalWorkflow
 from skills_marketplace.domain.entities.marketplace_company_skill import MarketplaceCompanySkill
@@ -98,6 +98,30 @@ class PgMarketplaceSkillRepository(SkillRepository):
 
         result = await self._session.execute(stmt)
         return [mapper.to_domain(row) for row in result.scalars().all()]
+
+    # ── personal 미리보기/편집 (REQ-013) ─────────────────────────────────────
+
+    async def list_personal_by_user(
+        self,
+        user_id: UUID,
+        lifecycle_state: SkillState | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MarketplacePersonalSkill]:
+        stmt = select(PersonalSkillModel).where(PersonalSkillModel.owner_user_id == user_id)
+        if lifecycle_state is not None:
+            stmt = stmt.where(PersonalSkillModel.lifecycle_state == lifecycle_state.value)
+        stmt = stmt.order_by(PersonalSkillModel.updated_at.desc()).limit(limit).offset(offset)
+
+        result = await self._session.execute(stmt)
+        return [PersonalSkillMapper.to_domain(row) for row in result.scalars().all()]
+
+    async def delete_personal(self, skill_id: UUID) -> None:
+        # 존재하지 않는 skill_id면 행 0건 영향 — 멱등. 인가/lifecycle 검증은 use case 선행.
+        await self._session.execute(
+            delete(PersonalSkillModel).where(PersonalSkillModel.skill_id == skill_id)
+        )
+        await self._session.flush()
 
     # ── approval ─────────────────────────────────────────────────────────────
 

@@ -5,6 +5,8 @@ DB 실행 없이 컴파일된 SQL로 검증한다 (행 동작 검증은 staging 
 """
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from sqlalchemy.dialects import postgresql
 from skills_marketplace.domain.value_objects.skill_scope import SkillScope
@@ -91,3 +93,76 @@ async def test_search_no_lifecycle_filter_by_default():
     await PgMarketplaceSkillRepository(session).search([0.0] * 768, SkillScope.COMPANY)
     # lifecycle_state 미지정 → WHERE에 비교 없음 (SELECT 컬럼으로만 등장).
     assert "lifecycle_state =" not in _sql(session)
+
+
+# ── list_personal_by_user (REQ-013 personal 미리보기) ────────────────────────
+
+
+class _FlushSession(_CapturingSession):
+    """flush까지 호출되는 delete_personal 시뮬레이션용."""
+
+    async def flush(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_list_personal_filters_by_owner_user_id():
+    session = _CapturingSession()
+    await PgMarketplaceSkillRepository(session).list_personal_by_user(uuid4())
+    sql = _sql(session)
+    assert "FROM personal_skills" in sql
+    assert "owner_user_id =" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_personal_no_lifecycle_filter_by_default():
+    session = _CapturingSession()
+    await PgMarketplaceSkillRepository(session).list_personal_by_user(uuid4())
+    # lifecycle_state 미지정 → WHERE에 비교 없음 (SELECT 컬럼으로만 등장).
+    assert "lifecycle_state =" not in _sql(session)
+
+
+@pytest.mark.asyncio
+async def test_list_personal_lifecycle_filter_applied():
+    session = _CapturingSession()
+    await PgMarketplaceSkillRepository(session).list_personal_by_user(
+        uuid4(), lifecycle_state=SkillState.DRAFT
+    )
+    assert "lifecycle_state =" in _sql(session)
+
+
+@pytest.mark.asyncio
+async def test_list_personal_orders_by_updated_at_desc():
+    session = _CapturingSession()
+    await PgMarketplaceSkillRepository(session).list_personal_by_user(uuid4())
+    sql = _sql(session)
+    assert "ORDER BY personal_skills.updated_at DESC" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_personal_pagination_applied():
+    session = _CapturingSession()
+    await PgMarketplaceSkillRepository(session).list_personal_by_user(uuid4(), limit=20, offset=40)
+    sql = _sql(session)
+    assert "LIMIT" in sql
+    assert "OFFSET" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_personal_does_not_filter_promoted():
+    """소유자 본인 목록 — 승격된 원본도 포함(스펙 §2.5)."""
+    session = _CapturingSession()
+    await PgMarketplaceSkillRepository(session).list_personal_by_user(uuid4())
+    assert "promoted_to_team_id IS NULL" not in _sql(session)
+
+
+# ── delete_personal ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_delete_personal_emits_delete_by_skill_id():
+    session = _FlushSession()
+    await PgMarketplaceSkillRepository(session).delete_personal(uuid4())
+    sql = _sql(session)
+    assert sql.startswith("DELETE FROM personal_skills")
+    assert "skill_id =" in sql
