@@ -23,6 +23,8 @@ class UpdatePersonalSkillUseCase:
     - 빈 문자열 name/description은 거부(`ValidationError`) — `model_copy`는 재검증하지 않으므로 직접 가드.
 
     부분 수정: None인 필드는 변경하지 않는다. 변경 항목이 없으면 저장 없이 현재 스킬 반환.
+    `tags`는 None(미변경)과 `[]`(빈 리스트)를 구분 — `tags=[]`는 **태그 전체 비움**으로 처리한다
+    (name/description의 빈 문자열 거부와 대비되는 정책: 빈 태그 목록은 유효한 상태).
     """
 
     _EDITABLE_STATE = SkillState.DRAFT

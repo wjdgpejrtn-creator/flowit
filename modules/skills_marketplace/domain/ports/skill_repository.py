@@ -108,6 +108,9 @@ class SkillRepository(ABC):
     async def delete_personal(self, skill_id: UUID) -> None:
         """개인 스킬 단건 삭제 (DB row). GCS SkillDocument 삭제는 use case가 `SkillDocumentStore`로 별도 수행.
 
-        존재하지 않는 skill_id면 no-op(멱등). 인가/lifecycle 검증은 `DeletePersonalSkillUseCase`에서 선행.
+        존재하지 않는 skill_id면 no-op(멱등) — storage 계층의 방어적 속성(재시도/경합 안전).
+        다만 정상 흐름에선 `DeletePersonalSkillUseCase`가 `get_personal`로 선검증 후 미존재 시
+        `NotFoundError`를 먼저 던지므로, 이 메서드에 미존재 skill_id가 도달하지는 않는다.
+        인가/lifecycle 검증도 use case에서 선행.
         """
         ...
