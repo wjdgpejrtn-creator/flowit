@@ -84,3 +84,30 @@ class SkillRepository(ABC):
         레코드로 남긴다. 저장 대상 = skill_approvals 테이블(PR-2e DDL). 구현은 storage.
         """
         ...
+
+    # ── personal 미리보기/편집 UI 지원 (REQ-013, 가원 요청) ──────────────────────
+    # 구현은 storage(PgMarketplaceSkillRepository, 조장). 인가/lifecycle 제약은 use case에서.
+
+    @abstractmethod
+    async def list_personal_by_user(
+        self,
+        user_id: UUID,
+        lifecycle_state: SkillState | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MarketplacePersonalSkill]:
+        """소유자(owner_user_id)의 개인 스킬 목록 — 미리보기 UI용.
+
+        `lifecycle_state` 지정 시 해당 게시 상태만(예: DRAFT). None이면 전체.
+        `limit`/`offset` 페이지네이션. 정렬은 구현(storage)에서 `updated_at DESC` 권장.
+        승격 완료분(`promoted_to_team_id`) 포함 여부는 소유자 본인 목록이므로 필터하지 않는다.
+        """
+        ...
+
+    @abstractmethod
+    async def delete_personal(self, skill_id: UUID) -> None:
+        """개인 스킬 단건 삭제 (DB row). GCS SkillDocument 삭제는 use case가 `SkillDocumentStore`로 별도 수행.
+
+        존재하지 않는 skill_id면 no-op(멱등). 인가/lifecycle 검증은 `DeletePersonalSkillUseCase`에서 선행.
+        """
+        ...
