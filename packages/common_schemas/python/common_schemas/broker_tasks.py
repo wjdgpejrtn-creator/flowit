@@ -23,5 +23,8 @@ TASK_EXECUTE_NODE: str = "execution_engine.execute_node"
 TASK_HANDLE_HANDOFF: str = "execution_engine.handle_handoff"
 TASK_LEVEL_CALLBACK: str = "execution_engine.level_callback"
 
+# REQ-006/009 documents analyze task
+TASK_ANALYZE_DOCUMENT: str = "execution_engine.analyze_document"
+
 # Default Celery queue
 QUEUE_DEFAULT: str = "default"

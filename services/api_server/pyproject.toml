@@ -16,6 +16,8 @@ dependencies = [
     "cloud-sql-python-connector[asyncpg]>=1.12",
     "celery[redis]>=5.4.0",
     "sse-starlette>=2.0.0",
+    # REQ-006/009 documents 라우터 `POST /upload` UploadFile 파싱용
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

@@ -15,7 +15,7 @@ from common_schemas import Chunk, DocumentBlock, QualityGateResult
 from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
 
 from ..mappers.document_mapper import DocumentMapper
-from ..orm.document_model import DocumentChunkModel, QualityLogModel
+from ..orm.document_model import DocumentChunkModel, DocumentModel, QualityLogModel
 
 
 class PgDocumentRepository(DocumentRepositoryPort):
@@ -23,10 +23,16 @@ class PgDocumentRepository(DocumentRepositoryPort):
         self._session = session
 
     async def save(self, document: DocumentBlock) -> UUID:
-        model = DocumentMapper.to_orm(document)
-        self._session.add(model)
+        # upload → analyze 사이 UPSERT 지원. upload 시 빈 blocks=[]로 INSERT,
+        # analyze 완료 후 동일 document_id로 parsed blocks 채워 재호출 시 UPDATE.
+        # session.add는 INSERT-only라 두 번째 호출 시 PK 충돌 — merge가 정확한 의미.
+        merged = await self._session.merge(DocumentMapper.to_orm(document))
         await self._session.flush()
-        return model.document_id
+        return merged.document_id
+
+    async def get_by_id(self, document_id: UUID) -> DocumentBlock | None:
+        model = await self._session.get(DocumentModel, document_id)
+        return DocumentMapper.to_domain(model) if model is not None else None
 
     async def save_chunks(self, chunks: list[Chunk]) -> None:
         for chunk in chunks:
