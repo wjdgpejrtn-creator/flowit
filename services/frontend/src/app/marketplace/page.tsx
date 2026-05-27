@@ -18,6 +18,7 @@ const LIFECYCLE_CONFIG: Record<SkillLifecycleState, { color: string; label: stri
   review:    { color: 'var(--color-risk-med)', label: '검토 중' },
   approved:  { color: 'var(--color-risk-low)', label: '승인됨' },
   published: { color: 'var(--color-accent)',   label: '게시됨' },
+  archived:  { color: 'var(--color-ink4)',    label: '보관됨' },
 };
 
 function LifecyclePill({ state }: { state: SkillLifecycleState }) {

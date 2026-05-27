@@ -1,6 +1,6 @@
 import { apiFetch, apiJson } from '@/lib/apiClient';
 
-export type SkillLifecycleState = 'draft' | 'review' | 'approved' | 'published';
+export type SkillLifecycleState = 'draft' | 'review' | 'approved' | 'published' | 'archived';
 
 export interface PersonalSkill {
   skill_id: string;

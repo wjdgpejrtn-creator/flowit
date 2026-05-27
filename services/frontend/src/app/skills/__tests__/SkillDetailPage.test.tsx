@@ -2,9 +2,10 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const mockPush = jest.fn();
+const mockRefresh = jest.fn();
 let mockId = 'sk-001';
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
   useParams: () => ({ id: mockId }),
   usePathname: () => '/skills/test-id',
 }));
@@ -33,6 +34,7 @@ beforeEach(() => {
   mockUpdate.mockReset();
   mockDelete.mockReset();
   mockPush.mockReset();
+  mockRefresh.mockReset();
 });
 
 const DRAFT_SKILL = {

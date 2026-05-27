@@ -22,6 +22,7 @@ const LIFECYCLE_CONFIG: Record<SkillLifecycleState, { color: string; label: stri
   review:    { color: 'var(--color-risk-med)',  label: '검토 중' },
   approved:  { color: 'var(--color-risk-low)',  label: '승인됨' },
   published: { color: 'var(--color-accent)',    label: '게시됨' },
+  archived:  { color: 'var(--color-ink4)',     label: '보관됨' },
 };
 
 function LifecyclePill({ state }: { state: SkillLifecycleState }) {
@@ -147,6 +148,7 @@ export default function SkillDetailPage() {
     try {
       await deletePersonalSkill(skill.skill_id);
       router.push('/marketplace?tab=personal');
+      router.refresh();
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       if (msg.startsWith('400')) setSaveError('DRAFT 상태의 스킬만 삭제할 수 있습니다.');
@@ -230,7 +232,7 @@ export default function SkillDetailPage() {
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-[12px] text-[var(--color-ink3)]">태그 (쉼표 구분)</label>
+                  <label className="text-[12px] text-[var(--color-ink3)]">태그 (쉼표 구분, 비우면 전체 삭제)</label>
                   <input
                     type="text"
                     value={editTags}
