@@ -14,8 +14,8 @@ environment = "staging"
 enable_cloud_run               = true
 enable_execution_engine_worker = true
 
-api_server_image              = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/api-server:phase-f-6"
-execution_engine_worker_image = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/execution-engine-worker:adr-0018-2b"
+api_server_image              = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/api-server:phase-f-7"
+execution_engine_worker_image = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/execution-engine-worker:documents-1"
 
 # api_server / worker 모두 dedicated SA (PR-A/B 2-PR 패턴으로 공용 cloudsql-iam-modal에서 분리, 격리).
 # 공용 cloudsql-iam-modal은 Modal sub-agents 3종(skills_builder/composer/personalization) 전용으로 축소.
