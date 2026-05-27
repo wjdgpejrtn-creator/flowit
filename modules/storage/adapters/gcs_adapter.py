@@ -44,9 +44,16 @@ class GCSAdapter(ObjectStoragePort):
             raise NotFoundError(f"File not found: {key}", code="E-STORAGE-001") from exc
 
     async def delete(self, key: str) -> None:
+        # download과 동일한 정규화 — 키 부재 시 NotFoundError(E-STORAGE-001). 호출자가
+        # 멱등성을 원하면 그 예외를 swallow한다(예: GcsSkillDocumentStore.delete).
+        from google.cloud.exceptions import NotFound as _GcsNotFound
+
         bucket = self._get_bucket()
         blob = bucket.blob(key)
-        blob.delete()
+        try:
+            blob.delete()
+        except _GcsNotFound as exc:
+            raise NotFoundError(f"File not found: {key}", code="E-STORAGE-001") from exc
 
     async def presign(self, key: str, ttl: int = 3600) -> str:
         import datetime
