@@ -11,6 +11,7 @@ from common_schemas.exceptions import AuthorizationError, NotFoundError, Validat
 
 from skills_marketplace.application.use_cases import (
     DeletePersonalSkillUseCase,
+    GetPersonalSkillUseCase,
     ListUserPersonalSkillsUseCase,
     UpdatePersonalSkillUseCase,
 )
@@ -263,3 +264,46 @@ async def test_delete_non_draft_rejected():
         await DeletePersonalSkillUseCase(repo, doc).execute(sid, me)
     assert await repo.get_personal(sid) is not None
     assert doc.deleted == []
+
+
+# ── Get ─────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_returns_skill_for_owner():
+    repo = _InMemorySkillRepo()
+    me, sid = uuid4(), uuid4()
+    await repo.save_personal(_personal(sid, me, name="원본"))
+
+    skill = await GetPersonalSkillUseCase(repo).execute(sid, me)
+    assert skill.skill_id == sid
+    assert skill.name == "원본"
+
+
+@pytest.mark.asyncio
+async def test_get_rejects_non_owner():
+    repo = _InMemorySkillRepo()
+    sid = uuid4()
+    await repo.save_personal(_personal(sid, uuid4()))  # owner = 타인
+
+    with pytest.raises(AuthorizationError):
+        await GetPersonalSkillUseCase(repo).execute(sid, uuid4())
+
+
+@pytest.mark.asyncio
+async def test_get_not_found():
+    repo = _InMemorySkillRepo()
+    with pytest.raises(NotFoundError):
+        await GetPersonalSkillUseCase(repo).execute(uuid4(), uuid4())
+
+
+@pytest.mark.asyncio
+async def test_get_returns_any_lifecycle_state():
+    """Get은 lifecycle 제약 없음 — DRAFT 외 상태(PUBLISHED 등)도 owner면 조회 가능.
+    Update/Delete만 DRAFT-only 제약 (편집 가능 조건 ≠ 조회 가능 조건)."""
+    repo = _InMemorySkillRepo()
+    me, sid = uuid4(), uuid4()
+    await repo.save_personal(_personal(sid, me, SkillState.PUBLISHED))
+
+    skill = await GetPersonalSkillUseCase(repo).execute(sid, me)
+    assert SkillState(skill.lifecycle_state) == SkillState.PUBLISHED
