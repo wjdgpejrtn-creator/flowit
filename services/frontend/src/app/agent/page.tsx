@@ -9,6 +9,7 @@ import StatusPill from '@/components/common/StatusPill';
 import NodeCard from '@/components/common/NodeCard';
 import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/agentStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
+import { streamCreateSession } from '@/lib/api/agentApi';
 import { ReactFlow, Background, Controls, Node, Edge, useNodesState, useEdgesState } from '@xyflow/react';
 import { RiskLevel } from '@common/generated';
 import type { NodeStatus } from '@/types';
@@ -184,17 +185,18 @@ function ExecutionView() {
 export default function AgentPage() {
   const {
     mode, setMode,
-    sessionId,
+    sessionId, setSessionId,
     messages, addMessage,
-    rationaleText,
-    slotQuestion,
-    currentStep,
+    rationaleText, appendRationale, clearRationale,
+    slotQuestion, setSlotQuestion,
+    currentStep, setCurrentStep,
     readyToExecute, setReadyToExecute,
   } = useAgentStore();
 
   const [input, setInput] = useState('');
   const [activeSession, setActiveSession] = useState('s1');
   const [executeLoading, setExecuteLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useSSEStream(sessionId, {
@@ -229,11 +231,71 @@ export default function AgentPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [displayMessages.length]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || streaming) return;
+
     addMessage({ id: `m${Date.now()}`, role: 'user', content: text, timestamp: Date.now() });
     setInput('');
+    setStreaming(true);
+    setCurrentStep(null);
+    clearRationale();
+
+    try {
+      await streamCreateSession(
+        { message: text, session_id: sessionId ?? undefined },
+        (frame) => {
+          switch (frame.frame_type) {
+            case 'session':
+              setSessionId(frame.session_id as string);
+              break;
+            case 'agent_node':
+              setCurrentStep(frame.node_name as AgentStep);
+              break;
+            case 'rationale_delta':
+              appendRationale(frame.delta as string);
+              break;
+            case 'slot_fill_question':
+              setSlotQuestion({
+                fieldName: frame.field_name as string,
+                label: frame.label as string,
+                risk: (frame.risk as RiskLevel) ?? RiskLevel.LOW,
+              });
+              break;
+            case 'result': {
+              const payload = frame.payload as Record<string, unknown> | undefined;
+              if (payload?.status === 'ready_to_execute') {
+                setReadyToExecute({
+                  workflowId: payload.workflow_id as string,
+                  message: (payload.message as string) ?? '워크플로우가 완성됐습니다.',
+                });
+              }
+              if (typeof frame.message === 'string') {
+                addMessage({ id: `a${Date.now()}`, role: 'agent', content: frame.message, timestamp: Date.now() });
+              }
+              break;
+            }
+            case 'error':
+              addMessage({
+                id: `e${Date.now()}`,
+                role: 'agent',
+                content: `오류가 발생했습니다: ${(frame.message as string) ?? '알 수 없는 오류'}`,
+                timestamp: Date.now(),
+              });
+              break;
+          }
+        },
+      );
+    } catch (err) {
+      addMessage({
+        id: `e${Date.now()}`,
+        role: 'agent',
+        content: `연결 오류: ${err instanceof Error ? err.message : '서버에 연결할 수 없습니다.'}`,
+        timestamp: Date.now(),
+      });
+    } finally {
+      setStreaming(false);
+    }
   };
 
   const stepIndex = currentStep ? STEP_ORDER.indexOf(currentStep) + 1 : 4;
@@ -355,10 +417,11 @@ export default function AgentPage() {
                 {/* Input bar */}
                 <div className="border-t-[1.5px] border-[var(--color-ink)] px-3 py-2 flex gap-2 bg-[var(--color-surface)] flex-shrink-0">
                   <textarea
-                    className="flex-1 resize-none border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-[10px] py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)]"
+                    className="flex-1 resize-none border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-[10px] py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
                     rows={2}
-                    placeholder="워크플로우를 자연어로 설명하세요… (Shift+Enter 줄바꿈)"
+                    placeholder={streaming ? 'AI가 처리 중입니다…' : '워크플로우를 자연어로 설명하세요… (Shift+Enter 줄바꿈)'}
                     value={input}
+                    disabled={streaming}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
@@ -367,7 +430,9 @@ export default function AgentPage() {
                       }
                     }}
                   />
-                  <Btn onClick={handleSend} className="self-end">전송 ↑</Btn>
+                  <Btn onClick={handleSend} disabled={streaming} className="self-end">
+                    {streaming ? '처리 중…' : '전송 ↑'}
+                  </Btn>
                 </div>
               </div>
 
