@@ -79,9 +79,10 @@ from common_schemas import (
 | `ParserPort` | `parse(file_path: str, file_meta: FileMeta) -> DocumentBlock` | `adapters/parsers/` |
 | | `supports(mime_type: str) -> bool` | |
 | `VisionPort` | `extract(file_path: str, vision_type: VisionType, page_num: int, block_index: int) -> ContentBlock \| None` | `adapters/vision/` |
-| `DocumentRepositoryPort` | `save(document: DocumentBlock) -> UUID` | `adapters/persistence/` (REQ-001 storage 연동) |
+| `DocumentRepositoryPort` | `save(document: DocumentBlock) -> UUID` | `modules/storage/repositories/pg_document_repository.py` (REQ-008 storage). upload(blocks=[]) → analyze(parsed) UPSERT(merge) (PR #197) |
 | | `save_chunks(chunks: list[Chunk]) -> None` | |
 | | `save_quality_log(result: QualityGateResult, document_id: UUID) -> None` | |
+| | `get_by_id(document_id: UUID) -> DocumentBlock \| None` | `GET /api/v1/documents/{id}` + worker analyze가 메타 조회에 사용. 인가는 호출자(`PermissionSource.user_id` 비교) 책임 (PR #197, 조장 — Update/Delete 동일 패턴으로 owner-검사 라우터 분산 방지) |
 | `ConfigLoaderPort` | `load_quality_config() -> QualityConfig` | `adapters/config/` |
 | | `load_chunking_strategy() -> ChunkingStrategy` | |
 | | `load_pii_rules() -> list[PIIMaskRule]` | |

@@ -84,9 +84,16 @@ class AgentComposer:
             "llm-base-url":          "LLM_BASE_URL",
             "embedding-base-url":    "EMBEDDING_BASE_URL",
             "gcs-session-bucket":    "GCS_SESSION_BUCKET",
-            "gcs-personal-bucket":   "GCS_PERSONAL_BUCKET",
             "execution-engine-url":  "EXECUTION_ENGINE_URL",
         })
+        # gcs-personal-bucket: secret 미등록이어도 composer boot 실패 방지 (PR #171 패턴)
+        try:
+            load_secrets_to_env({"gcs-personal-bucket": "GCS_PERSONAL_BUCKET"})
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "gcs-personal-bucket secret 미등록 — personal memory 비활성: %s", exc
+            )
 
         # Connector를 getconn() 안에서 lazy 초기화 + 명시적 loop 바인딩
         # storage/orm/session_factory.py 동일 패턴 — ConnectorLoopError 해결
@@ -130,12 +137,16 @@ class AgentComposer:
         from nodes_graph.domain.services.graph_validator import GraphValidator
         from storage.repositories.pg_node_definition_repository import PgNodeDefinitionRepository
         from storage.repositories.pg_workflow_repository import PgWorkflowRepository
+        from storage.repositories.pg_marketplace_skill_repository import PgMarketplaceSkillRepository
+        from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
 
         llm = ModalLLMAdapter()
         embedder = ModalEmbeddingAdapter()
 
         self._node_repo_cls = PgNodeDefinitionRepository
         self._workflow_repo_cls = PgWorkflowRepository
+        self._skill_repo_cls = PgMarketplaceSkillRepository
+        self._search_skills_use_case_cls = SearchSkillsUseCase
         self._embedder = embedder
         self._node_registry_cls = NodeRegistryAdapter
         self._graph_validator_cls = GraphValidator
@@ -190,8 +201,10 @@ class AgentComposer:
                     async with self._session_factory() as session:
                         node_repo = self._node_repo_cls(session)
                         workflow_repo = self._workflow_repo_cls(session)
+                        skill_repo = self._skill_repo_cls(session)
                         node_registry = self._node_registry_cls(node_repo, self._embedder)
                         graph_validator = self._graph_validator_cls(node_repo)
+                        skill_search = self._search_skills_use_case_cls(repo=skill_repo)
                         graph = self._orchestrator_cls(
                             intent_analyzer=self._intent_analyzer,
                             drafter=self._drafter,
@@ -205,6 +218,8 @@ class AgentComposer:
                             workflow_draft_store=self._workflow_draft_store,
                             execution_engine_url=self._execution_engine_url,
                             personal_memory_store=self._personal_memory_store,
+                            skill_search=skill_search,
+                            embedder=self._embedder,
                         )
                         async for frame in await graph.stream(
                             user_id=req.user_id,

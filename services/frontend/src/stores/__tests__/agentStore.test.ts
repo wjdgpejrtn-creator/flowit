@@ -1,5 +1,4 @@
 import { useAgentStore } from '../agentStore';
-import { RiskLevel } from '@common/generated';
 
 beforeEach(() => {
   useAgentStore.setState({
@@ -10,6 +9,7 @@ beforeEach(() => {
     currentStep: null,
     rationaleText: '',
     slotQuestion: null,
+    readyToExecute: null,
     sseFrames: [],
   });
 });
@@ -68,10 +68,24 @@ describe('SSE frames', () => {
 
 describe('slotQuestion', () => {
   it('setSlotQuestion sets and clears', () => {
-    const q = { fieldName: 'target', label: '대상 시트', risk: RiskLevel.LOW };
+    const q = { fieldName: 'target', question: '대상 시트를 선택하세요' };
     useAgentStore.getState().setSlotQuestion(q);
     expect(useAgentStore.getState().slotQuestion).toEqual(q);
     useAgentStore.getState().setSlotQuestion(null);
     expect(useAgentStore.getState().slotQuestion).toBeNull();
+  });
+});
+
+describe('readyToExecute', () => {
+  it('setReadyToExecute sets workflow info', () => {
+    const state = { workflowId: 'wf-123', message: '실행 버튼을 클릭해 실행하세요.' };
+    useAgentStore.getState().setReadyToExecute(state);
+    expect(useAgentStore.getState().readyToExecute).toEqual(state);
+  });
+
+  it('setReadyToExecute clears to null', () => {
+    useAgentStore.getState().setReadyToExecute({ workflowId: 'wf-123', message: '...' });
+    useAgentStore.getState().setReadyToExecute(null);
+    expect(useAgentStore.getState().readyToExecute).toBeNull();
   });
 });

@@ -11,14 +11,22 @@ from uuid import uuid4
 
 import jwt as pyjwt
 import pytest
-from fastapi.testclient import TestClient
-
 from app.config import Settings
 from app.dependencies.permission import get_permission_source
-from app.dependencies.use_cases import get_approve_skill_use_case, get_publish_skill_use_case
+from app.dependencies.use_cases import (
+    get_approve_skill_use_case,
+    get_delete_personal_skill_use_case,
+    get_get_personal_skill_use_case,
+    get_list_personal_skills_use_case,
+    get_publish_skill_use_case,
+    get_update_personal_skill_use_case,
+)
 from app.main import create_app
 from common_schemas import PermissionSource
-from common_schemas.exceptions import NotFoundError
+from common_schemas.exceptions import AuthorizationError, NotFoundError, ValidationError
+from fastapi.testclient import TestClient
+from skills_marketplace.domain.entities.marketplace_personal_skill import MarketplacePersonalSkill
+from skills_marketplace.domain.value_objects.skill_state import SkillState
 
 _REVIEWER_ID = uuid4()
 
@@ -197,3 +205,210 @@ def test_skills_routes_require_bearer(app) -> None:
     publish = client.post(f"/api/v1/skills/{uuid4()}/publish", json={"scope": "team"})
     assert approve.status_code == 401
     assert publish.status_code == 401
+
+
+# ── Personal CRUD (REQ-013) ──────────────────────────────────────────────────
+
+
+def _personal_skill(
+    skill_id, owner_id, *, name="블로그 요약", state: SkillState = SkillState.DRAFT
+) -> MarketplacePersonalSkill:
+    now = datetime.now(UTC)
+    return MarketplacePersonalSkill(
+        skill_id=skill_id,
+        owner_user_id=owner_id,
+        name=name,
+        description="설명",
+        lifecycle_state=state,
+        skill_document_uri="gs://bucket/skills/x/SKILL.md",
+        tags=["productivity"],
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def test_list_personal_skills_passes_user_and_filters(app) -> None:
+    sid = uuid4()
+    skill = _personal_skill(sid, _REVIEWER_ID)
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(return_value=[skill])
+    app.dependency_overrides[get_list_personal_skills_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(
+        "/api/v1/skills/personal",
+        params={"lifecycle_state": "draft", "limit": 20, "offset": 5},
+        headers=_headers(),
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["skill_id"] == str(sid)
+    assert body[0]["lifecycle_state"] == "draft"
+    # embedding/metadata/node_spec_staging는 응답에 노출 금지.
+    assert "embedding" not in body[0]
+    assert "metadata" not in body[0]
+    assert "node_spec_staging" not in body[0]
+    use_case.execute.assert_awaited_once_with(
+        user_id=_REVIEWER_ID,
+        lifecycle_state=SkillState.DRAFT,
+        limit=20,
+        offset=5,
+    )
+    app.dependency_overrides.clear()
+
+
+def test_list_personal_skills_defaults_no_lifecycle(app) -> None:
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(return_value=[])
+    app.dependency_overrides[get_list_personal_skills_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/skills/personal", headers=_headers())
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+    use_case.execute.assert_awaited_once_with(
+        user_id=_REVIEWER_ID, lifecycle_state=None, limit=50, offset=0
+    )
+    app.dependency_overrides.clear()
+
+
+def test_list_personal_skills_invalid_lifecycle_maps_422(app) -> None:
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(return_value=[])
+    app.dependency_overrides[get_list_personal_skills_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(
+        "/api/v1/skills/personal", params={"lifecycle_state": "not_a_state"}, headers=_headers()
+    )
+    assert resp.status_code == 422
+    use_case.execute.assert_not_awaited()
+    app.dependency_overrides.clear()
+
+
+def test_get_personal_skill_owner_pass_through(app) -> None:
+    sid = uuid4()
+    skill = _personal_skill(sid, _REVIEWER_ID)
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(return_value=skill)
+    app.dependency_overrides[get_get_personal_skill_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/skills/personal/{sid}", headers=_headers())
+
+    assert resp.status_code == 200
+    assert resp.json()["skill_id"] == str(sid)
+    use_case.execute.assert_awaited_once_with(skill_id=sid, actor_user_id=_REVIEWER_ID)
+    app.dependency_overrides.clear()
+
+
+def test_get_personal_skill_non_owner_maps_403(app) -> None:
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(side_effect=AuthorizationError("not owner"))
+    app.dependency_overrides[get_get_personal_skill_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/skills/personal/{uuid4()}", headers=_headers())
+    assert resp.status_code == 403
+    app.dependency_overrides.clear()
+
+
+def test_get_personal_skill_not_found_maps_404(app) -> None:
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(side_effect=NotFoundError("not found"))
+    app.dependency_overrides[get_get_personal_skill_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/skills/personal/{uuid4()}", headers=_headers())
+    assert resp.status_code == 404
+    app.dependency_overrides.clear()
+
+
+def test_update_personal_skill_partial_body(app) -> None:
+    sid = uuid4()
+    updated = _personal_skill(sid, _REVIEWER_ID, name="새 이름")
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(return_value=updated)
+    app.dependency_overrides[get_update_personal_skill_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.put(
+        f"/api/v1/skills/personal/{sid}",
+        json={"name": "새 이름", "tags": ["a", "b"]},
+        headers=_headers(),
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "새 이름"
+    use_case.execute.assert_awaited_once_with(
+        skill_id=sid,
+        actor_user_id=_REVIEWER_ID,
+        name="새 이름",
+        description=None,
+        tags=["a", "b"],
+    )
+    app.dependency_overrides.clear()
+
+
+def test_update_personal_skill_lifecycle_validation_maps_400(app) -> None:
+    """non-DRAFT 수정 시도 → use case가 ValidationError → 400."""
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(side_effect=ValidationError("not draft"))
+    app.dependency_overrides[get_update_personal_skill_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.put(
+        f"/api/v1/skills/personal/{uuid4()}", json={"name": "x"}, headers=_headers()
+    )
+    assert resp.status_code == 400
+    app.dependency_overrides.clear()
+
+
+def test_delete_personal_skill_returns_204(app) -> None:
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(return_value=None)
+    app.dependency_overrides[get_delete_personal_skill_use_case] = lambda: use_case
+    _override_permission(app)
+
+    sid = uuid4()
+    client = TestClient(app)
+    resp = client.delete(f"/api/v1/skills/personal/{sid}", headers=_headers())
+
+    assert resp.status_code == 204
+    assert resp.content == b""
+    use_case.execute.assert_awaited_once_with(skill_id=sid, actor_user_id=_REVIEWER_ID)
+    app.dependency_overrides.clear()
+
+
+def test_delete_personal_skill_non_owner_maps_403(app) -> None:
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(side_effect=AuthorizationError("not owner"))
+    app.dependency_overrides[get_delete_personal_skill_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.delete(f"/api/v1/skills/personal/{uuid4()}", headers=_headers())
+    assert resp.status_code == 403
+    app.dependency_overrides.clear()
+
+
+def test_personal_routes_require_bearer(app) -> None:
+    """AuthMiddleware가 /skills/personal* 차단 검증."""
+    client = TestClient(app)
+    sid = uuid4()
+    assert client.get("/api/v1/skills/personal").status_code == 401
+    assert client.get(f"/api/v1/skills/personal/{sid}").status_code == 401
+    assert client.put(f"/api/v1/skills/personal/{sid}", json={}).status_code == 401
+    assert client.delete(f"/api/v1/skills/personal/{sid}").status_code == 401

@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { RiskLevel } from '@common/generated';
 
 export type WorkspaceMode = 'wizard' | 'edit' | 'run';
 
@@ -21,8 +20,7 @@ export interface ChatMessage {
 
 export interface SlotFillQuestion {
   fieldName: string;
-  label: string;
-  risk: RiskLevel;
+  question: string;
 }
 
 export interface AgentSession {
@@ -54,6 +52,9 @@ interface AgentStoreState {
   slotQuestion: SlotFillQuestion | null;
   setSlotQuestion: (q: SlotFillQuestion | null) => void;
 
+  readyToExecute: { workflowId: string; message: string } | null;
+  setReadyToExecute: (state: { workflowId: string; message: string } | null) => void;
+
   sseFrames: string[];
   appendSSEFrame: (frame: string) => void;
 }
@@ -82,6 +83,9 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
 
   slotQuestion: null,
   setSlotQuestion: (q) => set({ slotQuestion: q }),
+
+  readyToExecute: null,
+  setReadyToExecute: (state) => set({ readyToExecute: state }),
 
   sseFrames: [],
   appendSSEFrame: (frame) =>

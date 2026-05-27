@@ -6,6 +6,7 @@ from functools import lru_cache
 from skills_marketplace.domain.ports.skill_document_store import SkillDocumentStore
 from storage.adapters.gcs_adapter import GCSAdapter
 from storage.adapters.gcs_skill_document_store import GcsSkillDocumentStore
+from storage.domain.ports.object_storage_port import ObjectStoragePort
 
 
 @lru_cache(maxsize=1)
@@ -23,3 +24,20 @@ def get_skill_document_store() -> SkillDocumentStore:
     return GcsSkillDocumentStore(
         object_storage=GCSAdapter(bucket_name=os.getenv("SKILLS_MARKETPLACE_BUCKET")),
     )
+
+
+@lru_cache(maxsize=1)
+def get_documents_object_storage() -> ObjectStoragePort:
+    """일반 사용자 업로드 documents 버킷용 ObjectStoragePort DI — REQ-006/009.
+
+    Production: GCSAdapter(`DOCUMENTS_BUCKET` env) — `infra/.../main.tf` `module.documents_bucket`이
+    `${project}-documents-${env}` 이름으로 생성하고 api_server module env_vars에 주입.
+    consumer: `app/routers/documents.py`의 upload(GCS write) + presign(GET 다운로드 URL).
+    SkillDocumentStore와 달리 high-level wrapper 없이 raw `ObjectStoragePort`로 노출 —
+    skill SKILL.md처럼 구조화된 도큐먼트가 아닌 일반 바이너리 업로드.
+
+    ⚠️ `DOCUMENTS_BUCKET` 미설정 시 GCSAdapter가 빈 bucket name으로 fallback → upload 시
+    `google.api_core.exceptions.InvalidArgument` raise. staging Cloud Run env 설정 필수
+    (Phase A `feature/req-009-documents-bucket-infra` 머지+apply 후 자동 주입).
+    """
+    return GCSAdapter(bucket_name=os.getenv("DOCUMENTS_BUCKET"))

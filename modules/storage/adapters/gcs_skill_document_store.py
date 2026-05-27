@@ -57,6 +57,15 @@ class GcsSkillDocumentStore(SkillDocumentStore):
             return None
         return _deserialize(skill_id, raw.decode("utf-8"))
 
+    async def delete(self, skill_id: UUID) -> None:
+        """멱등 — `ObjectStoragePort.delete`가 키 부재 시 NotFoundError를 던지면 swallow.
+        DeletePersonalSkillUseCase가 DB row 삭제 직전 GCS 잔여물 정리에 사용 (orphan 방지).
+        """
+        try:
+            await self._storage.delete(_key(skill_id))
+        except NotFoundError:
+            return
+
 
 def _serialize(document: SkillDocument) -> str:
     """SKILL.md 형식 — YAML frontmatter + markdown body."""

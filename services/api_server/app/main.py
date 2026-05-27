@@ -20,7 +20,9 @@ from app.middleware.auth import API_SERVER_PUBLIC_PATHS, AuthMiddleware
 from app.middleware.cors import install_cors
 from app.middleware.error_handler import install_error_handlers
 from app.middleware.request_id import RequestIdMiddleware
+from app.routers.agents import agents_router, ai_sessions_router
 from app.routers import auth as auth_router
+from app.routers import documents as documents_router
 from app.routers import exec_control as exec_control_router
 from app.routers import health
 from app.routers import nodes as nodes_router
@@ -82,8 +84,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(auth_router.router)
+    app.include_router(agents_router)
+    app.include_router(ai_sessions_router)
     app.include_router(nodes_router.router)
     app.include_router(workflows_router.router)
     app.include_router(exec_control_router.router)
     app.include_router(skills_router.router)
+    app.include_router(documents_router.router)
     return app
