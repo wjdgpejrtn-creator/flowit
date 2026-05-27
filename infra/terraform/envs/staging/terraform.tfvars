@@ -21,3 +21,11 @@ execution_engine_worker_image = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>
 # 공용 cloudsql-iam-modal은 Modal sub-agents 3종(skills_builder/composer/personalization) 전용으로 축소.
 api_server_service_account              = "<API_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
 execution_engine_worker_service_account = "<WORKER_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com"
+
+# REQ-010 frontend 첫 staging 배포 (2026-05-27, PR #199 후속) — 단일 출처 토폴로지(A).
+# 런타임 SA는 terraform 생성 (workflow-frontend-staging — 최소권한).
+# Stage 1: enable_frontend=true + frontend_image apply → output frontend_url 확인
+# Stage 2: 확인된 URL을 frontend_url에 채워 재apply (api_server FRONTEND_URL 반영)
+enable_frontend = true
+frontend_image  = "asia-northeast3-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/frontend:req-010-2"
+frontend_url    = "https://<FRONTEND_SERVICE_URL>"

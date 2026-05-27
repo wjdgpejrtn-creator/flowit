@@ -1,0 +1,34 @@
+# Cloud Build config for frontend image.
+#
+# Build context = repo root (Dockerfile COPY가 packages/common_schemas/typescript + services/frontend 사용).
+# 빌드 명령 (repo root에서):
+#   gcloud builds submit \
+#     --config=services/frontend/cloudbuild.yaml \
+#     --substitutions=_TAG=req-010-1 \
+#     .
+
+substitutions:
+  _AR_LOCATION: asia-northeast3
+  _AR_REPOSITORY: workflow-staging
+  _IMAGE: frontend
+  _TAG: latest
+  _API_PROXY_TARGET: https://<API_SERVICE_URL>
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - --tag
+      - ${_AR_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE}:${_TAG}
+      - --file
+      - services/frontend/Dockerfile
+      - --build-arg
+      - API_PROXY_TARGET=${_API_PROXY_TARGET}
+      - .
+
+images:
+  - ${_AR_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE}:${_TAG}
+
+options:
+  logging: CLOUD_LOGGING_ONLY
