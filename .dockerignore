@@ -1,0 +1,34 @@
+# Docker build context shared by services/{api_server,execution_engine,frontend}/Dockerfile.
+# Root-level so all monorepo builds skip the same junk.
+
+# VCS
+.git
+.github
+
+# Python venvs / caches
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+
+# Node / Next
+**/node_modules
+**/.next
+**/.turbo
+**/npm-debug.log*
+
+# Local env / IDE
+.env
+.env.*
+!.env.example
+.idea
+.vscode
+.claude
+
+# Docs / heavy assets not needed at runtime
+docs
+*.drawio
+*.drawio.png

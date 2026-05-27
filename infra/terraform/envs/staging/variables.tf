@@ -55,6 +55,8 @@ variable "agent_secret_names" {
     #   PR #184 머지 + composer Modal 재배포 전 등록 필수.
     "gcs-session-bucket",
     "execution-engine-url",
+    # api_server → orchestrator (REQ-004, 2026-05-27 정혜님 orchestrator Modal 재배포 — PR #201 ORCHESTRATOR_URL env 매핑 대상)
+    "orchestrator-url",
     # orchestrator → sub-agent 라우팅
     "composer-url",
     "skills-builder-url",
