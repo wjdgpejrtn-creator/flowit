@@ -87,7 +87,8 @@ async def create_session(
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
                         continue
-                    yield from _unwrap_sse(line[6:])
+                    for frame_line in _unwrap_sse(line[6:]):
+                        yield frame_line
         except Exception as exc:
             logger.error("agent-composer 스트리밍 실패: %s", exc)
             err = {"frame_type": "error", "code": "E_PROXY", "message": str(exc)}

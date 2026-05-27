@@ -359,7 +359,7 @@ module "api_server" {
     GOOGLE_CLIENT_ID     = { secret_id = "google-client-id", version = "latest" }
     GOOGLE_CLIENT_SECRET = { secret_id = "google-client-secret", version = "latest" }
     GOOGLE_REDIRECT_URI  = { secret_id = "google-redirect-uri", version = "latest" }
-    ORCHESTRATOR_URL     = { secret_id = "composer-url", version = "latest" }
+    ORCHESTRATOR_URL     = { secret_id = "orchestrator-url", version = "latest" }
   }
 
   labels = merge(local.common_labels, { role = "api-server" })
