@@ -129,3 +129,4 @@ Downstream (이 모듈에 의존):
 | SkillRepository ABC 구현 (조장) | `PgMarketplaceSkillRepository` 3-scope 신규 (storage/repositories) | ✅ PR #147 |
 | PR-2e | 3계층 schema 마이그레이션 (`020_skills_marketplace_staging.sql`) | ✅ PR #147 |
 | storage/marketplace/ 원본 삭제 (조장) | 구 게시 도메인 복사본 8파일 삭제 + `test_skill_lifecycle` skills_marketplace로 이전 | ✅ PR #148 |
+| personal 미리보기/편집 백엔드 (가원 요청) | Port `list_personal_by_user`/`delete_personal` + `SkillDocumentStore.delete` + UseCase 3(List/Update/Delete) | 🔵 PR #192 OPEN (조장 구현체 + api 라우트 4개 후속) |

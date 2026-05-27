@@ -89,8 +89,8 @@ from skills_marketplace.application.use_cases import (
 
 | 포트 (ABC) | 메서드 | 구현 위치 |
 |------------|--------|----------|
-| `SkillRepository` | `async save_personal/save_team/save_company`, `async get_personal/get_team/get_company`, `async search(query_embedding, scope, limit, include_promoted=False, lifecycle_state=None)`, `async save_approval(approval)` | `storage/repositories/` (PR-2d 후속) |
-| `SkillDocumentStore` | `async save(skill_id, document)`, `async load(skill_id)` | GCS adapter (위치 PR-2d/2e 결정). SkillDocument(markdown) GCS 저장 |
+| `SkillRepository` | `async save_personal/save_team/save_company`, `async get_personal/get_team/get_company`, `async search(query_embedding, scope, limit, include_promoted=False, lifecycle_state=None)`, `async save_approval(approval)`, `async list_personal_by_user(user_id, lifecycle_state?, limit=50, offset=0)`, `async delete_personal(skill_id)` | `storage/repositories/PgMarketplaceSkillRepository` (PR #147; `list_personal_by_user`/`delete_personal` = PR #192) |
+| `SkillDocumentStore` | `async save(skill_id, document)`, `async load(skill_id)`, `async delete(skill_id)` | `storage/adapters/gcs_skill_document_store.py` (PR #160). SkillDocument(markdown) GCS 저장. `delete` = 개인 스킬 삭제 시 GCS SKILL.md 정리(PR #192, 멱등) |
 
 > **Port 소유권** (ADR-0017 + 5/20 박아름·조장 합의): Port 정의는 skills_marketplace(소비 모듈)가 소유, 구현체는 storage가 제공 (auth/nodes_graph 일반 패턴). CLAUDE.md L146 정정 반영.
 
@@ -105,6 +105,9 @@ from skills_marketplace.application.use_cases import (
 | `SubmitSkillUseCase` | `skill_id, scope` | 게시 검토 제출 DRAFT → REVIEW (ADR-0020 Q4, PR #150 위임). submit 라우트(REQ-009)가 조립 — 라우트 직접 전이 = Composition Root 위반이라 use case 선행. approve/publish와 동일 패턴 |
 | `ApproveSkillUseCase` | `skill_id, scope, reviewer_id, approved, comment, *, actor_role, actor_department_id` | 게시 승인 REVIEW → APPROVED/DRAFT + `ApprovalWorkflow` 레코드 저장(ADR-0020 + 감사 추적). reviewer=actor → `SkillApprovalPolicy` 인가(위임2) 후 전이 |
 | `PublishSkillUseCase` | `skill_id, scope, *, actor_user_id, actor_role, actor_department_id` (생성자 +`node_def_repo`) | 게시 APPROVED → PUBLISHED. `SkillApprovalPolicy` 인가(위임2) 후 **publish 시 `node_spec_staging` → `NodeDefinition` 생성·upsert + `node_definition_id` 연결**(ADR-0020 Option B/Q1, ②d). scope별 owner/team 격리(personal=owner_user_id, team=team_id, company=전역). nodes_graph `NodeDefinitionRepository` 의존 |
+| `ListUserPersonalSkillsUseCase` | `user_id, lifecycle_state?, limit=50, offset=0 → list[MarketplacePersonalSkill]` | 소유자 본인 personal 스킬 목록 — 미리보기 UI(PR #192, 가원 요청). api_server `GET /skills/personal`가 현재 사용자 user_id 스코프로 호출 |
+| `UpdatePersonalSkillUseCase` | `skill_id, actor_user_id, *, name?, description?, tags? → MarketplacePersonalSkill` | 개인 스킬 메타 수정 — 편집 UI(PR #192). **owner만**(`AuthorizationError`) + **DRAFT만**(`ValidationError`), 빈값 거부·부분 수정. api_server `PUT /skills/personal/{id}` |
+| `DeletePersonalSkillUseCase` | `skill_id, actor_user_id → None` (생성자 +`doc_store?`) | 개인 스킬 삭제 — **owner+DRAFT만**(PR #192). `doc_store` 주입 시 GCS SKILL.md 먼저 정리(멱등)→DB row 삭제(orphan 방지). api_server `DELETE /skills/personal/{id}` |
 
 ## 의존 관계
 
