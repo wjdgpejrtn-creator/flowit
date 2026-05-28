@@ -1,5 +1,5 @@
 import { apiJson } from '@/lib/apiClient';
-import type { WorkflowSchema, ValidationErrorResponse } from '@common/generated';
+import type { WorkflowSchema, ValidationErrorResponse, ExecutionStatus } from '@common/generated';
 
 export interface ExecuteRequest {
   trigger_type?: string;
@@ -16,6 +16,24 @@ export interface ControlResponse {
   execution_id: string;
   action: string;
   task_id: string;
+}
+
+export interface NodeResultEntry {
+  node_instance_id: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'retrying' | 'cancelled';
+  attempt?: number;
+  last_error?: string | null;
+}
+
+export interface WorkflowLatestExecution {
+  execution_id: string;
+  workflow_id: string;
+  status: ExecutionStatus;
+  started_at: string;
+  finished_at: string | null;
+  error: string | null;
+  node_states_summary: Record<string, number>;
+  node_results: NodeResultEntry[];
 }
 
 export async function listWorkflows(limit = 50, offset = 0): Promise<WorkflowSchema[]> {
@@ -59,4 +77,12 @@ export async function cancelExecution(executionId: string): Promise<ControlRespo
 
 export async function resumeExecution(executionId: string): Promise<ControlResponse> {
   return apiJson<ControlResponse>(`/api/v1/executions/${executionId}/resume`, { method: 'POST' });
+}
+
+export async function getLatestExecution(
+  workflowId: string,
+): Promise<WorkflowLatestExecution | null> {
+  return apiJson<WorkflowLatestExecution | null>(
+    `/api/v1/workflows/${workflowId}/executions/latest`,
+  );
 }
