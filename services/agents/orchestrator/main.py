@@ -93,6 +93,7 @@ class OrchestratorAgent:
             skills_client=HTTPSubAgentClient(
                 base_url=os.environ["SKILLS_BUILDER_URL"]
             ),
+            llm=llm,
         )
 
     @modal.asgi_app()

@@ -142,19 +142,19 @@ class AgentComposer:
 
         llm = ModalLLMAdapter()
         embedder = ModalEmbeddingAdapter()
+        self._llm = llm
+        self._embedder = embedder
 
         self._node_repo_cls = PgNodeDefinitionRepository
         self._workflow_repo_cls = PgWorkflowRepository
         self._skill_repo_cls = PgMarketplaceSkillRepository
         self._search_skills_use_case_cls = SearchSkillsUseCase
-        self._embedder = embedder
         self._node_registry_cls = NodeRegistryAdapter
         self._graph_validator_cls = GraphValidator
         self._intent_analyzer = IntentAnalyzerService(llm)
         self._drafter = DrafterService(llm)
         self._qa_evaluator = QAEvaluatorService(llm)
         self._slot_filler = SlotFillingService()
-        self._llm = llm
         self._orchestrator_cls = LangGraphOrchestrator
         self._session_frame_store = GCSSessionFrameStore()
         self._workflow_draft_store = GCSWorkflowDraftStore()

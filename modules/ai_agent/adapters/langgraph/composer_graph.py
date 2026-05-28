@@ -2,14 +2,13 @@
 
 spec §3.2 Workflow Composer 내부 StateGraph 구현. LangGraph는 adapters/에만 존재.
 
-Tool-calling 에이전트 구조:
-  compress (turn_count >= 25 시) → security → agent_loop → END
-
-  agent_loop: LLM이 아래 툴 중 하나를 선택해 실행, done 반환 시 종료.
-    analyze_intent / ask_clarification / fill_slots / search_nodes /
-    draft_workflow / validate_workflow / evaluate_quality / retry_draft /
-    promote_workflow / save_workflow / execute_workflow / evaluate_output /
-    confirm_result / save_memory / done
+Fixed DAG 구조:
+  compress → security → intent
+    → clarify 경로: consultant → slot_fill → END
+    → 일반 경로: search_nodes → draft_workflow → validate_workflow
+        → (retry_draft → draft_workflow)* → qa_evaluator
+        → (retry_draft → draft_workflow)* → promote
+        → save_workflow → confirm_result → save_memory → END
 """
 from __future__ import annotations
 
@@ -71,7 +70,7 @@ from ...domain.value_objects.turn_limit import TurnLimit
 _logger = logging.getLogger(__name__)
 
 _QA_MAX_RETRY = 3
-_MAX_AGENT_ITERATIONS = 30  # 무한 루프 방지
+_MAX_AGENT_ITERATIONS = 15  # 무한 루프 방지
 
 class _NextAction(BaseModel):
     """LLM 에이전트가 다음에 실행할 툴을 선택하는 스키마."""
@@ -138,12 +137,15 @@ class _State(TypedDict):
     # skill suggest 필드
     skill_suggested: bool                   # suggest_skill 툴 실행 여부 (재중복 방지)
     suggested_skills: list[dict[str, Any]]  # 제안된 스킬 후보 목록
+    # fixed DAG 필드
+    validation_issues: str | None           # validator 실패 사유 (non-fatal — error 필드와 분리)
+    retry_count: int                        # draft/validate/qa 재시도 횟수
 
 
 class LangGraphOrchestrator:
-    """Workflow Composer — tool-calling 에이전트 (spec §3.2).
+    """Workflow Composer — fixed DAG (spec §3.2).
 
-    compress → security → agent_loop(LLM이 툴 선택) → END 구조.
+    compress → security → intent → search_nodes → draft → validate → qa → promote → save → confirm → memory → END.
     services/agents/agent-composer/main.py composition root에서 인스턴스화.
     """
 
@@ -241,16 +243,16 @@ class LangGraphOrchestrator:
             "output_quality_feedback": "",
             "skill_suggested": False,
             "suggested_skills": [],
+            "validation_issues": None,
+            "retry_count": 0,
         }
 
         try:
             async for event in self._graph.astream(initial, {"recursion_limit": 40}, stream_mode="updates"):
                 for node_name, updates in event.items():
-                    # agent 루프 노드는 내부에서 tool별 AgentNodeFrame을 collected_frames에 포함
-                    if node_name != "agent":
-                        node_frame = AgentNodeFrame(agent_node_name=node_name)
-                        yield node_frame
-                        all_frames.append(node_frame)
+                    node_frame = AgentNodeFrame(agent_node_name=node_name)
+                    yield node_frame
+                    all_frames.append(node_frame)
                     if not isinstance(updates, dict):
                         continue
                     for frame in updates.get("collected_frames", []):
@@ -265,7 +267,7 @@ class LangGraphOrchestrator:
         except GraphRecursionError:
             error_frame = ErrorFrame(
                 code="E_RECURSION",
-                message=f"에이전트 최대 반복 횟수({_MAX_AGENT_ITERATIONS}) 초과",
+                message="워크플로우 생성 최대 단계 초과",
             )
             yield error_frame
             all_frames.append(error_frame)
@@ -442,6 +444,30 @@ class LangGraphOrchestrator:
         if state.get("agent_done") or state.get("error"):
             return "end"
         return "continue"
+
+    @staticmethod
+    def _route_after_security(state: _State) -> str:
+        return "end" if state.get("error") else "intent"
+
+    @staticmethod
+    def _route_after_intent(state: _State) -> str:
+        return "consultant" if state.get("intent") == "clarify" else "search_nodes"
+
+    @staticmethod
+    def _route_after_validate(state: _State) -> str:
+        if state.get("pass_flag"):
+            return "qa_evaluator"
+        if state.get("retry_count", 0) < _QA_MAX_RETRY:
+            return "retry_draft"
+        return "qa_evaluator"
+
+    @staticmethod
+    def _route_after_qa(state: _State) -> str:
+        if state.get("pass_flag"):
+            return "promote"
+        if state.get("qa_attempts", 0) < _QA_MAX_RETRY:
+            return "retry_draft"
+        return "promote"
 
     # ------------------------------------------------------------------ preprocessing nodes
 
@@ -716,7 +742,7 @@ class LangGraphOrchestrator:
         try:
             await self._graph_validator.validate(workflow)
         except Exception as exc:
-            return {"error": f"validator 실패: {exc}"}
+            return {"pass_flag": False, "validation_issues": str(exc)}
 
         # RiskLevel 강제 — PermissionResolver 주입 + department_id 있을 때만
         if self._permission_resolver is not None and state.get("department_id"):
@@ -747,7 +773,7 @@ class LangGraphOrchestrator:
                 except Exception:
                     continue  # 스키마 조회 실패 시 스킵
 
-        return {}
+        return {"pass_flag": True, "validation_issues": None}
 
     # 9. qa_evaluator_node — LLM-as-a-Judge 품질 평가
     async def _qa_evaluator_node(self, state: _State) -> dict:
@@ -778,17 +804,20 @@ class LangGraphOrchestrator:
             ],
         }
 
-    # 10. qa_retry_node — QA 실패 시 재시도 준비 (drafter로 돌아감)
+    # 10. qa_retry_node — validate/QA 실패 시 재시도 준비 (draft_workflow로 돌아감)
     async def _qa_retry_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         spec = state.get("draft_spec")
         feedback = state.get("qa_feedback", "")
-        if spec and feedback:
-            updated_intent = f"{spec.natural_language_intent}\n[QA 피드백: {feedback}]"
+        validation_issues = state.get("validation_issues") or ""
+        combined_feedback = " | ".join(filter(None, [feedback, validation_issues]))
+        if spec and combined_feedback:
+            updated_intent = f"{spec.natural_language_intent}\n[재시도 피드백: {combined_feedback}]"
             spec = spec.model_copy(update={"natural_language_intent": updated_intent})
         elapsed = int((time.monotonic() - t0) * 1000)
         return {
             "draft_spec": spec,
+            "retry_count": state.get("retry_count", 0) + 1,
             "collected_frames": [
                 PipelineStatusFrame(service_name="qa_retry", status="started", elapsed_ms=elapsed),
             ],
@@ -998,24 +1027,24 @@ class LangGraphOrchestrator:
             ],
         }
 
-    # 15. user_confirm_node — 실행 결과 사용자 제시 + 최종 ResultFrame emit
+    # 15. user_confirm_node — 최종 ResultFrame emit (fixed DAG: 항상 ready_to_execute)
     async def _user_confirm_node(self, state: _State) -> dict:
-        execution_result = state.get("execution_result") or {}
         workflow_id = state.get("saved_workflow_id")
-
         return {
             "collected_frames": [
                 ResultFrame(
-                    intent="execution_review",
+                    intent="propose",
                     payload={
                         "workflow_id": str(workflow_id) if workflow_id else None,
-                        "execution_id": state.get("execution_id"),
-                        "execution_status": execution_result.get("status", "unknown"),
-                        "output_quality_score": state.get("output_quality_score", 0.0),
-                        "output_quality_feedback": state.get("output_quality_feedback", ""),
+                        "status": "ready_to_execute",
+                        "message": "워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.",
                         "session_id": str(state["session_id"]),
                     },
-                )
+                ),
+                ChatMessageFrame(
+                    role="assistant",
+                    content="워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.",
+                ),
             ]
         }
 
@@ -1075,10 +1104,21 @@ class LangGraphOrchestrator:
     def _build(self):
         graph: StateGraph = StateGraph(_State)
 
-        # tool-calling 구조: compress → security → agent_loop
+        # fixed DAG: compress → security → intent → search_nodes → draft → validate → qa → promote → save → confirm → memory → END
         graph.add_node("compress", self._compress_node)
         graph.add_node("security", self._security_node)
-        graph.add_node("agent", self._agent_node)
+        graph.add_node("intent", self._intent_node)
+        graph.add_node("consultant", self._consultant_node)
+        graph.add_node("slot_fill", self._slot_fill_node)
+        graph.add_node("search_nodes", self._retriever_node)
+        graph.add_node("draft_workflow", self._drafter_node)
+        graph.add_node("validate_workflow", self._validator_node)
+        graph.add_node("retry_draft", self._qa_retry_node)
+        graph.add_node("qa_evaluator", self._qa_evaluator_node)
+        graph.add_node("promote", self._promote_node)
+        graph.add_node("save_workflow", self._handoff_node)
+        graph.add_node("confirm_result", self._user_confirm_node)
+        graph.add_node("save_memory", self._memory_save_node)
 
         graph.set_entry_point("compress")
         graph.add_conditional_edges(
@@ -1086,11 +1126,34 @@ class LangGraphOrchestrator:
             self._should_compress,
             {"compress": "compress", "security": "security"},
         )
-        graph.add_edge("security", "agent")
         graph.add_conditional_edges(
-            "agent",
-            self._route_agent,
-            {"continue": "agent", "end": END},
+            "security",
+            self._route_after_security,
+            {"intent": "intent", "end": END},
         )
+        graph.add_conditional_edges(
+            "intent",
+            self._route_after_intent,
+            {"consultant": "consultant", "search_nodes": "search_nodes"},
+        )
+        graph.add_edge("consultant", "slot_fill")
+        graph.add_edge("slot_fill", END)
+        graph.add_edge("search_nodes", "draft_workflow")
+        graph.add_edge("draft_workflow", "validate_workflow")
+        graph.add_conditional_edges(
+            "validate_workflow",
+            self._route_after_validate,
+            {"qa_evaluator": "qa_evaluator", "retry_draft": "retry_draft"},
+        )
+        graph.add_edge("retry_draft", "draft_workflow")
+        graph.add_conditional_edges(
+            "qa_evaluator",
+            self._route_after_qa,
+            {"promote": "promote", "retry_draft": "retry_draft"},
+        )
+        graph.add_edge("promote", "save_workflow")
+        graph.add_edge("save_workflow", "confirm_result")
+        graph.add_edge("confirm_result", "save_memory")
+        graph.add_edge("save_memory", END)
 
         return graph.compile()

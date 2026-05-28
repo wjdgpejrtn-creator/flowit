@@ -43,3 +43,8 @@ class IntentType(str, Enum):
     REFINE = "refine"
     PROPOSE = "propose"
     BUILD_SKILL = "build_skill"
+    # fast-path intents — composer 호출 없이 즉시 처리
+    CHITCHAT = "chitchat"
+    INFO_QUESTION = "info_question"
+    CONTROL = "control"
+    WORKFLOW_EXECUTE = "workflow_execute"
