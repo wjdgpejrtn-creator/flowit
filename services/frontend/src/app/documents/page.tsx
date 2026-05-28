@@ -4,9 +4,19 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
-import Skel from '@/components/common/Skel';
 import ErrorBanner from '@/components/common/ErrorBanner';
-import { getDocument, uploadDocument, type DocumentResponse } from '@/lib/api/documentApi';
+import { uploadDocument, type DocumentResponse } from '@/lib/api/documentApi';
+
+const DOCS_STORAGE_KEY = 'wf_documents_list';
+
+function loadStoredDocs(): DocumentResponse[] {
+  try {
+    const raw = localStorage.getItem(DOCS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as DocumentResponse[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 function fmt(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -52,14 +62,17 @@ function DocRow({ doc, onDelete }: { doc: DocumentResponse; onDelete: (id: strin
 }
 
 export default function DocumentsPage() {
-  const [docs, setDocs] = useState<DocumentResponse[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [docs, setDocs] = useState<DocumentResponse[]>(() => loadStoredDocs());
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // NOTE: 현재 백엔드에 list 엔드포인트가 없어 빈 목록으로 시작.
-  // 업로드한 문서는 직접 목록에 추가하는 방식으로 동작.
+  useEffect(() => {
+    try {
+      localStorage.setItem(DOCS_STORAGE_KEY, JSON.stringify(docs));
+    } catch {}
+  }, [docs]);
+
   const handleUpload = async (file: File) => {
     setUploading(true);
     setError(null);
@@ -136,15 +149,7 @@ export default function DocumentsPage() {
         </div>
 
         {/* 문서 목록 */}
-        {loading ? (
-          <div className="flex flex-col gap-2">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] px-3 py-[6px]">
-                <Skel h={14} w="60%" />
-              </div>
-            ))}
-          </div>
-        ) : docs.length === 0 ? (
+        {docs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center text-[var(--color-ink4)]">
             <div className="text-[36px] mb-3">🗂</div>
             <div className="font-bold text-[13px] mb-1">문서가 없습니다</div>

@@ -188,3 +188,32 @@ class ChunkingStrategy(BaseModel):
     max_tokens: int
     overlap_tokens: int
     token_estimator_mode: Literal["tiktoken", "char_estimate"]
+
+
+# ── API 응답 DTO (api_server/routers/documents.py SSOT 이관) ──────────────────
+
+class DocumentResponse(BaseModel):
+    """문서 업로드/조회 공통 응답 DTO."""
+
+    document_id: UUID
+    file_name: str
+    mime_type: str
+    file_size: int
+    gcs_uri: str
+    is_analyzed: bool
+
+
+class AnalyzeDispatchResponse(BaseModel):
+    """문서 분석 Celery 태스크 디스패치 응답."""
+
+    document_id: UUID
+    task_id: str
+    action: str
+
+
+class DocumentDownloadResponse(BaseModel):
+    """문서 다운로드 서명 URL 응답."""
+
+    document_id: UUID
+    download_url: str
+    expires_in: int

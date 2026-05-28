@@ -19,12 +19,18 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from celery import Celery
-from common_schemas import DocumentBlock, FileMeta, PermissionSource
+from common_schemas import (
+    AnalyzeDispatchResponse,
+    DocumentBlock,
+    DocumentDownloadResponse,
+    DocumentResponse,
+    FileMeta,
+    PermissionSource,
+)
 from common_schemas.broker_tasks import QUEUE_DEFAULT, TASK_ANALYZE_DOCUMENT
 from common_schemas.exceptions import NotFoundError
 from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
 from storage.domain.ports.object_storage_port import ObjectStoragePort
 
 from app.dependencies.celery_client import get_celery
@@ -73,35 +79,6 @@ async def _read_capped(file: UploadFile) -> bytes:
             )
     return bytes(buf)
 
-
-class DocumentResponse(BaseModel):
-    """업로드/조회 공통 응답. blocks/parser_meta는 큰 페이로드라 의도적으로 제외 —
-    분석 결과 조회는 별도 엔드포인트(추후 PR)에서 chunks/quality_log와 함께 제공.
-
-    `created_at`은 현재 응답에서 제외(self-review MED #4) — `DocumentMapper.to_domain`이
-    ORM `created_at`을 도메인 엔티티(`DocumentBlock`)로 매핑하지 않아 GET 호출 시
-    매번 `datetime.now()`로 갱신되면 클라 캐시/eTag/diff가 깨진다. 정식 노출은
-    `DocumentBlock.created_at` 필드 추가(common_schemas 변경) + mapper 갱신 후 — Phase C.
-    """
-
-    document_id: UUID
-    file_name: str
-    mime_type: str
-    file_size: int
-    gcs_uri: str
-    is_analyzed: bool  # blocks 비어있으면 False — analyze 미수행 / 진행 중
-
-
-class AnalyzeDispatchResponse(BaseModel):
-    document_id: UUID
-    task_id: str
-    action: str
-
-
-class DocumentDownloadResponse(BaseModel):
-    document_id: UUID
-    download_url: str
-    expires_in: int
 
 
 def _to_response(document: DocumentBlock, gcs_uri: str) -> DocumentResponse:
