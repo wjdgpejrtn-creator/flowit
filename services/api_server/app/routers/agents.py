@@ -24,6 +24,16 @@ ai_sessions_router = APIRouter(prefix="/api/v1/ai/sessions", tags=["agents"])
 # 여기서는 raw dict으로 다루는 프록시라 import 없이 envelope.get("frames") 로만 접근.
 _PROXY_TIMEOUT = 290.0  # Cloud Run 기본 request timeout 300s 이내로 보수적으로 설정
 
+# SSE 응답 표준 헤더 — Google Cloud LB의 gzip 압축으로 SSE 스트리밍이 깨지는 것 차단.
+# - Cache-Control no-transform: LB에 응답 바디 변환 금지 지시 (핵심)
+# - X-Accel-Buffering no: nginx/reverse-proxy 버퍼링 차단
+# - Connection keep-alive: HTTP/1.1 keep-alive 명시
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+    "Connection": "keep-alive",
+}
+
 
 class SessionRequest(BaseModel):
     message: str
@@ -94,7 +104,7 @@ async def create_session(
             err = {"frame_type": "error", "code": "E_PROXY", "message": str(exc)}
             yield f"data: {json.dumps(err)}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 @agents_router.post("/sessions/{session_id}/slot", status_code=204)
@@ -134,4 +144,4 @@ async def stream_session_frames(
             err = {"frame_type": "error", "code": "E_FRAMES", "message": str(exc)}
             yield f"data: {json.dumps(err)}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=_SSE_HEADERS)
