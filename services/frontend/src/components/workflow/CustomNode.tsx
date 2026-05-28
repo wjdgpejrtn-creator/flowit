@@ -12,15 +12,20 @@ export interface CustomNodeData {
   risk_level: RiskLevel;
   status?: NodeStatus;
   icon?: string;
+  onDelete?: (id: string) => void;
 }
 
 export default function CustomNode({ id, data, selected }: NodeProps) {
   const d = data as unknown as CustomNodeData;
-  const removeNode = useWorkflowStore((s) => s.removeNode);
+  const workflowRemoveNode = useWorkflowStore((s) => s.removeNode);
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    removeNode(id);
+    if (d.onDelete) {
+      d.onDelete(id);
+    } else {
+      workflowRemoveNode(id);
+    }
   };
 
   return (

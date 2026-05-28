@@ -61,7 +61,12 @@ function FlowEditor() {
         id: `node-${Date.now()}`,
         type: 'custom',
         position,
-        data: { name: payload.name, risk_level: payload.risk_level, node_type: payload.node_type },
+        data: {
+          name: payload.name,
+          risk_level: payload.risk_level,
+          node_type: payload.node_type,
+          onDelete: (nodeId: string) => setNodes((prev) => prev.filter((n) => n.id !== nodeId)),
+        },
       },
     ]);
   }, [rfInstance, setNodes]);
@@ -335,14 +340,6 @@ function AgentPageContent() {
           {/* ── Wizard Mode ─────────────────────────────────────── */}
           {mode === 'wizard' && (
             <div className="flex-1 flex min-h-0">
-
-              {/* Node Palette */}
-              <div
-                className="flex-shrink-0 border-r-[1.5px] border-[var(--color-ink)] min-h-0 overflow-hidden flex flex-col"
-                style={{ width: 200 }}
-              >
-                <NodePalette />
-              </div>
 
               {/* Chat area */}
               <div className="flex-1 flex flex-col min-w-0 min-h-0">
