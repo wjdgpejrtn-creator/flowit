@@ -1,5 +1,4 @@
 import { useAgentStore } from '../agentStore';
-import { RiskLevel } from '@common/generated';
 
 beforeEach(() => {
   useAgentStore.setState({
@@ -69,7 +68,7 @@ describe('SSE frames', () => {
 
 describe('slotQuestion', () => {
   it('setSlotQuestion sets and clears', () => {
-    const q = { fieldName: 'target', label: '대상 시트', risk: RiskLevel.LOW };
+    const q = { fieldName: 'target', question: '대상 시트를 선택하세요' };
     useAgentStore.getState().setSlotQuestion(q);
     expect(useAgentStore.getState().slotQuestion).toEqual(q);
     useAgentStore.getState().setSlotQuestion(null);
