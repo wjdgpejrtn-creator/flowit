@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect } from 'react';
-import { use } from 'react';
 import AppBar from '@/components/common/AppBar';
 import StatusPill from '@/components/common/StatusPill';
 import NodeCard from '@/components/common/NodeCard';
@@ -28,8 +27,8 @@ const CANVAS_NODES: Array<{ icon: string; name: string; risk: RiskLevel; status:
   { icon: '#',  name: 'Slack',     risk: RiskLevel.HIGH,   status: 'pending',   x: 432, y: 80 },
 ];
 
-export default function WorkflowDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function WorkflowDetailPage({ params }: { params: { id: string } }) {
+  const { id } = params;
   const { workflow, loading, error, load } = useWorkflow();
 
   useEffect(() => {
