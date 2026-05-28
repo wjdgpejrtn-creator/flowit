@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useRef, useEffect, useState } from 'react';
+import { Suspense, useRef, useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
@@ -10,8 +10,12 @@ import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/a
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession } from '@/lib/api/agentApi';
 import { executeWorkflow } from '@/lib/api/workflowApi';
-import { ReactFlow, Background, Controls, useNodesState, useEdgesState } from '@xyflow/react';
+import { ReactFlow, Background, Controls, useNodesState, useEdgesState, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import NodePalette from '@/components/workflow/NodePalette';
+import CustomNode from '@/components/workflow/CustomNode';
+import { getCatalog } from '@/lib/api/nodeApi';
+import type { NodeConfig } from '@common/generated';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -29,25 +33,67 @@ const STEP_LABELS: Record<AgentStep, string> = {
   promote:   '워크플로우 확정',
 };
 
-// ─── FlowEditor (edit mode — 빈 캔버스로 시작, 향후 confirmed workflow와 wiring) ─
+const NODE_TYPES = { custom: CustomNode };
 
-function FlowEditor() {
-  const [nodes, , onNodesChange] = useNodesState([]);
-  const [edges, , onEdgesChange] = useEdgesState([]);
+// ─── FlowEditor (edit mode — NodePalette 좌측 + 드래그&드롭 중앙 배치) ─────────
+
+function FlowEditor({ catalogNodes }: { catalogNodes: NodeConfig[] }) {
+  const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
+  const [edges, , onEdgesChange] = useEdgesState<RFEdge>([]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData('application/x-node-config');
+    if (!raw || !rfInstance || !wrapperRef.current) return;
+    const nodeConfig = JSON.parse(raw) as NodeConfig;
+    const rect = wrapperRef.current.getBoundingClientRect();
+    const position = rfInstance.screenToFlowPosition({
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    });
+    setNodes((nds) => [
+      ...nds,
+      {
+        id: `node-${Date.now()}`,
+        type: 'custom',
+        position,
+        data: { label: nodeConfig.name, riskLevel: nodeConfig.risk_level },
+      },
+    ]);
+  }, [rfInstance, setNodes]);
 
   return (
-    <div className="w-full h-full">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        fitView
-        style={{ background: 'var(--color-paper2)' }}
+    <div className="flex h-full w-full">
+      <div
+        className="flex-shrink-0 border-r-[1.5px] border-[var(--color-ink)] min-h-0 overflow-hidden flex flex-col"
+        style={{ width: 200 }}
       >
-        <Background color="var(--color-line-soft)" />
-        <Controls />
-      </ReactFlow>
+        <NodePalette nodes={catalogNodes} />
+      </div>
+      <div ref={wrapperRef} className="flex-1 min-w-0 min-h-0">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onInit={setRfInstance}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          nodeTypes={NODE_TYPES}
+          fitView
+          style={{ background: 'var(--color-paper2)' }}
+        >
+          <Background color="var(--color-line-soft)" />
+          <Controls />
+        </ReactFlow>
+      </div>
     </div>
   );
 }
@@ -81,12 +127,17 @@ function AgentPageContent() {
   const [input, setInput] = useState('');
   const [executeLoading, setExecuteLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [catalogNodes, setCatalogNodes] = useState<NodeConfig[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
 
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
+  }, []);
+
+  useEffect(() => {
+    getCatalog().then(setCatalogNodes).catch(() => {});
   }, []);
 
   useSSEStream(sessionId, {
@@ -293,6 +344,14 @@ function AgentPageContent() {
           {mode === 'wizard' && (
             <div className="flex-1 flex min-h-0">
 
+              {/* Node Palette */}
+              <div
+                className="flex-shrink-0 border-r-[1.5px] border-[var(--color-ink)] min-h-0 overflow-hidden flex flex-col"
+                style={{ width: 200 }}
+              >
+                <NodePalette nodes={catalogNodes} />
+              </div>
+
               {/* Chat area */}
               <div className="flex-1 flex flex-col min-w-0 min-h-0">
                 {/* Message list */}
@@ -427,7 +486,7 @@ function AgentPageContent() {
           {/* ── Edit Mode ───────────────────────────────────────── */}
           {mode === 'edit' && (
             <div className="flex-1 min-h-0">
-              <FlowEditor />
+              <FlowEditor catalogNodes={catalogNodes} />
             </div>
           )}
 
