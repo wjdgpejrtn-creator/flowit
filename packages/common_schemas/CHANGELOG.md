@@ -7,6 +7,13 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.13.0] - 2026-05-28
+
+### Added — `ErrorCode.E_MISSING_REQUIRED_PARAMETER` (PR #208 후속)
+- `enums.py`: 워크플로우 노드의 `input_schema.required` 중 `NodeInstance.parameters`에 없는 필드를 `GraphValidator`가 보고할 때 사용. 기존엔 connection 누락(`E_MISSING_CONNECTION`)만 검사해 사용자가 `prompt` 같은 필수 파라미터를 안 넣어도 validate가 passed로 떨어지고 execute 시점에 worker가 `__init__() missing 1 required positional argument` 런타임 에러를 던지는 갭이 있었다.
+- 매핑: `GraphValidator._check_required_parameters`가 본 코드로 노드별 누락 필드를 `ValidationErrorItem(message="Required parameter(s) missing: ...")` 으로 반환.
+- TS regenerate 완료.
+
 ## [0.12.0] - 2026-05-23
 
 ### Added — `UserRole` named Literal (PR #157 review ① SSOT 통합)

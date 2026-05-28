@@ -12,10 +12,8 @@ import { streamCreateSession } from '@/lib/api/agentApi';
 import { executeWorkflow } from '@/lib/api/workflowApi';
 import { ReactFlow, Background, Controls, useNodesState, useEdgesState, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import NodePalette from '@/components/workflow/NodePalette';
+import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
-import { getCatalog } from '@/lib/api/nodeApi';
-import type { NodeConfig } from '@common/generated';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -37,7 +35,7 @@ const NODE_TYPES = { custom: CustomNode };
 
 // ─── FlowEditor (edit mode — NodePalette 좌측 + 드래그&드롭 중앙 배치) ─────────
 
-function FlowEditor({ catalogNodes }: { catalogNodes: NodeConfig[] }) {
+function FlowEditor() {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [edges, , onEdgesChange] = useEdgesState<RFEdge>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -45,14 +43,13 @@ function FlowEditor({ catalogNodes }: { catalogNodes: NodeConfig[] }) {
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    e.dataTransfer.dropEffect = 'copy';
   }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    const raw = e.dataTransfer.getData('application/x-node-config');
-    if (!raw || !rfInstance || !wrapperRef.current) return;
-    const nodeConfig = JSON.parse(raw) as NodeConfig;
+    const payload = readPaletteDragPayload(e);
+    if (!payload || !rfInstance || !wrapperRef.current) return;
     const rect = wrapperRef.current.getBoundingClientRect();
     const position = rfInstance.screenToFlowPosition({
       x: rect.left + rect.width / 2,
@@ -64,7 +61,7 @@ function FlowEditor({ catalogNodes }: { catalogNodes: NodeConfig[] }) {
         id: `node-${Date.now()}`,
         type: 'custom',
         position,
-        data: { label: nodeConfig.name, riskLevel: nodeConfig.risk_level },
+        data: { name: payload.name, risk_level: payload.risk_level, node_type: payload.node_type },
       },
     ]);
   }, [rfInstance, setNodes]);
@@ -75,7 +72,7 @@ function FlowEditor({ catalogNodes }: { catalogNodes: NodeConfig[] }) {
         className="flex-shrink-0 border-r-[1.5px] border-[var(--color-ink)] min-h-0 overflow-hidden flex flex-col"
         style={{ width: 200 }}
       >
-        <NodePalette nodes={catalogNodes} />
+        <NodePalette />
       </div>
       <div ref={wrapperRef} className="flex-1 min-w-0 min-h-0">
         <ReactFlow
@@ -127,17 +124,12 @@ function AgentPageContent() {
   const [input, setInput] = useState('');
   const [executeLoading, setExecuteLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
-  const [catalogNodes, setCatalogNodes] = useState<NodeConfig[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
 
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
-  }, []);
-
-  useEffect(() => {
-    getCatalog().then(setCatalogNodes).catch(() => {});
   }, []);
 
   useSSEStream(sessionId, {
@@ -349,7 +341,7 @@ function AgentPageContent() {
                 className="flex-shrink-0 border-r-[1.5px] border-[var(--color-ink)] min-h-0 overflow-hidden flex flex-col"
                 style={{ width: 200 }}
               >
-                <NodePalette nodes={catalogNodes} />
+                <NodePalette />
               </div>
 
               {/* Chat area */}
@@ -486,7 +478,7 @@ function AgentPageContent() {
           {/* ── Edit Mode ───────────────────────────────────────── */}
           {mode === 'edit' && (
             <div className="flex-1 min-h-0">
-              <FlowEditor catalogNodes={catalogNodes} />
+              <FlowEditor />
             </div>
           )}
 

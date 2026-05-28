@@ -1,84 +1,147 @@
-import { useState } from 'react';
-import RiskLevelBadge from './RiskLevelBadge';
-import type { NodeConfig } from '@common/generated';
+'use client';
 
-interface Props {
-  nodes: NodeConfig[];
-  onDragStart?: (node: NodeConfig) => void;
+import { useEffect, useMemo, useState } from 'react';
+import { getCatalog } from '@/lib/api/nodeApi';
+import { RiskLevel } from '@common/generated';
+import type { NodeConfig } from '@common/generated';
+import RiskPill from '@/components/common/RiskPill';
+
+const PALETTE_MIME = 'application/x-wf-node-config';
+
+export interface NodePaletteDragPayload {
+  node_id: string;
+  node_type: string;
+  name: string;
+  risk_level: RiskLevel;
 }
 
-const CATEGORY_ICONS: Record<string, string> = {
-  external: '🌐',
-  domain: '⚙',
-  toolset: '🔧',
-};
+export function readPaletteDragPayload(e: React.DragEvent | DragEvent): NodePaletteDragPayload | null {
+  const raw = e.dataTransfer?.getData(PALETTE_MIME);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as NodePaletteDragPayload;
+  } catch {
+    return null;
+  }
+}
 
-export default function NodePalette({ nodes, onDragStart }: Props) {
-  const [search, setSearch] = useState('');
+export default function NodePalette({
+  mvpOnly = false,
+  catalog: providedCatalog,
+}: {
+  mvpOnly?: boolean;
+  catalog?: NodeConfig[] | null;
+}) {
+  const [fetched, setFetched] = useState<NodeConfig[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
 
-  const filtered = search.trim()
-    ? nodes.filter(
-        (n) =>
-          n.name.toLowerCase().includes(search.toLowerCase()) ||
-          n.category.toLowerCase().includes(search.toLowerCase()) ||
-          n.description.toLowerCase().includes(search.toLowerCase()),
-      )
-    : nodes;
+  useEffect(() => {
+    if (providedCatalog !== undefined) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await getCatalog(mvpOnly);
+        if (!cancelled) setFetched(data);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : '카탈로그 조회 실패');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mvpOnly, providedCatalog]);
 
-  const grouped = filtered.reduce<Record<string, NodeConfig[]>>((acc, n) => {
-    if (!acc[n.category]) acc[n.category] = [];
-    acc[n.category].push(n);
-    return acc;
-  }, {});
+  const catalog = providedCatalog ?? fetched;
+
+  const grouped = useMemo(() => {
+    if (!catalog) return new Map<string, NodeConfig[]>();
+    const filtered = query
+      ? catalog.filter(
+          (n) =>
+            n.name.toLowerCase().includes(query.toLowerCase()) ||
+            n.node_type.toLowerCase().includes(query.toLowerCase()) ||
+            n.category.toLowerCase().includes(query.toLowerCase()),
+        )
+      : catalog;
+    const map = new Map<string, NodeConfig[]>();
+    for (const n of filtered) {
+      const key = n.category || 'other';
+      const list = map.get(key) ?? [];
+      list.push(n);
+      map.set(key, list);
+    }
+    return new Map([...map.entries()].sort(([a], [b]) => a.localeCompare(b)));
+  }, [catalog, query]);
 
   const handleDragStart = (e: React.DragEvent, node: NodeConfig) => {
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('application/x-node-config', JSON.stringify(node));
-    onDragStart?.(node);
+    const payload: NodePaletteDragPayload = {
+      node_id: node.node_id,
+      node_type: node.node_type,
+      name: node.name,
+      risk_level: node.risk_level,
+    };
+    e.dataTransfer.setData(PALETTE_MIME, JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = 'copy';
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* 검색 */}
-      <div className="p-2 border-b border-[var(--color-line-soft)]">
+    <div
+      data-testid="node-palette"
+      className="flex flex-col h-full border-r-[1.5px] border-[var(--color-ink)]"
+      style={{ width: 240, background: 'var(--color-surface)' }}
+    >
+      <div className="p-2 border-b-[1.5px] border-[var(--color-line-soft)]">
+        <div className="font-bold text-[13px] mb-1">노드 팔레트</div>
         <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="노드 검색…"
-          className="w-full border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-2 py-[4px] text-[12px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)]"
+          type="search"
+          placeholder="검색 (이름/타입/카테고리)"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-full text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
         />
       </div>
 
-      {/* 카테고리별 목록 */}
-      <div className="flex-1 overflow-auto">
-        {Object.entries(grouped).map(([category, catNodes]) => (
-          <div key={category}>
-            <div className="px-2 py-1 text-[10px] font-bold text-[var(--color-ink3)] uppercase tracking-wider bg-[var(--color-paper2)] border-b border-[var(--color-line-soft)] sticky top-0">
-              {CATEGORY_ICONS[category] ?? '📦'} {category} ({catNodes.length})
+      <div className="flex-1 overflow-auto p-2">
+        {error && (
+          <div className="text-[12px] text-[var(--color-status-failed)] mb-2">⚠ {error}</div>
+        )}
+        {!catalog && !error && (
+          <div className="text-[12px] text-[var(--color-ink4)] italic">로딩 중…</div>
+        )}
+        {catalog && grouped.size === 0 && (
+          <div className="text-[12px] text-[var(--color-ink4)] italic">결과 없음</div>
+        )}
+        {[...grouped.entries()].map(([category, nodes]) => (
+          <div key={category} className="mb-3">
+            <div className="text-[11px] uppercase tracking-wide text-[var(--color-ink3)] mb-1 font-bold">
+              {category}
             </div>
-            {catNodes.map((node) => (
-              <div
-                key={node.node_id}
-                draggable
-                onDragStart={(e) => handleDragStart(e, node)}
-                className="flex items-center gap-2 px-2 py-[6px] border-b border-[var(--color-line-soft)] cursor-grab hover:bg-[var(--color-hl)] active:cursor-grabbing"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-[12px] truncate">{node.name}</div>
-                  <div className="text-[10px] text-[var(--color-ink3)] truncate">{node.description}</div>
+            <div className="flex flex-col gap-1">
+              {nodes.map((node) => (
+                <div
+                  key={node.node_id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, node)}
+                  data-testid={`palette-item-${node.node_type}`}
+                  className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_9px_5px_9px] px-2 py-[5px] bg-[var(--color-paper2)] cursor-grab active:cursor-grabbing hover:bg-[var(--color-hl)]"
+                  title={node.description}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-bold text-[12px] truncate">{node.name}</span>
+                    <RiskPill level={node.risk_level} />
+                  </div>
+                  <div className="font-mono text-[10px] text-[var(--color-ink3)] truncate">
+                    {node.node_type}
+                  </div>
                 </div>
-                <RiskLevelBadge level={node.risk_level} showLabel={false} />
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         ))}
-        {filtered.length === 0 && (
-          <div className="p-4 text-center text-[12px] text-[var(--color-ink4)] italic">
-            검색 결과가 없습니다.
-          </div>
-        )}
       </div>
     </div>
   );
 }
+
+export { PALETTE_MIME };
