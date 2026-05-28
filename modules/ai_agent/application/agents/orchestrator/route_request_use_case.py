@@ -85,7 +85,8 @@ class RouteRequestUseCase:
                 personal_memory = await self._load_personal_memory(stub_state, trace_id)
             except Exception as exc:
                 logger.warning(
-                    "메모리 로드 실패, 빈 메모리로 계속 (user_id=%s): %s", user_id, exc
+                    "메모리 로드 실패, 빈 메모리로 계속 (user_id=%s, trace_id=%s): %s",
+                    user_id, trace_id, exc,
                 )
                 personal_memory = []
 
@@ -146,7 +147,8 @@ class RouteRequestUseCase:
                     await self._update_personal_memory(state, turn_count, trace_id)
                 except Exception as exc:
                     logger.warning(
-                        "메모리 업데이트 실패 (non-fatal, user_id=%s): %s", user_id, exc
+                        "메모리 업데이트 실패 (non-fatal, user_id=%s, trace_id=%s): %s",
+                        user_id, trace_id, exc,
                     )
 
         finally:
