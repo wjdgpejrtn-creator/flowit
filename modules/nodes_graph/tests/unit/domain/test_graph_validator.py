@@ -19,11 +19,11 @@ class _InMemoryRepo:
     async def search_by_embedding(self, q, limit=10): return list(self._store.values())[:limit]
 
 
-def _make_node_def(required_connections=None):
+def _make_node_def(required_connections=None, input_schema=None):
     from uuid import uuid4
     return NodeDefinition(
         node_id=uuid4(), node_type="x", name="x", category="x", version="1.0.0",
-        input_schema={}, output_schema={}, parameter_schema={},
+        input_schema=input_schema or {}, output_schema={}, parameter_schema={},
         risk_level=RiskLevel.LOW, required_connections=required_connections or [],
         description="x", is_mvp=True,
     )
@@ -36,10 +36,10 @@ def _wf(nodes, edges):
     )
 
 
-def _node(node_id=None, credential_id=None):
+def _node(node_id=None, credential_id=None, parameters=None):
     return NodeInstance(
         instance_id=uuid4(), node_id=node_id or uuid4(),
-        parameters={}, credential_id=credential_id, position=Position(x=0, y=0),
+        parameters=parameters or {}, credential_id=credential_id, position=Position(x=0, y=0),
     )
 
 
@@ -111,6 +111,66 @@ async def test_single_node_no_isolated_error():
     n1 = _node()
     result = await GraphValidator(_InMemoryRepo()).validate(_wf([n1], []))
     assert not any(e.code == ErrorCode.E_ISOLATED_NODE for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_missing_required_parameter_detected():
+    """input_schema.required 중 NodeInstance.parameters에 없는 필드는 검증 실패."""
+    repo = _InMemoryRepo()
+    schema = {"type": "object", "properties": {"prompt": {"type": "string"}}, "required": ["prompt"]}
+    node_def = _make_node_def(input_schema=schema)
+    await repo.upsert(node_def)
+    ni = _node(node_id=node_def.node_id, parameters={})  # prompt 누락
+    result = await GraphValidator(repo).validate(_wf([ni], []))
+    assert result.validation_status == "failed"
+    err = next(e for e in result.errors if e.code == ErrorCode.E_MISSING_REQUIRED_PARAMETER)
+    assert "prompt" in err.message
+    assert str(ni.instance_id) in err.node_ids
+
+
+@pytest.mark.asyncio
+async def test_required_parameter_empty_string_detected():
+    """빈 문자열도 누락으로 취급 (frontend computeMissingRequired와 동일)."""
+    repo = _InMemoryRepo()
+    schema = {"required": ["prompt"], "properties": {"prompt": {"type": "string"}}}
+    node_def = _make_node_def(input_schema=schema)
+    await repo.upsert(node_def)
+    ni = _node(node_id=node_def.node_id, parameters={"prompt": ""})
+    result = await GraphValidator(repo).validate(_wf([ni], []))
+    assert any(e.code == ErrorCode.E_MISSING_REQUIRED_PARAMETER for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_required_parameter_present_passes():
+    repo = _InMemoryRepo()
+    schema = {"required": ["prompt"], "properties": {"prompt": {"type": "string"}}}
+    node_def = _make_node_def(input_schema=schema)
+    await repo.upsert(node_def)
+    ni = _node(node_id=node_def.node_id, parameters={"prompt": "hello"})
+    result = await GraphValidator(repo).validate(_wf([ni], []))
+    assert not any(e.code == ErrorCode.E_MISSING_REQUIRED_PARAMETER for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_required_parameter_aggregates_multiple_fields():
+    repo = _InMemoryRepo()
+    schema = {"required": ["a", "b"], "properties": {"a": {}, "b": {}, "c": {}}}
+    node_def = _make_node_def(input_schema=schema)
+    await repo.upsert(node_def)
+    ni = _node(node_id=node_def.node_id, parameters={"c": "ok"})
+    result = await GraphValidator(repo).validate(_wf([ni], []))
+    err = next(e for e in result.errors if e.code == ErrorCode.E_MISSING_REQUIRED_PARAMETER)
+    assert "'a'" in err.message and "'b'" in err.message
+
+
+@pytest.mark.asyncio
+async def test_required_parameter_skipped_when_no_required_key():
+    repo = _InMemoryRepo()
+    node_def = _make_node_def(input_schema={"properties": {"x": {}}})  # required 키 없음
+    await repo.upsert(node_def)
+    ni = _node(node_id=node_def.node_id, parameters={})
+    result = await GraphValidator(repo).validate(_wf([ni], []))
+    assert not any(e.code == ErrorCode.E_MISSING_REQUIRED_PARAMETER for e in result.errors)
 
 
 @pytest.mark.asyncio
