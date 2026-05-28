@@ -2,16 +2,17 @@
 
 spec §3.1 supervisor diagram 구현. LangGraph는 adapters/에만 존재 (CLAUDE.md 제약).
 
-Tool-calling 에이전트 구조:
-  load_memory (전처리, 항상 실행) → agent_loop → END
+결정론적 라우팅 구조:
+  load_memory → agent_loop → END
 
-  agent_loop: LLM이 아래 툴 중 하나를 선택해 실행, done 반환 시 종료.
-    analyze_intent / call_composer / call_skills_builder / finalize /
-    update_memory / done
+  agent_loop: intent 분석 후 LLM 없이 결정론적 분기.
+    chitchat/info_question/control/workflow_execute → 즉시 응답
+    draft/refine/clarify → composer relay
+    propose → finalize
+    build_skill → skills relay
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import operator
 from collections.abc import AsyncGenerator
@@ -28,6 +29,7 @@ from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
     ErrorFrame,
+    PipelineStatusFrame,
     ResultFrame,
     SessionFrame,
     SSEFrame,
@@ -42,22 +44,7 @@ from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 
 _logger = logging.getLogger(__name__)
 
-_MAX_SUPERVISOR_ITERATIONS = 10
-_RELAY_TOOLS = {"call_composer", "call_skills_builder"}
-
-
-class _SupervisorAction(BaseModel):
-    """LLM 슈퍼바이저가 다음에 실행할 툴을 선택하는 스키마."""
-
-    tool_name: Literal[
-        "analyze_intent",
-        "call_composer",
-        "call_skills_builder",
-        "finalize",
-        "update_memory",
-        "done",
-    ]
-    reasoning: str
+_MAX_SUPERVISOR_ITERATIONS = 5
 
 
 class _State(TypedDict):
@@ -73,6 +60,7 @@ class _State(TypedDict):
     error: str | None
     agent_done: bool
     agent_iterations: int
+    composer_done: bool  # composer/skills 호출 완료 여부 — update_memory 단계 진입 트리거
 
 
 class LangGraphSupervisor:
@@ -96,7 +84,6 @@ class LangGraphSupervisor:
         self._skills = skills_client
         self._session_frame_store = session_frame_store
         self._llm = llm
-        self._live_queues: dict[UUID, asyncio.Queue] = {}
         self._graph = self._build()
 
     # ------------------------------------------------------------------ public
@@ -119,9 +106,6 @@ class LangGraphSupervisor:
         trace_id: str | None,
         turn_count: int = 1,
     ) -> AsyncGenerator[SSEFrame, None]:
-        queue: asyncio.Queue[SSEFrame | None] = asyncio.Queue()
-        self._live_queues[session_id] = queue
-
         yield SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
 
         initial: _State = {
@@ -137,38 +121,31 @@ class LangGraphSupervisor:
             "error": None,
             "agent_done": False,
             "agent_iterations": 0,
+            "composer_done": False,
         }
 
-        async def _run_graph() -> None:
-            try:
-                async for event in self._graph.astream(initial, stream_mode="updates"):
-                    for node_name, updates in event.items():
-                        # agent 루프 노드는 내부에서 툴별 AgentNodeFrame을 emit
-                        if node_name != "agent":
-                            await queue.put(AgentNodeFrame(agent_node_name=node_name))
-                        if not isinstance(updates, dict):
-                            continue
-                        # relay 툴(call_composer/call_skills_builder)은 _relay()에서 직접 queue에 put
-                        for frame in updates.get("collected_frames", []):
-                            await queue.put(frame)
-                        if updates.get("error"):
-                            await queue.put(
-                                ErrorFrame(code="E_SUPERVISOR", message=updates["error"])
-                            )
-                            return
-            finally:
-                await queue.put(None)
-                self._live_queues.pop(session_id, None)
-
-        asyncio.create_task(_run_graph())
-
         all_frames: list[AnySSEFrame] = []
-        while True:
-            frame = await queue.get()
-            if frame is None:
-                break
-            all_frames.append(frame)
-            yield frame
+        try:
+            async for event in self._graph.astream(initial, stream_mode="updates"):
+                for node_name, updates in event.items():
+                    if node_name != "agent":
+                        node_frame = AgentNodeFrame(agent_node_name=node_name)
+                        all_frames.append(node_frame)
+                        yield node_frame
+                    if not isinstance(updates, dict):
+                        continue
+                    for frame in updates.get("collected_frames", []):
+                        all_frames.append(frame)
+                        yield frame
+                    if updates.get("error"):
+                        err_frame = ErrorFrame(code="E_SUPERVISOR", message=updates["error"])
+                        all_frames.append(err_frame)
+                        yield err_frame
+                        return
+        except Exception as exc:
+            err_frame = ErrorFrame(code="E_SUPERVISOR", message=str(exc))
+            all_frames.append(err_frame)
+            yield err_frame
 
         if self._session_frame_store:
             await self._save_session_frames(session_id, user_id, message, all_frames)
@@ -204,56 +181,101 @@ class LangGraphSupervisor:
                 "agent_iterations": iterations,
             }
 
-        try:
-            action = await self._llm.generate_structured(
-                self._build_supervisor_prompt(state), _SupervisorAction
+        intent = state.get("intent")
+
+        # ── 1단계: intent 미분석 → 항상 analyze_intent 먼저 (routing LLM 0 call) ──
+        if intent is None:
+            _logger.info("supervisor: intent 없음 → analyze_intent 강제 실행")
+            updates = await self._intent_node(state)
+            intent = updates.get("intent")
+            _logger.info("supervisor: intent 분석 결과 = %s", intent)
+            return {
+                **updates,
+                "agent_iterations": iterations,
+                "collected_frames": [AgentNodeFrame(agent_node_name="analyze_intent")]
+                + updates.get("collected_frames", []),
+            }
+
+        # ── 2단계: 결정론적 라우팅 (routing LLM call 제거) ──────────────────────
+        _FAST_INTENTS = {"chitchat", "info_question", "control", "workflow_execute"}
+        _COMPOSER_INTENTS = {"draft", "refine", "clarify"}
+
+        # fast-path: composer 없이 즉시 응답
+        if intent in _FAST_INTENTS:
+            _logger.info("supervisor: fast-path 처리 intent=%s", intent)
+            updates = await self._fast_response_node(state, intent)
+            return {
+                **updates,
+                "agent_iterations": iterations,
+                "agent_done": True,
+                "collected_frames": [AgentNodeFrame(agent_node_name=intent)]
+                + updates.get("collected_frames", []),
+            }
+
+        # propose → finalize
+        if intent == "propose":
+            updates = await self._finalize_node(state)
+            return {
+                **updates,
+                "agent_iterations": iterations,
+                "agent_done": True,
+                "collected_frames": [AgentNodeFrame(agent_node_name="finalize")]
+                + updates.get("collected_frames", []),
+            }
+
+        # build_skill → skills_builder relay → update_memory → done
+        if intent == "build_skill":
+            if state.get("composer_done"):
+                await self._update_memory_node(state)
+                return {"agent_iterations": iterations, "agent_done": True}
+            updates = await self._skills_node(state)
+            return {**updates, "agent_iterations": iterations, "composer_done": True}
+
+        # draft/refine/clarify → composer relay (1회) → update_memory → done
+        if intent in _COMPOSER_INTENTS:
+            if state.get("composer_done"):
+                # composer 완료 → update_memory → done
+                await self._update_memory_node(state)
+                return {"agent_iterations": iterations, "agent_done": True}
+            updates = await self._composer_node(state)
+            return {**updates, "agent_iterations": iterations, "composer_done": True}
+
+        # unknown intent fallback → done
+        _logger.warning("supervisor: 알 수 없는 intent=%s → 종료", intent)
+        return {"agent_done": True, "agent_iterations": iterations}
+
+    async def _fast_response_node(self, state: _State, intent: str) -> dict:
+        """fast-path 응답 노드 — LLM 0~1 call로 즉시 처리."""
+        msg = state["message"]
+
+        if intent == "control":
+            if any(k in msg for k in ["취소", "초기화", "리셋", "reset", "처음"]):
+                text = "알겠습니다. 대화를 초기화했습니다. 새로운 워크플로우를 말씀해 주세요."
+            elif any(k in msg for k in ["중단", "멈춰", "stop"]):
+                text = "작업을 중단했습니다."
+            else:
+                text = "명령을 처리했습니다."
+            return {"collected_frames": [ResultFrame(intent="chitchat", payload={"message": text})]}
+
+        if intent == "workflow_execute":
+            return {
+                "collected_frames": [
+                    ResultFrame(
+                        intent="propose",
+                        payload={"message": "워크플로우를 실행하려면 채팅창의 '▶ 실행' 버튼을 클릭하세요.", "status": "info"},
+                    )
+                ]
+            }
+
+        # chitchat / info_question → 즉시 응답 (LLM cold start 방지)
+        if intent == "info_question":
+            text = (
+                "저는 업무 자동화 워크플로우를 만들어 드리는 AI 어시스턴트예요. "
+                "예) '매주 월요일 보고서를 Slack으로 보내줘', '구글 시트 데이터 요약해서 이메일 발송' 등을 말씀해 주세요!"
             )
-        except Exception as exc:
-            return {"error": f"툴 선택 실패: {exc}", "agent_done": True, "agent_iterations": iterations}
-
-        _logger.info("supervisor 툴 선택: %s — %s", action.tool_name, action.reasoning)
-
-        tool_map = {
-            "analyze_intent":      self._intent_node,
-            "call_composer":       self._composer_node,
-            "call_skills_builder": self._skills_node,
-            "finalize":            self._finalize_node,
-            "update_memory":       self._update_memory_node,
-        }
-
-        if action.tool_name == "done":
-            return {"agent_done": True, "agent_iterations": iterations}
-
-        tool_fn = tool_map.get(action.tool_name)
-        if tool_fn is None:
-            return {
-                "error": f"알 수 없는 툴: {action.tool_name}",
-                "agent_done": True,
-                "agent_iterations": iterations,
-            }
-
-        try:
-            updates = await tool_fn(state)
-        except Exception as exc:
-            return {
-                "error": f"툴 실행 실패({action.tool_name}): {exc}",
-                "agent_done": True,
-                "agent_iterations": iterations,
-            }
-
-        tool_frames = updates.get("collected_frames", [])
-        pre_frames: list[AnySSEFrame] = [AgentNodeFrame(agent_node_name=action.tool_name)]
-
-        # relay 툴은 _relay()에서 live_queue로 이미 전송 — collected_frames 재방출 방지
-        if action.tool_name in _RELAY_TOOLS:
-            tool_frames = []
-
-
-        return {
-            **updates,
-            "agent_iterations": iterations,
-            "collected_frames": pre_frames + tool_frames,
-        }
+        else:
+            text = "안녕하세요! 어떤 업무를 자동화하고 싶으신가요? 워크플로우를 만들어 드릴게요 😊"
+        return {"collected_frames": [ResultFrame(intent="chitchat", payload={"message": text})]}
 
     @staticmethod
     def _route_agent(state: _State) -> str:
@@ -288,7 +310,13 @@ class LangGraphSupervisor:
                 if resp.next_action != "continue":
                     break
         except Exception as exc:
-            return {"personal_memory": [], "error": f"load_memory 실패: {exc}"}
+            _logger.warning("load_memory 실패 (non-fatal, 빈 메모리로 계속): %s", exc)
+            return {
+                "personal_memory": [],
+                "collected_frames": [
+                    PipelineStatusFrame(service_name="load_memory", status="failed", elapsed_ms=0)
+                ],
+            }
         return {"personal_memory": memories}
 
     async def _intent_node(self, state: _State) -> dict:
@@ -375,14 +403,11 @@ class LangGraphSupervisor:
             payload={"message": state["message"]},
             trace_id=state["trace_id"],
         )
-        live_queue = self._live_queues.get(state["session_id"])
         frames: list[AnySSEFrame] = []
         try:
             async for resp in client.send(req):
                 for frame in resp.frames:
                     frames.append(frame)
-                    if live_queue:
-                        await live_queue.put(frame)
                 if resp.next_action != "continue":
                     break
         except Exception as exc:

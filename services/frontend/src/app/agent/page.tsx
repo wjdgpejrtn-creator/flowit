@@ -21,6 +21,27 @@ const STEP_ORDER: AgentStep[] = [
   'security', 'intent', 'retriever', 'drafter', 'validator', 'qa_eval', 'promote',
 ];
 
+const TOOL_TO_STEP: Record<string, AgentStep> = {
+  // supervisor 노드
+  load_memory:       'security',
+  analyze_intent:    'intent',
+  // composer fixed DAG 노드
+  compress:          'security',
+  security:          'security',
+  intent:            'intent',
+  consultant:        'intent',
+  slot_fill:         'intent',
+  search_nodes:      'retriever',
+  draft_workflow:    'drafter',
+  retry_draft:       'drafter',
+  validate_workflow: 'validator',
+  qa_evaluator:      'qa_eval',
+  promote:           'promote',
+  save_workflow:     'promote',
+  confirm_result:    'promote',
+  save_memory:       'promote',
+};
+
 const STEP_LABELS: Record<AgentStep, string> = {
   security:  '보안 검토',
   intent:    '의도 분류',
@@ -189,9 +210,11 @@ function AgentPageContent() {
             case 'session':
               setSessionId(frame.session_id as string);
               break;
-            case 'agent_node':
-              setCurrentStep(frame.agent_node_name as AgentStep);
+            case 'agent_node': {
+              const toolName = frame.agent_node_name as string;
+              setCurrentStep(TOOL_TO_STEP[toolName] ?? toolName as AgentStep);
               break;
+            }
             case 'rationale_delta':
               appendRationale(frame.delta as string);
               break;
@@ -212,6 +235,13 @@ function AgentPageContent() {
               const msg = payload?.message;
               if (typeof msg === 'string') {
                 addMessage({ id: `a${Date.now()}`, role: 'agent', content: msg, timestamp: Date.now() });
+              }
+              break;
+            }
+            case 'chat_message': {
+              const chatContent = (frame.content ?? frame.message) as string | undefined;
+              if (typeof chatContent === 'string') {
+                addMessage({ id: `c${Date.now()}`, role: 'agent', content: chatContent, timestamp: Date.now() });
               }
               break;
             }
@@ -375,6 +405,16 @@ function AgentPageContent() {
                       </div>
                     </div>
                   ))}
+                  {streaming && (
+                    <div className="flex items-end gap-2 justify-start">
+                      <span className="w-[26px] h-[26px] rounded-full bg-[var(--color-agent)] text-white text-[10px] flex items-center justify-center flex-shrink-0 font-bold mb-[1px]">
+                        AI
+                      </span>
+                      <div className="max-w-[72%] px-[11px] py-[8px] text-[13px] leading-relaxed border-[1.5px] bg-[var(--color-surface)] border-[var(--color-line-soft)] rounded-[8px_12px_12px_4px] text-[var(--color-ink3)] italic animate-pulse">
+                        워크플로우를 분석 중입니다… (1~2분 소요)
+                      </div>
+                    </div>
+                  )}
                   {readyToExecute && (
                     <div className="flex items-end gap-2 justify-start">
                       <span className="w-[26px] h-[26px] rounded-full bg-[var(--color-agent)] text-white text-[10px] flex items-center justify-center flex-shrink-0 font-bold mb-[1px]">
