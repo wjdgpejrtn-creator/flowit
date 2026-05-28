@@ -1,70 +1,237 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppBar from '@/components/common/AppBar';
 import StatusPill from '@/components/common/StatusPill';
-import NodeCard from '@/components/common/NodeCard';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import Btn from '@/components/common/Btn';
 import Skel from '@/components/common/Skel';
-import { RiskLevel } from '@common/generated';
-import type { NodeStatus } from '@/types';
 import { useWorkflow } from '@/hooks/useWorkflow';
+import {
+  getLatestExecution,
+  cancelExecution,
+  resumeExecution,
+  type WorkflowLatestExecution,
+  type NodeResultEntry,
+} from '@/lib/api/workflowApi';
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  type Node as RFNode,
+  type Edge as RFEdge,
+  useNodesState,
+  useEdgesState,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 
-const TIMELINE: Array<{ time: string; name: string; status: NodeStatus; elapsed: string }> = [
-  { time: '09:00:00.124', name: 'Cron Trigger', status: 'succeeded', elapsed: '+12ms' },
-  { time: '09:00:00.236', name: 'Sheets Read',  status: 'succeeded', elapsed: '+842ms' },
-  { time: '09:00:01.078', name: 'Aggregate',    status: 'running',   elapsed: '…' },
-  { time: '09:00:??',     name: 'Drive Save',   status: 'pending',   elapsed: '—' },
-  { time: '09:00:??',     name: 'Slack Post',   status: 'pending',   elapsed: '—' },
-];
+const POLL_INTERVAL_MS = 2000;
+const ACTIVE_STATUSES = new Set(['pending', 'running', 'paused']);
 
-const CANVAS_NODES: Array<{ icon: string; name: string; risk: RiskLevel; status: NodeStatus; x: number; y: number }> = [
-  { icon: '⏰', name: 'Cron',       risk: RiskLevel.LOW,    status: 'succeeded', x: 24,  y: 80 },
-  { icon: '📊', name: 'Sheets',    risk: RiskLevel.LOW,    status: 'succeeded', x: 160, y: 80 },
-  { icon: 'Σ',  name: 'Aggregate', risk: RiskLevel.LOW,    status: 'running',   x: 296, y: 80 },
-  { icon: '📦', name: 'Drive',     risk: RiskLevel.MEDIUM, status: 'pending',   x: 296, y: 190 },
-  { icon: '#',  name: 'Slack',     risk: RiskLevel.HIGH,   status: 'pending',   x: 432, y: 80 },
-];
+function fmtElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}m ${s}s`;
+}
+
+function fmtClock(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString('ko-KR', { hour12: false });
+}
+
+function nodeStatusLookup(results: NodeResultEntry[]): Map<string, NodeResultEntry['status']> {
+  const m = new Map<string, NodeResultEntry['status']>();
+  for (const r of results) m.set(r.node_instance_id, r.status);
+  return m;
+}
 
 export default function WorkflowDetailPage({ params }: { params: { id: string } }) {
   const { id } = params;
-  const { workflow, loading, error, load } = useWorkflow();
+  const { workflow, loading: wfLoading, error: wfError, load: loadWorkflow } = useWorkflow();
+
+  const [execution, setExecution] = useState<WorkflowLatestExecution | null>(null);
+  const [execError, setExecError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [controlBusy, setControlBusy] = useState(false);
+  const [controlError, setControlError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    void load(id);
-  }, [id, load]);
+    void loadWorkflow(id);
+  }, [id, loadWorkflow]);
 
-  const workflowName = workflow?.name ?? (loading ? '' : '주간 회의록 요약');
+  const fetchExecution = useCallback(async () => {
+    try {
+      const data = await getLatestExecution(id);
+      setExecution(data);
+      setExecError(null);
+    } catch (e) {
+      setExecError(e instanceof Error ? e.message : '실행 상태 조회 실패');
+    }
+  }, [id]);
+
+  useEffect(() => {
+    void fetchExecution();
+  }, [fetchExecution]);
+
+  // active 상태일 때만 polling
+  useEffect(() => {
+    if (pollRef.current) {
+      clearTimeout(pollRef.current);
+      pollRef.current = null;
+    }
+    if (execution && ACTIVE_STATUSES.has(execution.status)) {
+      pollRef.current = setTimeout(() => void fetchExecution(), POLL_INTERVAL_MS);
+    }
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, [execution, fetchExecution]);
+
+  // live 경과 시간 (running일 때 1초 tick)
+  useEffect(() => {
+    if (!execution || !ACTIVE_STATUSES.has(execution.status)) return;
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [execution]);
+
+  const handleCancel = async () => {
+    if (!execution) return;
+    setControlBusy(true);
+    setControlError(null);
+    try {
+      await cancelExecution(execution.execution_id);
+      void fetchExecution();
+    } catch (e) {
+      setControlError(e instanceof Error ? e.message : '취소 실패');
+    } finally {
+      setControlBusy(false);
+    }
+  };
+
+  const handleResume = async () => {
+    if (!execution) return;
+    setControlBusy(true);
+    setControlError(null);
+    try {
+      await resumeExecution(execution.execution_id);
+      void fetchExecution();
+    } catch (e) {
+      setControlError(e instanceof Error ? e.message : '재개 실패');
+    } finally {
+      setControlBusy(false);
+    }
+  };
+
+  // 경과 시간 계산
+  const elapsedSec = useMemo(() => {
+    if (!execution) return 0;
+    const start = new Date(execution.started_at).getTime();
+    const end = execution.finished_at ? new Date(execution.finished_at).getTime() : nowMs;
+    return Math.max(0, (end - start) / 1000);
+  }, [execution, nowMs]);
+
+  // progress 계산
+  const totalNodes = workflow?.nodes.length ?? 0;
+  const summary = execution?.node_states_summary ?? {};
+  const completedCount =
+    (summary.succeeded ?? 0) + (summary.failed ?? 0) + (summary.cancelled ?? 0);
+  const progressPct = totalNodes > 0 ? Math.round((completedCount / totalNodes) * 100) : 0;
+
+  // ReactFlow node/edge 변환
+  const statusMap = execution ? nodeStatusLookup(execution.node_results) : new Map();
+  const rfNodes: RFNode[] = useMemo(() => {
+    if (!workflow) return [];
+    return workflow.nodes.map((n) => {
+      const status = statusMap.get(n.instance_id) ?? 'pending';
+      const colorByStatus: Record<string, string> = {
+        succeeded: 'var(--color-status-succeeded)',
+        running: 'var(--color-status-running)',
+        failed: 'var(--color-status-failed)',
+        retrying: 'var(--color-status-retrying)',
+        pending: 'var(--color-ink4)',
+        cancelled: 'var(--color-ink4)',
+      };
+      return {
+        id: String(n.instance_id),
+        position: { x: n.position.x, y: n.position.y },
+        data: { label: `${n.instance_id.slice(0, 8)}… [${status}]` },
+        style: {
+          border: `2px solid ${colorByStatus[status]}`,
+          background: 'var(--color-surface)',
+          fontSize: 11,
+          padding: 6,
+        },
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflow, execution]);
+
+  const rfEdges: RFEdge[] = useMemo(() => {
+    if (!workflow) return [];
+    return workflow.connections.map((e, i) => ({
+      id: `e${i}`,
+      source: String(e.from_instance_id),
+      target: String(e.to_instance_id),
+    }));
+  }, [workflow]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(rfNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(rfEdges);
+
+  // workflow/execution 변동 시 ReactFlow state 동기화 (initial state는 mount 시점만 반영)
+  useEffect(() => {
+    setNodes(rfNodes);
+  }, [rfNodes, setNodes]);
+  useEffect(() => {
+    setEdges(rfEdges);
+  }, [rfEdges, setEdges]);
+
+  const workflowName = workflow?.name ?? (wfLoading ? '' : '워크플로우');
+  const execStatus = execution?.status ?? 'pending';
+  const isActive = execution && ACTIVE_STATUSES.has(execution.status);
+  const isPaused = execution?.status === 'paused';
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
       <AppBar />
 
       {/* Header bar */}
-      <div
-        className="flex items-center gap-[10px] px-3 py-2 border-b-[1.5px] border-[var(--color-ink)] bg-[var(--color-surface)]"
-      >
-        {loading ? (
+      <div className="flex items-center gap-[10px] px-3 py-2 border-b-[1.5px] border-[var(--color-ink)] bg-[var(--color-surface)]">
+        {wfLoading ? (
           <Skel className="w-40 h-4" />
         ) : (
-          <span className="font-bold text-[14px]">{workflowName} ▶</span>
+          <span className="font-bold text-[14px]">{workflowName}</span>
         )}
-        <StatusPill status="running" />
-        <span className="text-[13px] text-[var(--color-ink3)]">
-          시작 09:00:00 · 경과 <span className="bg-[var(--color-hl)] px-[3px]">2.4s</span>
-        </span>
-        <span className="text-[11px] border border-[var(--color-ink4)] rounded px-[6px] py-0 text-[var(--color-ink3)]">
-          trigger: cron
-        </span>
+        {execution ? (
+          <>
+            <StatusPill status={execStatus} />
+            <span className="text-[13px] text-[var(--color-ink3)]">
+              시작 {fmtClock(execution.started_at)} · 경과{' '}
+              <span className="bg-[var(--color-hl)] px-[3px] font-mono">{fmtElapsed(elapsedSec)}</span>
+            </span>
+            <span className="text-[11px] border border-[var(--color-ink4)] rounded px-[6px] py-0 text-[var(--color-ink3)] font-mono">
+              exec {execution.execution_id.slice(0, 8)}…
+            </span>
+          </>
+        ) : (
+          <span className="text-[13px] text-[var(--color-ink4)] italic">아직 실행된 적이 없습니다.</span>
+        )}
         <div className="flex-1" />
-        <Btn ghost disabled className="opacity-50 cursor-not-allowed">⏸ 일시정지</Btn>
-        <Btn danger disabled className="opacity-50 cursor-not-allowed">⏹ 취소</Btn>
+        <Btn ghost onClick={handleResume} disabled={!isPaused || controlBusy}>
+          ▶ 재개
+        </Btn>
+        <Btn danger onClick={handleCancel} disabled={!isActive || controlBusy}>
+          ⏹ 취소
+        </Btn>
       </div>
 
-      {error && (
-        <div className="px-3 pt-2">
-          <ErrorBanner><span>⚠ {error}</span></ErrorBanner>
+      {(wfError || execError || controlError) && (
+        <div className="px-3 pt-2 flex flex-col gap-1">
+          {wfError && <ErrorBanner><span>⚠ 워크플로우: {wfError}</span></ErrorBanner>}
+          {execError && <ErrorBanner><span>⚠ 실행 상태: {execError}</span></ErrorBanner>}
+          {controlError && <ErrorBanner><span>⚠ 제어: {controlError}</span></ErrorBanner>}
         </div>
       )}
 
@@ -73,82 +240,81 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
         className="px-3 py-[6px] border-b-[1.5px] border-[var(--color-line-soft)] flex items-center gap-3 text-[13px]"
         style={{ background: 'var(--color-paper2)' }}
       >
-        <span>2 / 5 완료</span>
+        <span>
+          {completedCount} / {totalNodes} 완료
+        </span>
         <div className="flex-1 h-[10px] border-[1.5px] border-[var(--color-ink)] rounded-full bg-[var(--color-paper)] overflow-hidden relative">
           <div
             className="absolute left-0 top-0 h-full border-r-[1.5px] border-[var(--color-ink)]"
-            style={{ width: '40%', background: 'var(--color-status-succeeded)' }}
-          />
-          <div
-            className="absolute top-0 h-full animate-shimmer"
-            style={{ left: '40%', width: '15%' }}
+            style={{ width: `${progressPct}%`, background: 'var(--color-status-succeeded)' }}
           />
         </div>
-        <span className="font-mono text-[12px]">2.4s · ETA 8s</span>
+        <span className="font-mono text-[12px]">{progressPct}%</span>
       </div>
 
       <div className="flex-1 flex min-h-0">
-        {/* Canvas area */}
+        {/* Canvas — ReactFlow */}
         <div
-          className="flex-1 relative border-r-[1.5px] border-[var(--color-ink)] overflow-hidden"
+          className="flex-1 border-r-[1.5px] border-[var(--color-ink)]"
           style={{ background: 'var(--color-paper2)', minHeight: 400 }}
         >
-          <svg
-            className="absolute inset-0 w-full h-full pointer-events-none"
-            viewBox="0 0 600 320"
-            preserveAspectRatio="xMidYMid meet"
-          >
-            <defs>
-              <marker id="arr" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto">
-                <path d="M0,0 L8,4 L0,8 z" fill="var(--color-ink)" />
-              </marker>
-            </defs>
-            <path d="M 134 112 C 175 112, 165 112, 160 112" stroke="var(--color-ink)" strokeWidth="1.5" fill="none" markerEnd="url(#arr)" />
-            <path d="M 272 112 C 310 112, 296 112, 296 112" stroke="var(--color-ink)" strokeWidth="1.5" fill="none" markerEnd="url(#arr)" />
-            <path d="M 410 112 C 450 112, 432 112, 432 112" stroke="var(--color-ink)" strokeWidth="1.5" fill="none" strokeDasharray="4 3" markerEnd="url(#arr)" />
-            <path d="M 370 140 C 370 175, 360 190, 296 222" stroke="var(--color-ink)" strokeWidth="1.5" fill="none" strokeDasharray="4 3" markerEnd="url(#arr)" />
-          </svg>
-
-          {CANVAS_NODES.map((node) => (
-            <div
-              key={node.name}
-              className="absolute"
-              style={{ left: node.x, top: node.y }}
+          {workflow && workflow.nodes.length > 0 ? (
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              fitView
+              style={{ background: 'var(--color-paper2)' }}
             >
-              <NodeCard
-                icon={node.icon}
-                name={node.name}
-                risk={node.risk}
-                status={node.status}
-              />
+              <Background color="var(--color-line-soft)" />
+              <Controls />
+            </ReactFlow>
+          ) : (
+            <div className="h-full flex items-center justify-center text-[13px] text-[var(--color-ink4)]">
+              {wfLoading ? '로딩 중…' : '노드가 없는 워크플로우입니다.'}
             </div>
-          ))}
+          )}
         </div>
 
-        {/* Timeline panel */}
+        {/* Status summary panel */}
         <div
-          className="overflow-auto p-2 flex flex-col gap-0"
+          className="overflow-auto p-2 flex flex-col flex-shrink-0"
           style={{ width: 280, background: 'var(--color-paper2)' }}
         >
-          <div className="font-bold text-[13px] mb-[6px]">노드 이벤트 타임라인</div>
+          <div className="font-bold text-[13px] mb-[6px]">노드 상태 집계</div>
           <div className="h-[1.5px] bg-[var(--color-ink3)] rounded mb-3" />
-          <div className="flex flex-col gap-2">
-            {TIMELINE.map((item, i) => (
-              <div
-                key={i}
-                className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[6px]"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[10px] text-[var(--color-ink3)]">{item.time}</span>
-                  <StatusPill status={item.status} />
+          {execution ? (
+            <div className="flex flex-col gap-2">
+              {Object.keys(summary).length === 0 ? (
+                <p className="text-[12px] text-[var(--color-ink4)] italic">
+                  아직 노드 실행 정보가 없습니다.
+                </p>
+              ) : (
+                Object.entries(summary).map(([status, count]) => (
+                  <div
+                    key={status}
+                    className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[6px] flex items-center justify-between"
+                  >
+                    <span className="font-bold text-[13px]">{status}</span>
+                    <span className="font-mono text-[12px] text-[var(--color-ink3)]">{count}</span>
+                  </div>
+                ))
+              )}
+              {execution.error && (
+                <div className="border-[1.5px] border-[var(--color-status-failed)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[6px]">
+                  <div className="font-bold text-[12px] text-[var(--color-status-failed)] mb-[2px]">에러</div>
+                  <div className="font-mono text-[10px] text-[var(--color-ink3)] break-all">
+                    {execution.error}
+                  </div>
                 </div>
-                <div className="flex items-center justify-between mt-[6px]">
-                  <span className="font-bold text-[13px]">{item.name}</span>
-                  <span className="font-mono text-[11px] text-[var(--color-ink3)]">{item.elapsed}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-[12px] text-[var(--color-ink4)] italic">
+              실행 이력이 없습니다. /agent에서 워크플로우를 생성하고 실행해보세요.
+            </p>
+          )}
         </div>
       </div>
     </div>
