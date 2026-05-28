@@ -38,6 +38,20 @@ class FakeSubAgentClient(SubAgentClient):
             yield resp
 
 
+class FailingSubAgentClient(SubAgentClient):
+    """send() 호출 시 항상 예외를 발생시키는 테스트용 클라이언트."""
+
+    def __init__(self, exc: Exception | None = None):
+        self.sent_requests: list[AgentProtocolRequest] = []
+        self._exc = exc or ConnectionError("personalization agent 연결 실패")
+
+    async def send(self, request: AgentProtocolRequest) -> AsyncIterator[AgentProtocolResponse]:
+        self.sent_requests.append(request)
+        raise self._exc
+        # AsyncGenerator protocol — yield 없이 raise만 해도 async generator로 동작
+        yield  # type: ignore[misc]
+
+
 def _make_use_case(intent: str, entities: dict | None = None):
     analyzer = MagicMock(spec=IntentAnalyzerService)
     analyzer.analyze = AsyncMock(
@@ -155,6 +169,73 @@ async def test_build_skill_functional_domain_payload():
     payload = skills.sent_requests[0].payload
     assert payload["source_type"] == "functional_domain"
     assert payload["domain_code"] == "hr"
+
+
+@pytest.mark.asyncio
+async def test_load_memory_failure_continues_session_with_empty_memory():
+    """personalization 클라이언트 장애 시 빈 메모리로 세션을 계속 진행해야 한다."""
+    analyzer = MagicMock(spec=IntentAnalyzerService)
+    analyzer.analyze = AsyncMock(
+        return_value=IntentResult(intent="draft", confidence=0.9, analyzed_entities={})
+    )
+    failing_personalization = FailingSubAgentClient(ConnectionError("Modal app stopped"))
+    composer = FakeSubAgentClient([_make_result_response()])
+
+    use_case = RouteRequestUseCase(
+        intent_analyzer=analyzer,
+        personalization_client=failing_personalization,
+        composer_client=composer,
+        skills_client=FakeSubAgentClient(),
+    )
+
+    frames = await _collect(use_case, uuid4(), uuid4(), "워크플로우 만들어줘")
+
+    # 세션이 죽지 않고 정상적으로 frame들이 수집되어야 함
+    frame_types = [f.frame_type for f in frames]
+    assert "session" in frame_types
+    assert "agent_node" in frame_types
+    # load_memory_node frame이 존재하고, 그 이후 intent_node로 진행
+    agent_node_names = [
+        f.agent_node_name for f in frames if f.frame_type == "agent_node"
+    ]
+    assert "load_memory_node" in agent_node_names
+    assert "intent_node" in agent_node_names
+
+
+@pytest.mark.asyncio
+async def test_update_memory_failure_does_not_crash_session():
+    """update_memory 실패 시 세션이 에러 없이 종료되어야 한다."""
+    analyzer = MagicMock(spec=IntentAnalyzerService)
+    analyzer.analyze = AsyncMock(
+        return_value=IntentResult(intent="draft", confidence=0.9, analyzed_entities={})
+    )
+
+    call_count = 0
+
+    class SelectiveFailClient(SubAgentClient):
+        async def send(self, request: AgentProtocolRequest) -> AsyncIterator[AgentProtocolResponse]:
+            nonlocal call_count
+            call_count += 1
+            action = request.payload.get("action")
+            if action == "update_memory":
+                raise RuntimeError("GCS write 타임아웃")
+            # load_memory / cleanup은 정상 응답
+            yield AgentProtocolResponse(
+                frames=[],
+                state_delta={"personal_memory": []},
+                next_action="complete",
+            )
+
+    use_case = RouteRequestUseCase(
+        intent_analyzer=analyzer,
+        personalization_client=SelectiveFailClient(),
+        composer_client=FakeSubAgentClient([_make_result_response()]),
+        skills_client=FakeSubAgentClient(),
+    )
+
+    # 예외가 전파되지 않고 정상 완료되어야 함
+    frames = await _collect(use_case, uuid4(), uuid4(), "워크플로우 만들어줘")
+    assert len(frames) > 0
 
 
 @pytest.mark.asyncio

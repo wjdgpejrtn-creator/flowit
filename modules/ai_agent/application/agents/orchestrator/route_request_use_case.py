@@ -81,7 +81,13 @@ class RouteRequestUseCase:
         try:
             # 1. load_memory_node
             yield AgentNodeFrame(agent_node_name="load_memory_node")
-            personal_memory = await self._load_personal_memory(stub_state, trace_id)
+            try:
+                personal_memory = await self._load_personal_memory(stub_state, trace_id)
+            except Exception as exc:
+                logger.warning(
+                    "메모리 로드 실패, 빈 메모리로 계속 (user_id=%s): %s", user_id, exc
+                )
+                personal_memory = []
 
             # 2. intent_node
             yield AgentNodeFrame(agent_node_name="intent_node")
@@ -136,7 +142,12 @@ class RouteRequestUseCase:
             # 5. update_memory_node — propose는 메모리 저장 불필요
             if intent.intent in (IntentType.DRAFT, IntentType.REFINE, IntentType.CLARIFY, IntentType.BUILD_SKILL):
                 yield AgentNodeFrame(agent_node_name="update_memory_node")
-                await self._update_personal_memory(state, turn_count, trace_id)
+                try:
+                    await self._update_personal_memory(state, turn_count, trace_id)
+                except Exception as exc:
+                    logger.warning(
+                        "메모리 업데이트 실패 (non-fatal, user_id=%s): %s", user_id, exc
+                    )
 
         finally:
             await self._cleanup_personal_memory(state, trace_id)
