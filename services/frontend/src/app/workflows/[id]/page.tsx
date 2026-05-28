@@ -7,6 +7,8 @@ import ErrorBanner from '@/components/common/ErrorBanner';
 import Btn from '@/components/common/Btn';
 import Skel from '@/components/common/Skel';
 import { useWorkflow } from '@/hooks/useWorkflow';
+import { useWorkflowStore } from '@/stores/workflowStore';
+import WorkflowEditPane from '@/components/workflow/WorkflowEditPane';
 import {
   getLatestExecution,
   cancelExecution,
@@ -46,10 +48,15 @@ function nodeStatusLookup(results: NodeResultEntry[]): Map<string, NodeResultEnt
   return m;
 }
 
+type Mode = 'view' | 'edit';
+
 export default function WorkflowDetailPage({ params }: { params: { id: string } }) {
   const { id } = params;
   const { workflow, loading: wfLoading, error: wfError, load: loadWorkflow } = useWorkflow();
+  const setStoreWorkflow = useWorkflowStore((s) => s.setWorkflow);
+  const storeDirty = useWorkflowStore((s) => s.dirty);
 
+  const [mode, setMode] = useState<Mode>('view');
   const [execution, setExecution] = useState<WorkflowLatestExecution | null>(null);
   const [execError, setExecError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -60,6 +67,19 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
   useEffect(() => {
     void loadWorkflow(id);
   }, [id, loadWorkflow]);
+
+  // edit 모드 진입 시 store에 workflow 푸시. 종료 시 정리.
+  useEffect(() => {
+    if (mode === 'edit') {
+      if (workflow) setStoreWorkflow(workflow);
+    } else {
+      setStoreWorkflow(null);
+    }
+    return () => {
+      // 페이지 unmount 시 정리
+      setStoreWorkflow(null);
+    };
+  }, [mode, workflow, setStoreWorkflow]);
 
   const fetchExecution = useCallback(async () => {
     try {
@@ -72,29 +92,32 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
   }, [id]);
 
   useEffect(() => {
+    if (mode === 'edit') return;
     void fetchExecution();
-  }, [fetchExecution]);
+  }, [fetchExecution, mode]);
 
-  // active 상태일 때만 polling
+  // active 상태일 때만 polling (view 모드일 때만)
   useEffect(() => {
     if (pollRef.current) {
       clearTimeout(pollRef.current);
       pollRef.current = null;
     }
+    if (mode === 'edit') return;
     if (execution && ACTIVE_STATUSES.has(execution.status)) {
       pollRef.current = setTimeout(() => void fetchExecution(), POLL_INTERVAL_MS);
     }
     return () => {
       if (pollRef.current) clearTimeout(pollRef.current);
     };
-  }, [execution, fetchExecution]);
+  }, [execution, fetchExecution, mode]);
 
-  // live 경과 시간 (running일 때 1초 tick)
+  // live 경과 시간
   useEffect(() => {
+    if (mode === 'edit') return;
     if (!execution || !ACTIVE_STATUSES.has(execution.status)) return;
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [execution]);
+  }, [execution, mode]);
 
   const handleCancel = async () => {
     if (!execution) return;
@@ -124,6 +147,26 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
     }
   };
 
+  const handleToggleMode = () => {
+    if (mode === 'edit' && storeDirty) {
+      const ok = window.confirm('미저장 변경이 있습니다. 변경을 버리고 보기 모드로 돌아갈까요?');
+      if (!ok) return;
+    }
+    const next: Mode = mode === 'view' ? 'edit' : 'view';
+    setMode(next);
+    if (next === 'view') {
+      // edit 모드에서 저장된 최신 노드/엣지가 view 모드 ReactFlow에 반영되도록 hook reload
+      void loadWorkflow(id);
+    }
+  };
+
+  const handleExecuted = () => {
+    // 실행 후 view 모드로 전환 + hook reload (edit 모드에서 저장된 최신 그래프 반영)
+    setMode('view');
+    void loadWorkflow(id);
+    void fetchExecution();
+  };
+
   // 경과 시간 계산
   const elapsedSec = useMemo(() => {
     if (!execution) return 0;
@@ -139,7 +182,7 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
     (summary.succeeded ?? 0) + (summary.failed ?? 0) + (summary.cancelled ?? 0);
   const progressPct = totalNodes > 0 ? Math.round((completedCount / totalNodes) * 100) : 0;
 
-  // ReactFlow node/edge 변환
+  // view 모드 ReactFlow node/edge 변환
   const statusMap = execution ? nodeStatusLookup(execution.node_results) : new Map();
   const rfNodes: RFNode[] = useMemo(() => {
     if (!workflow) return [];
@@ -180,7 +223,6 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
   const [nodes, setNodes, onNodesChange] = useNodesState(rfNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(rfEdges);
 
-  // workflow/execution 변동 시 ReactFlow state 동기화 (initial state는 mount 시점만 반영)
   useEffect(() => {
     setNodes(rfNodes);
   }, [rfNodes, setNodes]);
@@ -204,7 +246,7 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
         ) : (
           <span className="font-bold text-[14px]">{workflowName}</span>
         )}
-        {execution ? (
+        {mode === 'view' && execution && (
           <>
             <StatusPill status={execStatus} />
             <span className="text-[13px] text-[var(--color-ink3)]">
@@ -215,19 +257,32 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
               exec {execution.execution_id.slice(0, 8)}…
             </span>
           </>
-        ) : (
+        )}
+        {mode === 'view' && !execution && (
           <span className="text-[13px] text-[var(--color-ink4)] italic">아직 실행된 적이 없습니다.</span>
         )}
         <div className="flex-1" />
-        <Btn ghost onClick={handleResume} disabled={!isPaused || controlBusy}>
-          ▶ 재개
-        </Btn>
-        <Btn danger onClick={handleCancel} disabled={!isActive || controlBusy}>
-          ⏹ 취소
-        </Btn>
+
+        {mode === 'view' ? (
+          <>
+            <Btn ghost onClick={handleResume} disabled={!isPaused || controlBusy}>
+              ▶ 재개
+            </Btn>
+            <Btn danger onClick={handleCancel} disabled={!isActive || controlBusy}>
+              ⏹ 취소
+            </Btn>
+            <Btn primary onClick={handleToggleMode} disabled={!workflow}>
+              ✎ 편집
+            </Btn>
+          </>
+        ) : (
+          <Btn ghost onClick={handleToggleMode}>
+            👁 보기로 돌아가기
+          </Btn>
+        )}
       </div>
 
-      {(wfError || execError || controlError) && (
+      {mode === 'view' && (wfError || execError || controlError) && (
         <div className="px-3 pt-2 flex flex-col gap-1">
           {wfError && <ErrorBanner><span>⚠ 워크플로우: {wfError}</span></ErrorBanner>}
           {execError && <ErrorBanner><span>⚠ 실행 상태: {execError}</span></ErrorBanner>}
@@ -235,88 +290,94 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
         </div>
       )}
 
-      {/* Progress bar */}
-      <div
-        className="px-3 py-[6px] border-b-[1.5px] border-[var(--color-line-soft)] flex items-center gap-3 text-[13px]"
-        style={{ background: 'var(--color-paper2)' }}
-      >
-        <span>
-          {completedCount} / {totalNodes} 완료
-        </span>
-        <div className="flex-1 h-[10px] border-[1.5px] border-[var(--color-ink)] rounded-full bg-[var(--color-paper)] overflow-hidden relative">
+      {mode === 'edit' ? (
+        <WorkflowEditPane onExecuted={handleExecuted} />
+      ) : (
+        <>
+          {/* Progress bar */}
           <div
-            className="absolute left-0 top-0 h-full border-r-[1.5px] border-[var(--color-ink)]"
-            style={{ width: `${progressPct}%`, background: 'var(--color-status-succeeded)' }}
-          />
-        </div>
-        <span className="font-mono text-[12px]">{progressPct}%</span>
-      </div>
-
-      <div className="flex-1 flex min-h-0">
-        {/* Canvas — ReactFlow */}
-        <div
-          className="flex-1 border-r-[1.5px] border-[var(--color-ink)]"
-          style={{ background: 'var(--color-paper2)', minHeight: 400 }}
-        >
-          {workflow && workflow.nodes.length > 0 ? (
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              fitView
-              style={{ background: 'var(--color-paper2)' }}
-            >
-              <Background color="var(--color-line-soft)" />
-              <Controls />
-            </ReactFlow>
-          ) : (
-            <div className="h-full flex items-center justify-center text-[13px] text-[var(--color-ink4)]">
-              {wfLoading ? '로딩 중…' : '노드가 없는 워크플로우입니다.'}
+            className="px-3 py-[6px] border-b-[1.5px] border-[var(--color-line-soft)] flex items-center gap-3 text-[13px]"
+            style={{ background: 'var(--color-paper2)' }}
+          >
+            <span>
+              {completedCount} / {totalNodes} 완료
+            </span>
+            <div className="flex-1 h-[10px] border-[1.5px] border-[var(--color-ink)] rounded-full bg-[var(--color-paper)] overflow-hidden relative">
+              <div
+                className="absolute left-0 top-0 h-full border-r-[1.5px] border-[var(--color-ink)]"
+                style={{ width: `${progressPct}%`, background: 'var(--color-status-succeeded)' }}
+              />
             </div>
-          )}
-        </div>
+            <span className="font-mono text-[12px]">{progressPct}%</span>
+          </div>
 
-        {/* Status summary panel */}
-        <div
-          className="overflow-auto p-2 flex flex-col flex-shrink-0"
-          style={{ width: 280, background: 'var(--color-paper2)' }}
-        >
-          <div className="font-bold text-[13px] mb-[6px]">노드 상태 집계</div>
-          <div className="h-[1.5px] bg-[var(--color-ink3)] rounded mb-3" />
-          {execution ? (
-            <div className="flex flex-col gap-2">
-              {Object.keys(summary).length === 0 ? (
-                <p className="text-[12px] text-[var(--color-ink4)] italic">
-                  아직 노드 실행 정보가 없습니다.
-                </p>
+          <div className="flex-1 flex min-h-0">
+            {/* Canvas — ReactFlow (read-only) */}
+            <div
+              className="flex-1 border-r-[1.5px] border-[var(--color-ink)]"
+              style={{ background: 'var(--color-paper2)', minHeight: 400 }}
+            >
+              {workflow && workflow.nodes.length > 0 ? (
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  fitView
+                  style={{ background: 'var(--color-paper2)' }}
+                >
+                  <Background color="var(--color-line-soft)" />
+                  <Controls />
+                </ReactFlow>
               ) : (
-                Object.entries(summary).map(([status, count]) => (
-                  <div
-                    key={status}
-                    className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[6px] flex items-center justify-between"
-                  >
-                    <span className="font-bold text-[13px]">{status}</span>
-                    <span className="font-mono text-[12px] text-[var(--color-ink3)]">{count}</span>
-                  </div>
-                ))
-              )}
-              {execution.error && (
-                <div className="border-[1.5px] border-[var(--color-status-failed)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[6px]">
-                  <div className="font-bold text-[12px] text-[var(--color-status-failed)] mb-[2px]">에러</div>
-                  <div className="font-mono text-[10px] text-[var(--color-ink3)] break-all">
-                    {execution.error}
-                  </div>
+                <div className="h-full flex items-center justify-center text-[13px] text-[var(--color-ink4)]">
+                  {wfLoading ? '로딩 중…' : '노드가 없는 워크플로우입니다. ✎ 편집 버튼으로 추가하세요.'}
                 </div>
               )}
             </div>
-          ) : (
-            <p className="text-[12px] text-[var(--color-ink4)] italic">
-              실행 이력이 없습니다. /agent에서 워크플로우를 생성하고 실행해보세요.
-            </p>
-          )}
-        </div>
-      </div>
+
+            {/* Status summary panel */}
+            <div
+              className="overflow-auto p-2 flex flex-col flex-shrink-0"
+              style={{ width: 280, background: 'var(--color-paper2)' }}
+            >
+              <div className="font-bold text-[13px] mb-[6px]">노드 상태 집계</div>
+              <div className="h-[1.5px] bg-[var(--color-ink3)] rounded mb-3" />
+              {execution ? (
+                <div className="flex flex-col gap-2">
+                  {Object.keys(summary).length === 0 ? (
+                    <p className="text-[12px] text-[var(--color-ink4)] italic">
+                      아직 노드 실행 정보가 없습니다.
+                    </p>
+                  ) : (
+                    Object.entries(summary).map(([status, count]) => (
+                      <div
+                        key={status}
+                        className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[6px] flex items-center justify-between"
+                      >
+                        <span className="font-bold text-[13px]">{status}</span>
+                        <span className="font-mono text-[12px] text-[var(--color-ink3)]">{count}</span>
+                      </div>
+                    ))
+                  )}
+                  {execution.error && (
+                    <div className="border-[1.5px] border-[var(--color-status-failed)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[6px]">
+                      <div className="font-bold text-[12px] text-[var(--color-status-failed)] mb-[2px]">에러</div>
+                      <div className="font-mono text-[10px] text-[var(--color-ink3)] break-all">
+                        {execution.error}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[12px] text-[var(--color-ink4)] italic">
+                  실행 이력이 없습니다. /agent에서 워크플로우를 생성하거나 ✎ 편집으로 직접 만들어보세요.
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
