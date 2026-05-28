@@ -20,18 +20,24 @@ const STEP_ORDER: AgentStep[] = [
 ];
 
 const TOOL_TO_STEP: Record<string, AgentStep> = {
-  security:          'security',
+  // supervisor 노드
+  load_memory:       'security',
   analyze_intent:    'intent',
-  fill_slots:        'intent',
+  // composer fixed DAG 노드
+  compress:          'security',
+  security:          'security',
+  intent:            'intent',
+  consultant:        'intent',
+  slot_fill:         'intent',
   search_nodes:      'retriever',
-  suggest_skill:     'retriever',
-  use_suggested_skill: 'retriever',
   draft_workflow:    'drafter',
   retry_draft:       'drafter',
   validate_workflow: 'validator',
-  evaluate_quality:  'qa_eval',
-  promote_workflow:  'promote',
+  qa_evaluator:      'qa_eval',
+  promote:           'promote',
   save_workflow:     'promote',
+  confirm_result:    'promote',
+  save_memory:       'promote',
 };
 
 const STEP_LABELS: Record<AgentStep, string> = {

@@ -61,7 +61,8 @@ class ModalLLMAdapter(LLMPort):
             f"{json.dumps(schema_json, ensure_ascii=False)}"
         )
 
-        _CANCEL_MARKERS = ("cancelled", "failure", "Function call")
+        # Modal 취소/오류 sentinel — prefix 매칭으로 false-positive 방지
+        _CANCEL_PREFIXES = ("cancelled", "Function call")
         last_exc: Exception | None = None
 
         for attempt in range(3):
@@ -75,8 +76,8 @@ class ModalLLMAdapter(LLMPort):
                 result: dict[str, Any] = await self._modal_instance().generate.remote.aio(**kwargs)
                 raw: str = result.get("generated_text", "").strip()
 
-                # grammar cancel / 빈 응답 → 재시도
-                if not raw or any(m in raw for m in _CANCEL_MARKERS):
+                # 빈 응답 or Modal 취소 sentinel(prefix) → 재시도
+                if not raw or any(raw.startswith(m) for m in _CANCEL_PREFIXES):
                     last_exc = ExecutionError(
                         f"LLM 비정상 응답(시도 {attempt + 1}): {raw[:120]}", code="E_LLM_CANCEL"
                     )

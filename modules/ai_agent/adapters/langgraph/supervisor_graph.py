@@ -2,16 +2,17 @@
 
 spec §3.1 supervisor diagram 구현. LangGraph는 adapters/에만 존재 (CLAUDE.md 제약).
 
-Tool-calling 에이전트 구조:
-  load_memory (전처리, 항상 실행) → agent_loop → END
+결정론적 라우팅 구조:
+  load_memory → agent_loop → END
 
-  agent_loop: LLM이 아래 툴 중 하나를 선택해 실행, done 반환 시 종료.
-    analyze_intent / call_composer / call_skills_builder / finalize /
-    update_memory / done
+  agent_loop: intent 분석 후 LLM 없이 결정론적 분기.
+    chitchat/info_question/control/workflow_execute → 즉시 응답
+    draft/refine/clarify → composer relay
+    propose → finalize
+    build_skill → skills relay
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import operator
 from collections.abc import AsyncGenerator
@@ -28,6 +29,7 @@ from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
     ErrorFrame,
+    PipelineStatusFrame,
     ResultFrame,
     SessionFrame,
     SSEFrame,
@@ -43,7 +45,6 @@ from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 _logger = logging.getLogger(__name__)
 
 _MAX_SUPERVISOR_ITERATIONS = 5
-_RELAY_TOOLS = {"call_composer", "call_skills_builder"}
 
 
 class _State(TypedDict):
@@ -83,7 +84,6 @@ class LangGraphSupervisor:
         self._skills = skills_client
         self._session_frame_store = session_frame_store
         self._llm = llm
-        self._live_queues: dict[UUID, asyncio.Queue] = {}
         self._graph = self._build()
 
     # ------------------------------------------------------------------ public
@@ -311,7 +311,12 @@ class LangGraphSupervisor:
                     break
         except Exception as exc:
             _logger.warning("load_memory 실패 (non-fatal, 빈 메모리로 계속): %s", exc)
-            return {"personal_memory": []}
+            return {
+                "personal_memory": [],
+                "collected_frames": [
+                    PipelineStatusFrame(service_name="load_memory", status="failed", elapsed_ms=0)
+                ],
+            }
         return {"personal_memory": memories}
 
     async def _intent_node(self, state: _State) -> dict:
@@ -398,14 +403,11 @@ class LangGraphSupervisor:
             payload={"message": state["message"]},
             trace_id=state["trace_id"],
         )
-        live_queue = self._live_queues.get(state["session_id"])
         frames: list[AnySSEFrame] = []
         try:
             async for resp in client.send(req):
                 for frame in resp.frames:
                     frames.append(frame)
-                    if live_queue:
-                        await live_queue.put(frame)
                 if resp.next_action != "continue":
                     break
         except Exception as exc:

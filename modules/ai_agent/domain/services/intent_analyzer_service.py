@@ -28,7 +28,7 @@ _INFO_RE = re.compile(
     re.IGNORECASE,
 )
 _PROPOSE_RE = re.compile(
-    r"(좋아요?|맞아요?|확인|승인|approve|ok\b|yes\b|네\b|응\b|이대로|그대로\s*(해줘?|진행))",
+    r"(이대로|그대로\s*(해줘?|진행)|승인|approve)",
     re.IGNORECASE,
 )
 _REFINE_RE = re.compile(

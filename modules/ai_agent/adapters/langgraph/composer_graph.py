@@ -451,7 +451,13 @@ class LangGraphOrchestrator:
 
     @staticmethod
     def _route_after_intent(state: _State) -> str:
-        return "consultant" if state.get("intent") == "clarify" else "search_nodes"
+        intent = state.get("intent")
+        if intent == "clarify":
+            return "consultant"
+        if intent in {"draft", "refine", "propose", None}:
+            return "search_nodes"
+        # 예상 외 intent(chitchat 등) — supervisor가 막아줘야 하지만 방어 가드
+        return "end"
 
     @staticmethod
     def _route_after_validate(state: _State) -> str:
@@ -459,7 +465,7 @@ class LangGraphOrchestrator:
             return "qa_evaluator"
         if state.get("retry_count", 0) < _QA_MAX_RETRY:
             return "retry_draft"
-        return "qa_evaluator"
+        return "validation_failed"
 
     @staticmethod
     def _route_after_qa(state: _State) -> str:
@@ -467,7 +473,7 @@ class LangGraphOrchestrator:
             return "promote"
         if state.get("qa_attempts", 0) < _QA_MAX_RETRY:
             return "retry_draft"
-        return "promote"
+        return "qa_failed"
 
     # ------------------------------------------------------------------ preprocessing nodes
 
@@ -1048,6 +1054,28 @@ class LangGraphOrchestrator:
             ]
         }
 
+    # 16-a. validation_failed_node — 검증 재시도 소진 시 종결
+    async def _validation_failed_node(self, state: _State) -> dict:
+        return {
+            "collected_frames": [
+                ErrorFrame(
+                    code="E_VALIDATION_EXHAUSTED",
+                    message=f"워크플로우 검증 {_QA_MAX_RETRY}회 실패 — 요청을 다시 말씀해 주세요.",
+                )
+            ]
+        }
+
+    # 16-b. qa_failed_node — QA 재시도 소진 시 종결
+    async def _qa_failed_node(self, state: _State) -> dict:
+        return {
+            "collected_frames": [
+                ErrorFrame(
+                    code="E_QA_EXHAUSTED",
+                    message=f"품질 평가 {_QA_MAX_RETRY}회 실패 — 요청을 다시 말씀해 주세요.",
+                )
+            ]
+        }
+
     # 16. memory_save_node — 워크플로우 생성 패턴을 GCS PersonalMemoryStore에 저장
     async def _memory_save_node(self, state: _State) -> dict:
         if self._personal_memory_store is None:
@@ -1115,6 +1143,8 @@ class LangGraphOrchestrator:
         graph.add_node("validate_workflow", self._validator_node)
         graph.add_node("retry_draft", self._qa_retry_node)
         graph.add_node("qa_evaluator", self._qa_evaluator_node)
+        graph.add_node("validation_failed", self._validation_failed_node)
+        graph.add_node("qa_failed", self._qa_failed_node)
         graph.add_node("promote", self._promote_node)
         graph.add_node("save_workflow", self._handoff_node)
         graph.add_node("confirm_result", self._user_confirm_node)
@@ -1134,7 +1164,7 @@ class LangGraphOrchestrator:
         graph.add_conditional_edges(
             "intent",
             self._route_after_intent,
-            {"consultant": "consultant", "search_nodes": "search_nodes"},
+            {"consultant": "consultant", "search_nodes": "search_nodes", "end": END},
         )
         graph.add_edge("consultant", "slot_fill")
         graph.add_edge("slot_fill", END)
@@ -1143,14 +1173,16 @@ class LangGraphOrchestrator:
         graph.add_conditional_edges(
             "validate_workflow",
             self._route_after_validate,
-            {"qa_evaluator": "qa_evaluator", "retry_draft": "retry_draft"},
+            {"qa_evaluator": "qa_evaluator", "retry_draft": "retry_draft", "validation_failed": "validation_failed"},
         )
         graph.add_edge("retry_draft", "draft_workflow")
         graph.add_conditional_edges(
             "qa_evaluator",
             self._route_after_qa,
-            {"promote": "promote", "retry_draft": "retry_draft"},
+            {"promote": "promote", "retry_draft": "retry_draft", "qa_failed": "qa_failed"},
         )
+        graph.add_edge("validation_failed", END)
+        graph.add_edge("qa_failed", END)
         graph.add_edge("promote", "save_workflow")
         graph.add_edge("save_workflow", "confirm_result")
         graph.add_edge("confirm_result", "save_memory")
