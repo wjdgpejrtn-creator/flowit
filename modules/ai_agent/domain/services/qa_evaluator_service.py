@@ -14,8 +14,8 @@ _THRESHOLD = QualityThreshold()
 
 _SYSTEM_PROMPT = """You are a QA evaluator for workflow drafts.
 Score the workflow on a scale of 0-10 based on:
-- Completeness: nodes and connections cover the user's intent (do not penalize parameters left as "" for values the user did not specify)
-- Correctness: nodes are logically connected in the right execution order
+- Completeness: all requirements in the DraftSpec are addressed
+- Correctness: nodes are logically connected
 - Safety: no high-risk nodes used without justification
 
 pass_flag must be true if and only if score >= 8.
