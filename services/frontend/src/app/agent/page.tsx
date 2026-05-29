@@ -124,15 +124,50 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
   const nodeType = nodeData.node_type as string;
   const catalogNodeId = nodeData.node_id as string | undefined;
   const params = (nodeData.parameters ?? {}) as Record<string, unknown>;
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const nodeConfig = catalog?.find((c) => c.node_id === catalogNodeId) ?? null;
   const fields = parseFlowSchema(nodeConfig?.input_schema);
 
+  const clearError = (fieldName: string) =>
+    setFieldErrors((e) => { const { [fieldName]: _, ...rest } = e; return rest; });
+
   const updateField = (fieldName: string, raw: string, type: string) => {
     const next = { ...params };
-    const value = coerceFlowField(raw, type);
-    if (value === undefined) delete next[fieldName];
-    else next[fieldName] = value;
+
+    if (type === 'number' || type === 'integer') {
+      if (raw === '') {
+        delete next[fieldName];
+        clearError(fieldName);
+      } else {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) {
+          setFieldErrors((e) => ({ ...e, [fieldName]: '숫자 형식이 올바르지 않습니다.' }));
+          return;
+        }
+        next[fieldName] = n;
+        clearError(fieldName);
+      }
+    } else if (type === 'object' || type === 'array') {
+      if (raw.trim() === '') {
+        next[fieldName] = type === 'array' ? [] : {};
+        clearError(fieldName);
+      } else {
+        try {
+          next[fieldName] = JSON.parse(raw);
+          clearError(fieldName);
+        } catch {
+          setFieldErrors((e) => ({ ...e, [fieldName]: 'JSON 형식이 올바르지 않습니다.' }));
+          return;
+        }
+      }
+    } else {
+      const value = coerceFlowField(raw, type);
+      if (value === undefined) delete next[fieldName];
+      else next[fieldName] = value;
+      clearError(fieldName);
+    }
+
     onUpdateParams(next);
   };
 
@@ -219,6 +254,11 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
                   className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
                 />
               )}
+              {fieldErrors[f.name] && (
+                <span className="text-[11px] text-[var(--color-status-failed)]">
+                  {fieldErrors[f.name]}
+                </span>
+              )}
             </label>
           );
         })}
@@ -265,6 +305,17 @@ function FlowEditor() {
     const payload = readPaletteDragPayload(e);
     if (!payload || !rfInstance) return;
     const position = rfInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+
+    // input_schema default 값 자동 주입
+    const nodeConfig = catalog?.find((c) => c.node_id === payload.node_id);
+    const initParams: Record<string, unknown> = {};
+    if (nodeConfig?.input_schema) {
+      const schema = nodeConfig.input_schema as { properties?: Record<string, { default?: unknown }> };
+      for (const [key, def] of Object.entries(schema.properties ?? {})) {
+        if (def.default !== undefined) initParams[key] = def.default;
+      }
+    }
+
     setNodes((nds) => [
       ...nds,
       {
@@ -276,12 +327,12 @@ function FlowEditor() {
           risk_level: payload.risk_level,
           node_type: payload.node_type,
           node_id: payload.node_id,
-          parameters: {},
+          parameters: initParams,
           onDelete: (nodeId: string) => setNodes((prev) => prev.filter((n) => n.id !== nodeId)),
         },
       },
     ]);
-  }, [rfInstance, setNodes]);
+  }, [rfInstance, catalog, setNodes]);
 
   // Bug 2 fix: 더블클릭 → 설정 패널 열기
   const onNodeDoubleClick = useCallback<NodeMouseHandler>((_e, node) => {
