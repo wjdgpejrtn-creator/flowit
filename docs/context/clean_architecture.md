@@ -382,8 +382,8 @@ modules/ai_agent/                       # Sprint 3 멀티 에이전트 구조 (R
 │           ├── recall_personal_skills_use_case.py
 │           └── save_memory_use_case.py
 ├── adapters/
+│   ├── supervisor.py               # Main Orchestrator — async generator (PR #221)
 │   ├── langgraph/
-│   │   ├── supervisor_graph.py         # Orchestrator supervisor (Sprint 3 신규)
 │   │   └── composer_graph.py           # Workflow Composer 13-노드 StateGraph
 │   ├── llm/
 │   │   ├── modal_llm_adapter.py        # Modal Gemma 4
@@ -1285,7 +1285,8 @@ Workflow_Automation/
 │   │   │       ├── skills_builder/         # 박아름: BuildFromSOP, BuildFromIndustryDefault
 │   │   │       └── personalization/        # 햄햄: Load/Update/Recall/SaveMemory
 │   │   ├── adapters/
-│   │   │   ├── langgraph/                  # supervisor_graph, composer_graph
+│   │   │   ├── supervisor.py               # Main Orchestrator (PR #221 — async generator)
+│   │   │   ├── langgraph/                  # composer_graph
 │   │   │   ├── llm/                        # modal_llm_adapter, modal_embedding_adapter
 │   │   │   ├── memory/                     # gcs_memory_store (PersonalMemoryStore 구현)
 │   │   │   ├── agent_clients/              # http_sub_agent_client (orchestrator HTTP)

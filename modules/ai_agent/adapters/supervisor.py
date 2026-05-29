@@ -34,11 +34,11 @@ from common_schemas.transport import (
     SSEFrame,
 )
 
-from ...domain.entities.session_ref import SessionRef
-from ...domain.ports.llm_port import LLMPort
-from ...domain.ports.session_frame_store import SessionFrameStore
-from ...domain.ports.sub_agent_client import SubAgentClient
-from ...domain.services.intent_analyzer_service import IntentAnalyzerService
+from ..domain.entities.session_ref import SessionRef
+from ..domain.ports.llm_port import LLMPort
+from ..domain.ports.session_frame_store import SessionFrameStore
+from ..domain.ports.sub_agent_client import SubAgentClient
+from ..domain.services.intent_analyzer_service import IntentAnalyzerService
 
 _logger = logging.getLogger(__name__)
 
@@ -383,8 +383,8 @@ class LangGraphSupervisor:
             async for resp in self._personalization.send(req):
                 if resp.next_action != "continue":
                     break
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.warning("update_memory 실패 (non-fatal): %s", exc)
         return {}
 
     # ------------------------------------------------------------------ helpers
