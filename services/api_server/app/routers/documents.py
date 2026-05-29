@@ -20,8 +20,10 @@ from uuid import UUID, uuid4
 
 from celery import Celery
 from common_schemas import (
+    AnalysisStatus,
     AnalyzeDispatchResponse,
     DocumentBlock,
+    DocumentBlocksResponse,
     DocumentDownloadResponse,
     DocumentResponse,
     FileMeta,
@@ -88,7 +90,10 @@ def _to_response(document: DocumentBlock, gcs_uri: str) -> DocumentResponse:
         mime_type=document.file_meta.mime_type,
         file_size=document.file_meta.file_size,
         gcs_uri=gcs_uri,
-        is_analyzed=len(document.blocks) > 0,
+        is_analyzed=document.analysis_status == AnalysisStatus.COMPLETED,
+        analysis_status=document.analysis_status,
+        analysis_error=document.analysis_error,
+        analyzed_at=document.analyzed_at,
     )
 
 
@@ -169,6 +174,32 @@ async def get_document_download_url(
     key = _gcs_key(document_id, document.file_meta.file_name)
     url = await object_storage.presign(key, ttl=ttl)
     return DocumentDownloadResponse(document_id=document_id, download_url=url, expires_in=ttl)
+
+
+@router.get("/{document_id}/blocks", response_model=DocumentBlocksResponse)
+async def get_document_blocks(
+    document_id: UUID,
+    permission: PermissionSource = Depends(get_permission_source),
+    repo: DocumentRepositoryPort = Depends(get_document_repository),
+) -> DocumentBlocksResponse:
+    """파싱 결과 본문 — owner만. 메타(`GET /{id}`)와 분리된 read path.
+
+    분석 완료(`analysis_status="completed"`) 후 1회 fetch 가정. 진행중/실패 상태에서도
+    호출 가능(blocks는 빈 배열 또는 이전 분석 잔존). 프론트엔드 폴링이 status를 보고
+    `completed` 시 본 endpoint 호출.
+    """
+    document = await repo.get_by_id(document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    if document.user_id != permission.user_id:
+        raise HTTPException(status_code=403, detail="Document belongs to another user")
+    return DocumentBlocksResponse(
+        document_id=document_id,
+        blocks=document.blocks,
+        analysis_status=document.analysis_status,
+        analysis_error=document.analysis_error,
+        analyzed_at=document.analyzed_at,
+    )
 
 
 @router.post("/{document_id}/analyze", response_model=AnalyzeDispatchResponse, status_code=202)

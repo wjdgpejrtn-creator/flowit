@@ -19,13 +19,18 @@ import asyncio
 import logging
 import os
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
 from celery import shared_task
+from common_schemas import AnalysisStatus
 from common_schemas.broker_tasks import TASK_ANALYZE_DOCUMENT
 
 logger = logging.getLogger(__name__)
+
+# analysis_error 컬럼은 TEXT라 길이 제한 없지만, 운영 로그/UI 표시 안정성 위해 잘라 저장.
+_ERROR_MSG_MAX_LEN = 1000
 
 
 @shared_task(
@@ -79,7 +84,7 @@ async def _analyze(document_id: UUID) -> dict:
     try:
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-        # 1. 메타 조회
+        # 1. 메타 조회 + analysis_status="running" 표기 (atomic).
         async with session_factory() as session:
             repo = PgDocumentRepository(session)
             document = await repo.get_by_id(document_id)
@@ -87,45 +92,83 @@ async def _analyze(document_id: UUID) -> dict:
                 return {"document_id": str(document_id), "status": "not_found"}
             file_meta = document.file_meta
             original_user_id = document.user_id
-
-        # 2. GCS download → tmpfile
-        key = f"documents/{document_id}/{file_meta.file_name}"
-        payload = await object_storage.download(key)
-        suffix = Path(file_meta.file_name).suffix
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(payload)
-            tmp_path = tmp.name
+            running = document.model_copy(update={
+                "analysis_status": AnalysisStatus.RUNNING,
+                "analysis_error": None,
+            })
+            await repo.save(running)
+            await session.commit()
 
         try:
-            # 3. ParsingPipeline (sync)
-            pipeline = _build_pipeline()
-            parsed_doc, chunks, quality = pipeline.execute(tmp_path, file_meta)
+            # 2. GCS download → tmpfile
+            key = f"documents/{document_id}/{file_meta.file_name}"
+            payload = await object_storage.download(key)
+            suffix = Path(file_meta.file_name).suffix
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(payload)
+                tmp_path = tmp.name
 
-            # 4. 결과 영속화 — UPSERT로 blocks 채움 + user_id 보존
-            result = parsed_doc.model_copy(update={
-                "document_id": document_id,
-                "user_id": original_user_id,
-            })
-            async with session_factory() as session:
-                save_repo = PgDocumentRepository(session)
-                await save_repo.save(result)
-                if chunks:
-                    await save_repo.save_chunks(chunks)
-                await save_repo.save_quality_log(quality, document_id)
-                await session.commit()
+            try:
+                # 3. ParsingPipeline (sync)
+                pipeline = _build_pipeline()
+                parsed_doc, chunks, quality = pipeline.execute(tmp_path, file_meta)
 
-            return {
-                "document_id": str(document_id),
-                "status": "completed",
-                "block_count": len(result.blocks),
-                "chunk_count": len(chunks),
-                "quality_status": quality.quality_status,
-            }
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
+                # 4. 결과 영속화 — UPSERT로 blocks 채움 + status="completed" + analyzed_at 갱신.
+                result = parsed_doc.model_copy(update={
+                    "document_id": document_id,
+                    "user_id": original_user_id,
+                    "analysis_status": AnalysisStatus.COMPLETED,
+                    "analysis_error": None,
+                    "analyzed_at": datetime.now(UTC),
+                })
+                async with session_factory() as session:
+                    save_repo = PgDocumentRepository(session)
+                    await save_repo.save(result)
+                    if chunks:
+                        await save_repo.save_chunks(chunks)
+                    await save_repo.save_quality_log(quality, document_id)
+                    await session.commit()
+
+                return {
+                    "document_id": str(document_id),
+                    "status": "completed",
+                    "block_count": len(result.blocks),
+                    "chunk_count": len(chunks),
+                    "quality_status": quality.quality_status,
+                }
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+        except Exception as exc:
+            # 실패 상태 기록 — blocks는 이전 상태 보존(덮어쓰지 않음). 프론트가 폴링으로 인지.
+            await _mark_failed(session_factory, document_id, exc)
+            raise
     finally:
         await engine.dispose()
         await connector.close_async()
+
+
+async def _mark_failed(session_factory, document_id: UUID, exc: BaseException) -> None:
+    """분석 실패 시 documents row에 status=failed + error를 기록.
+
+    blocks/parser_meta는 그대로 두고 상태 컬럼만 갱신. 기록 자체가 실패해도 task는 정상
+    예외 전파(상위 try가 dict 반환) — 가용성 우선.
+    """
+    from storage.repositories.pg_document_repository import PgDocumentRepository
+
+    try:
+        async with session_factory() as session:
+            fail_repo = PgDocumentRepository(session)
+            current = await fail_repo.get_by_id(document_id)
+            if current is None:
+                return
+            failed = current.model_copy(update={
+                "analysis_status": AnalysisStatus.FAILED,
+                "analysis_error": str(exc)[:_ERROR_MSG_MAX_LEN],
+            })
+            await fail_repo.save(failed)
+            await session.commit()
+    except Exception:
+        logger.exception("analyze_document_task: failed-state 기록 실패 document_id=%s", document_id)
 
 
 def _build_pipeline():

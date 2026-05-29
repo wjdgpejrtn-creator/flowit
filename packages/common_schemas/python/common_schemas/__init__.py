@@ -9,6 +9,7 @@ from .document import (
     ChunkingStrategy,
     ContentBlock,
     DocumentBlock,
+    DocumentBlocksResponse,
     DocumentDownloadResponse,
     DocumentResponse,
     FileMeta,
@@ -20,7 +21,7 @@ from .document import (
     SourceRef,
     WarningInfo,
 )
-from .enums import AgentMode, ErrorCode, ExecutionStatus, IntentType, RiskLevel
+from .enums import AgentMode, AnalysisStatus, ErrorCode, ExecutionStatus, IntentType, RiskLevel
 from .exceptions import (
     AuthorizationError,
     DomainError,
@@ -58,6 +59,7 @@ from .workflow import Edge, NodeConfig, NodeExecutionState, NodeInstance, Positi
 __all__ = [
     # enums
     "AgentMode",
+    "AnalysisStatus",
     "ErrorCode",
     "ExecutionStatus",
     "IntentType",
@@ -83,6 +85,7 @@ __all__ = [
     "BBox",
     "ContentBlock",
     "DocumentBlock",
+    "DocumentBlocksResponse",
     "DocumentDownloadResponse",
     "DocumentResponse",
     "FileMeta",

@@ -29,6 +29,19 @@ class DocumentModel(Base):
     blocks: Mapped[list[dict[str, Any]]] = mapped_column(
         pg.JSONB, nullable=False, server_default="'[]'::jsonb"
     )
+    analysis_status: Mapped[str] = mapped_column(
+        pg.ENUM(
+            "pending", "running", "completed", "failed",
+            name="analysis_status_enum",
+            create_type=False,
+        ),
+        nullable=False,
+        server_default="pending",
+    )
+    analysis_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    analyzed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
