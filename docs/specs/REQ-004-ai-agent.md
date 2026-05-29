@@ -193,30 +193,36 @@ LLM 자유 생성 산업 default는 v2(Sprint 4+) 이연.
 | `NodeRegistryAdapter` | nodes_graph의 `NodeDefinitionRepository`를 감싸는 Facade | `NodeRegistry` | `nodes_graph.domain.ports.NodeDefinitionRepository` (DI 주입) | composer, skills_builder |
 | `HTTPSubAgentClient` 🆕 | 다른 sub-agent Modal endpoint 호출 (VPC 내부) | `SubAgentClient` | `httpx` | orchestrator |
 | `LangGraphOrchestrator` | Workflow Composer tool-calling 에이전트 (3 LangGraph 노드: compress / security / agent_loop). LLM이 17종 툴을 동적으로 선택·실행. 선택 의존성: `PermissionResolver`(권한 확인), `EmbedderPort`+`SearchSkillsUseCase`(스킬 제안), `SessionFrameStore`(모니터링 세션 저장) | (내부용, Port 아님) | `langgraph` | composer |
-| `LangGraphSupervisor` 🆕 | Main Orchestrator tool-calling 에이전트 (2 LangGraph 노드: load_memory / agent_loop). LLM이 6종 툴 동적 선택 — analyze_intent / call_composer / call_skills_builder / finalize / update_memory / done | (내부용, Port 아님) | `langgraph` | orchestrator |
+| `LangGraphSupervisor` 🆕 | Main Orchestrator inline async generator 라우터. load_memory → analyze_intent → 결정론적 분기 → composer/skills _relay_stream() pass-through. LangGraph 미사용 (PR #221). | (내부용, Port 아님) | — | orchestrator |
 
 ---
 
 ## 3. LangGraph 그래프 구성
 
-### 3.1 Main Orchestrator Supervisor Graph (tool-calling 에이전트, 2026-05-22 재설계)
+### 3.1 Main Orchestrator Supervisor Graph (inline async generator, PR #221 재설계)
 
-LangGraph 노드 2개 (load_memory / agent_loop)로 구성. LLM이 아래 툴 중 하나를 동적으로 선택·실행하며, `done` 반환 시 루프 종료.
+LangGraph StateGraph 제거. `_run()` inline async generator로 직접 라우팅. frame 수신 즉시 SSE pass-through.
 
 ```
-사용자 메시지 ─► load_memory (항상 실행, HTTP → agent-personalization)
+사용자 메시지 ─► load_memory (HTTP → agent-personalization)
                   │
                   ▼
-               agent_loop ──(LLM 툴 선택 반복, 최대 10회)──► END
-
-agent_loop 사용 가능 툴 (총 6종):
-  analyze_intent      — 사용자 의도 분석 (IntentAnalyzerService)
-  call_composer       — Workflow Composer sub-agent 호출 (HTTP → agent-composer)
-  call_skills_builder — Skills Builder sub-agent 호출 (HTTP → agent-skills-builder)
-  finalize            — 워크플로우 제안 확정 (propose 의도)
-  update_memory       — Personalization 메모리 업데이트 (HTTP → agent-personalization)
-  done                — 완료 (루프 종료)
+               analyze_intent (IntentAnalyzerService fast regex)
+                  │
+                  ▼ intent 결정론적 분기
+          ┌───────┴────────────────────────────────────┐
+          │                                            │
+     None/chitchat/                            draft/refine/clarify
+     info_question/                                   │
+     control/workflow_execute                  transition 즉시 yield
+     propose/build_skill                       _relay_stream() → composer SSE pass-through
+          │                                    update_memory (HTTP → agent-personalization)
+          ▼
+       즉시 응답 → END
 ```
+
+- `_relay_stream()`: composer/skills frame 수신 즉시 outer SSE stream으로 yield (MAX_RELAY_FRAMES=200 가드)
+- 파일 경로: `adapters/supervisor.py` (PR #221 이후 langgraph 미사용으로 이동)
 
 ### 3.2 Workflow Composer 내부 StateGraph (tool-calling 에이전트, 2026-05-22 재설계)
 
@@ -590,8 +596,8 @@ modules/ai_agent/
 │   ├── agent_clients/                        # 신규 (orchestrator 전용)
 │   │   └── http_sub_agent_client.py
 │   ├── langgraph/
-│   │   ├── supervisor_graph.py               # Orchestrator
 │   │   └── composer_graph.py                 # Workflow Composer tool-calling 에이전트 (PR #142)
+│   ├── supervisor.py                         # Orchestrator (PR #221 — langgraph 미사용으로 이동)
 │   └── node_registry_adapter.py
 ├── seeds/
 │   ├── industry_defaults/                    # 신규 (Skills Builder seed — 산업 baseline)
@@ -637,3 +643,4 @@ modules/ai_agent/
 | 2026-05-22 | **스펙 누락 항목 보완** — ① §2.3 `LangGraphOrchestrator` 노드 수 13→16 정정. ② §4 `agent-composer` 전용 엔드포인트 3종 추가: `POST /v1/agent/approve`, `GET /v1/agent/sessions`, `GET /v1/agent/sessions/{session_id}/frames` (PR #135 구현 완료분). | 신정혜 |
 | 2026-05-22 | **§3.1 supervisor tool-calling 재설계 반영** — LangGraphSupervisor 6노드 고정 라우터 → tool-calling 에이전트 (load_memory / agent_loop 2 LangGraph 노드). LLM이 6종 툴 동적 선택. `_SupervisorAction` 스키마, `agent_done/agent_iterations` State 필드, `llm: LLMPort` 주입 추가. | 신정혜 |
 | 2026-05-22 | **§3.2 tool-calling 재설계 반영 (PR #142)** — Composer 16-노드 고정 그래프 → tool-calling 에이전트 (compress / security / agent_loop 3 LangGraph 노드). LLM이 17종 툴 동적 선택. `suggest_skill` / `use_suggested_skill` 신규 추가 — 스킬 마켓플레이스 후보 제시 + 사용자 수락 시 node_candidates 추가. `_State`에 `skill_suggested: bool`, `suggested_skills: list` 필드 추가. | 신정혜 |
+| 2026-05-29 | **§3.1 supervisor inline async generator 전환 (PR #221)** — `LangGraphSupervisor` LangGraph StateGraph 완전 제거. `_relay()` dict-return → `_relay_stream()` async generator pass-through 전환으로 composer relay 20분+ silent 문제 근본 수정. transition 메시지 relay 호출 전 즉시 yield. MAX_RELAY_FRAMES=200 frame 수 가드 추가. 파일 경로 `adapters/langgraph/supervisor_graph.py` → `adapters/supervisor.py` 이동. | 신정혜 |

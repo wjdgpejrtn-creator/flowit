@@ -106,7 +106,8 @@ Workflow_Automation/
 │   │   │       ├── skills_builder/         # 박아름: BuildFromSOP, BuildFromIndustryDefault
 │   │   │       └── personalization/        # 햄햄: Load/Update/Recall/SaveMemory
 │   │   ├── adapters/
-│   │   │   ├── langgraph/                  # supervisor_graph, composer_graph
+│   │   │   ├── supervisor.py               # Main Orchestrator (PR #221 — async generator)
+│   │   │   ├── langgraph/                  # composer_graph
 │   │   │   ├── llm/                        # modal_llm_adapter, modal_embedding_adapter
 │   │   │   ├── memory/                     # gcs_memory_store (PersonalMemoryStore 구현, GCS)
 │   │   │   ├── agent_clients/              # http_sub_agent_client (orchestrator HTTP)
