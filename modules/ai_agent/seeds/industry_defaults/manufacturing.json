@@ -1,0 +1,168 @@
+{
+  "industry_code": "manufacturing",
+  "industry_name": "제조",
+  "description": "제조업 표준 자동화 — 작업지시·품질관리·출고·협력사 발주",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "manufacturing_work_order_issue",
+      "name": "작업지시서 발행",
+      "category": "action",
+      "description": "생산 라인에 작업지시서를 발행하고 작업자에게 슬랙/이메일로 알림 전송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "production_order_id": {"type": "string"},
+          "line_id": {"type": "string"},
+          "product_code": {"type": "string"},
+          "quantity": {"type": "integer", "minimum": 1},
+          "due_date": {"type": "string", "format": "date"},
+          "operator_ids": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["production_order_id", "line_id", "product_code", "quantity", "due_date"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "work_order_id": {"type": "string"},
+          "notified_operators": {"type": "array", "items": {"type": "string"}},
+          "issued_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["slack"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "manufacturing_quality_inspection_log",
+      "name": "품질검사 기록",
+      "category": "action",
+      "description": "품질검사 결과(합격/불합격, 검사 항목, 시료 번호)를 시트에 기록하고 불합격 시 담당자 알림",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "inspection_id": {"type": "string"},
+          "product_code": {"type": "string"},
+          "lot_number": {"type": "string"},
+          "result": {"type": "string", "enum": ["pass", "fail", "rework"]},
+          "items_checked": {"type": "array", "items": {"type": "object"}},
+          "inspector_id": {"type": "string"},
+          "spreadsheet_id": {"type": "string"}
+        },
+        "required": ["inspection_id", "product_code", "result", "inspector_id", "spreadsheet_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "row_appended": {"type": "integer"},
+          "notification_sent": {"type": "boolean"},
+          "logged_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google", "slack"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "manufacturing_shipment_notify",
+      "name": "출고 알림",
+      "category": "action",
+      "description": "출고 확정 시 고객/거래처 담당자에게 출고 정보(품목·수량·송장번호) 메일 발송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "shipment_id": {"type": "string"},
+          "customer_email": {"type": "string", "format": "email"},
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "product_code": {"type": "string"},
+                "quantity": {"type": "integer"}
+              }
+            }
+          },
+          "tracking_number": {"type": "string"},
+          "expected_arrival": {"type": "string", "format": "date"}
+        },
+        "required": ["shipment_id", "customer_email", "items", "tracking_number"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "email_message_id": {"type": "string"},
+          "sent_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "manufacturing_defect_rate_report",
+      "name": "불량률 리포트",
+      "category": "output",
+      "description": "일/주간 라인별 불량률 집계 후 PDF 리포트 생성 + 슬랙 채널 공유",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "period": {"type": "string", "enum": ["daily", "weekly", "monthly"]},
+          "line_ids": {"type": "array", "items": {"type": "string"}},
+          "spreadsheet_id": {"type": "string"},
+          "report_channel": {"type": "string"}
+        },
+        "required": ["period", "spreadsheet_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "pdf_url": {"type": "string"},
+          "defect_rate_by_line": {"type": "object"},
+          "generated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Low",
+      "required_connections": ["google", "slack"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "manufacturing_supplier_purchase_order",
+      "name": "협력사 발주",
+      "category": "action",
+      "description": "재고 임계값 도달 시 협력사에 자동 발주서 발송 (메일 + PDF 첨부)",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "supplier_id": {"type": "string"},
+          "supplier_email": {"type": "string", "format": "email"},
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "material_code": {"type": "string"},
+                "quantity": {"type": "integer"},
+                "unit_price": {"type": "number"}
+              }
+            }
+          },
+          "po_number": {"type": "string"},
+          "requested_delivery_date": {"type": "string", "format": "date"}
+        },
+        "required": ["supplier_id", "supplier_email", "items", "po_number"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "po_pdf_url": {"type": "string"},
+          "email_message_id": {"type": "string"},
+          "submitted_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    }
+  ]
+}

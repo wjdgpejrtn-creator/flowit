@@ -21,4 +21,24 @@
 
 | # | Title | Status | Date |
 |---|-------|--------|------|
-| — | _아직 등록된 ADR이 없습니다_ | — | — |
+| 0001 | [브랜치-per-모듈에서 모노레포 구조로 전환](./adr/ADR-0001-monorepo-structure.md) | Accepted | 2026-05-03 |
+| 0002 | [pgvector HNSW 인덱스 설정 (m=16, ef_construction=64)](./adr/ADR-0002-pgvector-hnsw-index.md) | Accepted | 2026-05-05 |
+| 0003 | [node_logs RANGE 파티션 (월별) + 자동 생성 스크립트](./adr/ADR-0003-node-logs-range-partition.md) | Accepted | 2026-05-05 |
+| 0004 | [BaseCipher typing.Protocol 기반 DI 인터페이스](./adr/ADR-0004-base-cipher-protocol.md) | Accepted | 2026-05-05 |
+| 0005 | [SessionRepository / OAuthConnectionRepository H-3 시그니처 계약](./adr/ADR-0005-session-oauth-h3-contract.md) | Accepted | 2026-05-05 |
+| 0006 | [scope 값 lowercase 통일 ('private', 'team', 'public')](./adr/ADR-0006-scope-lowercase-convention.md) | Accepted | 2026-05-05 |
+| 0007 | [Python 최소 버전 3.12로 상향](./adr/ADR-0007-python-312-minimum.md) | Accepted | 2026-05-05 |
+| 0008 | [NodeExecutionState를 common_schemas 공유 타입으로 도입](./adr/ADR-0008-node-execution-state-shared-type.md) | Accepted | 2026-05-07 |
+| 0009 | [UtcDatetime 공용 타입 도입 — naive datetime 자동 UTC 변환](./adr/ADR-0009-utc-datetime-type.md) | Accepted | 2026-05-08 |
+| 0010 | [Storage 모듈 아키텍처 — Mapper 패턴 + 타 모듈 Port ABC 구현](./adr/ADR-0010-storage-module-architecture.md) | Accepted | 2026-05-07 |
+| 0011 | [schema_migrations 추적 + bootstrap 기반 raw SQL 마이그레이션](./adr/ADR-0011-migration-tracking-pattern.md) | Accepted | 2026-05-14 |
+| 0012 | [`database/` / `modules/storage/` / `modules/skills_marketplace/` 책임 분배](./adr/ADR-0012-database-storage-module-boundary.md) | Accepted | 2026-05-14 |
+| 0013 | [EmbedderPort SSOT — nodes_graph 소유 + ai_agent 구현체 (예외 패턴)](./adr/ADR-0013-embedder-port-ssot.md) | Accepted | 2026-05-12 |
+| 0014 | [ToolToNodeWrapper 제거 + REQ-005 toolset 11종을 nodes_graph external/로 직접 등록](./adr/ADR-0014-tool-to-node-wrapper-removal.md) | Accepted (호출 경로 A는 0018로 부분 대체) | 2026-05-19 |
+| 0015 | toolset = AI tool-use 대상 (워크플로우 노드 아님) — `docs` 브랜치 전용(PR #79), development 미반영. 인덱스 갭은 의도된 것 (되살림 여부 별도 안건) | 미반영 | — |
+| 0016 | [Personalization GCS MemoryStore — Port 소유권 · 저장 경로 · Embedding 분리](./adr/ADR-0016-personalization-gcs-memory-store.md) | Accepted | 2026-05-18 |
+| 0017 | [Skills Builder 산출물 = NodeDefinition + SkillDocument 이중 저장 (`skills_marketplace` = 사내 SkillsMP 역할)](./adr/ADR-0017-skills-builder-skill-document-dual-storage.md) | Accepted (§2는 0020으로 부분 대체) | 2026-05-20 |
+| 0018 | [워크플로우 노드 독립 실행 경로 — ToolsetExecutor 폐기, BaseNode.process() 직접 실행](./adr/ADR-0018-workflow-node-independent-execution-path.md) | Accepted | 2026-05-20 |
+| 0019 | [Vision Pipeline 도입 — fitz(PyMuPDF) + Gemma4 + 인터리빙 패턴](./adr/ADR-0019-vision-pipeline-fitz-gemma4-interleaving.md) | Accepted | 2026-05-21 |
+| 0020 | [Skills Builder 산출물 게시 lifecycle 게이트 + scope별 진입 (Option B)](./adr/ADR-0020-skills-builder-publish-lifecycle-gate.md) | Accepted | 2026-05-21 |
+| 0021 | [프론트엔드 인증 — OAuth backend-callback + 단일 출처 토폴로지](./adr/ADR-0021-frontend-auth-single-origin-topology.md) | Accepted | 2026-05-22 |

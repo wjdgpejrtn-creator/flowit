@@ -1,0 +1,172 @@
+# auth
+
+> REQ-002: 인증/인가, OAuth 연동, JWT 발급, 자격증명 암호화
+>
+> 구현 명세 → [`docs/specs/REQ-002-auth.md`](../../docs/specs/REQ-002-auth.md)
+
+## 설치
+
+```bash
+pip install -e modules/auth
+pip install -e "modules/auth[dev]"
+```
+
+## Quick Start
+
+```python
+from auth.domain.services import PermissionResolver, CredentialInjectionService
+from auth.domain.entities import Session, OAuthConnection, User
+from auth.domain.value_objects import TokenPair
+from auth.domain.ports import (
+    SessionRepository,
+    OAuthConnectionRepository,
+    UserRepository,
+    CipherPort,
+    OAuthClientPort,
+)
+from auth.application.use_cases import (
+    AuthenticateUseCase,
+    IssueTokenUseCase,
+    RefreshTokenUseCase,
+    InjectCredentialUseCase,
+    GrantUserRoleUseCase,
+)
+```
+
+## Public API
+
+### domain/entities
+
+| 클래스 | 주요 필드 | 설명 |
+|--------|----------|------|
+| `Session` | `session_id: UUID`, `user_id: UUID`, `session_hash: str`, `expires_at: datetime`, `is_revoked: bool`, `device_info: Optional[str]` | JWT 세션. `is_expired() → bool`, `revoke() → None` 메서드 제공 |
+| `OAuthConnection` | `oauth_id: UUID`, `user_id: UUID`, `service: Literal["google","slack"]`, `credential_id: UUID`, `access_token_encrypted: bytes`, `refresh_token_encrypted: Optional[bytes]`, `scopes: list[str]`, `is_active: bool` | 외부 서비스 OAuth 연결. `revoke() → None` 메서드 제공 |
+| `User` | `user_id: UUID`, `email: str`, `name: str`, `role: Literal["User","team_manager","company_manager","Admin"]`, `department_id: Optional[UUID]`, `is_active: bool`, `created_at/updated_at: UtcDatetime` | 사용자 식별 정보. PR #87(cef92fa) 신설, JIT auto-provisioning 시 `AuthenticateUseCase`가 INSERT |
+| `Credential` | `credential_id: UUID`, `user_id: UUID`, `name: str`, `credential_kind: Literal["api_key","oauth_token","password","certificate","custom"]`, `encrypted_data: bytes`, `metadata: dict`, `is_active: bool`, `created_at/updated_at: UtcDatetime` | 통합 credential 저장 엔티티 (DB: `credentials`, 002). `oauth_connections.credential_id` FK가 본 엔티티를 참조. PR #99 신설 |
+
+### domain/value_objects
+
+| 클래스 | 주요 필드 | 설명 |
+|--------|----------|------|
+| `TokenPair` | `access_token: str`, `refresh_token: str`, `token_type: Literal["Bearer"]`, `expires_in: int` | JWT 토큰 쌍 (frozen) |
+
+### domain/services
+
+| 서비스 | 메서드 | 설명 |
+|--------|--------|------|
+| `PermissionResolver` | `resolve(user_id: UUID, role: Literal["User","team_manager","company_manager","Admin"], department_id: UUID, session_id: UUID, current_workflow_id: Optional[UUID], current_skill_id: Optional[UUID]) → PermissionSource` | 6차원 권한 모델 기반 컨텍스트 생성 |
+| `CredentialInjectionService` | `async inject(credential_id: UUID, node_id: UUID) → PlaintextCredential` | 노드 실행 시 자격증명 복호화 (ADR-0018). `credentials` 테이블(SSOT) 조회 후 `credential_kind` 분기 — `oauth_token`은 `oauth_connections` enrich + service 검증, `api_key` 등은 `encrypted_data` 직접 복호화. `NodeDefinitionRepository.get_by_id(node_id)`로 `risk_level`/`required_connections`/`service_type` 검증 (H-4 합의). 생성자에 `CredentialRepository` 의존 |
+
+### domain/ports (인터페이스 — 구현체는 `modules/storage`)
+
+| 포트 (ABC) | 메서드 | 구현 위치 |
+|------------|--------|----------|
+| `SessionRepository` | `async create(user_id: UUID, session_hash: str, **kwargs) → Session` | `storage/repositories/` |
+| | `async find_by_hash(session_hash: str) → Optional[Session]` | |
+| | `async revoke(session_id: UUID) → None` | |
+| | `async revoke_all_for_user(user_id: UUID) → int` | |
+| `OAuthConnectionRepository` | `async create(user_id: UUID, service: str, tokens: dict) → OAuthConnection` | `storage/repositories/` |
+| | `async get_by_credential_id(credential_id: UUID) → Optional[OAuthConnection]` | |
+| | `async get_active_for_user(user_id: UUID, service: str) → Optional[OAuthConnection]` | |
+| | `async update_tokens(credential_id: UUID, new_tokens: dict) → None` | |
+| | `async revoke(credential_id: UUID) → None` | |
+| `UserRepository` | `async find_by_id(user_id: UUID) → Optional[User]` | `storage/repositories/` (PR #87 cef92fa) |
+| | `async find_by_email(email: str) → Optional[User]` | |
+| | `async create(user_id: UUID, email: str, name: str, role: Literal["User","team_manager","company_manager","Admin"] = "User", department_id: Optional[UUID] = None) → User` | |
+| | `async update_role(user_id: UUID, role: Literal["User","team_manager","company_manager","Admin"]) → None` | |
+| | `async update_department(user_id: UUID, department_id: Optional[UUID]) → None` | |
+| `CredentialRepository` | `async create(user_id: UUID, name: str, credential_kind, encrypted_data: bytes, metadata: dict \| None = None) → Credential` | `storage/repositories/` (PR #99) |
+| | `async get_by_id(credential_id: UUID) → Optional[Credential]` | |
+| | `async update_data(credential_id: UUID, encrypted_data: bytes) → None` | |
+| `CipherPort` | `encrypt(plaintext: bytes) → bytes`, `decrypt(ciphertext: bytes) → bytes` | `auth/adapters/cipher/` (자체 구현) |
+| `OAuthClientPort` | `async exchange_code(code: str) → dict`, `async refresh_access_token(refresh_token: str) → dict`, `async get_user_info(access_token: str) → dict` | `auth/adapters/oauth/` (자체 구현) |
+
+### application/use_cases
+
+| 유스케이스 | Input → Output | 설명 |
+|-----------|----------------|------|
+| `AuthenticateUseCase` | `OAuth code, redirect_uri → TokenPair` | Google OAuth 코드 교환 → **users JIT auto-provisioning (없으면 INSERT)** → `credentials` row 생성(`oauth_token` kind) → `oauth_connections` 연결 → 세션 생성. 의존성: `SessionRepository`, `OAuthConnectionRepository`, `UserRepository`, `CredentialRepository`, `CipherPort`, `OAuthClientPort` |
+| `IssueTokenUseCase` | `session_hash: str → TokenPair` | 기존 세션에서 JWT 발급 |
+| `RefreshTokenUseCase` | `refresh_token: str → TokenPair` | 액세스 토큰 갱신 (Refresh Token Rotation 적용) |
+| `InjectCredentialUseCase` | `credential_id: UUID, node_id: UUID → PlaintextCredential` | 노드 실행 시 자격증명 복호화 |
+| `GrantUserRoleUseCase` | `actor: PermissionSource, target_user_id: UUID, role: UserRole, department_id: UUID \| None → User` | Admin이 다른 사용자의 역할/소속 팀 변경 (스킬 마켓플레이스 RBAC). `actor.role == "Admin"` 게이트 — 위반 시 `AuthorizationError(E-PERM-001)`. `team_manager` 부여 시 `department_id` 필수 |
+
+### adapters/cipher
+
+| 어댑터 | 설명 |
+|--------|------|
+| `AESGCMCipher` | AES-256-GCM 암호화 (`CipherPort` 구현). `database/src/protocols.py`의 `BaseCipher(typing.Protocol)`도 구조적 만족 (ADR-0004) |
+| `FernetCipher` | Fernet 대칭키 암호화 (`CipherPort` 구현) |
+
+### adapters/oauth
+
+| 어댑터 | 설명 |
+|--------|------|
+| `GoogleOAuthClient` | Google OAuth 2.0 클라이언트 (`OAuthClientPort` 구현). 코드 교환, 토큰 갱신, 사용자 정보 조회 |
+
+## 의존 관계
+
+```
+Upstream (이 모듈이 의존):
+  ├── common_schemas (REQ-012)
+  │     └── PermissionSource, PlaintextCredential, RiskLevel, ErrorCode
+  └── nodes_graph (REQ-003)
+        └── NodeDefinitionRepository ABC (CredentialInjectionService가 get_by_id 후 필드 접근)
+
+Downstream (이 모듈에 의존):
+  ├── ai_agent (REQ-004)      → CredentialInjectionService 호출
+  ├── api_server (REQ-009)    → AuthMiddleware, JWT 검증, AuthenticateUseCase 호출
+  ├── execution_engine (REQ-007) → InjectCredentialUseCase 호출
+  └── storage (REQ-008)       → SessionRepository, OAuthConnectionRepository, UserRepository 구현체 제공
+```
+
+## 환경 변수
+
+| 변수명 | 필수 | 설명 |
+|--------|------|------|
+| `JWT_SECRET_KEY` | Y | JWT 서명 키 (HS256) |
+| `JWT_ALGORITHM` | N | 알고리즘 (기본: HS256) |
+| `JWT_EXPIRY_SECONDS` | N | 액세스 토큰 만료 시간 (기본: 3600) |
+| `ENCRYPTION_KEY` | Y | AES-256-GCM 마스터 키 (32바이트, base64) |
+| `GOOGLE_CLIENT_ID` | Y | Google OAuth 클라이언트 ID |
+| `GOOGLE_CLIENT_SECRET` | Y | Google OAuth 클라이언트 시크릿 |
+
+## 6차원 권한 모델
+
+| 차원 | 설명 | 검증 대상 |
+|------|------|----------|
+| Role (RBAC) | User / team_manager / company_manager / Admin | 관리자 전용 엔드포인트, 스킬 마켓플레이스 team/company scope 승인 |
+| Ownership | 리소스 소유자 | workflows, skills, agent_memories(private) |
+| Resource Scope | Private / Team / Public | workflows, skills |
+| Department | 같은 부서 사용자만 Team 접근 | workflows(team), skills(team) |
+| Node Risk Level | Low / Medium / High / Restricted | node_definitions |
+| Memory Scope | private / team / public | agent_memories |
+
+## Rate Limiting
+
+| API 유형 | 제한 |
+|---------|------|
+| 일반 API | 분당 60회 |
+| LLM 호출 API | 분당 10회 |
+| OAuth 콜백 API | 분당 5회 |
+
+## 에러 코드
+
+| 코드 | 의미 | HTTP |
+|------|------|------|
+| E-AUTH-001 | OAuth state 검증 실패 (CSRF) | 400 |
+| E-AUTH-003 | JWT 만료 | 401 |
+| E-AUTH-005 | Refresh Token 무효/폐기 | 401 |
+| E-AUTH-006 | Refresh Token 재사용 감지 | 401 |
+| E-PERM-001 | 권한 없음 (RBAC) | 403 |
+| E-PERM-002 | Ownership 위반 | 403 |
+| E-PERM-004 | Risk Level 차단 | 403 |
+| E-MEM-001 | Agent Memory Scope 위반 | 403 |
+| E-CRED-001 | Credential Injection 실패 | 401 |
+| E-CRED-002 | 외부 서비스 토큰 refresh 실패 | 401 |
+
+## 테스트
+
+```bash
+pytest modules/auth/tests/
+```

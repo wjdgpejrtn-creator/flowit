@@ -1,0 +1,18 @@
+from abc import ABC, abstractmethod
+from uuid import UUID
+
+from ..entities.session import Session
+
+
+class SessionRepository(ABC):
+    @abstractmethod
+    async def create(self, user_id: UUID, session_hash: str, **kwargs) -> Session: ...
+
+    @abstractmethod
+    async def find_by_hash(self, session_hash: str) -> Session | None: ...
+
+    @abstractmethod
+    async def revoke(self, session_id: UUID) -> None: ...
+
+    @abstractmethod
+    async def revoke_all_for_user(self, user_id: UUID) -> int: ...

@@ -1,0 +1,155 @@
+{
+  "domain_code": "marketing",
+  "domain_name": "마케팅",
+  "description": "마케팅 자동화 — 캠페인 스케줄·리드 스코어링·A/B 테스트·이벤트·리포트",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "marketing_campaign_schedule",
+      "name": "캠페인 스케줄링",
+      "category": "trigger",
+      "description": "지정된 시각/조건(예: 사용자 가입 N일 후)에 다채널(메일/SNS/푸시) 메시지 자동 발송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "campaign_id": {"type": "string"},
+          "channels": {"type": "array", "items": {"type": "string", "enum": ["email", "sms", "push", "slack"]}},
+          "schedule_type": {"type": "string", "enum": ["one_time", "delayed", "recurring", "trigger_based"]},
+          "schedule_value": {"type": "string"},
+          "audience_segment_id": {"type": "string"}
+        },
+        "required": ["campaign_id", "channels", "schedule_type", "audience_segment_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "scheduled_at": {"type": "string", "format": "date-time"},
+          "estimated_recipients": {"type": "integer"},
+          "channel_breakdown": {"type": "object"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "marketing_lead_scoring",
+      "name": "리드 스코어링",
+      "category": "ai",
+      "description": "사용자 행동(방문·체류·전환) 기반 LLM/룰 혼합 스코어링 → 분류",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "lead_id": {"type": "string"},
+          "behavior_events": {"type": "array", "items": {"type": "object"}},
+          "scoring_model": {"type": "string", "enum": ["rule_based", "llm_assisted", "hybrid"], "default": "hybrid"},
+          "thresholds": {"type": "object"}
+        },
+        "required": ["lead_id", "behavior_events"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "score": {"type": "number", "minimum": 0, "maximum": 100},
+          "tier": {"type": "string", "enum": ["cold", "warm", "hot", "qualified"]},
+          "next_action": {"type": "string"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["anthropic"],
+      "service_type": "anthropic"
+    },
+    {
+      "node_type": "marketing_ab_test_split",
+      "name": "A/B 테스트 트래픽 분할",
+      "category": "condition",
+      "description": "유입 트래픽을 A/B(혹은 multi-variant) 그룹으로 결정적 해싱 분할",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "experiment_id": {"type": "string"},
+          "user_id": {"type": "string"},
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {"type": "string"},
+                "weight": {"type": "number", "minimum": 0, "maximum": 1}
+              },
+              "required": ["key", "weight"]
+            },
+            "minItems": 2
+          },
+          "sticky": {"type": "boolean", "default": true}
+        },
+        "required": ["experiment_id", "user_id", "variants"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "assigned_variant": {"type": "string"},
+          "assigned_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Low",
+      "required_connections": [],
+      "service_type": null
+    },
+    {
+      "node_type": "marketing_event_invite",
+      "name": "이벤트 초대 일괄 발송",
+      "category": "action",
+      "description": "오프라인/온라인 이벤트 초대를 세그먼트 대상자에게 일괄 발송 + 참석 RSVP 추적",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "event_id": {"type": "string"},
+          "event_name": {"type": "string"},
+          "event_datetime": {"type": "string", "format": "date-time"},
+          "registration_url": {"type": "string", "format": "uri"},
+          "audience_emails": {"type": "array", "items": {"type": "string", "format": "email"}, "minItems": 1}
+        },
+        "required": ["event_id", "event_name", "event_datetime", "registration_url", "audience_emails"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "invites_sent": {"type": "integer"},
+          "campaign_message_id": {"type": "string"},
+          "rsvp_tracking_url": {"type": "string"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    },
+    {
+      "node_type": "marketing_engagement_report",
+      "name": "캠페인 성과 리포트",
+      "category": "output",
+      "description": "주간/월간 캠페인 KPI(오픈·클릭·전환·매출) 집계 → PDF 리포트 + 슬랙 공유",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "campaign_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "period_start": {"type": "string", "format": "date"},
+          "period_end": {"type": "string", "format": "date"},
+          "report_channel": {"type": "string"}
+        },
+        "required": ["campaign_ids", "period_start", "period_end"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "pdf_url": {"type": "string"},
+          "kpi_summary": {"type": "object"},
+          "shared_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Low",
+      "required_connections": ["google", "slack"],
+      "service_type": "slack"
+    }
+  ]
+}

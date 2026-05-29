@@ -1,0 +1,52 @@
+name: Codegen Drift Check
+
+on:
+  pull_request:
+    paths:
+      - "packages/common_schemas/python/**"
+      - "packages/common_schemas/scripts/**"
+      - "packages/common_schemas/typescript/**"
+  push:
+    branches: [main, development]
+    paths:
+      - "packages/common_schemas/python/**"
+      - "packages/common_schemas/scripts/**"
+      - "packages/common_schemas/typescript/**"
+
+jobs:
+  codegen-drift:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e packages/common_schemas/python
+
+      - name: Run codegen
+        run: python packages/common_schemas/scripts/generate_ts.py
+
+      - name: Check for drift
+        run: |
+          if ! git diff --exit-code packages/common_schemas/typescript/src/generated/index.ts; then
+            echo "::error::Generated TypeScript is out of sync with Python models. Run: python packages/common_schemas/scripts/generate_ts.py"
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install TypeScript
+        working-directory: packages/common_schemas/typescript
+        run: npm install
+
+      - name: Typecheck generated code
+        working-directory: packages/common_schemas/typescript
+        run: npx tsc --noEmit

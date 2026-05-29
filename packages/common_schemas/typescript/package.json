@@ -1,0 +1,20 @@
+{
+  "name": "@workflow-automation/common_schemas",
+  "version": "0.14.0",
+  "private": true,
+  "main": "src/generated/index.ts",
+  "types": "src/generated/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/generated/index.ts",
+      "default": "./src/generated/index.ts"
+    }
+  },
+  "scripts": {
+    "codegen": "python ../scripts/generate_ts.py",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
