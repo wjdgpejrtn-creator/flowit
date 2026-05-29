@@ -16,8 +16,18 @@ Secrets:
     boot()에서 services.common.gcp_secrets.load_secrets_to_env로 런타임 pull.
 """
 import modal
-from fastapi import Body, FastAPI
-from fastapi.responses import StreamingResponse
+
+# fastapi는 modal.Image 안에만 install됨. GitHub Actions runner의 `modal deploy`
+# CLI가 본 module을 import할 때는 미설치 → ModuleNotFoundError.
+# 모든 fastapi 호출(FastAPI/Body/StreamingResponse)은 @modal.asgi_app()
+# fastapi(self) 메서드 안에서만 evaluate되므로 (Python lazy method body),
+# runner에서는 stub=None으로 충분.
+try:
+    from fastapi import Body, FastAPI
+    from fastapi.responses import StreamingResponse
+except ModuleNotFoundError:
+    Body = FastAPI = None  # type: ignore[misc,assignment]
+    StreamingResponse = None  # type: ignore[misc,assignment]
 
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
 
