@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common_schemas import Chunk, DocumentBlock, QualityGateResult
@@ -33,6 +34,15 @@ class PgDocumentRepository(DocumentRepositoryPort):
     async def get_by_id(self, document_id: UUID) -> DocumentBlock | None:
         model = await self._session.get(DocumentModel, document_id)
         return DocumentMapper.to_domain(model) if model is not None else None
+
+    async def list_by_owner(self, user_id: UUID) -> list[DocumentBlock]:
+        stmt = (
+            select(DocumentModel)
+            .where(DocumentModel.user_id == user_id)
+            .order_by(DocumentModel.created_at.desc())
+        )
+        result = await self._session.execute(stmt)
+        return [DocumentMapper.to_domain(m) for m in result.scalars().all()]
 
     async def save_chunks(self, chunks: list[Chunk]) -> None:
         for chunk in chunks:

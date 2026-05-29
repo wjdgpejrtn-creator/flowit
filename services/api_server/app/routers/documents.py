@@ -56,6 +56,11 @@ def _gcs_key(document_id: UUID, filename: str) -> str:
     return f"{_KEY_PREFIX}/{document_id}/{filename}"
 
 
+def _gcs_uri(document_id: UUID, filename: str) -> str:
+    """`gs://documents/{id}/{filename}` — 응답용 GCS URI. 키 패턴 drift 방지로 단일화."""
+    return f"gs://{_gcs_key(document_id, filename)}"
+
+
 async def _read_capped(file: UploadFile) -> bytes:
     """`UploadFile`을 chunk로 읽으며 `_MAX_UPLOAD_BYTES` 초과 시 413 raise.
 
@@ -139,6 +144,23 @@ async def upload_document(
     return _to_response(document.model_copy(update={"document_id": saved_id}), gcs_uri)
 
 
+@router.get("", response_model=list[DocumentResponse])
+async def list_documents(
+    permission: PermissionSource = Depends(get_permission_source),
+    repo: DocumentRepositoryPort = Depends(get_document_repository),
+) -> list[DocumentResponse]:
+    """현재 사용자 소유 문서 목록 조회 (최신순).
+
+    localStorage SSOT 대체 (#219) — 디바이스 간 동기화 + 다중 사용자 privacy 확보.
+    인가: `DocumentRepositoryPort.list_by_owner(permission.user_id)`로 owner 본인 문서만.
+    """
+    documents = await repo.list_by_owner(permission.user_id)
+    return [
+        _to_response(doc, _gcs_uri(doc.document_id, doc.file_meta.file_name))
+        for doc in documents
+    ]
+
+
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: UUID,
@@ -151,7 +173,7 @@ async def get_document(
         raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
     if document.user_id != permission.user_id:
         raise HTTPException(status_code=403, detail="Document belongs to another user")
-    gcs_uri = f"gs://{_KEY_PREFIX}/{document_id}/{document.file_meta.file_name}"
+    gcs_uri = _gcs_uri(document_id, document.file_meta.file_name)
     return _to_response(document, gcs_uri)
 
 

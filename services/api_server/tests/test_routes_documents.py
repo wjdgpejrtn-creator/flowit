@@ -461,6 +461,42 @@ def test_analyze_not_found_returns_404(app) -> None:
     app.dependency_overrides.clear()
 
 
+# ── list ─────────────────────────────────────────────────────────────────────
+
+
+def test_list_documents_returns_owner_docs(app) -> None:
+    """GET /api/v1/documents — owner 본인 문서 목록 반환 (#219)."""
+    d1, d2 = uuid4(), uuid4()
+    repo = MagicMock()
+    repo.list_by_owner = AsyncMock(return_value=[_doc(d1, name="a.pdf"), _doc(d2, name="b.pdf")])
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/documents", headers=_headers())
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert {item["document_id"] for item in body} == {str(d1), str(d2)}
+    assert all(item["gcs_uri"].startswith("gs://") for item in body)
+    repo.list_by_owner.assert_awaited_once_with(_OWNER_ID)
+    app.dependency_overrides.clear()
+
+
+def test_list_documents_empty(app) -> None:
+    repo = MagicMock()
+    repo.list_by_owner = AsyncMock(return_value=[])
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/documents", headers=_headers())
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+    app.dependency_overrides.clear()
+
+
 # ── auth gate ─────────────────────────────────────────────────────────────────
 
 
@@ -472,6 +508,7 @@ def test_documents_routes_require_bearer(app) -> None:
         files={"file": ("x", BytesIO(b"x"), "text/plain")},
     )
     assert upload_resp.status_code == 401
+    assert client.get("/api/v1/documents").status_code == 401
     assert client.get(f"/api/v1/documents/{did}").status_code == 401
     assert client.get(f"/api/v1/documents/{did}/blocks").status_code == 401
     assert client.get(f"/api/v1/documents/{did}/download").status_code == 401

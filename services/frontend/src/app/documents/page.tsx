@@ -5,11 +5,11 @@ import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
-import { uploadDocument, type DocumentResponse } from '@/lib/api/documentApi';
+import { uploadDocument, listDocuments, type DocumentResponse } from '@/lib/api/documentApi';
 import { DOCS_STORAGE_KEY } from '@/lib/storage/keys';
 
-// TODO(#219): 문서 목록이 localStorage SSOT — 디바이스 간 sync X, 다중 사용자 privacy 위험.
-// 백엔드 GET /api/v1/documents 추가 후 서버 목록을 SSOT 로 전환 예정. (PR #216 리뷰 #2)
+// #219: 서버(GET /api/v1/documents)가 SSOT. localStorage 는 optimistic 캐시로만 유지
+// (첫 페인트 즉시 표시 + 서버 조회 실패 시 폴백).
 function loadStoredDocs(): DocumentResponse[] {
   try {
     const raw = localStorage.getItem(DOCS_STORAGE_KEY);
@@ -73,6 +73,22 @@ export default function DocumentsPage() {
       localStorage.setItem(DOCS_STORAGE_KEY, JSON.stringify(docs));
     } catch {}
   }, [docs]);
+
+  // 마운트 시 서버 목록을 SSOT 로 로드 (실패 시 localStorage 캐시 유지)
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const serverDocs = await listDocuments();
+        if (!cancelled) setDocs(serverDocs);
+      } catch {
+        /* 서버 조회 실패 — loadStoredDocs() 초기값 유지 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleUpload = async (file: File) => {
     setUploading(true);

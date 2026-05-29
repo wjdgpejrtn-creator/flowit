@@ -8,7 +8,7 @@ import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import { createPersonalSkill } from '@/lib/api/skillApi';
 import type { PersonalSkill, SkillLifecycleState } from '@/lib/api/skillApi';
-import type { DocumentResponse } from '@/lib/api/documentApi';
+import { listDocuments, type DocumentResponse } from '@/lib/api/documentApi';
 import { DOCS_STORAGE_KEY } from '@/lib/storage/keys';
 
 function fmtSize(bytes: number): string {
@@ -47,8 +47,20 @@ export default function SkillBuilderPage() {
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<PersonalSkill | null>(null);
 
+  // 문서 목록: 서버 SSOT, 실패 시 localStorage 캐시 폴백 (#219)
   useEffect(() => {
-    setDocs(loadDocs());
+    let cancelled = false;
+    void (async () => {
+      try {
+        const serverDocs = await listDocuments();
+        if (!cancelled) setDocs(serverDocs);
+      } catch {
+        if (!cancelled) setDocs(loadDocs());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const tags = tagsInput.split(',').map((t) => t.trim()).filter(Boolean);

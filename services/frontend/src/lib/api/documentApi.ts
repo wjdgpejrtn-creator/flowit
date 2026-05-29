@@ -13,6 +13,10 @@ export type {
   AnalyzeDispatchResponse,
 };
 
+export async function listDocuments(): Promise<DocumentResponse[]> {
+  return apiJson<DocumentResponse[]>('/api/v1/documents');
+}
+
 export async function getDocument(id: string): Promise<DocumentResponse> {
   return apiJson<DocumentResponse>(`/api/v1/documents/${id}`);
 }
