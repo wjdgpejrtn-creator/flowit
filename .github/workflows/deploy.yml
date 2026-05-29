@@ -1,0 +1,256 @@
+# Deploy to Cloud Run (staging) — CD #1.
+#
+# release 브랜치 push 즉시 변경된 service만 Cloud Build → Cloud Run staging 갱신.
+# FF-only 머지 + concurrency로 in-flight deploy 보호.
+#
+# 본 프로젝트는 prod Cloud Run 0건 (7/1 destroy 예정) — staging 단일.
+# release 머지 자체가 명시적 배포 결정 시점 → 추가 manual approval 불필요.
+#
+# 빌드 도구 = 각 service의 cloudbuild.yaml (build context = repo root).
+# Cloud Run 갱신 = `gcloud run services update --image=...` (deploy 아님 —
+#   terraform이 spec 관리, image만 교체).
+#
+# Secret/Variable 의존:
+#   secrets.GCP_WIF_PROVIDER         (WIF provider full path)
+#   secrets.GCP_WIF_SERVICE_ACCOUNT  (deploy SA email)
+#   vars.GCP_PROJECT_ID_PROD         (<GCP_PROJECT_ID> — staging도 동일 project)
+#   vars.GCP_REGION                  (asia-northeast3)
+#
+# Cloud Run service / AR repo (terraform 실측):
+#   api_server: workflow-api-staging       / image=api-server       / cloudbuild=services/api_server/cloudbuild.yaml
+#   worker:     workflow-execution-worker-staging / image=execution-engine-worker / cloudbuild=services/execution_engine/cloudbuild.yaml
+#   frontend:   workflow-frontend-staging  / image=frontend         / cloudbuild=services/frontend/cloudbuild.yaml
+#   AR repo:    workflow-staging
+
+name: Deploy to Cloud Run (staging)
+
+on:
+  push:
+    branches: [release]
+    paths:
+      - "services/api_server/**"
+      - "services/execution_engine/**"
+      - "services/frontend/**"
+      - "modules/**"
+      - "packages/common_schemas/**"
+
+permissions:
+  contents: read
+  id-token: write  # WIF 필수 — google-github-actions/auth가 OIDC 토큰 제시
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false  # release 머지 폭주 시에도 in-flight deploy 보호
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  # 변경 경로 보고 어떤 service deploy job 돌릴지 분기.
+  detect-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      api_server: ${{ steps.filter.outputs.api_server }}
+      worker: ${{ steps.filter.outputs.worker }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api_server:
+              - 'services/api_server/**'
+              - 'modules/auth/**'
+              - 'modules/ai_agent/**'
+              - 'modules/nodes_graph/**'
+              - 'modules/doc_parser/**'
+              - 'modules/toolset/**'
+              - 'modules/storage/**'
+              - 'modules/skills_marketplace/**'
+              - 'packages/common_schemas/python/**'
+            worker:
+              - 'services/execution_engine/**'
+              - 'modules/auth/**'
+              - 'modules/nodes_graph/**'
+              - 'modules/storage/**'
+              - 'modules/doc_parser/**'    # PR #218 — worker가 doc_parser use case import
+              - 'modules/toolset/**'        # execution_engine이 ExecuteToolUseCase import (REQ-005)
+              - 'packages/common_schemas/python/**'
+            frontend:
+              - 'services/frontend/**'
+              - 'packages/common_schemas/typescript/**'
+
+  deploy-api-server:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.api_server == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID_PROD }}  # 이름은 _PROD지만 staging도 동일 project
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      AR_REPO: workflow-staging
+      IMAGE: api-server
+      SERVICE: workflow-api-staging
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs (no trailing whitespace)
+        # 2026-04-19 GCP_REGION 끝 공백 사고 재발 방지. Variable UI 복붙 시 개행 들어가는 경우 있음.
+        run: |
+          for pair in "GCP_PROJECT_ID:${GCP_PROJECT_ID}" "GCP_REGION:${GCP_REGION}"; do
+            name="${pair%%:*}"; val="${pair#*:}"
+            if [ -z "$val" ]; then echo "::error::$name empty"; exit 1; fi
+            trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
+            if [ "$val" != "$trimmed" ]; then echo "::error::$name has whitespace"; exit 1; fi
+          done
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build via Cloud Build
+        run: |
+          gcloud builds submit \
+            --project="$GCP_PROJECT_ID" \
+            --config=services/api_server/cloudbuild.yaml \
+            --substitutions=_TAG=$GITHUB_SHA \
+            .
+
+      - name: Update Cloud Run service (image only — terraform owns spec)
+        run: |
+          IMAGE_URI="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/${IMAGE}:${GITHUB_SHA}"
+          gcloud run services update "$SERVICE" \
+            --image="$IMAGE_URI" \
+            --region="$GCP_REGION" \
+            --project="$GCP_PROJECT_ID" \
+            --quiet
+
+      - name: Summary
+        run: |
+          echo "### Deployed: ${SERVICE}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- image: \`${IMAGE}:${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- region: \`${GCP_REGION}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-worker:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID_PROD }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      AR_REPO: workflow-staging
+      IMAGE: execution-engine-worker
+      SERVICE: workflow-execution-worker-staging
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs (no trailing whitespace)
+        run: |
+          for pair in "GCP_PROJECT_ID:${GCP_PROJECT_ID}" "GCP_REGION:${GCP_REGION}"; do
+            name="${pair%%:*}"; val="${pair#*:}"
+            if [ -z "$val" ]; then echo "::error::$name empty"; exit 1; fi
+            trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
+            if [ "$val" != "$trimmed" ]; then echo "::error::$name has whitespace"; exit 1; fi
+          done
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build via Cloud Build
+        run: |
+          gcloud builds submit \
+            --project="$GCP_PROJECT_ID" \
+            --config=services/execution_engine/cloudbuild.yaml \
+            --substitutions=_TAG=$GITHUB_SHA \
+            .
+
+      - name: Update Cloud Run service (image only — terraform owns spec)
+        run: |
+          IMAGE_URI="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/${IMAGE}:${GITHUB_SHA}"
+          gcloud run services update "$SERVICE" \
+            --image="$IMAGE_URI" \
+            --region="$GCP_REGION" \
+            --project="$GCP_PROJECT_ID" \
+            --quiet
+
+      - name: Summary
+        run: |
+          echo "### Deployed: ${SERVICE}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- image: \`${IMAGE}:${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- region: \`${GCP_REGION}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-frontend:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID_PROD }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      AR_REPO: workflow-staging
+      IMAGE: frontend
+      SERVICE: workflow-frontend-staging
+      # frontend cloudbuild.yaml의 _API_PROXY_TARGET default — build-arg로 Dockerfile에 전달.
+      # 2026-05-28 가원 빌드 사고 (default가 build-arg에 안 실리는 케이스) 방어 차원에서 명시 override.
+      API_PROXY_TARGET: https://<API_SERVICE_URL>
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs (no trailing whitespace)
+        run: |
+          for pair in "GCP_PROJECT_ID:${GCP_PROJECT_ID}" "GCP_REGION:${GCP_REGION}" "API_PROXY_TARGET:${API_PROXY_TARGET}"; do
+            name="${pair%%:*}"; val="${pair#*:}"
+            if [ -z "$val" ]; then echo "::error::$name empty"; exit 1; fi
+            trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
+            if [ "$val" != "$trimmed" ]; then echo "::error::$name has whitespace"; exit 1; fi
+          done
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build via Cloud Build (_API_PROXY_TARGET 명시 — 가원 사고 방어)
+        run: |
+          gcloud builds submit \
+            --project="$GCP_PROJECT_ID" \
+            --config=services/frontend/cloudbuild.yaml \
+            --substitutions=_TAG=$GITHUB_SHA,_API_PROXY_TARGET=$API_PROXY_TARGET \
+            .
+
+      - name: Update Cloud Run service (image only — terraform owns spec)
+        run: |
+          IMAGE_URI="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/${IMAGE}:${GITHUB_SHA}"
+          gcloud run services update "$SERVICE" \
+            --image="$IMAGE_URI" \
+            --region="$GCP_REGION" \
+            --project="$GCP_PROJECT_ID" \
+            --quiet
+
+      - name: Summary
+        run: |
+          echo "### Deployed: ${SERVICE}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- image: \`${IMAGE}:${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- region: \`${GCP_REGION}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- _API_PROXY_TARGET: \`${API_PROXY_TARGET}\`" >> "$GITHUB_STEP_SUMMARY"
