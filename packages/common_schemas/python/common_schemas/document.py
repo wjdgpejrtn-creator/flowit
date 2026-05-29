@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .enums import AnalysisStatus
 from .types import UtcDatetime
 
 
@@ -87,6 +88,10 @@ class DocumentBlock(BaseModel):
     blocks: list[ContentBlock]
     vision_block_count: int = 0
     failed_block_count: int = 0
+    # 분석 상태 추적 (REQ-009/REQ-007 — Celery 태스크 진행/실패 가시화).
+    analysis_status: AnalysisStatus = AnalysisStatus.PENDING
+    analysis_error: Optional[str] = None
+    analyzed_at: Optional[UtcDatetime] = None
 
 
 class AnalysisResult(BaseModel):
@@ -201,6 +206,23 @@ class DocumentResponse(BaseModel):
     file_size: int
     gcs_uri: str
     is_analyzed: bool
+    # 분석 상태 — 프론트엔드 폴링 신호. is_analyzed는 호환성 위해 유지(completed == True).
+    analysis_status: AnalysisStatus = AnalysisStatus.PENDING
+    analysis_error: Optional[str] = None
+    analyzed_at: Optional[UtcDatetime] = None
+
+
+class DocumentBlocksResponse(BaseModel):
+    """GET /api/v1/documents/{id}/blocks 응답 — 파싱 결과 본문 전용 DTO.
+
+    DocumentResponse(메타)와 분리: 메타 폴링은 가벼운 페이로드, blocks는 분석 완료 후 1회.
+    """
+
+    document_id: UUID
+    blocks: list[ContentBlock]
+    analysis_status: AnalysisStatus
+    analysis_error: Optional[str] = None
+    analyzed_at: Optional[UtcDatetime] = None
 
 
 class AnalyzeDispatchResponse(BaseModel):

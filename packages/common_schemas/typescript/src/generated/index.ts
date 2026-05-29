@@ -11,6 +11,13 @@ export enum AgentMode {
   SKILL_BUILDER = "skill_builder",
 }
 
+export enum AnalysisStatus {
+  PENDING = "pending",
+  RUNNING = "running",
+  COMPLETED = "completed",
+  FAILED = "failed",
+}
+
 export enum ErrorCode {
   E_NODE_TYPE_MISMATCH = "E_NODE_TYPE_MISMATCH",
   E_CYCLE_DETECTED = "E_CYCLE_DETECTED",
@@ -37,6 +44,10 @@ export enum IntentType {
   REFINE = "refine",
   PROPOSE = "propose",
   BUILD_SKILL = "build_skill",
+  CHITCHAT = "chitchat",
+  INFO_QUESTION = "info_question",
+  CONTROL = "control",
+  WORKFLOW_EXECUTE = "workflow_execute",
 }
 
 export enum RiskLevel {
@@ -334,6 +345,17 @@ export interface DocumentBlock {
   blocks: Array<ContentBlock>;
   vision_block_count: number;
   failed_block_count: number;
+  analysis_status: AnalysisStatus;
+  analysis_error?: string | null;
+  analyzed_at?: string | null;
+}
+
+export interface DocumentBlocksResponse {
+  document_id: string;
+  blocks: Array<ContentBlock>;
+  analysis_status: AnalysisStatus;
+  analysis_error?: string | null;
+  analyzed_at?: string | null;
 }
 
 export interface DocumentDownloadResponse {
@@ -349,6 +371,9 @@ export interface DocumentResponse {
   file_size: number;
   gcs_uri: string;
   is_analyzed: boolean;
+  analysis_status: AnalysisStatus;
+  analysis_error?: string | null;
+  analyzed_at?: string | null;
 }
 
 export interface EvaluationResult {

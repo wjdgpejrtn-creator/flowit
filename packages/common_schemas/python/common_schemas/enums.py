@@ -37,6 +37,14 @@ class ErrorCode(str, Enum):
     E_INVALID_TRIGGER = "E_INVALID_TRIGGER"
 
 
+class AnalysisStatus(str, Enum):
+    """문서 분석 비동기 태스크 상태 — Celery worker가 갱신, api_server가 노출."""
+    PENDING = "pending"      # 업로드 직후 — analyze 미요청
+    RUNNING = "running"      # Celery 태스크 시작
+    COMPLETED = "completed"  # blocks 저장 완료
+    FAILED = "failed"        # 파싱 실패 — analysis_error 참조
+
+
 class IntentType(str, Enum):
     CLARIFY = "clarify"
     DRAFT = "draft"

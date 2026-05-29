@@ -7,6 +7,17 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.14.0] - 2026-05-29
+
+### Added — 문서 분석 상태 추적 (REQ-009/REQ-007 — 분석 결과 read path 완성)
+- `enums.py`: `AnalysisStatus(pending|running|completed|failed)` 신설. Celery worker가 갱신, api_server가 응답에 노출. 기존엔 `DocumentResponse.is_analyzed` boolean만 있어 "진행중"과 "실패"를 구분 못 했고, 프론트엔드가 폴링으로 완료를 감지할 수 없었다.
+- `document.py`:
+  - `DocumentBlock` 도메인 엔티티에 `analysis_status: AnalysisStatus` / `analysis_error` / `analyzed_at` 필드 추가.
+  - `DocumentResponse`에 동일 필드 추가 — 메타 폴링 응답에서 상태 노출. `is_analyzed`는 호환성 위해 유지(=`status == AnalysisStatus.COMPLETED`).
+  - `DocumentBlocksResponse` 신규 — `GET /api/v1/documents/{id}/blocks` 본문 전용 DTO. 메타와 분리해서 분석 완료 후 1회만 fetch.
+  - 3 스키마 모두 `AnalysisStatus` enum 직접 참조(`Literal` 미사용) — SSOT 활용 일관.
+- TS regenerate 완료.
+
 ## [0.13.0] - 2026-05-28
 
 ### Added — `ErrorCode.E_MISSING_REQUIRED_PARAMETER` (PR #208 후속)

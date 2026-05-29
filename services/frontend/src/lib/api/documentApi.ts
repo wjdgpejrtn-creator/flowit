@@ -1,10 +1,24 @@
 import { apiJson, apiFetch } from '@/lib/apiClient';
-import type { DocumentResponse, DocumentDownloadResponse, AnalyzeDispatchResponse } from '@common/generated';
+import type {
+  DocumentResponse,
+  DocumentBlocksResponse,
+  DocumentDownloadResponse,
+  AnalyzeDispatchResponse,
+} from '@common/generated';
 
-export type { DocumentResponse, DocumentDownloadResponse, AnalyzeDispatchResponse };
+export type {
+  DocumentResponse,
+  DocumentBlocksResponse,
+  DocumentDownloadResponse,
+  AnalyzeDispatchResponse,
+};
 
 export async function getDocument(id: string): Promise<DocumentResponse> {
   return apiJson<DocumentResponse>(`/api/v1/documents/${id}`);
+}
+
+export async function getDocumentBlocks(id: string): Promise<DocumentBlocksResponse> {
+  return apiJson<DocumentBlocksResponse>(`/api/v1/documents/${id}/blocks`);
 }
 
 export async function uploadDocument(file: File): Promise<DocumentResponse> {

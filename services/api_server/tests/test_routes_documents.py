@@ -64,7 +64,16 @@ def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {_bearer_token()}"}
 
 
-def _doc(document_id, *, user_id=_OWNER_ID, blocks=None, name="report.pdf") -> DocumentBlock:
+def _doc(
+    document_id,
+    *,
+    user_id=_OWNER_ID,
+    blocks=None,
+    name="report.pdf",
+    analysis_status="pending",
+    analysis_error=None,
+    analyzed_at=None,
+) -> DocumentBlock:
     return DocumentBlock(
         document_id=document_id,
         user_id=user_id,
@@ -75,6 +84,9 @@ def _doc(document_id, *, user_id=_OWNER_ID, blocks=None, name="report.pdf") -> D
             file_size=1234,
         ),
         blocks=blocks or [],
+        analysis_status=analysis_status,
+        analysis_error=analysis_error,
+        analyzed_at=analyzed_at,
     )
 
 
@@ -217,23 +229,73 @@ def test_get_document_not_found_returns_404(app) -> None:
     app.dependency_overrides.clear()
 
 
-def test_get_document_is_analyzed_true_when_blocks_present(app) -> None:
+def test_get_document_is_analyzed_true_when_status_completed(app) -> None:
+    """is_analyzed는 analysis_status='completed'와 동치 — blocks 유무 아님(REQ-009 v0.14)."""
     from common_schemas import ContentBlock
     document_id = uuid4()
-    block = ContentBlock(
-        block_id=uuid4(),
-        block_type="text",
-        content="hello",
-    )
+    block = ContentBlock(block_id=uuid4(), block_type="text", content="hello")
     repo = MagicMock()
-    repo.get_by_id = AsyncMock(return_value=_doc(document_id, blocks=[block]))
+    repo.get_by_id = AsyncMock(
+        return_value=_doc(
+            document_id,
+            blocks=[block],
+            analysis_status="completed",
+            analyzed_at=datetime.now(UTC),
+        )
+    )
     app.dependency_overrides[get_document_repository] = lambda: repo
     _override_permission(app)
 
     client = TestClient(app)
     resp = client.get(f"/api/v1/documents/{document_id}", headers=_headers())
     assert resp.status_code == 200
-    assert resp.json()["is_analyzed"] is True
+    body = resp.json()
+    assert body["is_analyzed"] is True
+    assert body["analysis_status"] == "completed"
+    assert body["analysis_error"] is None
+    assert body["analyzed_at"] is not None
+    app.dependency_overrides.clear()
+
+
+def test_get_document_running_status_exposed(app) -> None:
+    """진행중(`running`) 상태도 응답에 노출 — 프론트 폴링이 인지."""
+    document_id = uuid4()
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(
+        return_value=_doc(document_id, analysis_status="running")
+    )
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/documents/{document_id}", headers=_headers())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_analyzed"] is False
+    assert body["analysis_status"] == "running"
+    app.dependency_overrides.clear()
+
+
+def test_get_document_failed_status_exposes_error(app) -> None:
+    """실패 상태 + error 메시지 노출 — 프론트가 retry 유도."""
+    document_id = uuid4()
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(
+        return_value=_doc(
+            document_id,
+            analysis_status="failed",
+            analysis_error="PDF parser crashed on page 3",
+        )
+    )
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/documents/{document_id}", headers=_headers())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["analysis_status"] == "failed"
+    assert "PDF parser crashed" in body["analysis_error"]
     app.dependency_overrides.clear()
 
 
@@ -255,6 +317,83 @@ def test_get_download_url_returns_presigned(app) -> None:
     assert body["download_url"] == "https://signed.example/abc?sig=x"
     assert body["expires_in"] == 3600
     storage.presign.assert_awaited_once()
+    app.dependency_overrides.clear()
+
+
+# ── GET /{id}/blocks ─────────────────────────────────────────────────────────
+
+
+def test_get_blocks_owner_returns_blocks_and_status(app) -> None:
+    """분석 완료 문서: blocks + analysis_status='completed' 동시 노출."""
+    from common_schemas import ContentBlock
+    document_id = uuid4()
+    block = ContentBlock(block_id=uuid4(), block_type="text", content="parsed text")
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(
+        return_value=_doc(
+            document_id,
+            blocks=[block],
+            analysis_status="completed",
+            analyzed_at=datetime.now(UTC),
+        )
+    )
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/documents/{document_id}/blocks", headers=_headers())
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["document_id"] == str(document_id)
+    assert body["analysis_status"] == "completed"
+    assert len(body["blocks"]) == 1
+    assert body["blocks"][0]["content"] == "parsed text"
+    app.dependency_overrides.clear()
+
+
+def test_get_blocks_running_returns_empty_blocks(app) -> None:
+    """진행중 상태도 200 — blocks는 빈 배열, 프론트가 폴링 계속."""
+    document_id = uuid4()
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(
+        return_value=_doc(document_id, analysis_status="running")
+    )
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/documents/{document_id}/blocks", headers=_headers())
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["analysis_status"] == "running"
+    assert body["blocks"] == []
+    app.dependency_overrides.clear()
+
+
+def test_get_blocks_non_owner_returns_403(app) -> None:
+    document_id = uuid4()
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(return_value=_doc(document_id, user_id=uuid4()))
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/documents/{document_id}/blocks", headers=_headers())
+    assert resp.status_code == 403
+    app.dependency_overrides.clear()
+
+
+def test_get_blocks_not_found_returns_404(app) -> None:
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(return_value=None)
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/documents/{uuid4()}/blocks", headers=_headers())
+    assert resp.status_code == 404
     app.dependency_overrides.clear()
 
 
@@ -334,5 +473,6 @@ def test_documents_routes_require_bearer(app) -> None:
     )
     assert upload_resp.status_code == 401
     assert client.get(f"/api/v1/documents/{did}").status_code == 401
+    assert client.get(f"/api/v1/documents/{did}/blocks").status_code == 401
     assert client.get(f"/api/v1/documents/{did}/download").status_code == 401
     assert client.post(f"/api/v1/documents/{did}/analyze").status_code == 401
