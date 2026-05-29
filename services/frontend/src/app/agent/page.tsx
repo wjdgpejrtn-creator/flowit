@@ -96,10 +96,7 @@ function FlowEditor() {
 
   return (
     <div className="flex h-full w-full">
-      <div
-        className="flex-shrink-0 border-r-[1.5px] border-[var(--color-ink)] min-h-0 overflow-hidden flex flex-col"
-        style={{ width: 200 }}
-      >
+      <div className="flex-shrink-0 min-h-0 flex flex-col">
         <NodePalette />
       </div>
       <div ref={wrapperRef} className="flex-1 min-w-0 min-h-0">
