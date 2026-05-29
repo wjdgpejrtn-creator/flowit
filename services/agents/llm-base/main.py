@@ -38,7 +38,16 @@ import time
 from pathlib import Path
 
 import modal
-from pydantic import BaseModel
+
+# pydantic은 modal.Image 안에만 install됨. GitHub Actions runner의 `modal deploy`
+# CLI가 본 module을 import할 때는 미설치 → ModuleNotFoundError.
+# try/except로 가드, runner에서는 BaseModel=object stub. EmbedReq/EmbedBatchReq/
+# GenerateReq는 module scope 유지 필수(FastAPI 0.115+ 요구사항, 아래 주석 참조),
+# instance화는 container 안에서만 발생하므로 stub 안전.
+try:
+    from pydantic import BaseModel
+except ModuleNotFoundError:
+    BaseModel = object  # type: ignore[misc,assignment]
 
 # Gemma 4 vision-mode chat-template leak. `enable_thinking=False` +
 # `reasoning_format=none` strip the <think> trace in text mode, but the vision
