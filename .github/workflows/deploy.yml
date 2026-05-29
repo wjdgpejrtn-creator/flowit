@@ -103,9 +103,9 @@ jobs:
         run: |
           for pair in "GCP_PROJECT_ID:${GCP_PROJECT_ID}" "GCP_REGION:${GCP_REGION}"; do
             name="${pair%%:*}"; val="${pair#*:}"
-            [ -z "$val" ] && { echo "::error::$name empty"; exit 1; }
+            if [ -z "$val" ]; then echo "::error::$name empty"; exit 1; fi
             trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
-            [ "$val" != "$trimmed" ] && { echo "::error::$name has whitespace"; exit 1; }
+            if [ "$val" != "$trimmed" ]; then echo "::error::$name has whitespace"; exit 1; fi
           done
 
       - id: auth
@@ -159,9 +159,9 @@ jobs:
         run: |
           for pair in "GCP_PROJECT_ID:${GCP_PROJECT_ID}" "GCP_REGION:${GCP_REGION}"; do
             name="${pair%%:*}"; val="${pair#*:}"
-            [ -z "$val" ] && { echo "::error::$name empty"; exit 1; }
+            if [ -z "$val" ]; then echo "::error::$name empty"; exit 1; fi
             trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
-            [ "$val" != "$trimmed" ] && { echo "::error::$name has whitespace"; exit 1; }
+            if [ "$val" != "$trimmed" ]; then echo "::error::$name has whitespace"; exit 1; fi
           done
 
       - id: auth
@@ -218,9 +218,9 @@ jobs:
         run: |
           for pair in "GCP_PROJECT_ID:${GCP_PROJECT_ID}" "GCP_REGION:${GCP_REGION}" "API_PROXY_TARGET:${API_PROXY_TARGET}"; do
             name="${pair%%:*}"; val="${pair#*:}"
-            [ -z "$val" ] && { echo "::error::$name empty"; exit 1; }
+            if [ -z "$val" ]; then echo "::error::$name empty"; exit 1; fi
             trimmed=$(printf '%s' "$val" | tr -d '[:space:]')
-            [ "$val" != "$trimmed" ] && { echo "::error::$name has whitespace"; exit 1; }
+            if [ "$val" != "$trimmed" ]; then echo "::error::$name has whitespace"; exit 1; fi
           done
 
       - id: auth
