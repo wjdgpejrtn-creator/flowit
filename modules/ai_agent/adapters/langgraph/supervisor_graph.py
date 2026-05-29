@@ -28,6 +28,7 @@ from common_schemas.enums import AgentMode, ExecutionStatus
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
+    ChatMessageFrame,
     ErrorFrame,
     PipelineStatusFrame,
     ResultFrame,
@@ -183,12 +184,24 @@ class LangGraphSupervisor:
 
         intent = state.get("intent")
 
-        # ── 1단계: intent 미분석 → 항상 analyze_intent 먼저 (routing LLM 0 call) ──
+        # ── 1단계: intent 미분석 → analyze_intent ──────────────────────────────
         if intent is None:
             _logger.info("supervisor: intent 없음 → analyze_intent 강제 실행")
             updates = await self._intent_node(state)
             intent = updates.get("intent")
             _logger.info("supervisor: intent 분석 결과 = %s", intent)
+
+            # 미분류(None) → general_chat으로 즉시 자연어 응답
+            if intent is None:
+                chat_updates = await self._general_chat_node(state)
+                return {
+                    **chat_updates,
+                    "agent_iterations": iterations,
+                    "agent_done": True,
+                    "collected_frames": [AgentNodeFrame(agent_node_name="analyze_intent")]
+                    + chat_updates.get("collected_frames", []),
+                }
+
             return {
                 **updates,
                 "agent_iterations": iterations,
@@ -196,7 +209,7 @@ class LangGraphSupervisor:
                 + updates.get("collected_frames", []),
             }
 
-        # ── 2단계: 결정론적 라우팅 (routing LLM call 제거) ──────────────────────
+        # ── 2단계: 결정론적 라우팅 ──────────────────────────────────────────────
         _FAST_INTENTS = {"chitchat", "info_question", "control", "workflow_execute"}
         _COMPOSER_INTENTS = {"draft", "refine", "clarify"}
 
@@ -223,22 +236,39 @@ class LangGraphSupervisor:
                 + updates.get("collected_frames", []),
             }
 
-        # build_skill → skills_builder relay → update_memory → done
+        # build_skill → 트랜지션 메시지 + skills_builder relay
         if intent == "build_skill":
             if state.get("composer_done"):
                 await self._update_memory_node(state)
                 return {"agent_iterations": iterations, "agent_done": True}
+            transition = ChatMessageFrame(
+                role="assistant",
+                content="스킬 빌드를 시작할게요. 잠시만 기다려 주세요.",
+            )
             updates = await self._skills_node(state)
-            return {**updates, "agent_iterations": iterations, "composer_done": True}
+            return {
+                **updates,
+                "agent_iterations": iterations,
+                "composer_done": True,
+                "collected_frames": [transition] + updates.get("collected_frames", []),
+            }
 
-        # draft/refine/clarify → composer relay (1회) → update_memory → done
+        # draft/refine/clarify → 트랜지션 메시지 + composer relay
         if intent in _COMPOSER_INTENTS:
             if state.get("composer_done"):
-                # composer 완료 → update_memory → done
                 await self._update_memory_node(state)
                 return {"agent_iterations": iterations, "agent_done": True}
+            transition = ChatMessageFrame(
+                role="assistant",
+                content="요청하신 워크플로우 작성을 시작할게요. 잠시만 기다려 주세요.",
+            )
             updates = await self._composer_node(state)
-            return {**updates, "agent_iterations": iterations, "composer_done": True}
+            return {
+                **updates,
+                "agent_iterations": iterations,
+                "composer_done": True,
+                "collected_frames": [transition] + updates.get("collected_frames", []),
+            }
 
         # unknown intent fallback → done
         _logger.warning("supervisor: 알 수 없는 intent=%s → 종료", intent)
@@ -276,6 +306,23 @@ class LangGraphSupervisor:
         else:
             text = "안녕하세요! 어떤 업무를 자동화하고 싶으신가요? 워크플로우를 만들어 드릴게요 😊"
         return {"collected_frames": [ResultFrame(intent="chitchat", payload={"message": text})]}
+
+    async def _general_chat_node(self, state: _State) -> dict:
+        """미분류 입력 — LLM으로 자연어 응답 생성 (2~3문장, 워크플로우로 자연스럽게 유도)."""
+        if self._llm is None:
+            text = "안녕하세요! 어떤 업무를 자동화하고 싶으신가요?"
+            return {"collected_frames": [ChatMessageFrame(role="assistant", content=text)]}
+        system = (
+            "당신은 업무 자동화 워크플로우를 만들어주는 AI 어시스턴트입니다. "
+            "사용자가 자연스러운 대화를 시작했습니다. 친근하고 짧게 응답하고, "
+            "어떤 업무를 자동화하고 싶은지 자연스럽게 유도하세요. 2~3문장 이내로 한국어로 답하세요."
+        )
+        try:
+            text = await self._llm.generate(f"{system}\n\n사용자: {state['message']}")
+        except Exception as exc:
+            _logger.warning("general_chat LLM 실패, 기본 응답 사용: %s", exc)
+            text = "안녕하세요! 어떤 업무를 자동화하고 싶으신가요? 말씀해 주시면 워크플로우를 만들어 드릴게요."
+        return {"collected_frames": [ChatMessageFrame(role="assistant", content=text)]}
 
     @staticmethod
     def _route_agent(state: _State) -> str:
@@ -326,6 +373,9 @@ class LangGraphSupervisor:
             )
         except Exception as exc:
             return {"intent": "clarify", "error": f"intent 분석 실패: {exc}"}
+        # result가 None이면 미분류 → intent=None 유지 (general_chat으로 분기)
+        if result is None:
+            return {"intent": None, "intent_analyzed_entities": {}}
         return {
             "intent": result.intent,
             "intent_analyzed_entities": result.analyzed_entities,
