@@ -163,7 +163,8 @@ def download_model() -> None:
     volumes={MODEL_DIR: model_volume},
     secrets=[hf_secret],
     timeout=600,
-    scaledown_window=300,
+    # 15분 idle 유지 — staging 연속 테스트 시 3분 cold start(Gemma mmap+BGE) 회피.
+    scaledown_window=900,
 )
 @modal.concurrent(max_inputs=4)
 class LLMBase:
