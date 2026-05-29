@@ -89,16 +89,7 @@ function parseFlowSchema(input: unknown): FlowSchemaField[] {
 }
 
 function coerceFlowField(raw: string, type: string): unknown {
-  if (type === 'number' || type === 'integer') {
-    if (raw === '') return undefined;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : raw;
-  }
   if (type === 'boolean') return raw === 'true';
-  if (type === 'object' || type === 'array') {
-    if (raw.trim() === '') return type === 'array' ? [] : {};
-    try { return JSON.parse(raw); } catch { return raw; }
-  }
   return raw;
 }
 
@@ -125,6 +116,7 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
   const catalogNodeId = nodeData.node_id as string | undefined;
   const params = (nodeData.parameters ?? {}) as Record<string, unknown>;
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [draftTexts, setDraftTexts] = useState<Record<string, string>>({});
 
   const nodeConfig = catalog?.find((c) => c.node_id === catalogNodeId) ?? null;
   const fields = parseFlowSchema(nodeConfig?.input_schema);
@@ -132,9 +124,35 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
   const clearError = (fieldName: string) =>
     setFieldErrors((e) => { const { [fieldName]: _, ...rest } = e; return rest; });
 
+  // Initialize draft texts for draft-managed field types when catalog first loads
+  useEffect(() => {
+    if (!nodeConfig) return;
+    setDraftTexts((prev) => {
+      const next = { ...prev };
+      for (const f of parseFlowSchema(nodeConfig.input_schema)) {
+        if ((f.type === 'object' || f.type === 'array' || f.type === 'number' || f.type === 'integer') && !(f.name in next)) {
+          next[f.name] = stringifyFlowField(params[f.name] ?? f.default, f.type);
+        }
+      }
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeConfig]);
+
+  // For string/boolean/enum: direct commit to params
   const updateField = (fieldName: string, raw: string, type: string) => {
     const next = { ...params };
+    const value = coerceFlowField(raw, type);
+    if (value === undefined) delete next[fieldName];
+    else next[fieldName] = value;
+    clearError(fieldName);
+    onUpdateParams(next);
+  };
 
+  // For number/integer/object/array: store raw draft always, commit to params only when valid
+  const updateDraftField = (fieldName: string, raw: string, type: string) => {
+    setDraftTexts((prev) => ({ ...prev, [fieldName]: raw }));
+    const next = { ...params };
     if (type === 'number' || type === 'integer') {
       if (raw === '') {
         delete next[fieldName];
@@ -148,7 +166,7 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
         next[fieldName] = n;
         clearError(fieldName);
       }
-    } else if (type === 'object' || type === 'array') {
+    } else {
       if (raw.trim() === '') {
         next[fieldName] = type === 'array' ? [] : {};
         clearError(fieldName);
@@ -161,13 +179,7 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
           return;
         }
       }
-    } else {
-      const value = coerceFlowField(raw, type);
-      if (value === undefined) delete next[fieldName];
-      else next[fieldName] = value;
-      clearError(fieldName);
     }
-
     onUpdateParams(next);
   };
 
@@ -208,7 +220,10 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
           <div className="text-[12px] text-[var(--color-ink4)] italic">설정 가능한 파라미터가 없습니다.</div>
         )}
         {fields.map((f) => {
-          const value = stringifyFlowField(params[f.name] ?? f.default, f.type);
+          const isDraft = f.type === 'object' || f.type === 'array' || f.type === 'number' || f.type === 'integer';
+          const value = isDraft
+            ? (draftTexts[f.name] ?? stringifyFlowField(params[f.name] ?? f.default, f.type))
+            : stringifyFlowField(params[f.name] ?? f.default, f.type);
           return (
             <label key={f.name} className="flex flex-col gap-1">
               <span className="text-[12px] font-bold flex items-center gap-1">
@@ -241,14 +256,22 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
               ) : f.type === 'object' || f.type === 'array' ? (
                 <textarea
                   value={value}
-                  onChange={(e) => updateField(f.name, e.target.value, f.type)}
+                  onChange={(e) => updateDraftField(f.name, e.target.value, f.type)}
                   className="text-[11px] font-mono px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
                   rows={4}
                   spellCheck={false}
                 />
+              ) : (f.type === 'number' || f.type === 'integer') ? (
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={value}
+                  onChange={(e) => updateDraftField(f.name, e.target.value, f.type)}
+                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                />
               ) : (
                 <input
-                  type={f.type === 'number' || f.type === 'integer' ? 'number' : 'text'}
+                  type="text"
                   value={value}
                   onChange={(e) => updateField(f.name, e.target.value, f.type)}
                   className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
