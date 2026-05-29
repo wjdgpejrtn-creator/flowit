@@ -36,6 +36,8 @@ const TOOL_TO_STEP: Record<string, AgentStep> = {
   retry_draft:       'drafter',
   validate_workflow: 'validator',
   qa_evaluator:      'qa_eval',
+  validation_failed: 'validator',
+  qa_failed:         'qa_eval',
   promote:           'promote',
   save_workflow:     'promote',
   confirm_result:    'promote',

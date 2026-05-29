@@ -27,8 +27,8 @@ from uuid import UUID, uuid4
 
 import httpx
 from auth.domain.services.permission_resolver import PermissionResolver
-from common_schemas.agent import DraftSpec, MemoryEntry, SlotFillingState
-from common_schemas.enums import RiskLevel
+from common_schemas.agent import DraftSpec, IntentResult, MemoryEntry, SlotFillingState
+from common_schemas.enums import IntentType, RiskLevel
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
@@ -454,9 +454,9 @@ class LangGraphOrchestrator:
         intent = state.get("intent")
         if intent == "clarify":
             return "consultant"
-        if intent in {"draft", "refine", "propose", None}:
+        if intent in {"draft", "refine", None}:
             return "search_nodes"
-        # 예상 외 intent(chitchat 등) — supervisor가 막아줘야 하지만 방어 가드
+        # propose 포함 예상 외 intent → supervisor가 처리, composer는 no-op END
         return "end"
 
     @staticmethod
@@ -539,6 +539,10 @@ class LangGraphOrchestrator:
             )
         except Exception as exc:
             return {"intent": "clarify", "error": f"intent 분석 실패: {exc}"}
+        # composer 진입 = supervisor가 draft/refine/clarify로 분류한 상황
+        # result=None(미분류)이면 draft로 기본 처리
+        if result is None:
+            result = IntentResult(intent=IntentType.DRAFT, confidence=0.5, analyzed_entities={})
         elapsed = int((time.monotonic() - t0) * 1000)
         draft_spec = DraftSpec(
             natural_language_intent=state["messages"][-1].get("content", ""),

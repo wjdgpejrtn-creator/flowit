@@ -96,7 +96,7 @@ class IntentAnalyzerService:
     def __init__(self, llm: LLMPort) -> None:
         self._llm = llm
 
-    async def analyze(self, messages: list[dict[str, Any]], context: dict[str, Any]) -> IntentResult:
+    async def analyze(self, messages: list[dict[str, Any]], context: dict[str, Any]) -> IntentResult | None:
         user_message = ""
         for m in reversed(messages):
             if m.get("role") == "user":
@@ -112,14 +112,6 @@ class IntentAnalyzerService:
                 analyzed_entities={},
             )
 
-        # LLM fallback: 애매한 경우만
-        if context:
-            prompt = _SYSTEM_PROMPT + f"\nContext: {json.dumps(context, ensure_ascii=False)}"
-        else:
-            prompt = _SYSTEM_PROMPT
-        prompt += f"\n\nUser message: {user_message}"
-
-        try:
-            return await self._llm.generate_structured(prompt, IntentResult)
-        except Exception as e:
-            raise ExecutionError(f"IntentResult 파싱 실패: {e}", code="E_INTENT_PARSE")
+        # 미분류 → None 반환 (supervisor가 general_chat으로 처리)
+        # LLM 분류 호출 제거 — 분류 실패 시 응답 생성 LLM으로 흡수
+        return None
