@@ -6,9 +6,10 @@ import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import { uploadDocument, type DocumentResponse } from '@/lib/api/documentApi';
+import { DOCS_STORAGE_KEY } from '@/lib/storage/keys';
 
-const DOCS_STORAGE_KEY = 'wf_documents_list';
-
+// TODO(#219): 문서 목록이 localStorage SSOT — 디바이스 간 sync X, 다중 사용자 privacy 위험.
+// 백엔드 GET /api/v1/documents 추가 후 서버 목록을 SSOT 로 전환 예정. (PR #216 리뷰 #2)
 function loadStoredDocs(): DocumentResponse[] {
   try {
     const raw = localStorage.getItem(DOCS_STORAGE_KEY);

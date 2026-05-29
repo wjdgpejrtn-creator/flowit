@@ -6,11 +6,10 @@ import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
-import { apiJson } from '@/lib/apiClient';
+import { createPersonalSkill } from '@/lib/api/skillApi';
 import type { PersonalSkill, SkillLifecycleState } from '@/lib/api/skillApi';
 import type { DocumentResponse } from '@/lib/api/documentApi';
-
-const DOCS_STORAGE_KEY = 'wf_documents_list';
+import { DOCS_STORAGE_KEY } from '@/lib/storage/keys';
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -37,28 +36,12 @@ const LIFECYCLE_LABEL: Record<SkillLifecycleState, string> = {
   draft: '초안', review: '검토 중', approved: '승인됨', published: '게시됨', archived: '보관됨',
 };
 
-interface CreateSkillRequest {
-  name: string;
-  description: string;
-  instructions?: string;
-  tags?: string[];
-  document_id?: string;
-}
-
-async function createPersonalSkill(data: CreateSkillRequest): Promise<PersonalSkill> {
-  return apiJson<PersonalSkill>('/api/v1/skills/personal', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
 export default function SkillBuilderPage() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [instructions, setInstructions] = useState('');
   const [tagsInput, setTagsInput] = useState('');
-  const [selectedDocId, setSelectedDocId] = useState('');
   const [docs, setDocs] = useState<DocumentResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +64,6 @@ export default function SkillBuilderPage() {
         description: description.trim(),
         instructions: instructions.trim() || undefined,
         tags,
-        document_id: selectedDocId || undefined,
       });
       setCreated(skill);
     } catch (err) {
@@ -161,7 +143,7 @@ export default function SkillBuilderPage() {
                 <Btn onClick={() => router.push(`/skills/${created.skill_id}`)}>
                   스킬 보기 →
                 </Btn>
-                <Btn ghost onClick={() => { setCreated(null); setName(''); setDescription(''); setInstructions(''); setTagsInput(''); setSelectedDocId(''); }}>
+                <Btn ghost onClick={() => { setCreated(null); setName(''); setDescription(''); setInstructions(''); setTagsInput(''); }}>
                   새 스킬 만들기
                 </Btn>
               </div>
@@ -169,33 +151,38 @@ export default function SkillBuilderPage() {
           ) : (
             // 입력 폼
             <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
-              {/* 문서 선택 */}
+              {/* 문서 선택 — 백엔드 연동 예정 (POST /skills/personal 에 source_document_id 미구현) */}
               <div className="flex flex-col gap-1">
                 <label className="text-[12px] font-bold text-[var(--color-ink3)]">
-                  기반 문서 <span className="text-[var(--color-ink4)] font-normal">(선택)</span>
+                  기반 문서 <span className="text-[var(--color-ink4)] font-normal">(백엔드 연동 예정)</span>
                 </label>
-                {docs.length === 0 ? (
-                  <div className="text-[12px] text-[var(--color-ink4)] border-[1.5px] border-dashed border-[var(--color-ink4)] rounded-[4px_8px_4px_8px] px-3 py-2">
-                    업로드된 문서가 없습니다.{' '}
-                    <Link href="/documents" className="text-[var(--color-accent)] underline">
-                      문서 탭에서 업로드
-                    </Link>
-                    하세요.
-                  </div>
-                ) : (
-                  <select
-                    value={selectedDocId}
-                    onChange={(e) => setSelectedDocId(e.target.value)}
-                    className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)]"
-                  >
-                    <option value="">문서 선택 안 함</option>
-                    {docs.map((doc) => (
-                      <option key={doc.document_id} value={doc.document_id}>
-                        {doc.file_name} · {fmtSize(doc.file_size)}
-                      </option>
-                    ))}
-                  </select>
-                )}
+                <select
+                  value=""
+                  disabled
+                  title="백엔드 연동 후 활성화됩니다"
+                  className="border-[1.5px] border-[var(--color-ink4)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-paper2)] text-[var(--color-ink4)] cursor-not-allowed"
+                >
+                  <option value="">
+                    {docs.length === 0 ? '업로드된 문서가 없습니다' : `문서 ${docs.length}개 (연동 예정)`}
+                  </option>
+                  {docs.map((doc) => (
+                    <option key={doc.document_id} value={doc.document_id}>
+                      {doc.file_name} · {fmtSize(doc.file_size)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-[var(--color-ink4)] flex items-center gap-1">
+                  <span>ⓘ</span>
+                  문서 기반 스킬 생성은 백엔드 연동 후 활성화됩니다.
+                  {docs.length === 0 && (
+                    <>
+                      {' '}
+                      <Link href="/documents" className="text-[var(--color-accent)] underline">
+                        문서 탭에서 업로드
+                      </Link>
+                    </>
+                  )}
+                </p>
               </div>
 
               <div className="flex flex-col gap-1">

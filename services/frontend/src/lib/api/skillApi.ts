@@ -18,10 +18,29 @@ export interface PersonalSkill {
   updated_at: string;
 }
 
+export interface CreatePersonalSkillRequest {
+  name: string;
+  description: string;
+  instructions?: string;
+  tags?: string[];
+  // NOTE: document_id(기반 문서 association)는 백엔드 contract 미구현 상태라
+  // 의도적으로 제외한다. skills_marketplace 백엔드 wiring(source_document_id) 완료 후
+  // 추가 예정. (PR #216 리뷰 #1 — false healthy 방지)
+}
+
 export interface UpdatePersonalSkillRequest {
   name?: string;
   description?: string;
   tags?: string[];
+}
+
+export async function createPersonalSkill(
+  data: CreatePersonalSkillRequest,
+): Promise<PersonalSkill> {
+  return apiJson<PersonalSkill>('/api/v1/skills/personal', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 
 export async function listPersonalSkills(
