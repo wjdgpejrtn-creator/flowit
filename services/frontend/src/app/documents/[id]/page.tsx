@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { use } from 'react';
 import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
@@ -15,8 +14,8 @@ import {
   type DocumentResponse,
 } from '@/lib/api/documentApi';
 
-export default function DocumentDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function DocumentDetailPage({ params }: { params: { id: string } }) {
+  const { id } = params;
 
   const [doc, setDoc] = useState<DocumentResponse | null>(null);
   const [loading, setLoading] = useState(true);
