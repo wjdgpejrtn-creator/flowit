@@ -89,7 +89,7 @@ export default function NodePalette({
     <div
       data-testid="node-palette"
       className="flex flex-col h-full border-r-[1.5px] border-[var(--color-ink)]"
-      style={{ width: 300, background: 'var(--color-surface)' }}
+      style={{ width: 280, background: 'var(--color-surface)' }}
     >
       <div className="p-2 border-b-[1.5px] border-[var(--color-line-soft)]">
         <div className="font-bold text-[13px] mb-1">노드 팔레트</div>
