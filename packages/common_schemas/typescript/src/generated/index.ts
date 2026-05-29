@@ -247,6 +247,12 @@ export interface AnalysisResult {
   few_shot_count: number;
 }
 
+export interface AnalyzeDispatchResponse {
+  document_id: string;
+  task_id: string;
+  action: string;
+}
+
 export interface BBox {
   x1: number;
   y1: number;
@@ -328,6 +334,21 @@ export interface DocumentBlock {
   blocks: Array<ContentBlock>;
   vision_block_count: number;
   failed_block_count: number;
+}
+
+export interface DocumentDownloadResponse {
+  document_id: string;
+  download_url: string;
+  expires_in: number;
+}
+
+export interface DocumentResponse {
+  document_id: string;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  gcs_uri: string;
+  is_analyzed: boolean;
 }
 
 export interface EvaluationResult {

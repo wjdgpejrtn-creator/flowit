@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useRef, useEffect, useState } from 'react';
+import { Suspense, useRef, useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
@@ -10,8 +10,10 @@ import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/a
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession } from '@/lib/api/agentApi';
 import { executeWorkflow } from '@/lib/api/workflowApi';
-import { ReactFlow, Background, Controls, useNodesState, useEdgesState } from '@xyflow/react';
+import { ReactFlow, Background, Controls, useNodesState, useEdgesState, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
+import CustomNode from '@/components/workflow/CustomNode';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -50,25 +52,71 @@ const STEP_LABELS: Record<AgentStep, string> = {
   promote:   '워크플로우 확정',
 };
 
-// ─── FlowEditor (edit mode — 빈 캔버스로 시작, 향후 confirmed workflow와 wiring) ─
+const NODE_TYPES = { custom: CustomNode };
+
+// ─── FlowEditor (edit mode — NodePalette 좌측 + 드래그&드롭 중앙 배치) ─────────
 
 function FlowEditor() {
-  const [nodes, , onNodesChange] = useNodesState([]);
-  const [edges, , onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
+  const [edges, , onEdgesChange] = useEdgesState<RFEdge>([]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const payload = readPaletteDragPayload(e);
+    if (!payload || !rfInstance || !wrapperRef.current) return;
+    const rect = wrapperRef.current.getBoundingClientRect();
+    const position = rfInstance.screenToFlowPosition({
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    });
+    setNodes((nds) => [
+      ...nds,
+      {
+        id: `node-${Date.now()}`,
+        type: 'custom',
+        position,
+        data: {
+          name: payload.name,
+          risk_level: payload.risk_level,
+          node_type: payload.node_type,
+          onDelete: (nodeId: string) => setNodes((prev) => prev.filter((n) => n.id !== nodeId)),
+        },
+      },
+    ]);
+  }, [rfInstance, setNodes]);
 
   return (
-    <div className="w-full h-full">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        fitView
-        style={{ background: 'var(--color-paper2)' }}
+    <div className="flex h-full w-full">
+      <div
+        className="flex-shrink-0 border-r-[1.5px] border-[var(--color-ink)] min-h-0 overflow-hidden flex flex-col"
+        style={{ width: 200 }}
       >
-        <Background color="var(--color-line-soft)" />
-        <Controls />
-      </ReactFlow>
+        <NodePalette />
+      </div>
+      <div ref={wrapperRef} className="flex-1 min-w-0 min-h-0">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onInit={setRfInstance}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          nodeTypes={NODE_TYPES}
+          fitView
+          style={{ background: 'var(--color-paper2)' }}
+        >
+          <Background color="var(--color-line-soft)" />
+          <Controls />
+        </ReactFlow>
+      </div>
     </div>
   );
 }
