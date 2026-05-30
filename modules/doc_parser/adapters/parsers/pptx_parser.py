@@ -75,6 +75,8 @@ class PptxParser(ParserPort):
         try:
             blocks: list[ContentBlock] = []
 
+            slide_count = len(prs.slides)
+
             for slide_num, slide in enumerate(prs.slides, start=1):
                 block_index = 0
 
@@ -85,7 +87,7 @@ class PptxParser(ParserPort):
 
             return DocumentBlock(
                 document_id=uuid4(),
-                file_meta=file_meta,
+                file_meta=file_meta.model_copy(update={"page_count": slide_count}),
                 parser=ParserMeta(
                     parser_name="PptxParser",
                     parser_version="1.0.0",

@@ -143,7 +143,7 @@ class PdfParser(ParserPort):
 
             return DocumentBlock(
                 document_id=uuid4(),
-                file_meta=file_meta,
+                file_meta=file_meta.model_copy(update={"page_count": page_count}),
                 parser=ParserMeta(
                     parser_name="PdfParser",
                     parser_version="1.2.0-table-score",
