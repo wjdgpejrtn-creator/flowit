@@ -7,6 +7,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  ConnectionMode,
   useReactFlow,
   type Node as RFNode,
   type Edge as RFEdge,
@@ -75,8 +76,10 @@ function CanvasInner({ catalog }: { catalog?: NodeConfig[] | null }) {
       id: `${e.from_instance_id}->${e.to_instance_id}`,
       source: e.from_instance_id,
       target: e.to_instance_id,
-      sourceHandle: e.from_handle || null,
-      targetHandle: e.to_handle || null,
+      // 핸들 id 가 비어있는 옛/AI 생성 엣지는 기존 좌→우 레이아웃으로 그려지도록
+      // 기본 source=right / target=left 로 폴백 (4핸들 추가 후 모호성 제거).
+      sourceHandle: e.from_handle || 'right',
+      targetHandle: e.to_handle || 'left',
       type: 'custom',
     }));
   }, [workflow]);
@@ -111,6 +114,8 @@ function CanvasInner({ catalog }: { catalog?: NodeConfig[] | null }) {
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
+      // Loose 모드에서 자기 자신 연결(self-loop) 방지
+      if (connection.source === connection.target) return;
       addEdge({
         from_instance_id: connection.source,
         to_instance_id: connection.target,
@@ -172,6 +177,7 @@ function CanvasInner({ catalog }: { catalog?: NodeConfig[] | null }) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
+        connectionMode={ConnectionMode.Loose}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}

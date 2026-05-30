@@ -10,7 +10,7 @@ import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/a
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession } from '@/lib/api/agentApi';
 import { executeWorkflow } from '@/lib/api/workflowApi';
-import { ReactFlow, Background, Controls, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
+import { ReactFlow, Background, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getCatalog } from '@/lib/api/nodeApi';
 import type { NodeConfig } from '@common/generated';
@@ -315,6 +315,8 @@ function FlowEditor() {
 
   // Bug 1 fix: 엣지 연결 핸들러
   const onConnect = useCallback((conn: Connection) => {
+    // Loose 모드에서 자기 자신 연결(self-loop) 방지
+    if (conn.source === conn.target) return;
     setEdges((eds) => rfAddEdge(conn, eds));
   }, [setEdges]);
 
@@ -385,6 +387,7 @@ function FlowEditor() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          connectionMode={ConnectionMode.Loose}
           onInit={setRfInstance}
           onDrop={onDrop}
           onDragOver={onDragOver}

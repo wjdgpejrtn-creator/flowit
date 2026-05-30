@@ -15,8 +15,9 @@ export function toReactFlowEdge(edge: SchemaEdge): RFEdge {
     id: `${edge.from_instance_id}-${edge.to_instance_id}`,
     source: edge.from_instance_id,
     target: edge.to_instance_id,
-    sourceHandle: edge.from_handle ?? null,
-    targetHandle: edge.to_handle ?? null,
+    // 핸들 id 가 없는 옛/AI 엣지는 기본 좌→우(source=right/target=left)로 폴백.
+    sourceHandle: edge.from_handle || 'right',
+    targetHandle: edge.to_handle || 'left',
   };
 }
 
