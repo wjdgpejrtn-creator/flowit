@@ -15,6 +15,11 @@ export interface CustomNodeData {
   onDelete?: (id: string) => void;
 }
 
+// 4방향 핸들 공통 스타일. connectionMode=Loose 라 type 은 기본 방향 힌트일 뿐,
+// 어느 핸들에서나 양방향 연결 가능. 같은 type 핸들이 2개 이상이면 React Flow 가
+// 고유 id 를 요구하므로 변마다 id 부여('left'/'right'/'top'/'bottom').
+const HANDLE_STYLE = { background: 'var(--color-ink)', width: 8, height: 8 } as const;
+
 export default function CustomNode({ id, data, selected }: NodeProps) {
   const d = data as unknown as CustomNodeData;
   const workflowRemoveNode = useWorkflowStore((s) => s.removeNode);
@@ -30,11 +35,8 @@ export default function CustomNode({ id, data, selected }: NodeProps) {
 
   return (
     <div className={`relative ${selected ? 'ring-2 ring-[var(--color-accent)] rounded-[5px_9px_5px_9px]' : ''}`}>
-      <Handle
-        type="target"
-        position={RFPosition.Left}
-        style={{ background: 'var(--color-ink)', width: 8, height: 8 }}
-      />
+      <Handle id="left" type="target" position={RFPosition.Left} style={HANDLE_STYLE} />
+      <Handle id="top" type="target" position={RFPosition.Top} style={HANDLE_STYLE} />
       <NodeCard
         icon={d.icon ?? d.name.slice(0, 1).toUpperCase()}
         name={d.name}
@@ -55,11 +57,8 @@ export default function CustomNode({ id, data, selected }: NodeProps) {
           ×
         </button>
       )}
-      <Handle
-        type="source"
-        position={RFPosition.Right}
-        style={{ background: 'var(--color-ink)', width: 8, height: 8 }}
-      />
+      <Handle id="right" type="source" position={RFPosition.Right} style={HANDLE_STYLE} />
+      <Handle id="bottom" type="source" position={RFPosition.Bottom} style={HANDLE_STYLE} />
     </div>
   );
 }
