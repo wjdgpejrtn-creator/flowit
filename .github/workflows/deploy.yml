@@ -13,7 +13,8 @@
 # Secret/Variable 의존:
 #   secrets.GCP_WIF_PROVIDER         (WIF provider full path)
 #   secrets.GCP_WIF_SERVICE_ACCOUNT  (deploy SA email)
-#   vars.GCP_PROJECT_ID_PROD         (<GCP_PROJECT_ID> — staging도 동일 project)
+#   vars.GCP_PROJECT_ID              (<GCP_PROJECT_ID> — staging 단일)
+#   vars.API_PROXY_TARGET_STAGING    (frontend build-arg URL)
 #   vars.GCP_REGION                  (asia-northeast3)
 #
 # Cloud Run service / AR repo (terraform 실측):
@@ -33,6 +34,9 @@ on:
       - "services/frontend/**"
       - "modules/**"
       - "packages/common_schemas/**"
+  # 수동 trigger — release sync에 services/* paths 변경 없어서 push trigger 안 도는 경우
+  # (예: 인프라 hotfix 위주 sync) 또는 박아름이 검증용 강제 trigger 필요할 때.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -89,7 +93,7 @@ jobs:
     timeout-minutes: 20
 
     env:
-      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID_PROD }}  # 이름은 _PROD지만 staging도 동일 project
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}  # 이름은 _PROD지만 staging도 동일 project
       GCP_REGION: ${{ vars.GCP_REGION }}
       AR_REPO: workflow-staging
       IMAGE: api-server
@@ -133,6 +137,23 @@ jobs:
             --project="$GCP_PROJECT_ID" \
             --quiet
 
+      - name: Verify revision healthy
+        # 깨진 image 배포 시 mean-time-to-detect 단축. PR #217 황대원 리뷰 follow-up #16.
+        # latestReadyRevisionName이 비어있거나 Ready 조건이 True 아니면 fail.
+        run: |
+          REVISION=$(gcloud run services describe "$SERVICE" \
+            --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
+            --format='value(status.latestReadyRevisionName)')
+          if [ -z "$REVISION" ]; then echo "::error::No ready revision found for $SERVICE"; exit 1; fi
+          # PR #232 황대원 MED — conditions 배열 순서 미보장 → filter type:Ready로 정확히 추출.
+          # 기존 conditions[0]은 Active/ContainerHealthy/ResourcesAvailable 등 다른 condition이
+          # 0번에 올 경우 false-pass/fail 가능.
+          STATUS=$(gcloud run revisions describe "$REVISION" \
+            --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
+            --format='value(status.conditions.filter("type:Ready").extract(status).flatten())')
+          if [ "$STATUS" != "True" ]; then echo "::error::Revision $REVISION not Ready (status=$STATUS)"; exit 1; fi
+          echo "✓ Revision $REVISION healthy"
+
       - name: Summary
         run: |
           echo "### Deployed: ${SERVICE}" >> "$GITHUB_STEP_SUMMARY"
@@ -146,7 +167,7 @@ jobs:
     timeout-minutes: 20
 
     env:
-      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID_PROD }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
       AR_REPO: workflow-staging
       IMAGE: execution-engine-worker
@@ -189,6 +210,23 @@ jobs:
             --project="$GCP_PROJECT_ID" \
             --quiet
 
+      - name: Verify revision healthy
+        # 깨진 image 배포 시 mean-time-to-detect 단축. PR #217 황대원 리뷰 follow-up #16.
+        # latestReadyRevisionName이 비어있거나 Ready 조건이 True 아니면 fail.
+        run: |
+          REVISION=$(gcloud run services describe "$SERVICE" \
+            --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
+            --format='value(status.latestReadyRevisionName)')
+          if [ -z "$REVISION" ]; then echo "::error::No ready revision found for $SERVICE"; exit 1; fi
+          # PR #232 황대원 MED — conditions 배열 순서 미보장 → filter type:Ready로 정확히 추출.
+          # 기존 conditions[0]은 Active/ContainerHealthy/ResourcesAvailable 등 다른 condition이
+          # 0번에 올 경우 false-pass/fail 가능.
+          STATUS=$(gcloud run revisions describe "$REVISION" \
+            --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
+            --format='value(status.conditions.filter("type:Ready").extract(status).flatten())')
+          if [ "$STATUS" != "True" ]; then echo "::error::Revision $REVISION not Ready (status=$STATUS)"; exit 1; fi
+          echo "✓ Revision $REVISION healthy"
+
       - name: Summary
         run: |
           echo "### Deployed: ${SERVICE}" >> "$GITHUB_STEP_SUMMARY"
@@ -202,14 +240,16 @@ jobs:
     timeout-minutes: 20
 
     env:
-      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID_PROD }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_REGION: ${{ vars.GCP_REGION }}
       AR_REPO: workflow-staging
       IMAGE: frontend
       SERVICE: workflow-frontend-staging
       # frontend cloudbuild.yaml의 _API_PROXY_TARGET default — build-arg로 Dockerfile에 전달.
       # 2026-05-28 가원 빌드 사고 (default가 build-arg에 안 실리는 케이스) 방어 차원에서 명시 override.
-      API_PROXY_TARGET: https://<API_SERVICE_URL>
+      # PR #217 황대원 리뷰 follow-up #18 — 하드코딩 URL을 GitHub Variable로 외부화.
+      # region 이동/project 변경 시 yml 수정 없이 Variable 값만 갱신 가능.
+      API_PROXY_TARGET: ${{ vars.API_PROXY_TARGET_STAGING }}
 
     steps:
       - uses: actions/checkout@v4
@@ -247,6 +287,23 @@ jobs:
             --region="$GCP_REGION" \
             --project="$GCP_PROJECT_ID" \
             --quiet
+
+      - name: Verify revision healthy
+        # 깨진 image 배포 시 mean-time-to-detect 단축. PR #217 황대원 리뷰 follow-up #16.
+        # latestReadyRevisionName이 비어있거나 Ready 조건이 True 아니면 fail.
+        run: |
+          REVISION=$(gcloud run services describe "$SERVICE" \
+            --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
+            --format='value(status.latestReadyRevisionName)')
+          if [ -z "$REVISION" ]; then echo "::error::No ready revision found for $SERVICE"; exit 1; fi
+          # PR #232 황대원 MED — conditions 배열 순서 미보장 → filter type:Ready로 정확히 추출.
+          # 기존 conditions[0]은 Active/ContainerHealthy/ResourcesAvailable 등 다른 condition이
+          # 0번에 올 경우 false-pass/fail 가능.
+          STATUS=$(gcloud run revisions describe "$REVISION" \
+            --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
+            --format='value(status.conditions.filter("type:Ready").extract(status).flatten())')
+          if [ "$STATUS" != "True" ]; then echo "::error::Revision $REVISION not Ready (status=$STATUS)"; exit 1; fi
+          echo "✓ Revision $REVISION healthy"
 
       - name: Summary
         run: |

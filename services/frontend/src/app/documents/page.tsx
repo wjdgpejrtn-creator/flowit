@@ -1,15 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
-import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
-import { uploadDocument, type DocumentResponse } from '@/lib/api/documentApi';
+import { uploadDocument, listDocuments, type DocumentResponse } from '@/lib/api/documentApi';
 import { DOCS_STORAGE_KEY } from '@/lib/storage/keys';
 
-// TODO(#219): 문서 목록이 localStorage SSOT — 디바이스 간 sync X, 다중 사용자 privacy 위험.
-// 백엔드 GET /api/v1/documents 추가 후 서버 목록을 SSOT 로 전환 예정. (PR #216 리뷰 #2)
+// #219: 서버(GET /api/v1/documents)가 SSOT. localStorage 는 optimistic 캐시로만 유지
+// (첫 페인트 즉시 표시 + 서버 조회 실패 시 폴백).
 function loadStoredDocs(): DocumentResponse[] {
   try {
     const raw = localStorage.getItem(DOCS_STORAGE_KEY);
@@ -25,54 +24,115 @@ function fmt(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function DocRow({ doc, onDelete }: { doc: DocumentResponse; onDelete: (id: string) => void }) {
+// 파일타입 태그 — mime_type / 확장자에서 유추.
+function fileTag(doc: DocumentResponse): string {
+  const ext = doc.file_name.split('.').pop()?.toUpperCase();
+  if (ext && ext.length <= 4) return ext;
+  const sub = doc.mime_type.split('/').pop() ?? doc.mime_type;
+  return sub.toUpperCase().slice(0, 4);
+}
+
+// 카드 — 클릭 시 상세(분석 뷰)로 이동. 디자인 SSOT: screens-3.jsx DocumentsScreen "통합" v1.
+function DocCard({
+  doc,
+  onOpen,
+  onDelete,
+}: {
+  doc: DocumentResponse;
+  onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
   return (
-    <div className="flex items-center gap-3 border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] px-3 py-[6px] bg-[var(--color-surface)] hover:bg-[var(--color-paper2)] group">
-      <span className="text-[16px]">📄</span>
-      <div className="flex-1 min-w-0">
-        <div className="font-bold text-[13px] truncate">{doc.file_name}</div>
-        <div className="text-[11px] text-[var(--color-ink3)] flex items-center gap-2 mt-[1px]">
-          <span className="font-mono">{doc.mime_type}</span>
-          <span>·</span>
-          <span>{fmt(doc.file_size)}</span>
-        </div>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(doc.document_id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen(doc.document_id);
+        }
+      }}
+      className="group relative flex flex-col gap-[6px] border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] p-[10px] bg-[var(--color-surface)] hover:bg-[var(--color-paper2)] cursor-pointer transition-colors"
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-bold px-[6px] py-[1px] border-[1.5px] border-[var(--color-ink)] rounded-[3px_6px_3px_6px] bg-[var(--color-paper2)]">
+          {fileTag(doc)}
+        </span>
+        <span className="text-[11px] text-[var(--color-ink3)]">{fmt(doc.file_size)}</span>
+        <div className="flex-1" />
+        <span className="font-mono text-[11px] text-[var(--color-ink4)]">열기 →</span>
       </div>
-      <span
-        className="text-[11px] font-semibold px-2 py-[1px] rounded border-[1.5px] whitespace-nowrap"
-        style={{
-          color: doc.is_analyzed ? 'var(--color-risk-low)' : 'var(--color-ink4)',
-          borderColor: doc.is_analyzed ? 'var(--color-risk-low)' : 'var(--color-ink4)',
-        }}
-      >
-        {doc.is_analyzed ? '분석 완료' : '분석 전'}
-      </span>
-      <Link
-        href={`/documents/${doc.document_id}`}
-        className="text-[12px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-2 py-[2px] no-underline text-[var(--color-ink)] bg-[var(--color-surface)] hover:bg-[var(--color-hl)] opacity-0 group-hover:opacity-100 transition-opacity"
-      >
-        열기
-      </Link>
+
+      <div className="font-bold text-[15px] truncate" title={doc.file_name}>
+        {doc.file_name}
+      </div>
+
+      {/* 분석 상태 — 품질 점수는 백엔드 미연동이라 분석 상태로 대체 (placeholder). */}
+      <div className="flex items-center justify-between mt-1">
+        <span className="text-[11px] text-[var(--color-ink3)]">분석 상태</span>
+        <span
+          className="text-[11px] font-semibold px-2 py-[1px] rounded border-[1.5px] whitespace-nowrap"
+          style={{
+            color: doc.is_analyzed ? 'var(--color-risk-low)' : 'var(--color-ink4)',
+            borderColor: doc.is_analyzed ? 'var(--color-risk-low)' : 'var(--color-ink4)',
+          }}
+        >
+          {doc.is_analyzed ? '분석 완료' : '분석 전'}
+        </span>
+      </div>
+
       <button
-        onClick={() => onDelete(doc.document_id)}
-        className="text-[11px] text-[var(--color-risk-restricted)] border-[1.5px] border-[var(--color-risk-restricted)] rounded-[4px_8px_4px_8px] px-2 py-[2px] bg-transparent cursor-pointer hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(doc.document_id);
+        }}
+        title="삭제"
+        className="absolute top-[8px] right-[8px] text-[11px] text-[var(--color-risk-restricted)] border-[1.5px] border-[var(--color-risk-restricted)] rounded-[4px_8px_4px_8px] px-[6px] bg-[var(--color-surface)] cursor-pointer hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
       >
-        삭제
+        ✕
       </button>
     </div>
   );
 }
 
 export default function DocumentsPage() {
-  const [docs, setDocs] = useState<DocumentResponse[]>(() => loadStoredDocs());
+  const router = useRouter();
+  // SSR/CSR 일관성을 위해 초기값은 항상 빈 배열. localStorage 캐시는 마운트 후 읽는다
+  // (useState 이니셜라이저에서 localStorage 를 읽으면 SSR=[] / CSR=캐시 → hydration mismatch).
+  const [docs, setDocs] = useState<DocumentResponse[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 마운트(hydration) 완료 전에는 localStorage 동기화를 막아 초기 [] 로 캐시를 덮어쓰지 않게 한다.
+  const hydratedRef = useRef(false);
 
   useEffect(() => {
+    if (!hydratedRef.current) return;
     try {
       localStorage.setItem(DOCS_STORAGE_KEY, JSON.stringify(docs));
     } catch {}
   }, [docs]);
+
+  // 마운트 시: localStorage 캐시 즉시 반영(첫 페인트 폴백) → 서버 목록을 SSOT 로 로드.
+  useEffect(() => {
+    const cached = loadStoredDocs();
+    if (cached.length > 0) setDocs(cached);
+    hydratedRef.current = true;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const serverDocs = await listDocuments();
+        if (!cancelled) setDocs(serverDocs);
+      } catch {
+        /* 서버 조회 실패 — localStorage 캐시 유지 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleUpload = async (file: File) => {
     setUploading(true);
@@ -103,69 +163,78 @@ export default function DocumentsPage() {
     setDocs((prev) => prev.filter((d) => d.document_id !== id));
   };
 
+  const handleOpen = (id: string) => {
+    router.push(`/documents/${id}`);
+  };
+
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
+    <div className="h-screen flex flex-col bg-[var(--color-paper)]">
       <AppBar />
 
-      <div className="px-6 pt-5 pb-3 border-b-[1.5px] border-[var(--color-ink3)] bg-[var(--color-paper2)] flex items-center justify-between">
-        <div>
-          <h1 className="font-bold text-[20px] tracking-[-0.02em]">문서</h1>
-          <p className="text-[12px] text-[var(--color-ink3)] mt-1">
-            업로드한 문서를 AI로 분석하고 워크플로우에 활용하세요.
+      {/* 본문 — 좌: 문서 그리드 / 우: 업로드 패널 (디자인 SSOT 2단 레이아웃) */}
+      <div className="flex-1 grid grid-cols-[1fr_260px] min-h-0">
+        {/* 좌측 — 문서 그리드 */}
+        <div className="p-4 overflow-auto">
+          {error && (
+            <div className="mb-3">
+              <ErrorBanner><span>⚠ {error}</span></ErrorBanner>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <h1 className="font-bold text-[18px] tracking-[-0.02em]">문서 ({docs.length})</h1>
+            <div className="flex items-center gap-1 text-[13px] text-[var(--color-ink4)] border-[1.5px] border-[var(--color-line-soft)] rounded-[4px_8px_4px_8px] px-2 py-[2px]">
+              🔍 검색…
+            </div>
+          </div>
+          <p className="text-[11px] text-[var(--color-ink3)] mt-2">
+            ↓ 카드를 클릭하면 분석 결과(상세 뷰)로 이동합니다
           </p>
-        </div>
-        <Btn primary onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-          {uploading ? '업로드 중…' : '+ 문서 업로드'}
-        </Btn>
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
-          onChange={handleFileChange}
-        />
-      </div>
 
-      <div className="flex-1 p-5 flex flex-col gap-4">
-        {error && (
-          <ErrorBanner><span>⚠ {error}</span></ErrorBanner>
-        )}
-
-        {/* 드래그 앤 드롭 업로드 영역 */}
-        <div
-          onDrop={handleDrop}
-          onDragOver={(e) => e.preventDefault()}
-          className="border-[2px] border-dashed border-[var(--color-ink3)] rounded-[5px_11px_6px_10px] px-6 py-8 text-center text-[13px] text-[var(--color-ink3)] hover:border-[var(--color-ink)] hover:bg-[var(--color-paper2)] transition-colors cursor-pointer"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {uploading ? (
-            <span>업로드 중…</span>
+          {docs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center text-[var(--color-ink4)]">
+              <div className="text-[36px] mb-3">🗂</div>
+              <div className="font-bold text-[13px] mb-1">문서가 없습니다</div>
+              <div className="text-[12px]">오른쪽 패널에서 파일을 업로드해 AI 분석을 시작하세요.</div>
+            </div>
           ) : (
-            <>
-              <div className="text-[24px] mb-2">📎</div>
-              <div>여기에 파일을 드래그하거나 클릭해서 업로드</div>
-              <div className="text-[11px] mt-1 text-[var(--color-ink4)]">PDF, DOCX, XLSX, CSV, TXT, MD · 최대 50MB</div>
-            </>
+            <div className="grid grid-cols-2 gap-[10px] mt-[10px]">
+              {docs.map((doc) => (
+                <DocCard key={doc.document_id} doc={doc} onOpen={handleOpen} onDelete={handleDelete} />
+              ))}
+            </div>
           )}
         </div>
 
-        {/* 문서 목록 */}
-        {docs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center text-[var(--color-ink4)]">
-            <div className="text-[36px] mb-3">🗂</div>
-            <div className="font-bold text-[13px] mb-1">문서가 없습니다</div>
-            <div className="text-[12px]">파일을 업로드해서 AI 분석을 시작하세요.</div>
+        {/* 우측 — 업로드 패널 */}
+        <div className="border-l-[1.5px] border-[var(--color-ink)] p-3 bg-[var(--color-paper2)] overflow-auto">
+          <div className="font-bold text-[13px]">업로드</div>
+          <div
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            onClick={() => fileInputRef.current?.click()}
+            className="mt-2 border-[2px] border-dashed border-[var(--color-ink3)] rounded-[5px_11px_6px_10px] px-4 py-6 text-center text-[12px] text-[var(--color-ink3)] hover:border-[var(--color-ink)] hover:bg-[var(--color-surface)] transition-colors cursor-pointer"
+          >
+            {uploading ? (
+              <span>업로드 중…</span>
+            ) : (
+              <>
+                <div className="text-[28px]">⤓</div>
+                <div className="mt-1">파일을 드래그하거나<br />클릭해서 선택</div>
+                <div className="font-mono text-[11px] text-[var(--color-ink4)] mt-2">
+                  PDF · DOCX · XLSX · CSV · TXT · MD
+                </div>
+              </>
+            )}
           </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div className="text-[11px] text-[var(--color-ink3)] font-bold uppercase tracking-wider mb-1">
-              문서 {docs.length}개
-            </div>
-            {docs.map((doc) => (
-              <DocRow key={doc.document_id} doc={doc} onDelete={handleDelete} />
-            ))}
-          </div>
-        )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
+            onChange={handleFileChange}
+          />
+        </div>
       </div>
     </div>
   );

@@ -88,6 +88,18 @@ class TestPersonalSkillMapper:
         assert orm.staging_required_connections == ["slack"]
         assert orm.skill_metadata == {}  # entity.metadata 기본값
 
+    def test_roundtrip_with_source_document_id(self):
+        # REQ-010 문서→빌더 핸드오프 association 이 to_orm ↔ to_domain 왕복에서 보존
+        doc_id = uuid4()
+        entity = MarketplacePersonalSkill(
+            skill_id=uuid4(), owner_user_id=uuid4(), name="문서 기반", description="명세 기반",
+            node_spec_staging=_staging(), source_document_id=doc_id,
+            created_at=_NOW, updated_at=_NOW,
+        )
+        result = _roundtrip_orm(PersonalSkillMapper, entity)
+        assert result.source_document_id == doc_id
+        assert result == entity
+
 
 class TestTeamSkillMapper:
     def test_roundtrip(self):

@@ -10,8 +10,11 @@ import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/a
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession } from '@/lib/api/agentApi';
 import { executeWorkflow } from '@/lib/api/workflowApi';
-import { ReactFlow, Background, Controls, useNodesState, useEdgesState, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge } from '@xyflow/react';
+import { ReactFlow, Background, Controls, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { getCatalog } from '@/lib/api/nodeApi';
+import type { NodeConfig } from '@common/generated';
+import RiskPill from '@/components/common/RiskPill';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
 
@@ -56,13 +59,264 @@ const STEP_LABELS: Record<AgentStep, string> = {
 
 const NODE_TYPES = { custom: CustomNode };
 
+// ─── FlowEditor helpers ────────────────────────────────────────────────────────
+
+interface FlowSchemaField {
+  name: string;
+  type: string;
+  required: boolean;
+  enumOptions?: unknown[];
+  description?: string;
+  default?: unknown;
+}
+
+function parseFlowSchema(input: unknown): FlowSchemaField[] {
+  if (!input || typeof input !== 'object') return [];
+  const schema = input as { properties?: Record<string, unknown>; required?: string[] };
+  if (!schema.properties) return [];
+  const req = new Set(schema.required ?? []);
+  return Object.entries(schema.properties).map(([name, raw]) => {
+    const def = (raw ?? {}) as { type?: string; enum?: unknown[]; description?: string; default?: unknown };
+    return {
+      name,
+      type: def.type ?? 'string',
+      required: req.has(name),
+      enumOptions: def.enum,
+      description: def.description,
+      default: def.default,
+    };
+  });
+}
+
+function coerceFlowField(raw: string, type: string): unknown {
+  if (type === 'boolean') return raw === 'true';
+  return raw;
+}
+
+function stringifyFlowField(value: unknown, type: string): string {
+  if (value === undefined || value === null) return '';
+  if (type === 'object' || type === 'array') {
+    try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+  }
+  return String(value);
+}
+
+// ─── FlowNodeConfigPanel ───────────────────────────────────────────────────────
+
+interface FlowNodeConfigPanelProps {
+  nodeData: Record<string, unknown>;
+  catalog: NodeConfig[] | null;
+  onClose: () => void;
+  onUpdateParams: (params: Record<string, unknown>) => void;
+}
+
+function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: FlowNodeConfigPanelProps) {
+  const name = nodeData.name as string;
+  const nodeType = nodeData.node_type as string;
+  const catalogNodeId = nodeData.node_id as string | undefined;
+  const params = (nodeData.parameters ?? {}) as Record<string, unknown>;
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [draftTexts, setDraftTexts] = useState<Record<string, string>>({});
+
+  const nodeConfig = catalog?.find((c) => c.node_id === catalogNodeId) ?? null;
+  const fields = parseFlowSchema(nodeConfig?.input_schema);
+
+  const clearError = (fieldName: string) =>
+    setFieldErrors((e) => { const { [fieldName]: _, ...rest } = e; return rest; });
+
+  // Initialize draft texts for draft-managed field types when catalog first loads
+  useEffect(() => {
+    if (!nodeConfig) return;
+    setDraftTexts((prev) => {
+      const next = { ...prev };
+      for (const f of parseFlowSchema(nodeConfig.input_schema)) {
+        if ((f.type === 'object' || f.type === 'array' || f.type === 'number' || f.type === 'integer') && !(f.name in next)) {
+          next[f.name] = stringifyFlowField(params[f.name] ?? f.default, f.type);
+        }
+      }
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeConfig]);
+
+  // For string/boolean/enum: direct commit to params
+  const updateField = (fieldName: string, raw: string, type: string) => {
+    const next = { ...params };
+    const value = coerceFlowField(raw, type);
+    if (value === undefined) delete next[fieldName];
+    else next[fieldName] = value;
+    clearError(fieldName);
+    onUpdateParams(next);
+  };
+
+  // For number/integer/object/array: store raw draft always, commit to params only when valid
+  const updateDraftField = (fieldName: string, raw: string, type: string) => {
+    setDraftTexts((prev) => ({ ...prev, [fieldName]: raw }));
+    const next = { ...params };
+    if (type === 'number' || type === 'integer') {
+      if (raw === '') {
+        delete next[fieldName];
+        clearError(fieldName);
+      } else {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) {
+          setFieldErrors((e) => ({ ...e, [fieldName]: '숫자 형식이 올바르지 않습니다.' }));
+          return;
+        }
+        next[fieldName] = n;
+        clearError(fieldName);
+      }
+    } else {
+      if (raw.trim() === '') {
+        next[fieldName] = type === 'array' ? [] : {};
+        clearError(fieldName);
+      } else {
+        try {
+          next[fieldName] = JSON.parse(raw);
+          clearError(fieldName);
+        } catch {
+          setFieldErrors((e) => ({ ...e, [fieldName]: 'JSON 형식이 올바르지 않습니다.' }));
+          return;
+        }
+      }
+    }
+    onUpdateParams(next);
+  };
+
+  return (
+    <div
+      className="flex-shrink-0 flex flex-col border-l-[1.5px] border-[var(--color-ink)] overflow-auto"
+      style={{ width: 300, background: 'var(--color-surface)' }}
+    >
+      <div className="p-3 border-b-[1.5px] border-[var(--color-line-soft)]">
+        <div className="flex items-center justify-between gap-2">
+          <div className="font-bold text-[13px] truncate">{nodeConfig?.name ?? name}</div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[18px] text-[var(--color-ink3)] hover:text-[var(--color-ink)] leading-none"
+            aria-label="닫기"
+          >
+            ×
+          </button>
+        </div>
+        {nodeConfig && (
+          <div className="mt-1 flex items-center gap-2">
+            <RiskPill level={nodeConfig.risk_level} />
+            <span className="font-mono text-[10px] text-[var(--color-ink3)] truncate">{nodeType}</span>
+          </div>
+        )}
+        {nodeConfig?.description && (
+          <div className="text-[11px] text-[var(--color-ink3)] mt-2">{nodeConfig.description}</div>
+        )}
+      </div>
+
+      <div className="p-3 flex-1 flex flex-col gap-3">
+        {!catalog && <div className="text-[12px] text-[var(--color-ink4)] italic">카탈로그 로딩 중…</div>}
+        {catalog && !nodeConfig && (
+          <div className="text-[12px] text-[var(--color-ink4)] italic">노드 정의를 찾을 수 없습니다.</div>
+        )}
+        {nodeConfig && fields.length === 0 && (
+          <div className="text-[12px] text-[var(--color-ink4)] italic">설정 가능한 파라미터가 없습니다.</div>
+        )}
+        {fields.map((f) => {
+          const isDraft = f.type === 'object' || f.type === 'array' || f.type === 'number' || f.type === 'integer';
+          const value = isDraft
+            ? (draftTexts[f.name] ?? stringifyFlowField(params[f.name] ?? f.default, f.type))
+            : stringifyFlowField(params[f.name] ?? f.default, f.type);
+          return (
+            <label key={f.name} className="flex flex-col gap-1">
+              <span className="text-[12px] font-bold flex items-center gap-1">
+                {f.name}
+                {f.required && <span className="text-[var(--color-status-failed)]">*</span>}
+                <span className="font-mono text-[10px] text-[var(--color-ink4)] font-normal">: {f.type}</span>
+              </span>
+              {f.description && <span className="text-[11px] text-[var(--color-ink3)]">{f.description}</span>}
+              {f.enumOptions ? (
+                <select
+                  value={value}
+                  onChange={(e) => updateField(f.name, e.target.value, f.type)}
+                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                >
+                  <option value="">(선택)</option>
+                  {f.enumOptions.map((opt) => (
+                    <option key={String(opt)} value={String(opt)}>{String(opt)}</option>
+                  ))}
+                </select>
+              ) : f.type === 'boolean' ? (
+                <select
+                  value={value}
+                  onChange={(e) => updateField(f.name, e.target.value, f.type)}
+                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                >
+                  <option value="">(미지정)</option>
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              ) : f.type === 'object' || f.type === 'array' ? (
+                <textarea
+                  value={value}
+                  onChange={(e) => updateDraftField(f.name, e.target.value, f.type)}
+                  className="text-[11px] font-mono px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                  rows={4}
+                  spellCheck={false}
+                />
+              ) : (f.type === 'number' || f.type === 'integer') ? (
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={value}
+                  onChange={(e) => updateDraftField(f.name, e.target.value, f.type)}
+                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={value}
+                  onChange={(e) => updateField(f.name, e.target.value, f.type)}
+                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                />
+              )}
+              {fieldErrors[f.name] && (
+                <span className="text-[11px] text-[var(--color-status-failed)]">
+                  {fieldErrors[f.name]}
+                </span>
+              )}
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── FlowEditor (edit mode — NodePalette 좌측 + 드래그&드롭 중앙 배치) ─────────
 
 function FlowEditor() {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
-  const [edges, , onEdgesChange] = useEdgesState<RFEdge>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
+  const [catalog, setCatalog] = useState<NodeConfig[] | null>(null);
+  const [selectedNodeIdForConfig, setSelectedNodeIdForConfig] = useState<string | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await getCatalog();
+        if (!cancelled) setCatalog(data);
+      } catch {
+        if (!cancelled) setCatalog([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Bug 1 fix: 엣지 연결 핸들러
+  const onConnect = useCallback((conn: Connection) => {
+    setEdges((eds) => rfAddEdge(conn, eds));
+  }, [setEdges]);
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -72,12 +326,19 @@ function FlowEditor() {
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const payload = readPaletteDragPayload(e);
-    if (!payload || !rfInstance || !wrapperRef.current) return;
-    const rect = wrapperRef.current.getBoundingClientRect();
-    const position = rfInstance.screenToFlowPosition({
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2,
-    });
+    if (!payload || !rfInstance) return;
+    const position = rfInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+
+    // input_schema default 값 자동 주입
+    const nodeConfig = catalog?.find((c) => c.node_id === payload.node_id);
+    const initParams: Record<string, unknown> = {};
+    if (nodeConfig?.input_schema) {
+      const schema = nodeConfig.input_schema as { properties?: Record<string, { default?: unknown }> };
+      for (const [key, def] of Object.entries(schema.properties ?? {})) {
+        if (def.default !== undefined) initParams[key] = def.default;
+      }
+    }
+
     setNodes((nds) => [
       ...nds,
       {
@@ -88,16 +349,34 @@ function FlowEditor() {
           name: payload.name,
           risk_level: payload.risk_level,
           node_type: payload.node_type,
+          node_id: payload.node_id,
+          parameters: initParams,
           onDelete: (nodeId: string) => setNodes((prev) => prev.filter((n) => n.id !== nodeId)),
         },
       },
     ]);
-  }, [rfInstance, setNodes]);
+  }, [rfInstance, catalog, setNodes]);
+
+  // Bug 2 fix: 더블클릭 → 설정 패널 열기
+  const onNodeDoubleClick = useCallback<NodeMouseHandler>((_e, node) => {
+    setSelectedNodeIdForConfig(node.id);
+  }, []);
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeIdForConfig) ?? null;
+
+  const handleUpdateParams = useCallback((params: Record<string, unknown>) => {
+    if (!selectedNodeIdForConfig) return;
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id !== selectedNodeIdForConfig ? n : { ...n, data: { ...n.data, parameters: params } },
+      ),
+    );
+  }, [selectedNodeIdForConfig, setNodes]);
 
   return (
     <div className="flex h-full w-full">
       <div className="flex-shrink-0 min-h-0 flex flex-col">
-        <NodePalette />
+        <NodePalette catalog={catalog} />
       </div>
       <div ref={wrapperRef} className="flex-1 min-w-0 min-h-0">
         <ReactFlow
@@ -105,9 +384,11 @@ function FlowEditor() {
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
           onInit={setRfInstance}
           onDrop={onDrop}
           onDragOver={onDragOver}
+          onNodeDoubleClick={onNodeDoubleClick}
           nodeTypes={NODE_TYPES}
           fitView
           style={{ background: 'var(--color-paper2)' }}
@@ -116,6 +397,14 @@ function FlowEditor() {
           <Controls />
         </ReactFlow>
       </div>
+      {selectedNode && (
+        <FlowNodeConfigPanel
+          nodeData={selectedNode.data as Record<string, unknown>}
+          catalog={catalog}
+          onClose={() => setSelectedNodeIdForConfig(null)}
+          onUpdateParams={handleUpdateParams}
+        />
+      )}
     </div>
   );
 }

@@ -73,7 +73,7 @@ class OrchestratorAgent:
 
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from ai_agent.adapters.agent_clients.http_sub_agent_client import HTTPSubAgentClient
-        from ai_agent.adapters.langgraph.supervisor_graph import LangGraphSupervisor
+        from ai_agent.adapters.supervisor import LangGraphSupervisor
         from ai_agent.domain.services.intent_analyzer_service import IntentAnalyzerService
 
         # GCP SA JSON → 임시 파일 → ADC 환경변수

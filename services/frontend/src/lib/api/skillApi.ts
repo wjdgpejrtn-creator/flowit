@@ -11,6 +11,7 @@ export interface PersonalSkill {
   lifecycle_state: SkillLifecycleState;
   skill_document_uri: string | null;
   workflow_id: string | null;
+  source_document_id: string | null;
   tags: string[];
   version: string;
   promoted_to_team_id: string | null;
@@ -23,9 +24,9 @@ export interface CreatePersonalSkillRequest {
   description: string;
   instructions?: string;
   tags?: string[];
-  // NOTE: document_id(기반 문서 association)는 백엔드 contract 미구현 상태라
-  // 의도적으로 제외한다. skills_marketplace 백엔드 wiring(source_document_id) 완료 후
-  // 추가 예정. (PR #216 리뷰 #1 — false healthy 방지)
+  // 기반 문서 association (REQ-010 문서→빌더 핸드오프). 백엔드 source_document_id 와이어업
+  // 완료(POST /skills/personal). 직접 진입 시 생략.
+  source_document_id?: string;
 }
 
 export interface UpdatePersonalSkillRequest {

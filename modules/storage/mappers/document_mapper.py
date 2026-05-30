@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from common_schemas import ContentBlock, DocumentBlock, FileMeta
-from common_schemas.document import ParserMeta
+from common_schemas.document import ParseCoverage, ParserMeta
 
 from ..orm.document_model import DocumentModel
 
@@ -19,6 +19,7 @@ class DocumentMapper:
             analysis_status=orm.analysis_status,
             analysis_error=orm.analysis_error,
             analyzed_at=orm.analyzed_at,
+            coverage=ParseCoverage.model_validate(orm.coverage) if orm.coverage else None,
         )
 
     @staticmethod
@@ -35,4 +36,5 @@ class DocumentMapper:
             analysis_status=entity.analysis_status.value,
             analysis_error=entity.analysis_error,
             analyzed_at=entity.analyzed_at,
+            coverage=entity.coverage.model_dump(mode="json") if entity.coverage else None,
         )

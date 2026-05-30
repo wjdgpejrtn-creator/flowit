@@ -12,6 +12,9 @@ dependencies = [
     # asyncpg는 worker가 async DB 경로를 쓰지 않아 제거 (dead dependency).
     "cloud-sql-python-connector>=1.10.0",
     "pg8000>=1.31.0",
+    # document_tasks vision seam(HttpVisionLLM)이 llm-base /v1/generate를 HTTP 호출.
+    # nodes_graph로도 워커 이미지에 들어오지만 execution_engine이 직접 import하므로 명시 선언.
+    "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]

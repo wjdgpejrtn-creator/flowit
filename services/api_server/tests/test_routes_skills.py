@@ -13,8 +13,10 @@ import jwt as pyjwt
 import pytest
 from app.config import Settings
 from app.dependencies.permission import get_permission_source
+from app.dependencies.repositories import get_document_repository
 from app.dependencies.use_cases import (
     get_approve_skill_use_case,
+    get_create_draft_skill_use_case,
     get_delete_personal_skill_use_case,
     get_get_personal_skill_use_case,
     get_list_personal_skills_use_case,
@@ -23,6 +25,7 @@ from app.dependencies.use_cases import (
 )
 from app.main import create_app
 from common_schemas import PermissionSource
+from common_schemas.enums import RiskLevel
 from common_schemas.exceptions import AuthorizationError, NotFoundError, ValidationError
 from fastapi.testclient import TestClient
 from skills_marketplace.domain.entities.marketplace_personal_skill import MarketplacePersonalSkill
@@ -412,3 +415,154 @@ def test_personal_routes_require_bearer(app) -> None:
     assert client.get(f"/api/v1/skills/personal/{sid}").status_code == 401
     assert client.put(f"/api/v1/skills/personal/{sid}", json={}).status_code == 401
     assert client.delete(f"/api/v1/skills/personal/{sid}").status_code == 401
+
+
+# ── Personal create (REQ-010, 스킬빌더 폼 입구) ───────────────────────────────
+
+
+def _override_create_trio(app, *, sid, created, update_uc=None, doc=...):
+    """create/update/get 3개 use case + document repo 를 override 하고 mock 을 돌려준다.
+
+    `doc_repo.get_by_id`는 기본적으로 _REVIEWER_ID 소유 문서를 반환(source_document_id
+    검증 통과 경로). `doc=None`이면 미존재(404), 다른 user_id 문서를 주면 403 경로.
+    """
+    create_uc = MagicMock()
+    create_uc.execute = AsyncMock(return_value=sid)
+    get_uc = MagicMock()
+    get_uc.execute = AsyncMock(return_value=created)
+    update_uc = update_uc or MagicMock()
+    if not isinstance(update_uc.execute, AsyncMock):
+        update_uc.execute = AsyncMock(return_value=created)
+    doc_repo = MagicMock()
+    default_doc = MagicMock(user_id=_REVIEWER_ID) if doc is ... else doc
+    doc_repo.get_by_id = AsyncMock(return_value=default_doc)
+    app.dependency_overrides[get_create_draft_skill_use_case] = lambda: create_uc
+    app.dependency_overrides[get_get_personal_skill_use_case] = lambda: get_uc
+    app.dependency_overrides[get_update_personal_skill_use_case] = lambda: update_uc
+    app.dependency_overrides[get_document_repository] = lambda: doc_repo
+    return create_uc, update_uc, get_uc
+
+
+def test_create_personal_skill_minimal(app) -> None:
+    sid = uuid4()
+    created = _personal_skill(sid, _REVIEWER_ID, name="새 스킬")
+    create_uc, update_uc, get_uc = _override_create_trio(app, sid=sid, created=created)
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/skills/personal",
+        json={"name": "새 스킬", "description": "설명"},
+        headers=_headers(),
+    )
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["skill_id"] == str(sid)
+    assert body["lifecycle_state"] == "draft"
+    # tags 없으면 update 미호출 (불필요 write 방지).
+    update_uc.execute.assert_not_awaited()
+    get_uc.execute.assert_awaited_once_with(skill_id=sid, actor_user_id=_REVIEWER_ID)
+    # create는 owner/name/description + placeholder node_spec_staging 로 위임.
+    kwargs = create_uc.execute.await_args.kwargs
+    assert kwargs["owner_user_id"] == _REVIEWER_ID
+    assert kwargs["name"] == "새 스킬"
+    assert kwargs["description"] == "설명"
+    assert kwargs["instructions"] is None
+    assert kwargs["source_document_id"] is None  # 직접 진입 — association 없음
+    assert kwargs["node_spec_staging"].category == "action"
+    assert kwargs["node_spec_staging"].risk_level == RiskLevel.LOW
+    app.dependency_overrides.clear()
+
+
+def test_create_personal_skill_persists_source_document_id(app) -> None:
+    # REQ-010 문서→빌더 핸드오프: source_document_id 를 use case 로 전달
+    sid = uuid4()
+    doc_id = uuid4()
+    created = _personal_skill(sid, _REVIEWER_ID, name="문서 기반")
+    create_uc, _, _ = _override_create_trio(app, sid=sid, created=created)
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/skills/personal",
+        json={"name": "문서 기반", "description": "설명", "source_document_id": str(doc_id)},
+        headers=_headers(),
+    )
+
+    assert resp.status_code == 201
+    assert create_uc.execute.await_args.kwargs["source_document_id"] == doc_id
+    app.dependency_overrides.clear()
+
+
+def test_create_personal_skill_unknown_source_document_404(app) -> None:
+    # 없는 문서 id → FK 위반 500 이 아니라 404 (라우터 선검증)
+    sid = uuid4()
+    create_uc, _, _ = _override_create_trio(app, sid=sid, created=None, doc=None)
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/skills/personal",
+        json={"name": "x", "description": "y", "source_document_id": str(uuid4())},
+        headers=_headers(),
+    )
+    assert resp.status_code == 404
+    create_uc.execute.assert_not_awaited()  # 검증 실패 시 생성 안 함
+    app.dependency_overrides.clear()
+
+
+def test_create_personal_skill_other_users_source_document_403(app) -> None:
+    # 타 사용자 문서 id → FK 는 통과하지만 소유 검증으로 403 (association leak 차단)
+    sid = uuid4()
+    other_doc = MagicMock(user_id=uuid4())  # _REVIEWER_ID 아님
+    create_uc, _, _ = _override_create_trio(app, sid=sid, created=None, doc=other_doc)
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/skills/personal",
+        json={"name": "x", "description": "y", "source_document_id": str(uuid4())},
+        headers=_headers(),
+    )
+    assert resp.status_code == 403
+    create_uc.execute.assert_not_awaited()
+    app.dependency_overrides.clear()
+
+
+def test_create_personal_skill_with_tags_calls_update(app) -> None:
+    sid = uuid4()
+    created = _personal_skill(sid, _REVIEWER_ID)
+    create_uc, update_uc, _ = _override_create_trio(app, sid=sid, created=created)
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/skills/personal",
+        json={"name": "새 스킬", "description": "설명", "instructions": "## 지침", "tags": ["a", "b"]},
+        headers=_headers(),
+    )
+
+    assert resp.status_code == 201
+    assert create_uc.execute.await_args.kwargs["instructions"] == "## 지침"
+    # tags 는 create 계약에 없어 생성 직후 update 로 반영.
+    update_uc.execute.assert_awaited_once_with(
+        skill_id=sid, actor_user_id=_REVIEWER_ID, name=None, description=None, tags=["a", "b"]
+    )
+    app.dependency_overrides.clear()
+
+
+def test_create_personal_skill_missing_field_maps_422(app) -> None:
+    _override_create_trio(app, sid=uuid4(), created=None)
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.post("/api/v1/skills/personal", json={"name": "이름만"}, headers=_headers())
+    assert resp.status_code == 422
+    app.dependency_overrides.clear()
+
+
+def test_create_personal_skill_requires_bearer(app) -> None:
+    client = TestClient(app)
+    resp = client.post("/api/v1/skills/personal", json={"name": "x", "description": "y"})
+    assert resp.status_code == 401

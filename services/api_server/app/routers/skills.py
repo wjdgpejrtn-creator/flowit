@@ -23,10 +23,13 @@ from datetime import datetime
 from uuid import UUID
 
 from common_schemas import PermissionSource
-from fastapi import APIRouter, Depends, Query, Response, status
-from pydantic import BaseModel
+from common_schemas.enums import RiskLevel
+from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field
 from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
+    CreateDraftSkillUseCase,
     DeletePersonalSkillUseCase,
     GetPersonalSkillUseCase,
     ListUserPersonalSkillsUseCase,
@@ -34,12 +37,15 @@ from skills_marketplace.application.use_cases import (
     UpdatePersonalSkillUseCase,
 )
 from skills_marketplace.domain.entities.marketplace_personal_skill import MarketplacePersonalSkill
+from skills_marketplace.domain.value_objects.node_spec_staging import NodeSpecStaging
 from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 from skills_marketplace.domain.value_objects.skill_state import SkillState
 
 from app.dependencies.permission import get_permission_source
+from app.dependencies.repositories import get_document_repository
 from app.dependencies.use_cases import (
     get_approve_skill_use_case,
+    get_create_draft_skill_use_case,
     get_delete_personal_skill_use_case,
     get_get_personal_skill_use_case,
     get_list_personal_skills_use_case,
@@ -128,6 +134,7 @@ class PersonalSkillResponse(BaseModel):
     lifecycle_state: SkillState
     skill_document_uri: str | None = None
     workflow_id: UUID | None = None
+    source_document_id: UUID | None = None  # REQ-010 기반 문서 association
     tags: list[str]
     version: str
     promoted_to_team_id: UUID | None = None
@@ -145,6 +152,7 @@ def _to_response(skill: MarketplacePersonalSkill) -> PersonalSkillResponse:
         lifecycle_state=SkillState(skill.lifecycle_state),
         skill_document_uri=skill.skill_document_uri,
         workflow_id=skill.workflow_id,
+        source_document_id=skill.source_document_id,
         tags=list(skill.tags),
         version=skill.version,
         promoted_to_team_id=skill.promoted_to_team_id,
@@ -158,6 +166,69 @@ class UpdatePersonalSkillRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     tags: list[str] | None = None
+
+
+class CreatePersonalSkillRequest(BaseModel):
+    name: str
+    description: str
+    instructions: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    # REQ-010 문서→빌더 핸드오프: 기반 문서 association. None=직접 진입.
+    source_document_id: UUID | None = None
+
+
+@router.post("/personal", response_model=PersonalSkillResponse, status_code=status.HTTP_201_CREATED)
+async def create_personal_skill(
+    body: CreatePersonalSkillRequest,
+    permission: PermissionSource = Depends(get_permission_source),
+    create_use_case: CreateDraftSkillUseCase = Depends(get_create_draft_skill_use_case),
+    update_use_case: UpdatePersonalSkillUseCase = Depends(get_update_personal_skill_use_case),
+    get_use_case: GetPersonalSkillUseCase = Depends(get_get_personal_skill_use_case),
+    doc_repo: DocumentRepositoryPort = Depends(get_document_repository),
+) -> PersonalSkillResponse:
+    """개인 DRAFT 스킬 생성 — 스킬빌더 폼 입구 (REQ-010, 프론트 POST /skills/personal 대응).
+
+    `CreateDraftSkillUseCase`(박아름, ADR-0020 ②e) 재사용. 이 use case는 본래 Skills Builder
+    Agent(REQ-004 ③) 추출 결과용이라 `node_spec_staging`이 필수 입력이다. 수동 폼 생성은 노드
+    스펙이 없어 빈 staging(action/빈 스키마/LOW)을 placeholder로 넣는다 — 실제 스펙은 추후
+    에이전트 추출/publish 단계에서 확정. tags는 create 계약에 없어 생성 직후 update로 반영
+    (owner+DRAFT 보장 — 방금 생성분). 응답은 GetPersonalSkill로 재조회해 일관 직렬화.
+
+    `source_document_id`(REQ-010 association)가 주어지면 create 전에 문서 존재+소유를 검증한다 —
+    DB FK 위반에 맡기면 500이 되고(404/403이 정확), 타인 문서 id가 FK만 통과해 association되는
+    것을 막는다. 검증은 composition root(라우터)의 책임 — skills_marketplace use case는 doc_parser를
+    모르고(도메인 디커플), doc_parser GET /{id}와 동일한 404/403 패턴을 재사용한다.
+    """
+    if body.source_document_id is not None:
+        document = await doc_repo.get_by_id(body.source_document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail=f"Document {body.source_document_id} not found")
+        if document.user_id != permission.user_id:
+            raise HTTPException(status_code=403, detail="Document belongs to another user")
+
+    skill_id = await create_use_case.execute(
+        owner_user_id=permission.user_id,
+        name=body.name,
+        description=body.description,
+        node_spec_staging=NodeSpecStaging(
+            category="action",
+            input_schema={},
+            output_schema={},
+            risk_level=RiskLevel.LOW,
+        ),
+        instructions=body.instructions,
+        source_document_id=body.source_document_id,
+    )
+    if body.tags:
+        await update_use_case.execute(
+            skill_id=skill_id,
+            actor_user_id=permission.user_id,
+            name=None,
+            description=None,
+            tags=body.tags,
+        )
+    created = await get_use_case.execute(skill_id=skill_id, actor_user_id=permission.user_id)
+    return _to_response(created)
 
 
 @router.get("/personal", response_model=list[PersonalSkillResponse])

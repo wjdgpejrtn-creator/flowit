@@ -32,6 +32,8 @@ on:
       - "modules/nodes_graph/**"
       - "packages/common_schemas/python/**"
       - "services/common/**"  # services.common.gcp_secrets — composer/orchestrator boot import
+  # 수동 trigger — Modal 측 상태 확인용 강제 갈아끼우기 또는 paths 미매칭 release sync 시.
+  workflow_dispatch:
 
 concurrency:
   # workflow + ref 단위 group — 같은 run 내 5 job 병렬은 그대로 동작(서로 다른 app),
@@ -42,6 +44,9 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # PR #232 황대원 LOW #3 — workspace 이름 8곳 하드코딩 → env 단일 정의로 drift 방지.
+  # 변경 시 본 라인 1곳만 수정.
+  EXPECTED_MODAL_WORKSPACE: dhwang0803
 
 jobs:
   # 변경 경로 보고 어떤 sub-agent deploy 돌릴지 분기.
@@ -102,6 +107,19 @@ jobs:
           cache: pip
       - name: Install Modal CLI
         run: pip install modal
+
+      - name: Verify Modal workspace
+        # 잘못된 workspace 토큰일 경우 다른 workspace로 silent 배포 위험 방지.
+        # PR #217 황대원 리뷰 follow-up #17 + PR #232 황대원 LOW #2/#3 반영:
+        # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
+        # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
+        run: |
+          ACTUAL=$(modal profile current | tr -d '[:space:]')
+          if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
+            echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
+            exit 1
+          fi
+          echo "✓ Modal workspace: $ACTUAL"
       - name: Deploy agent-composer
         # PYTHONUTF8=1: Modal Image 빌드 시 일부 파일 UTF-8 BOM 안전망.
         run: PYTHONUTF8=1 modal deploy services/agents/agent-composer/main.py
@@ -122,6 +140,19 @@ jobs:
           cache: pip
       - name: Install Modal CLI
         run: pip install modal
+
+      - name: Verify Modal workspace
+        # 잘못된 workspace 토큰일 경우 다른 workspace로 silent 배포 위험 방지.
+        # PR #217 황대원 리뷰 follow-up #17 + PR #232 황대원 LOW #2/#3 반영:
+        # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
+        # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
+        run: |
+          ACTUAL=$(modal profile current | tr -d '[:space:]')
+          if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
+            echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
+            exit 1
+          fi
+          echo "✓ Modal workspace: $ACTUAL"
       - name: Deploy orchestrator
         run: PYTHONUTF8=1 modal deploy services/agents/orchestrator/main.py
 
@@ -141,6 +172,19 @@ jobs:
           cache: pip
       - name: Install Modal CLI
         run: pip install modal
+
+      - name: Verify Modal workspace
+        # 잘못된 workspace 토큰일 경우 다른 workspace로 silent 배포 위험 방지.
+        # PR #217 황대원 리뷰 follow-up #17 + PR #232 황대원 LOW #2/#3 반영:
+        # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
+        # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
+        run: |
+          ACTUAL=$(modal profile current | tr -d '[:space:]')
+          if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
+            echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
+            exit 1
+          fi
+          echo "✓ Modal workspace: $ACTUAL"
       - name: Deploy agent-skills-builder
         run: PYTHONUTF8=1 modal deploy services/agents/agent-skills-builder/main.py
 
@@ -160,6 +204,19 @@ jobs:
           cache: pip
       - name: Install Modal CLI
         run: pip install modal
+
+      - name: Verify Modal workspace
+        # 잘못된 workspace 토큰일 경우 다른 workspace로 silent 배포 위험 방지.
+        # PR #217 황대원 리뷰 follow-up #17 + PR #232 황대원 LOW #2/#3 반영:
+        # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
+        # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
+        run: |
+          ACTUAL=$(modal profile current | tr -d '[:space:]')
+          if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
+            echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
+            exit 1
+          fi
+          echo "✓ Modal workspace: $ACTUAL"
       - name: Deploy agent-personalization
         run: PYTHONUTF8=1 modal deploy services/agents/agent-personalization/main.py
 
@@ -180,6 +237,19 @@ jobs:
           cache: pip
       - name: Install Modal CLI
         run: pip install modal
+
+      - name: Verify Modal workspace
+        # 잘못된 workspace 토큰일 경우 다른 workspace로 silent 배포 위험 방지.
+        # PR #217 황대원 리뷰 follow-up #17 + PR #232 황대원 LOW #2/#3 반영:
+        # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
+        # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
+        run: |
+          ACTUAL=$(modal profile current | tr -d '[:space:]')
+          if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
+            echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
+            exit 1
+          fi
+          echo "✓ Modal workspace: $ACTUAL"
       - name: Deploy llm-base
         # llm-base는 Modal Volume(llm-base-models)에서 Gemma 4 GGUF 로드.
         # 모델 가중치 변경 없는 한 download_model 재실행 불필요 — image rebuild만.

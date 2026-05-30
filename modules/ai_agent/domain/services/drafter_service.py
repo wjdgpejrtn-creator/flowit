@@ -20,13 +20,19 @@ output a JSON object matching this schema:
   "name": "<string>",
   "scope": "private",
   "is_draft": true,
-  "nodes": [{"node_type": "<type>", "parameters": {}, "x": 0, "y": 0}],
+  "nodes": [{"node_type": "<type>", "parameters": {"<param_key>": "<value>"}, "x": 0, "y": 0}],
   "connections": [{"from_node_type": "<type>", "to_node_type": "<type>", "from_handle": "output", "to_handle": "input"}]
 }
 Only use nodes from the provided candidate list.
 Each node_type must appear at most once in the nodes list.
 Connections define execution order: from_node_type runs before to_node_type.
 Use "output" for from_handle and "input" for to_handle unless specific handles are needed.
+Fill in `parameters` for each node using:
+1. Values extracted from DraftSpec entities (e.g. schedule time, service names, channels).
+2. The node's input_schema (a JSON Schema with `properties`, `required`, `default`) as a guide
+   for which fields to fill. Fill every field listed in `required`; when the user did not specify
+   a value, use the field's `default` if present.
+3. Use an empty string "" only for optional fields the user did not specify that have no default.
 """
 
 
@@ -60,7 +66,12 @@ class DrafterService:
 
     async def draft(self, spec: DraftSpec, candidates: list[NodeConfig], owner_user_id: UUID) -> WorkflowSchema:
         catalog = [
-            {"node_type": n.node_type, "name": n.name, "description": n.description}
+            {
+                "node_type": n.node_type,
+                "name": n.name,
+                "description": n.description,
+                "input_schema": n.input_schema,
+            }
             for n in candidates
         ]
         prompt = (

@@ -31,3 +31,11 @@ class DocumentRepositoryPort(ABC):
         없으면 None 반환. 인가는 호출자가 `DocumentBlock.user_id` 비교로 수행 (Port는 read-only).
         """
         ...
+
+    @abstractmethod
+    async def list_by_owner(self, user_id: UUID) -> list[DocumentBlock]:
+        """소유자 기준 문서 목록 조회 (최신순) — `GET /api/v1/documents`가 사용.
+
+        owner 본인 문서만 반환. 인가 필터(`user_id`)는 호출자가 전달 (Port는 read-only).
+        """
+        ...

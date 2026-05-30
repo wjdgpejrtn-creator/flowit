@@ -12,6 +12,11 @@ jest.mock('../../../lib/api/skillApi', () => ({
   createPersonalSkill: (...args: unknown[]) => mockCreate(...args),
 }));
 
+const mockListDocuments = jest.fn(() => Promise.resolve([] as unknown[]));
+jest.mock('../../../lib/api/documentApi', () => ({
+  listDocuments: () => mockListDocuments(),
+}));
+
 jest.mock('../../../stores/authStore', () => ({
   useAuthStore: () => ({ role: 'User', userName: 'tester', dept: '', isAuthenticated: true }),
 }));
@@ -38,28 +43,32 @@ const CREATED_SKILL = {
   updated_at: '2026-05-29T09:00:00Z',
 };
 
+const DOC = {
+  document_id: 'd1',
+  file_name: 'spec.pdf',
+  mime_type: 'application/pdf',
+  file_size: 2048,
+};
+
 beforeEach(() => {
   mockCreate.mockReset();
   mockPush.mockReset();
+  mockListDocuments.mockReset();
+  mockListDocuments.mockResolvedValue([]);
   localStorage.clear();
 });
 
-describe('SkillBuilderPage — 기반 문서 선택 (PR #216 리뷰 #1)', () => {
-  it('문서 선택 select 는 백엔드 연동 전까지 비활성화돼 있다', () => {
-    localStorage.setItem(
-      'wf_documents_list',
-      JSON.stringify([
-        { document_id: 'd1', file_name: 'spec.pdf', mime_type: 'application/pdf', file_size: 2048 },
-      ]),
-    );
+describe('SkillBuilderPage — 기반 문서 선택 (REQ-010 association)', () => {
+  it('업로드된 문서가 있으면 select 로 기반 문서를 고를 수 있다', async () => {
+    mockListDocuments.mockResolvedValue([DOC]);
     render(<SkillBuilderPage />);
 
-    const select = screen.getByRole('combobox');
-    expect(select).toBeDisabled();
-    expect(screen.getByText(/백엔드 연동 후 활성화/)).toBeInTheDocument();
+    const select = await screen.findByRole('combobox');
+    await waitFor(() => expect(select).not.toBeDisabled());
+    expect(screen.getByText(/spec\.pdf/)).toBeInTheDocument();
   });
 
-  it('스킬 생성 시 document_id 를 백엔드로 전송하지 않는다 (false healthy 방지)', async () => {
+  it('문서 미선택 시 source_document_id 를 전송하지 않는다', async () => {
     mockCreate.mockResolvedValue(CREATED_SKILL);
     const user = userEvent.setup();
     render(<SkillBuilderPage />);
@@ -70,8 +79,58 @@ describe('SkillBuilderPage — 기반 문서 선택 (PR #216 리뷰 #1)', () => 
 
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1));
     const payload = mockCreate.mock.calls[0][0] as Record<string, unknown>;
-    expect(payload).not.toHaveProperty('document_id');
+    expect(payload.source_document_id).toBeUndefined();
     expect(payload.name).toBe('주간 리포트');
     expect(payload.description).toBe('매주 요약 생성');
+  });
+
+  it('select 로 고른 문서를 source_document_id 로 전송한다', async () => {
+    mockListDocuments.mockResolvedValue([DOC]);
+    mockCreate.mockResolvedValue(CREATED_SKILL);
+    const user = userEvent.setup();
+    render(<SkillBuilderPage />);
+
+    const select = await screen.findByRole('combobox');
+    await waitFor(() => expect(select).not.toBeDisabled());
+    await user.selectOptions(select, 'd1');
+    await user.type(screen.getByPlaceholderText(/주간 리포트 자동화/), '주간 리포트');
+    await user.type(screen.getByPlaceholderText(/어떤 작업을 자동화/), '매주 요약 생성');
+    await user.click(screen.getByRole('button', { name: '스킬 생성' }));
+
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1));
+    const payload = mockCreate.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.source_document_id).toBe('d1');
+  });
+});
+
+describe('SkillBuilderPage — 문서→빌더 핸드오프 (REQ-010)', () => {
+  afterEach(() => {
+    window.history.pushState({}, '', '/skills/builder');
+  });
+
+  it('source_document_id 쿼리가 있으면 기반 문서를 read-only 로 표시하고 select 를 숨긴다', async () => {
+    window.history.pushState({}, '', '/skills/builder?source_document_id=doc-xyz');
+    render(<SkillBuilderPage />);
+
+    // 비활성 select 대신 read-only 기반 문서 패널 (목록 미해결 시 id 텍스트로 폴백)
+    await waitFor(() => expect(screen.getByText('doc-xyz')).toBeInTheDocument());
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.getByText(/생성 시 문서 연결이 함께 저장/)).toBeInTheDocument();
+  });
+
+  it('핸드오프 상태에서 source_document_id 를 백엔드로 전송한다', async () => {
+    mockCreate.mockResolvedValue(CREATED_SKILL);
+    window.history.pushState({}, '', '/skills/builder?source_document_id=doc-xyz');
+    const user = userEvent.setup();
+    render(<SkillBuilderPage />);
+
+    await user.type(screen.getByPlaceholderText(/주간 리포트 자동화/), '주간 리포트');
+    await user.type(screen.getByPlaceholderText(/어떤 작업을 자동화/), '매주 요약 생성');
+    await user.click(screen.getByRole('button', { name: '스킬 생성' }));
+
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1));
+    const payload = mockCreate.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('document_id');
+    expect(payload.source_document_id).toBe('doc-xyz');
   });
 });

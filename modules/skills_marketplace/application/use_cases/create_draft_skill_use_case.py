@@ -39,6 +39,7 @@ class CreateDraftSkillUseCase:
         embedding: list[float] | None = None,
         skill_document_uri: str | None = None,
         instructions: str | None = None,
+        source_document_id: UUID | None = None,
     ) -> UUID:
         skill_id = uuid4()
 
@@ -64,6 +65,7 @@ class CreateDraftSkillUseCase:
             lifecycle_state=SkillState.DRAFT,
             embedding=embedding,
             skill_document_uri=skill_document_uri,
+            source_document_id=source_document_id,  # 문서→빌더 핸드오프 association (REQ-010)
             created_at=now,
             updated_at=now,
         )
