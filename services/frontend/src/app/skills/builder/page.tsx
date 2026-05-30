@@ -46,6 +46,18 @@ export default function SkillBuilderPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<PersonalSkill | null>(null);
+  const [sourceDocId, setSourceDocId] = useState<string | null>(null);
+  const [fromHandoff, setFromHandoff] = useState(false);
+
+  // 문서→빌더 핸드오프: ?source_document_id=<id> 를 읽어 기반 문서로 표시·전송.
+  // 백엔드 source_document_id association 와이어업 완료 — createPersonalSkill 페이로드에 포함한다.
+  useEffect(() => {
+    const param = new URLSearchParams(window.location.search).get('source_document_id');
+    if (param) {
+      setSourceDocId(param);
+      setFromHandoff(true);
+    }
+  }, []);
 
   // 문서 목록: 서버 SSOT, 실패 시 localStorage 캐시 폴백 (#219)
   useEffect(() => {
@@ -64,6 +76,7 @@ export default function SkillBuilderPage() {
   }, []);
 
   const tags = tagsInput.split(',').map((t) => t.trim()).filter(Boolean);
+  const sourceDoc = sourceDocId ? docs.find((d) => d.document_id === sourceDocId) ?? null : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,6 +89,7 @@ export default function SkillBuilderPage() {
         description: description.trim(),
         instructions: instructions.trim() || undefined,
         tags,
+        source_document_id: sourceDocId ?? undefined,
       });
       setCreated(skill);
     } catch (err) {
@@ -163,39 +177,62 @@ export default function SkillBuilderPage() {
           ) : (
             // 입력 폼
             <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
-              {/* 문서 선택 — 백엔드 연동 예정 (POST /skills/personal 에 source_document_id 미구현) */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[12px] font-bold text-[var(--color-ink3)]">
-                  기반 문서 <span className="text-[var(--color-ink4)] font-normal">(백엔드 연동 예정)</span>
-                </label>
-                <select
-                  value=""
-                  disabled
-                  title="백엔드 연동 후 활성화됩니다"
-                  className="border-[1.5px] border-[var(--color-ink4)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-paper2)] text-[var(--color-ink4)] cursor-not-allowed"
-                >
-                  <option value="">
-                    {docs.length === 0 ? '업로드된 문서가 없습니다' : `문서 ${docs.length}개 (연동 예정)`}
-                  </option>
-                  {docs.map((doc) => (
-                    <option key={doc.document_id} value={doc.document_id}>
-                      {doc.file_name} · {fmtSize(doc.file_size)}
+              {/* 기반 문서 association (REQ-010). 문서→빌더 핸드오프(?source_document_id=)면
+                  read-only 표시, 아니면 선택 가능한 select. 둘 다 sourceDocId 를 통해
+                  createPersonalSkill 페이로드(source_document_id)로 전송된다. */}
+              {fromHandoff ? (
+                <div className="flex flex-col gap-1">
+                  <label className="text-[12px] font-bold text-[var(--color-ink3)]">기반 문서</label>
+                  <div className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-surface)] flex items-center gap-2">
+                    <span>📄</span>
+                    <span className="font-bold truncate" title={sourceDoc?.file_name ?? sourceDocId ?? ''}>
+                      {sourceDoc?.file_name ?? sourceDocId}
+                    </span>
+                    {sourceDoc && (
+                      <span className="text-[11px] text-[var(--color-ink3)] flex-shrink-0">
+                        {fmtSize(sourceDoc.file_size)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-[var(--color-ink4)] flex items-center gap-1">
+                    <span>ⓘ</span>
+                    이 문서를 기반으로 스킬을 만듭니다. 생성 시 문서 연결이 함께 저장됩니다.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <label className="text-[12px] font-bold text-[var(--color-ink3)]">
+                    기반 문서 <span className="text-[var(--color-ink4)] font-normal">(선택)</span>
+                  </label>
+                  <select
+                    value={sourceDocId ?? ''}
+                    onChange={(e) => setSourceDocId(e.target.value || null)}
+                    disabled={docs.length === 0}
+                    className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)] disabled:bg-[var(--color-paper2)] disabled:text-[var(--color-ink4)] disabled:cursor-not-allowed"
+                  >
+                    <option value="">
+                      {docs.length === 0 ? '업로드된 문서가 없습니다' : '문서를 선택하세요 (선택)'}
                     </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-[var(--color-ink4)] flex items-center gap-1">
-                  <span>ⓘ</span>
-                  문서 기반 스킬 생성은 백엔드 연동 후 활성화됩니다.
-                  {docs.length === 0 && (
-                    <>
-                      {' '}
-                      <Link href="/documents" className="text-[var(--color-accent)] underline">
-                        문서 탭에서 업로드
-                      </Link>
-                    </>
-                  )}
-                </p>
-              </div>
+                    {docs.map((doc) => (
+                      <option key={doc.document_id} value={doc.document_id}>
+                        {doc.file_name} · {fmtSize(doc.file_size)}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-[var(--color-ink4)] flex items-center gap-1">
+                    <span>ⓘ</span>
+                    문서를 선택하면 스킬에 기반 문서로 연결됩니다.
+                    {docs.length === 0 && (
+                      <>
+                        {' '}
+                        <Link href="/documents" className="text-[var(--color-accent)] underline">
+                          문서 탭에서 업로드
+                        </Link>
+                      </>
+                    )}
+                  </p>
+                </div>
+              )}
 
               <div className="flex flex-col gap-1">
                 <label className="text-[12px] font-bold text-[var(--color-ink3)]">

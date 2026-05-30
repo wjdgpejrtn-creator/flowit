@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
@@ -49,6 +50,7 @@ function StatusBadge({ status }: { status: AnalysisStatus }) {
 
 export default function DocumentDetailPage({ params }: { params: { id: string } }) {
   const { id } = params;
+  const router = useRouter();
 
   const [doc, setDoc] = useState<DocumentResponse | null>(null);
   const [blocks, setBlocks] = useState<ContentBlock[]>([]);
@@ -187,8 +189,14 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
         <Btn onClick={handleAnalyze} disabled={isRunning || !doc}>
           {isRunning ? '분석 중…' : isFailed ? '🔁 다시 분석' : '🔍 분석'}
         </Btn>
-        {/* 문서 → 스킬빌더 핸드오프 — REQ-013(황대원) 영역. UI 자리만, 동작 wiring 후속. */}
-        <Btn primary disabled title="스킬빌더 연동 예정 (REQ-013)" className="opacity-60">
+        {/* 문서 → 스킬빌더 핸드오프 (REQ-010) — source_document_id 를 쿼리로 전달.
+            DB 연결(source_document_id 영속화)은 박아름 skills_marketplace 백엔드 wiring 후속. */}
+        <Btn
+          primary
+          disabled={!doc}
+          title="이 문서를 기반으로 새 스킬 만들기"
+          onClick={() => router.push(`/skills/builder?source_document_id=${id}`)}
+        >
           🛠 이 문서로 스킬 만들기
         </Btn>
       </div>
@@ -242,7 +250,7 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
             </div>
           )}
         </div>
-        <DocumentAnalysisSidebar analyzed={status === AnalysisStatus.COMPLETED} />
+        <DocumentAnalysisSidebar analyzed={status === AnalysisStatus.COMPLETED} documentId={id} />
       </div>
     </div>
   );

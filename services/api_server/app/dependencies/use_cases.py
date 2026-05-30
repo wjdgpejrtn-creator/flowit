@@ -6,6 +6,7 @@ from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRe
 from nodes_graph.domain.services.graph_validator import GraphValidator
 from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
+    CreateDraftSkillUseCase,
     DeletePersonalSkillUseCase,
     GetPersonalSkillUseCase,
     ListUserPersonalSkillsUseCase,
@@ -48,6 +49,14 @@ def get_publish_skill_use_case(
 
 
 # ── personal skills CRUD (REQ-013, 가원 요청) ─────────────────────────────────
+
+
+def get_create_draft_skill_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+    doc_store: SkillDocumentStore = Depends(get_skill_document_store),
+) -> CreateDraftSkillUseCase:
+    """스킬빌더 폼 → 개인 DRAFT 생성 (REQ-010). doc_store는 ADR-0017 SKILL.md 이중 저장용."""
+    return CreateDraftSkillUseCase(repo=repo, doc_store=doc_store)
 
 
 def get_list_personal_skills_use_case(

@@ -99,6 +99,7 @@ class PersonalSkillMapper:
             **_common_to_domain_kwargs(orm),
             owner_user_id=orm.owner_user_id,
             promoted_to_team_id=orm.promoted_to_team_id,
+            source_document_id=orm.source_document_id,  # REQ-010 (personal 전용)
         )
 
     @staticmethod
@@ -107,6 +108,7 @@ class PersonalSkillMapper:
             **_common_to_orm_kwargs(entity),
             owner_user_id=entity.owner_user_id,
             promoted_to_team_id=entity.promoted_to_team_id,
+            source_document_id=entity.source_document_id,  # REQ-010 (personal 전용)
         )
 
 
