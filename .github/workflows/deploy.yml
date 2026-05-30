@@ -145,12 +145,14 @@ jobs:
             --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
             --format='value(status.latestReadyRevisionName)')
           if [ -z "$REVISION" ]; then echo "::error::No ready revision found for $SERVICE"; exit 1; fi
-          # PR #232 황대원 MED — conditions 배열 순서 미보장 → filter type:Ready로 정확히 추출.
+          # PR #232 황대원 MED — conditions 배열 순서 미보장 → filter로 Ready 조건만 추출.
           # 기존 conditions[0]은 Active/ContainerHealthy/ResourcesAvailable 등 다른 condition이
           # 0번에 올 경우 false-pass/fail 가능.
+          # filter는 반드시 "type=Ready"(정확매칭) — "type:Ready"(부분매칭)는 ContainerReady까지
+          # 걸려 status가 "True,True"로 나와 항상 false-fail (#251 release 배포 false-fail 사례).
           STATUS=$(gcloud run revisions describe "$REVISION" \
             --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
-            --format='value(status.conditions.filter("type:Ready").extract(status).flatten())')
+            --format='value(status.conditions.filter("type=Ready").extract(status).flatten())')
           if [ "$STATUS" != "True" ]; then echo "::error::Revision $REVISION not Ready (status=$STATUS)"; exit 1; fi
           echo "✓ Revision $REVISION healthy"
 
@@ -218,12 +220,14 @@ jobs:
             --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
             --format='value(status.latestReadyRevisionName)')
           if [ -z "$REVISION" ]; then echo "::error::No ready revision found for $SERVICE"; exit 1; fi
-          # PR #232 황대원 MED — conditions 배열 순서 미보장 → filter type:Ready로 정확히 추출.
+          # PR #232 황대원 MED — conditions 배열 순서 미보장 → filter로 Ready 조건만 추출.
           # 기존 conditions[0]은 Active/ContainerHealthy/ResourcesAvailable 등 다른 condition이
           # 0번에 올 경우 false-pass/fail 가능.
+          # filter는 반드시 "type=Ready"(정확매칭) — "type:Ready"(부분매칭)는 ContainerReady까지
+          # 걸려 status가 "True,True"로 나와 항상 false-fail (#251 release 배포 false-fail 사례).
           STATUS=$(gcloud run revisions describe "$REVISION" \
             --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
-            --format='value(status.conditions.filter("type:Ready").extract(status).flatten())')
+            --format='value(status.conditions.filter("type=Ready").extract(status).flatten())')
           if [ "$STATUS" != "True" ]; then echo "::error::Revision $REVISION not Ready (status=$STATUS)"; exit 1; fi
           echo "✓ Revision $REVISION healthy"
 
@@ -296,12 +300,14 @@ jobs:
             --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
             --format='value(status.latestReadyRevisionName)')
           if [ -z "$REVISION" ]; then echo "::error::No ready revision found for $SERVICE"; exit 1; fi
-          # PR #232 황대원 MED — conditions 배열 순서 미보장 → filter type:Ready로 정확히 추출.
+          # PR #232 황대원 MED — conditions 배열 순서 미보장 → filter로 Ready 조건만 추출.
           # 기존 conditions[0]은 Active/ContainerHealthy/ResourcesAvailable 등 다른 condition이
           # 0번에 올 경우 false-pass/fail 가능.
+          # filter는 반드시 "type=Ready"(정확매칭) — "type:Ready"(부분매칭)는 ContainerReady까지
+          # 걸려 status가 "True,True"로 나와 항상 false-fail (#251 release 배포 false-fail 사례).
           STATUS=$(gcloud run revisions describe "$REVISION" \
             --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
-            --format='value(status.conditions.filter("type:Ready").extract(status).flatten())')
+            --format='value(status.conditions.filter("type=Ready").extract(status).flatten())')
           if [ "$STATUS" != "True" ]; then echo "::error::Revision $REVISION not Ready (status=$STATUS)"; exit 1; fi
           echo "✓ Revision $REVISION healthy"
 
