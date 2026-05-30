@@ -16,8 +16,10 @@ jest.mock('../../../hooks/useAuth', () => ({
 }));
 
 const mockUpload = jest.fn();
+const mockList = jest.fn();
 jest.mock('../../../lib/api/documentApi', () => ({
   uploadDocument: (...args: unknown[]) => mockUpload(...args),
+  listDocuments: (...args: unknown[]) => mockList(...args),
 }));
 
 import DocumentsPage from '../page';
@@ -35,6 +37,9 @@ const DOC = {
 beforeEach(() => {
   mockPush.mockReset();
   mockUpload.mockReset();
+  // 기본값: 서버 미가용 → localStorage 캐시 폴백 경로를 검증 (마운트 시 캐시를 덮어쓰지 않음).
+  mockList.mockReset();
+  mockList.mockRejectedValue(new Error('server unavailable'));
   localStorage.clear();
 });
 

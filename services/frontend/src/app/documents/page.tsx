@@ -98,26 +98,35 @@ function DocCard({
 
 export default function DocumentsPage() {
   const router = useRouter();
-  const [docs, setDocs] = useState<DocumentResponse[]>(() => loadStoredDocs());
+  // SSR/CSR 일관성을 위해 초기값은 항상 빈 배열. localStorage 캐시는 마운트 후 읽는다
+  // (useState 이니셜라이저에서 localStorage 를 읽으면 SSR=[] / CSR=캐시 → hydration mismatch).
+  const [docs, setDocs] = useState<DocumentResponse[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 마운트(hydration) 완료 전에는 localStorage 동기화를 막아 초기 [] 로 캐시를 덮어쓰지 않게 한다.
+  const hydratedRef = useRef(false);
 
   useEffect(() => {
+    if (!hydratedRef.current) return;
     try {
       localStorage.setItem(DOCS_STORAGE_KEY, JSON.stringify(docs));
     } catch {}
   }, [docs]);
 
-  // 마운트 시 서버 목록을 SSOT 로 로드 (실패 시 localStorage 캐시 유지)
+  // 마운트 시: localStorage 캐시 즉시 반영(첫 페인트 폴백) → 서버 목록을 SSOT 로 로드.
   useEffect(() => {
+    const cached = loadStoredDocs();
+    if (cached.length > 0) setDocs(cached);
+    hydratedRef.current = true;
+
     let cancelled = false;
     void (async () => {
       try {
         const serverDocs = await listDocuments();
         if (!cancelled) setDocs(serverDocs);
       } catch {
-        /* 서버 조회 실패 — loadStoredDocs() 초기값 유지 */
+        /* 서버 조회 실패 — localStorage 캐시 유지 */
       }
     })();
     return () => {
