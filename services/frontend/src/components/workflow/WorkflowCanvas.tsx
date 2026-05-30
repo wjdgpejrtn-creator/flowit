@@ -7,6 +7,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  ConnectionMode,
   useReactFlow,
   type Node as RFNode,
   type Edge as RFEdge,
@@ -22,6 +23,7 @@ import { useWorkflowStore } from '@/stores/workflowStore';
 import NodePalette, { readPaletteDragPayload } from './NodePalette';
 import CustomNode, { type CustomNodeData } from './CustomNode';
 import EdgeLine from './EdgeLine';
+import { resolveSourceHandle, resolveTargetHandle } from '@/lib/adapters/reactFlowAdapter';
 
 const nodeTypes = { custom: CustomNode };
 const edgeTypes = { custom: EdgeLine };
@@ -75,8 +77,10 @@ function CanvasInner({ catalog }: { catalog?: NodeConfig[] | null }) {
       id: `${e.from_instance_id}->${e.to_instance_id}`,
       source: e.from_instance_id,
       target: e.to_instance_id,
-      sourceHandle: e.from_handle || null,
-      targetHandle: e.to_handle || null,
+      // 레거시/AI 엣지의 from_handle="output"·to_handle="input" 을 4방향 핸들 id 로 매핑.
+      // 빈 값/미지 값은 기존 좌→우 레이아웃으로 폴백 (reactFlowAdapter 단일 소스).
+      sourceHandle: resolveSourceHandle(e.from_handle),
+      targetHandle: resolveTargetHandle(e.to_handle),
       type: 'custom',
     }));
   }, [workflow]);
@@ -111,6 +115,8 @@ function CanvasInner({ catalog }: { catalog?: NodeConfig[] | null }) {
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
+      // Loose 모드에서 자기 자신 연결(self-loop) 방지
+      if (connection.source === connection.target) return;
       addEdge({
         from_instance_id: connection.source,
         to_instance_id: connection.target,
@@ -172,6 +178,7 @@ function CanvasInner({ catalog }: { catalog?: NodeConfig[] | null }) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
+        connectionMode={ConnectionMode.Loose}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
