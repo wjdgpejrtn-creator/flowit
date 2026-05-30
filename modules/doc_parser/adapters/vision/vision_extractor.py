@@ -205,7 +205,7 @@ class VisionExtractor(VisionPort):
 
         try:
             prompt = VisionPromptStrategy.get(vision_type)
-            result = self._llm.generate.remote(
+            result = self._llm.generate(
                 prompt,
                 images=[data_url],
                 max_tokens=1024,
