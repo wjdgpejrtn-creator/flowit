@@ -531,3 +531,23 @@ module "frontend" {
 
   depends_on = [module.networking]
 }
+
+# ---------------------------------------------------------------------------
+# 팀원 관측(observability) — staging 로그 조회 self-service
+# ---------------------------------------------------------------------------
+# 팀원이 직접 Cloud Run 로그/트레이스백을 조회(`gcloud logging read`)하도록 읽기 전용
+# logging.viewer 부여. 부여 전엔 PERMISSION_DENIED라 매번 조장이 대리 진단해야 했다
+# (스킬빌더 500 trace 329b1b68 사례). agent_secret_accessors의 사람 principal(user:)만
+# 대상 — SA(serviceAccount:)는 제외. logging.viewer는 읽기 전용(로그 쓰기/설정/data-access 불가).
+locals {
+  team_log_viewers = toset([
+    for m in var.agent_secret_accessors : m if startswith(m, "user:")
+  ])
+}
+
+resource "google_project_iam_member" "team_log_viewer" {
+  for_each = local.team_log_viewers
+  project  = var.project_id
+  role     = "roles/logging.viewer"
+  member   = each.value
+}

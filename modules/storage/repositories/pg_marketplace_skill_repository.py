@@ -37,19 +37,27 @@ class PgMarketplaceSkillRepository(SkillRepository):
 
     # ── save (upsert by PK) ──────────────────────────────────────────────────
 
+    # flush 직후 refresh: server_default/onupdate 컬럼(created_at/updated_at)은 UPDATE 후 expired
+    # 상태가 된다. to_domain이 이를 읽으면 async 세션 밖에서 lazy SELECT가 일어나
+    # sqlalchemy.exc.MissingGreenlet으로 터진다(INSERT는 RETURNING으로 채워져 무사, UPDATE에서만 발현).
+    # refresh로 greenlet 컨텍스트 안에서 명시 재로드해 to_domain 매핑을 안전화한다.
+
     async def save_personal(self, skill: MarketplacePersonalSkill) -> MarketplacePersonalSkill:
         merged = await self._session.merge(PersonalSkillMapper.to_orm(skill))
         await self._session.flush()
+        await self._session.refresh(merged)
         return PersonalSkillMapper.to_domain(merged)
 
     async def save_team(self, skill: MarketplaceTeamSkill) -> MarketplaceTeamSkill:
         merged = await self._session.merge(TeamSkillMapper.to_orm(skill))
         await self._session.flush()
+        await self._session.refresh(merged)
         return TeamSkillMapper.to_domain(merged)
 
     async def save_company(self, skill: MarketplaceCompanySkill) -> MarketplaceCompanySkill:
         merged = await self._session.merge(CompanySkillMapper.to_orm(skill))
         await self._session.flush()
+        await self._session.refresh(merged)
         return CompanySkillMapper.to_domain(merged)
 
     # ── get ──────────────────────────────────────────────────────────────────
