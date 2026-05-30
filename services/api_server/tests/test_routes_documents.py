@@ -73,6 +73,7 @@ def _doc(
     analysis_status="pending",
     analysis_error=None,
     analyzed_at=None,
+    coverage=None,
 ) -> DocumentBlock:
     return DocumentBlock(
         document_id=document_id,
@@ -87,6 +88,7 @@ def _doc(
         analysis_status=analysis_status,
         analysis_error=analysis_error,
         analyzed_at=analyzed_at,
+        coverage=coverage,
     )
 
 
@@ -349,6 +351,43 @@ def test_get_blocks_owner_returns_blocks_and_status(app) -> None:
     assert body["analysis_status"] == "completed"
     assert len(body["blocks"]) == 1
     assert body["blocks"][0]["content"] == "parsed text"
+    # 미분석 doc(coverage=None) → 응답 coverage None
+    assert body["coverage"] is None
+    app.dependency_overrides.clear()
+
+
+def test_get_blocks_includes_coverage(app) -> None:
+    """분석 완료 문서: coverage(ParseCoverage)가 /blocks 응답에 반영(REQ-009)."""
+    from common_schemas import ContentBlock, ParseCoverage
+    document_id = uuid4()
+    block = ContentBlock(block_id=uuid4(), block_type="text", content="parsed text")
+    coverage = ParseCoverage(
+        total_pages=4, parsed_pages=4, text_blocks=30, table_blocks=2,
+        vision_blocks=1, failed_blocks=0, warnings=[],
+    )
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(
+        return_value=_doc(
+            document_id,
+            blocks=[block],
+            analysis_status="completed",
+            analyzed_at=datetime.now(UTC),
+            coverage=coverage,
+        )
+    )
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/documents/{document_id}/blocks", headers=_headers())
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["coverage"] is not None
+    assert body["coverage"]["parsed_pages"] == 4
+    assert body["coverage"]["total_pages"] == 4
+    assert body["coverage"]["table_blocks"] == 2
+    assert body["coverage"]["vision_blocks"] == 1
     app.dependency_overrides.clear()
 
 
@@ -461,6 +500,42 @@ def test_analyze_not_found_returns_404(app) -> None:
     app.dependency_overrides.clear()
 
 
+# ── list ─────────────────────────────────────────────────────────────────────
+
+
+def test_list_documents_returns_owner_docs(app) -> None:
+    """GET /api/v1/documents — owner 본인 문서 목록 반환 (#219)."""
+    d1, d2 = uuid4(), uuid4()
+    repo = MagicMock()
+    repo.list_by_owner = AsyncMock(return_value=[_doc(d1, name="a.pdf"), _doc(d2, name="b.pdf")])
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/documents", headers=_headers())
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert {item["document_id"] for item in body} == {str(d1), str(d2)}
+    assert all(item["gcs_uri"].startswith("gs://") for item in body)
+    repo.list_by_owner.assert_awaited_once_with(_OWNER_ID)
+    app.dependency_overrides.clear()
+
+
+def test_list_documents_empty(app) -> None:
+    repo = MagicMock()
+    repo.list_by_owner = AsyncMock(return_value=[])
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/documents", headers=_headers())
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+    app.dependency_overrides.clear()
+
+
 # ── auth gate ─────────────────────────────────────────────────────────────────
 
 
@@ -472,6 +547,7 @@ def test_documents_routes_require_bearer(app) -> None:
         files={"file": ("x", BytesIO(b"x"), "text/plain")},
     )
     assert upload_resp.status_code == 401
+    assert client.get("/api/v1/documents").status_code == 401
     assert client.get(f"/api/v1/documents/{did}").status_code == 401
     assert client.get(f"/api/v1/documents/{did}/blocks").status_code == 401
     assert client.get(f"/api/v1/documents/{did}/download").status_code == 401

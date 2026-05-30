@@ -92,6 +92,9 @@ class DocumentBlock(BaseModel):
     analysis_status: AnalysisStatus = AnalysisStatus.PENDING
     analysis_error: Optional[str] = None
     analyzed_at: Optional[UtcDatetime] = None
+    # 파싱 커버리지 (QualityGate 산출 — 페이지/블록 종류별 수). 분석 완료 시 채워진다.
+    # 전방 참조(ParseCoverage는 아래 정의) — 파일 끝 model_rebuild()로 해소.
+    coverage: Optional["ParseCoverage"] = None
 
 
 class AnalysisResult(BaseModel):
@@ -223,6 +226,8 @@ class DocumentBlocksResponse(BaseModel):
     analysis_status: AnalysisStatus
     analysis_error: Optional[str] = None
     analyzed_at: Optional[UtcDatetime] = None
+    # 파싱 커버리지 — 분석 완료(completed) 시 채워짐. 진행중/실패 시 None.
+    coverage: Optional[ParseCoverage] = None
 
 
 class AnalyzeDispatchResponse(BaseModel):
@@ -239,3 +244,7 @@ class DocumentDownloadResponse(BaseModel):
     document_id: UUID
     download_url: str
     expires_in: int
+
+
+# DocumentBlock.coverage가 아래에서 정의된 ParseCoverage를 전방 참조하므로 재빌드로 해소.
+DocumentBlock.model_rebuild()

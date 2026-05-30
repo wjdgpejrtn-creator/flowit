@@ -12,6 +12,10 @@ jest.mock('../../../lib/api/skillApi', () => ({
   createPersonalSkill: (...args: unknown[]) => mockCreate(...args),
 }));
 
+jest.mock('../../../lib/api/documentApi', () => ({
+  listDocuments: jest.fn(() => Promise.resolve([])),
+}));
+
 jest.mock('../../../stores/authStore', () => ({
   useAuthStore: () => ({ role: 'User', userName: 'tester', dept: '', isAuthenticated: true }),
 }));

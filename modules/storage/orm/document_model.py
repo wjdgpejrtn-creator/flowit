@@ -42,6 +42,8 @@ class DocumentModel(Base):
     analyzed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # 파싱 커버리지 (ParseCoverage JSON) — 분석 완료 시 채워짐. 023 마이그레이션.
+    coverage: Mapped[Optional[dict[str, Any]]] = mapped_column(pg.JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -120,7 +120,14 @@ async def _analyze(document_id: UUID) -> dict:
                     "analysis_status": AnalysisStatus.COMPLETED,
                     "analysis_error": None,
                     "analyzed_at": datetime.now(UTC),
+                    "coverage": quality.coverage,  # QualityGate 산출 커버리지를 문서에 실어 노출
                 })
+                # 청크의 parent_document_id를 실제 document_id로 remap. 파이프라인은 파싱 시
+                # masked_document에 자체 uuid를 부여하고 ChunkingService가 그 id를
+                # parent_document_id로 박는다. document는 위에서 실제 document_id로 갱신하지만
+                # 청크를 그대로 두면 parent_document_id가 파싱 시점 uuid를 가리켜
+                # document_chunks_parent_document_id_fkey FK 위반(documents에 없음)이 난다.
+                chunks = [c.model_copy(update={"parent_document_id": document_id}) for c in chunks]
                 async with session_factory() as session:
                     save_repo = PgDocumentRepository(session)
                     await save_repo.save(result)
@@ -171,11 +178,48 @@ async def _mark_failed(session_factory, document_id: UUID, exc: BaseException) -
         logger.exception("analyze_document_task: failed-state 기록 실패 document_id=%s", document_id)
 
 
+def _build_vision_llm():
+    """Vision(InterleavingParser) 활성 시 ParserFactory에 주입할 LLM 클라이언트.
+
+    doc_parser `VisionExtractor`가 `llm.generate(prompt, images=[data_url])`로 호출하면
+    llm-base(Gemma 4 멀티모달) web endpoint(`POST {LLM_BASE_URL}/v1/generate`)로 HTTP RPC한다.
+    **Modal 토큰 불필요** — worker는 이미 `LLM_BASE_URL` env를 갖고 있다.
+
+    안전 기본값 = None(텍스트 전용, 현 동작). 아래가 모두 갖춰질 때만 vision을 켠다:
+      - DOC_PARSER_VISION_ENABLED = "true"|"1"|"yes"
+      - LLM_BASE_URL (llm-base web endpoint — worker secret_env_vars에 이미 매핑됨)
+    설정 누락·생성 실패 시 경고 + None으로 degrade(분석은 텍스트로 계속).
+
+    ⚠️ 실제 vision이 켜지려면(본 seam 외) 선행 필요 — docs/guides/worker-vision-enable.md:
+      · llm-base HTTP `GenerateReq`에 `images` 필드 패스스루(정혜님/REQ-011)
+      · VisionExtractor `.generate.remote()` → `.generate()` 전환(쿠쿠/REQ-006)
+      · worker `DOC_PARSER_VISION_ENABLED=true` 토글
+    """
+    flag = os.getenv("DOC_PARSER_VISION_ENABLED", "").strip().lower()
+    if flag not in ("1", "true", "yes"):
+        return None
+    base_url = os.getenv("LLM_BASE_URL", "").strip()
+    if not base_url:
+        logger.warning(
+            "DOC_PARSER_VISION_ENABLED=on이나 LLM_BASE_URL 미설정 — "
+            "vision 비활성(텍스트 전용)으로 degrade"
+        )
+        return None
+    try:
+        from .vision_llm_client import HttpVisionLLM
+
+        logger.info("vision LLM 활성 — HTTP %s/v1/generate", base_url.rstrip("/"))
+        return HttpVisionLLM(base_url)
+    except Exception:
+        logger.exception("vision LLM 클라이언트 생성 실패 — vision 비활성(텍스트 전용)으로 degrade")
+        return None
+
+
 def _build_pipeline():
     """ParsingPipeline 조립 — 매 task call마다 fresh build.
 
-    파서 등록은 ParserFactory(llm=None) 기준 — vision 모드 비활성(Phase B 단순화).
-    Phase C에서 LLMBase Modal 연동 + vision 활성 시 본 함수에 llm 인자 추가.
+    `_build_vision_llm()`이 None이면 텍스트 전용(현 동작), HTTP 비전 클라이언트를 반환하면
+    ParserFactory가 PDF/HWPX/PPTX를 InterleavingParser(VisionExtractor)로 래핑해 vision 활성.
     """
     from doc_parser.adapters.config.yaml_config_loader import YamlConfigLoader
     from doc_parser.adapters.parser_factory import ParserFactory
@@ -193,7 +237,7 @@ def _build_pipeline():
     from doc_parser.domain.services.pii_masking import PIIMaskingService
     from doc_parser.domain.services.quality_gate import QualityGate
 
-    factory = ParserFactory(llm=None)
+    factory = ParserFactory(llm=_build_vision_llm())
     for parser in (
         PdfParser(),
         DocxParser(),
