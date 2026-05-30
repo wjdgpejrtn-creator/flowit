@@ -121,6 +121,12 @@ async def _analyze(document_id: UUID) -> dict:
                     "analysis_error": None,
                     "analyzed_at": datetime.now(UTC),
                 })
+                # 청크의 parent_document_id를 실제 document_id로 remap. 파이프라인은 파싱 시
+                # masked_document에 자체 uuid를 부여하고 ChunkingService가 그 id를
+                # parent_document_id로 박는다. document는 위에서 실제 document_id로 갱신하지만
+                # 청크를 그대로 두면 parent_document_id가 파싱 시점 uuid를 가리켜
+                # document_chunks_parent_document_id_fkey FK 위반(documents에 없음)이 난다.
+                chunks = [c.model_copy(update={"parent_document_id": document_id}) for c in chunks]
                 async with session_factory() as session:
                     save_repo = PgDocumentRepository(session)
                     await save_repo.save(result)
