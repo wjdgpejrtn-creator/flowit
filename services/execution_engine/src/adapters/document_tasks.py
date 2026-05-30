@@ -178,11 +178,49 @@ async def _mark_failed(session_factory, document_id: UUID, exc: BaseException) -
         logger.exception("analyze_document_task: failed-state 기록 실패 document_id=%s", document_id)
 
 
+def _build_vision_llm():
+    """Vision(InterleavingParser) 활성 시 ParserFactory에 주입할 LLM 클라이언트.
+
+    doc_parser `VisionExtractor`는 `llm.generate.remote(prompt, images=[data_url])`로
+    llm-base(Gemma 4 멀티모달) Modal RPC를 호출한다. 따라서 llm은 llm-base Modal Cls의
+    **인스턴스**여야 한다(`modal.Cls.from_name("llm-base", "LLMBase")()`).
+
+    안전 기본값 = None(텍스트 전용, 현 동작). 아래 env가 모두 갖춰질 때만 vision을 켠다:
+      - DOC_PARSER_VISION_ENABLED = "true"|"1"|"yes"
+      - MODAL_TOKEN_ID + MODAL_TOKEN_SECRET (Modal RPC 인증 — Cloud Run worker에 secret 주입 필요)
+      - (선택) LLM_BASE_MODAL_APP / LLM_BASE_MODAL_CLS 로 앱/클래스명 override
+    설정 누락·클라이언트 생성 실패 시 경고 로그 + None으로 degrade(분석은 텍스트로 계속).
+
+    ⚠️ 이 seam만으로는 vision이 켜지지 않는다 — 워커에 Modal 토큰 secret 주입(infra) +
+    DOC_PARSER_VISION_ENABLED 설정이 선행돼야 한다. docs/guides/worker-vision-enable.md 참조.
+    """
+    flag = os.getenv("DOC_PARSER_VISION_ENABLED", "").strip().lower()
+    if flag not in ("1", "true", "yes"):
+        return None
+    if not (os.getenv("MODAL_TOKEN_ID") and os.getenv("MODAL_TOKEN_SECRET")):
+        logger.warning(
+            "DOC_PARSER_VISION_ENABLED=on이나 MODAL_TOKEN_ID/SECRET 미설정 — "
+            "vision 비활성(텍스트 전용)으로 degrade"
+        )
+        return None
+    try:
+        import modal
+
+        app_name = os.getenv("LLM_BASE_MODAL_APP", "llm-base")
+        cls_name = os.getenv("LLM_BASE_MODAL_CLS", "LLMBase")
+        llm = modal.Cls.from_name(app_name, cls_name)()
+        logger.info("vision LLM 활성 — Modal RPC %s/%s", app_name, cls_name)
+        return llm
+    except Exception:
+        logger.exception("vision LLM 클라이언트 생성 실패 — vision 비활성(텍스트 전용)으로 degrade")
+        return None
+
+
 def _build_pipeline():
     """ParsingPipeline 조립 — 매 task call마다 fresh build.
 
-    파서 등록은 ParserFactory(llm=None) 기준 — vision 모드 비활성(Phase B 단순화).
-    Phase C에서 LLMBase Modal 연동 + vision 활성 시 본 함수에 llm 인자 추가.
+    `_build_vision_llm()`이 None이면 텍스트 전용(현 동작), Modal LLM 인스턴스를 반환하면
+    ParserFactory가 PDF/HWPX/PPTX를 InterleavingParser(VisionExtractor)로 래핑해 vision 활성.
     """
     from doc_parser.adapters.config.yaml_config_loader import YamlConfigLoader
     from doc_parser.adapters.parser_factory import ParserFactory
@@ -200,7 +238,7 @@ def _build_pipeline():
     from doc_parser.domain.services.pii_masking import PIIMaskingService
     from doc_parser.domain.services.quality_gate import QualityGate
 
-    factory = ParserFactory(llm=None)
+    factory = ParserFactory(llm=_build_vision_llm())
     for parser in (
         PdfParser(),
         DocxParser(),
