@@ -53,6 +53,8 @@ class PromoteToTeamUseCase:
             tags=list(personal.tags),
             version=personal.version,
             metadata=dict(personal.metadata),
+            # source_document_id(REQ-010 문서 association)는 personal 전용 — 승격=복제 시 의도적 비승계.
+            # MarketplaceTeamSkill에 해당 필드가 없어 구조적으로도 복사되지 않는다(필드 단위 명시 생성).
             promoted_from=personal_skill_id,
             created_at=now,
             updated_at=now,

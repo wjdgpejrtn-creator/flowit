@@ -13,6 +13,7 @@ import jwt as pyjwt
 import pytest
 from app.config import Settings
 from app.dependencies.permission import get_permission_source
+from app.dependencies.repositories import get_document_repository
 from app.dependencies.use_cases import (
     get_approve_skill_use_case,
     get_create_draft_skill_use_case,
@@ -419,8 +420,12 @@ def test_personal_routes_require_bearer(app) -> None:
 # ── Personal create (REQ-010, 스킬빌더 폼 입구) ───────────────────────────────
 
 
-def _override_create_trio(app, *, sid, created, update_uc=None):
-    """create/update/get 3개 use case를 한 번에 override 하고 mock 트리오를 돌려준다."""
+def _override_create_trio(app, *, sid, created, update_uc=None, doc=...):
+    """create/update/get 3개 use case + document repo 를 override 하고 mock 을 돌려준다.
+
+    `doc_repo.get_by_id`는 기본적으로 _REVIEWER_ID 소유 문서를 반환(source_document_id
+    검증 통과 경로). `doc=None`이면 미존재(404), 다른 user_id 문서를 주면 403 경로.
+    """
     create_uc = MagicMock()
     create_uc.execute = AsyncMock(return_value=sid)
     get_uc = MagicMock()
@@ -428,9 +433,13 @@ def _override_create_trio(app, *, sid, created, update_uc=None):
     update_uc = update_uc or MagicMock()
     if not isinstance(update_uc.execute, AsyncMock):
         update_uc.execute = AsyncMock(return_value=created)
+    doc_repo = MagicMock()
+    default_doc = MagicMock(user_id=_REVIEWER_ID) if doc is ... else doc
+    doc_repo.get_by_id = AsyncMock(return_value=default_doc)
     app.dependency_overrides[get_create_draft_skill_use_case] = lambda: create_uc
     app.dependency_overrides[get_get_personal_skill_use_case] = lambda: get_uc
     app.dependency_overrides[get_update_personal_skill_use_case] = lambda: update_uc
+    app.dependency_overrides[get_document_repository] = lambda: doc_repo
     return create_uc, update_uc, get_uc
 
 
@@ -460,8 +469,64 @@ def test_create_personal_skill_minimal(app) -> None:
     assert kwargs["name"] == "새 스킬"
     assert kwargs["description"] == "설명"
     assert kwargs["instructions"] is None
+    assert kwargs["source_document_id"] is None  # 직접 진입 — association 없음
     assert kwargs["node_spec_staging"].category == "action"
     assert kwargs["node_spec_staging"].risk_level == RiskLevel.LOW
+    app.dependency_overrides.clear()
+
+
+def test_create_personal_skill_persists_source_document_id(app) -> None:
+    # REQ-010 문서→빌더 핸드오프: source_document_id 를 use case 로 전달
+    sid = uuid4()
+    doc_id = uuid4()
+    created = _personal_skill(sid, _REVIEWER_ID, name="문서 기반")
+    create_uc, _, _ = _override_create_trio(app, sid=sid, created=created)
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/skills/personal",
+        json={"name": "문서 기반", "description": "설명", "source_document_id": str(doc_id)},
+        headers=_headers(),
+    )
+
+    assert resp.status_code == 201
+    assert create_uc.execute.await_args.kwargs["source_document_id"] == doc_id
+    app.dependency_overrides.clear()
+
+
+def test_create_personal_skill_unknown_source_document_404(app) -> None:
+    # 없는 문서 id → FK 위반 500 이 아니라 404 (라우터 선검증)
+    sid = uuid4()
+    create_uc, _, _ = _override_create_trio(app, sid=sid, created=None, doc=None)
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/skills/personal",
+        json={"name": "x", "description": "y", "source_document_id": str(uuid4())},
+        headers=_headers(),
+    )
+    assert resp.status_code == 404
+    create_uc.execute.assert_not_awaited()  # 검증 실패 시 생성 안 함
+    app.dependency_overrides.clear()
+
+
+def test_create_personal_skill_other_users_source_document_403(app) -> None:
+    # 타 사용자 문서 id → FK 는 통과하지만 소유 검증으로 403 (association leak 차단)
+    sid = uuid4()
+    other_doc = MagicMock(user_id=uuid4())  # _REVIEWER_ID 아님
+    create_uc, _, _ = _override_create_trio(app, sid=sid, created=None, doc=other_doc)
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/skills/personal",
+        json={"name": "x", "description": "y", "source_document_id": str(uuid4())},
+        headers=_headers(),
+    )
+    assert resp.status_code == 403
+    create_uc.execute.assert_not_awaited()
     app.dependency_overrides.clear()
 
 
