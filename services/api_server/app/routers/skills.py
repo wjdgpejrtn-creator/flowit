@@ -23,10 +23,12 @@ from datetime import datetime
 from uuid import UUID
 
 from common_schemas import PermissionSource
+from common_schemas.enums import RiskLevel
 from fastapi import APIRouter, Depends, Query, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
+    CreateDraftSkillUseCase,
     DeletePersonalSkillUseCase,
     GetPersonalSkillUseCase,
     ListUserPersonalSkillsUseCase,
@@ -34,12 +36,14 @@ from skills_marketplace.application.use_cases import (
     UpdatePersonalSkillUseCase,
 )
 from skills_marketplace.domain.entities.marketplace_personal_skill import MarketplacePersonalSkill
+from skills_marketplace.domain.value_objects.node_spec_staging import NodeSpecStaging
 from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 from skills_marketplace.domain.value_objects.skill_state import SkillState
 
 from app.dependencies.permission import get_permission_source
 from app.dependencies.use_cases import (
     get_approve_skill_use_case,
+    get_create_draft_skill_use_case,
     get_delete_personal_skill_use_case,
     get_get_personal_skill_use_case,
     get_list_personal_skills_use_case,
@@ -158,6 +162,53 @@ class UpdatePersonalSkillRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     tags: list[str] | None = None
+
+
+class CreatePersonalSkillRequest(BaseModel):
+    name: str
+    description: str
+    instructions: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+@router.post("/personal", response_model=PersonalSkillResponse, status_code=status.HTTP_201_CREATED)
+async def create_personal_skill(
+    body: CreatePersonalSkillRequest,
+    permission: PermissionSource = Depends(get_permission_source),
+    create_use_case: CreateDraftSkillUseCase = Depends(get_create_draft_skill_use_case),
+    update_use_case: UpdatePersonalSkillUseCase = Depends(get_update_personal_skill_use_case),
+    get_use_case: GetPersonalSkillUseCase = Depends(get_get_personal_skill_use_case),
+) -> PersonalSkillResponse:
+    """개인 DRAFT 스킬 생성 — 스킬빌더 폼 입구 (REQ-010, 프론트 POST /skills/personal 대응).
+
+    `CreateDraftSkillUseCase`(박아름, ADR-0020 ②e) 재사용. 이 use case는 본래 Skills Builder
+    Agent(REQ-004 ③) 추출 결과용이라 `node_spec_staging`이 필수 입력이다. 수동 폼 생성은 노드
+    스펙이 없어 빈 staging(action/빈 스키마/LOW)을 placeholder로 넣는다 — 실제 스펙은 추후
+    에이전트 추출/publish 단계에서 확정. tags는 create 계약에 없어 생성 직후 update로 반영
+    (owner+DRAFT 보장 — 방금 생성분). 응답은 GetPersonalSkill로 재조회해 일관 직렬화.
+    """
+    skill_id = await create_use_case.execute(
+        owner_user_id=permission.user_id,
+        name=body.name,
+        description=body.description,
+        node_spec_staging=NodeSpecStaging(
+            category="action",
+            input_schema={},
+            output_schema={},
+            risk_level=RiskLevel.LOW,
+        ),
+        instructions=body.instructions,
+    )
+    if body.tags:
+        await update_use_case.execute(
+            skill_id=skill_id,
+            actor_user_id=permission.user_id,
+            name=None,
+            description=None,
+            tags=body.tags,
+        )
+    created = await get_use_case.execute(skill_id=skill_id, actor_user_id=permission.user_id)
+    return _to_response(created)
 
 
 @router.get("/personal", response_model=list[PersonalSkillResponse])

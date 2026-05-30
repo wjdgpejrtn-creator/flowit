@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Btn from '@/components/common/Btn';
 
 // 디자인 SSOT: screens-3.jsx DocumentsScreen "통합" v2 우측 분석 사이드바.
@@ -8,8 +9,9 @@ import Btn from '@/components/common/Btn';
 //
 // NOTE: 요약/키워드/엔티티는 분석 결과(AnalysisResult) 데이터인데, 이를 내려주는
 // 프론트 API 엔드포인트가 아직 없어 placeholder 로 둔다. 백엔드 연동 후 props 로 주입.
-// Skills Builder 핸드오프("이 문서로 스킬 만들기" / "SkillNode 후보 보기")는 REQ-013
-// (황대원 담당) 영역 — UI 자리만 두고 동작 wiring 은 후속.
+// Skills Builder 핸드오프("이 문서로 스킬 만들기" / "SkillNode 후보 보기")는 REQ-010 에서
+// 활성화 — /skills/builder?source_document_id=<id> 로 이동. 단 문서↔스킬 DB 연결
+// (source_document_id 영속화)은 박아름 skills_marketplace 백엔드 wiring 후속.
 
 type Tab = 'analysis' | 'quality' | 'pii';
 
@@ -23,7 +25,14 @@ function Placeholder({ text }: { text: string }) {
   return <div className="text-[12px] text-[var(--color-ink4)] mt-2">{text}</div>;
 }
 
-export default function DocumentAnalysisSidebar({ analyzed }: { analyzed: boolean }) {
+export default function DocumentAnalysisSidebar({
+  analyzed,
+  documentId,
+}: {
+  analyzed: boolean;
+  documentId: string;
+}) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>('analysis');
 
   return (
@@ -77,18 +86,20 @@ export default function DocumentAnalysisSidebar({ analyzed }: { analyzed: boolea
       {/* 구분선 */}
       <div className="h-[1px] bg-[var(--color-line-soft)] my-3" />
 
-      {/* Skills Builder 핸드오프 — REQ-013(황대원) 영역. UI 자리만, 동작 wiring 후속. */}
+      {/* Skills Builder 핸드오프 — 이 문서를 기반 문서로 지정해 빌더로 이동(빈 폼).
+          문서에서 노드 후보를 자동 추출하는 기능은 Skills Builder Agent(REQ-004 ③,
+          정혜님/박아름) 연동이 필요해 아직 없음 — 라벨을 실제 동작에 맞춤. */}
       <div className="font-bold text-[13px]">🛠 Skills Builder</div>
       <div className="text-[11px] text-[var(--color-ink4)] mt-2">
-        이 문서의 처리 패턴을 스킬로 추출할 수 있어요.
+        이 문서를 기반으로 새 스킬을 만들 수 있어요.
       </div>
       <Btn
         primary
-        disabled
-        title="스킬빌더 연동 예정 (REQ-013)"
-        className="mt-2 w-full justify-center opacity-60"
+        title="이 문서를 기반으로 새 스킬 만들기"
+        onClick={() => router.push(`/skills/builder?source_document_id=${documentId}`)}
+        className="mt-2 w-full justify-center"
       >
-        SkillNode 후보 보기 →
+        이 문서로 스킬 만들기 →
       </Btn>
     </div>
   );
