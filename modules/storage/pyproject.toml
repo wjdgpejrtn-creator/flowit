@@ -11,10 +11,14 @@ dependencies = [
     "pgvector>=0.3",
     "cloud-sql-python-connector[asyncpg]>=1.12",
     "pyyaml>=6.0",
+    # GCSAdapter(ObjectStoragePort 구현)가 google.cloud.storage + google.cloud.exceptions를
+    # 사용한다. base 의존성 — worker/api_server가 storage를 설치하면 자동 포함되어야 한다.
+    # (이전엔 `[gcs]` extra라 Dockerfile `pip install -e storage`에 안 실려 worker analyze가
+    #  `No module named 'google.cloud.exceptions'`로 실패. 2026-05-29.)
+    "google-cloud-storage>=2.14",
 ]
 
 [project.optional-dependencies]
-gcs = ["google-cloud-storage>=2.14"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
