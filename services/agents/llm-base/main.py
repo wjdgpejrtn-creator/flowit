@@ -86,6 +86,10 @@ class GenerateReq(BaseModel):
     system: str | None = None
     format: str | None = None  # "json" 지정 시 grammar-level JSON 강제
     json_schema: dict | None = None
+    # data URL 목록(예: "data:image/png;base64,..."). Gemma 4 멀티모달 vision 입력 —
+    # doc_parser VisionExtractor가 HttpVisionLLM 경유 POST(REQ-006/007). `_run_generate`는
+    # 이미 images kwargs를 처리하므로 HTTP 경로에 필드만 노출하면 됨.
+    images: list[str] = []
 
 
 APP_NAME = "llm-base"
@@ -446,6 +450,8 @@ class LLMBase:
                 kwargs["format"] = req.format
             if req.json_schema:
                 kwargs["json_schema"] = req.json_schema
+            if req.images:
+                kwargs["images"] = req.images  # Gemma 4 vision — _run_generate가 처리
             return self._run_generate(req.prompt, **kwargs)
 
         return api
