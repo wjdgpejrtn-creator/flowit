@@ -181,36 +181,35 @@ async def _mark_failed(session_factory, document_id: UUID, exc: BaseException) -
 def _build_vision_llm():
     """Vision(InterleavingParser) 활성 시 ParserFactory에 주입할 LLM 클라이언트.
 
-    doc_parser `VisionExtractor`는 `llm.generate.remote(prompt, images=[data_url])`로
-    llm-base(Gemma 4 멀티모달) Modal RPC를 호출한다. 따라서 llm은 llm-base Modal Cls의
-    **인스턴스**여야 한다(`modal.Cls.from_name("llm-base", "LLMBase")()`).
+    doc_parser `VisionExtractor`가 `llm.generate(prompt, images=[data_url])`로 호출하면
+    llm-base(Gemma 4 멀티모달) web endpoint(`POST {LLM_BASE_URL}/v1/generate`)로 HTTP RPC한다.
+    **Modal 토큰 불필요** — worker는 이미 `LLM_BASE_URL` env를 갖고 있다.
 
-    안전 기본값 = None(텍스트 전용, 현 동작). 아래 env가 모두 갖춰질 때만 vision을 켠다:
+    안전 기본값 = None(텍스트 전용, 현 동작). 아래가 모두 갖춰질 때만 vision을 켠다:
       - DOC_PARSER_VISION_ENABLED = "true"|"1"|"yes"
-      - MODAL_TOKEN_ID + MODAL_TOKEN_SECRET (Modal RPC 인증 — Cloud Run worker에 secret 주입 필요)
-      - (선택) LLM_BASE_MODAL_APP / LLM_BASE_MODAL_CLS 로 앱/클래스명 override
-    설정 누락·클라이언트 생성 실패 시 경고 로그 + None으로 degrade(분석은 텍스트로 계속).
+      - LLM_BASE_URL (llm-base web endpoint — worker secret_env_vars에 이미 매핑됨)
+    설정 누락·생성 실패 시 경고 + None으로 degrade(분석은 텍스트로 계속).
 
-    ⚠️ 이 seam만으로는 vision이 켜지지 않는다 — 워커에 Modal 토큰 secret 주입(infra) +
-    DOC_PARSER_VISION_ENABLED 설정이 선행돼야 한다. docs/guides/worker-vision-enable.md 참조.
+    ⚠️ 실제 vision이 켜지려면(본 seam 외) 선행 필요 — docs/guides/worker-vision-enable.md:
+      · llm-base HTTP `GenerateReq`에 `images` 필드 패스스루(정혜님/REQ-011)
+      · VisionExtractor `.generate.remote()` → `.generate()` 전환(쿠쿠/REQ-006)
+      · worker `DOC_PARSER_VISION_ENABLED=true` 토글
     """
     flag = os.getenv("DOC_PARSER_VISION_ENABLED", "").strip().lower()
     if flag not in ("1", "true", "yes"):
         return None
-    if not (os.getenv("MODAL_TOKEN_ID") and os.getenv("MODAL_TOKEN_SECRET")):
+    base_url = os.getenv("LLM_BASE_URL", "").strip()
+    if not base_url:
         logger.warning(
-            "DOC_PARSER_VISION_ENABLED=on이나 MODAL_TOKEN_ID/SECRET 미설정 — "
+            "DOC_PARSER_VISION_ENABLED=on이나 LLM_BASE_URL 미설정 — "
             "vision 비활성(텍스트 전용)으로 degrade"
         )
         return None
     try:
-        import modal
+        from .vision_llm_client import HttpVisionLLM
 
-        app_name = os.getenv("LLM_BASE_MODAL_APP", "llm-base")
-        cls_name = os.getenv("LLM_BASE_MODAL_CLS", "LLMBase")
-        llm = modal.Cls.from_name(app_name, cls_name)()
-        logger.info("vision LLM 활성 — Modal RPC %s/%s", app_name, cls_name)
-        return llm
+        logger.info("vision LLM 활성 — HTTP %s/v1/generate", base_url.rstrip("/"))
+        return HttpVisionLLM(base_url)
     except Exception:
         logger.exception("vision LLM 클라이언트 생성 실패 — vision 비활성(텍스트 전용)으로 degrade")
         return None
@@ -219,7 +218,7 @@ def _build_vision_llm():
 def _build_pipeline():
     """ParsingPipeline 조립 — 매 task call마다 fresh build.
 
-    `_build_vision_llm()`이 None이면 텍스트 전용(현 동작), Modal LLM 인스턴스를 반환하면
+    `_build_vision_llm()`이 None이면 텍스트 전용(현 동작), HTTP 비전 클라이언트를 반환하면
     ParserFactory가 PDF/HWPX/PPTX를 InterleavingParser(VisionExtractor)로 래핑해 vision 활성.
     """
     from doc_parser.adapters.config.yaml_config_loader import YamlConfigLoader
