@@ -1,0 +1,68 @@
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+const mockPush = jest.fn();
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockPush }),
+  usePathname: () => '/documents',
+}));
+
+jest.mock('../../../stores/authStore', () => ({
+  useAuthStore: () => ({ role: 'User', userName: 'tester', dept: '', isAuthenticated: true }),
+}));
+
+jest.mock('../../../hooks/useAuth', () => ({
+  useAuth: () => ({ logout: jest.fn() }),
+}));
+
+const mockUpload = jest.fn();
+jest.mock('../../../lib/api/documentApi', () => ({
+  uploadDocument: (...args: unknown[]) => mockUpload(...args),
+}));
+
+import DocumentsPage from '../page';
+
+const DOC = {
+  document_id: 'doc-1',
+  file_name: '2026 Q2 견적_LG.pdf',
+  mime_type: 'application/pdf',
+  file_size: 2_400_000,
+  gcs_uri: 'gs://bucket/doc-1',
+  is_analyzed: true,
+  analysis_status: 'completed',
+};
+
+beforeEach(() => {
+  mockPush.mockReset();
+  mockUpload.mockReset();
+  localStorage.clear();
+});
+
+describe('DocumentsPage — 카드 그리드 + 업로드 패널 (디자인 SSOT)', () => {
+  it('저장된 문서를 카드로 렌더링한다', () => {
+    localStorage.setItem('wf_documents_list', JSON.stringify([DOC]));
+    render(<DocumentsPage />);
+
+    expect(screen.getByText('2026 Q2 견적_LG.pdf')).toBeInTheDocument();
+    expect(screen.getByText('문서 (1)')).toBeInTheDocument();
+    // 파일타입 태그
+    expect(screen.getByText('PDF')).toBeInTheDocument();
+  });
+
+  it('카드 클릭 시 상세 페이지로 이동한다', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('wf_documents_list', JSON.stringify([DOC]));
+    render(<DocumentsPage />);
+
+    await user.click(screen.getByText('2026 Q2 견적_LG.pdf'));
+    expect(mockPush).toHaveBeenCalledWith('/documents/doc-1');
+  });
+
+  it('문서가 없으면 빈 상태를 보여주고 업로드 패널을 노출한다', () => {
+    render(<DocumentsPage />);
+
+    expect(screen.getByText('문서가 없습니다')).toBeInTheDocument();
+    expect(screen.getByText('업로드')).toBeInTheDocument();
+    expect(screen.getByText(/파일을 드래그하거나/)).toBeInTheDocument();
+  });
+});

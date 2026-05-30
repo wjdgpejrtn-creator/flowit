@@ -7,6 +7,7 @@ import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import FileMetaHeader from '@/components/document/FileMetaHeader';
 import DocumentViewer from '@/components/document/DocumentViewer';
+import DocumentAnalysisSidebar from '@/components/document/DocumentAnalysisSidebar';
 import {
   getDocument,
   getDocumentBlocks,
@@ -160,7 +161,7 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
   const isFailed = status === AnalysisStatus.FAILED;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
+    <div className="h-screen flex flex-col bg-[var(--color-paper)]">
       <AppBar />
 
       {/* 헤더 */}
@@ -183,6 +184,10 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
         <Btn onClick={handleAnalyze} disabled={isRunning || !doc}>
           {isRunning ? '분석 중…' : isFailed ? '🔁 다시 분석' : '🔍 분석'}
         </Btn>
+        {/* 문서 → 스킬빌더 핸드오프 — REQ-013(황대원) 영역. UI 자리만, 동작 wiring 후속. */}
+        <Btn primary disabled title="스킬빌더 연동 예정 (REQ-013)" className="opacity-60">
+          🛠 이 문서로 스킬 만들기
+        </Btn>
       </div>
 
       {error && (
@@ -204,17 +209,20 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
       {/* 파일 메타 */}
       {doc && <FileMetaHeader doc={doc} />}
 
-      {/* 본문 */}
-      <div className="flex-1 overflow-auto">
-        {loading ? (
-          <DocumentViewer blocks={[]} loading />
-        ) : doc ? (
-          <DocumentViewer blocks={blocks} />
-        ) : (
-          <div className="flex items-center justify-center py-16 text-[13px] text-[var(--color-ink4)]">
-            문서를 찾을 수 없습니다.
-          </div>
-        )}
+      {/* 본문 — 좌: 문서 뷰어 / 우: 분석 사이드바 (디자인 SSOT 2단 레이아웃) */}
+      <div className="flex-1 grid grid-cols-[1fr_320px] min-h-0">
+        <div className="overflow-auto">
+          {loading ? (
+            <DocumentViewer blocks={[]} loading />
+          ) : doc ? (
+            <DocumentViewer blocks={blocks} />
+          ) : (
+            <div className="flex items-center justify-center py-16 text-[13px] text-[var(--color-ink4)]">
+              문서를 찾을 수 없습니다.
+            </div>
+          )}
+        </div>
+        <DocumentAnalysisSidebar analyzed={status === AnalysisStatus.COMPLETED} />
       </div>
     </div>
   );
