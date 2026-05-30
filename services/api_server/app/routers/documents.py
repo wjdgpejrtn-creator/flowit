@@ -221,6 +221,7 @@ async def get_document_blocks(
         analysis_status=document.analysis_status,
         analysis_error=document.analysis_error,
         analyzed_at=document.analyzed_at,
+        coverage=document.coverage,
     )
 
 

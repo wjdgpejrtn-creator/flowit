@@ -7,6 +7,16 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.15.0] - 2026-05-30
+
+### Added — 문서 파싱 커버리지 노출 (REQ-009 — analyze 결과 가시화)
+- `document.py`:
+  - `DocumentBlock` 도메인 엔티티에 `coverage: Optional[ParseCoverage] = None` 추가. QualityGate가 산출한 페이지/블록 종류별 커버리지를 문서에 실어 storage→api→프론트로 흐르게 한다. 기존엔 `QualityGateResult.coverage`가 계산만 되고 `save_quality_log`에서 드롭돼 어디에도 노출 안 됐다.
+  - `DocumentBlocksResponse`에 동일 `coverage` 필드 추가 — `GET /api/v1/documents/{id}/blocks`가 분석 완료 시 커버리지 반환.
+  - `DocumentBlock`이 뒤에 정의된 `ParseCoverage`를 전방 참조하므로 파일 끝 `DocumentBlock.model_rebuild()` 추가.
+- 둘 다 `Optional` 신규 필드 → MINOR. `ParseCoverage`는 기존 정의/TS export 재사용(신규 타입 없음).
+- TS regenerate 완료 — `DocumentBlock` / `DocumentBlocksResponse` 인터페이스에 `coverage` 자동 반영.
+
 ## [0.14.0] - 2026-05-29
 
 ### Added — 문서 분석 상태 추적 (REQ-009/REQ-007 — 분석 결과 read path 완성)

@@ -336,6 +336,16 @@ export interface ParserMeta {
   parse_duration_ms?: number | null;
 }
 
+export interface ParseCoverage {
+  total_pages: number;
+  parsed_pages: number;
+  text_blocks: number;
+  table_blocks: number;
+  vision_blocks: number;
+  failed_blocks: number;
+  warnings: Array<string>;
+}
+
 export interface DocumentBlock {
   document_id: string;
   workflow_id?: string | null;
@@ -348,6 +358,7 @@ export interface DocumentBlock {
   analysis_status: AnalysisStatus;
   analysis_error?: string | null;
   analyzed_at?: string | null;
+  coverage?: ParseCoverage | null;
 }
 
 export interface DocumentBlocksResponse {
@@ -356,6 +367,7 @@ export interface DocumentBlocksResponse {
   analysis_status: AnalysisStatus;
   analysis_error?: string | null;
   analyzed_at?: string | null;
+  coverage?: ParseCoverage | null;
 }
 
 export interface DocumentDownloadResponse {
@@ -422,16 +434,6 @@ export interface NodeExecutionState {
   status: "pending" | "running" | "succeeded" | "failed" | "retrying" | "cancelled";
   attempt: number;
   last_error?: string | null;
-}
-
-export interface ParseCoverage {
-  total_pages: number;
-  parsed_pages: number;
-  text_blocks: number;
-  table_blocks: number;
-  vision_blocks: number;
-  failed_blocks: number;
-  warnings: Array<string>;
 }
 
 export interface PermissionSource {

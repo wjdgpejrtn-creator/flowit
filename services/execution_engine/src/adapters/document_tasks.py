@@ -120,6 +120,7 @@ async def _analyze(document_id: UUID) -> dict:
                     "analysis_status": AnalysisStatus.COMPLETED,
                     "analysis_error": None,
                     "analyzed_at": datetime.now(UTC),
+                    "coverage": quality.coverage,  # QualityGate 산출 커버리지를 문서에 실어 노출
                 })
                 # 청크의 parent_document_id를 실제 document_id로 remap. 파이프라인은 파싱 시
                 # masked_document에 자체 uuid를 부여하고 ChunkingService가 그 id를

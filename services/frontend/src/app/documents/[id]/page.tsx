@@ -14,7 +14,7 @@ import {
   analyzeDocument,
   type DocumentResponse,
 } from '@/lib/api/documentApi';
-import { AnalysisStatus, type ContentBlock } from '@common/generated';
+import { AnalysisStatus, type ContentBlock, type ParseCoverage } from '@common/generated';
 
 // 폴링 정책 — 분석 dispatch 후 2초 간격으로 max 60s.
 const POLL_INTERVAL_MS = 2000;
@@ -51,6 +51,7 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
 
   const [doc, setDoc] = useState<DocumentResponse | null>(null);
   const [blocks, setBlocks] = useState<ContentBlock[]>([]);
+  const [coverage, setCoverage] = useState<ParseCoverage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -72,6 +73,7 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
     try {
       const res = await getDocumentBlocks(docId);
       setBlocks(res.blocks);
+      setCoverage(res.coverage ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : '분석 결과 조회 실패');
     }
@@ -131,6 +133,7 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
     setAnalyzing(true);
     setError(null);
     setBlocks([]);
+    setCoverage(null);
     try {
       await analyzeDocument(id);
       // dispatch 직후 메타가 아직 running 으로 갱신 안 됐을 수 있음 — 폴링이 따라잡음.
@@ -198,6 +201,23 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
       {isRunning && (
         <div className="px-4 pt-2 text-[12px] text-[var(--color-ink3)] border-b border-[var(--color-line-soft)] pb-2 bg-[var(--color-paper2)]">
           🔄 분석 중입니다… (최대 60초)
+        </div>
+      )}
+      {coverage && status === AnalysisStatus.COMPLETED && (
+        <div className="px-4 py-2 border-b border-[var(--color-line-soft)] bg-[var(--color-paper2)] flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-[var(--color-ink3)]">
+          <span className="font-bold text-[var(--color-ink)]">📊 파싱 커버리지</span>
+          <span>페이지 <b>{coverage.parsed_pages}/{coverage.total_pages}</b></span>
+          <span>텍스트 {coverage.text_blocks}</span>
+          <span>표 {coverage.table_blocks}</span>
+          {coverage.vision_blocks > 0 && <span>이미지 {coverage.vision_blocks}</span>}
+          {coverage.failed_blocks > 0 && (
+            <span className="text-[var(--color-risk-high)]">실패 {coverage.failed_blocks}</span>
+          )}
+          {coverage.warnings.length > 0 && (
+            <span className="text-[var(--color-risk-restricted)]" title={coverage.warnings.join('\n')}>
+              ⚠ 경고 {coverage.warnings.length}건
+            </span>
+          )}
         </div>
       )}
 
