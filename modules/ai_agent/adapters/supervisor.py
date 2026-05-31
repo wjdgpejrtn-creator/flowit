@@ -56,6 +56,9 @@ class _State(TypedDict):
     intent: str | None
     intent_analyzed_entities: dict[str, Any]
     error: str | None
+    # two-shot HITL relay passthrough (REQ-013)
+    round: int
+    selected_skill_id: str | None
 
 
 class LangGraphSupervisor:
@@ -89,8 +92,10 @@ class LangGraphSupervisor:
         message: str,
         trace_id: str | None = None,
         turn_count: int = 1,
+        round: int = 1,
+        selected_skill_id: str | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
-        return self._run(user_id, session_id, message, trace_id, turn_count)
+        return self._run(user_id, session_id, message, trace_id, turn_count, round, selected_skill_id)
 
     async def _run(
         self,
@@ -99,6 +104,8 @@ class LangGraphSupervisor:
         message: str,
         trace_id: str | None,
         turn_count: int = 1,
+        round: int = 1,
+        selected_skill_id: str | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
         yield SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
 
@@ -112,11 +119,26 @@ class LangGraphSupervisor:
             "intent": None,
             "intent_analyzed_entities": {},
             "error": None,
+            "round": round,
+            "selected_skill_id": selected_skill_id,
         }
 
         all_frames: list[AnySSEFrame] = []
 
         try:
+            # ── two-shot 2차 (REQ-013) — intent 재분석 없이 곧장 composer 재개 relay ──
+            if round == 2:
+                node_frame = AgentNodeFrame(agent_node_name="composer")
+                all_frames.append(node_frame)
+                yield node_frame
+                async for frame in self._relay_stream(state, self._composer, AgentMode.WIZARD):
+                    all_frames.append(frame)
+                    yield frame
+                await self._update_memory_node(state)
+                if self._session_frame_store:
+                    await self._save_session_frames(session_id, user_id, message, all_frames)
+                return
+
             # ── load_memory ───────────────────────────────────────────────
             node_frame = AgentNodeFrame(agent_node_name="load_memory")
             all_frames.append(node_frame)
@@ -225,12 +247,20 @@ class LangGraphSupervisor:
             personal_memory=state["personal_memory"],
             execution_status=ExecutionStatus.RUNNING,
         )
+        # two-shot 라운드/선택 스킬을 payload로 passthrough (1차는 round=1·None 기본 → 무영향)
+        payload: dict[str, Any] = {
+            "message": state["message"],
+            "round": state.get("round", 1),
+        }
+        selected = state.get("selected_skill_id")
+        if selected:
+            payload["selected_skill_id"] = selected
         req = AgentProtocolRequest(
             session_id=state["session_id"],
             user_id=state["user_id"],
             state=agent_state,
             personal_memory=state["personal_memory"],
-            payload={"message": state["message"]},
+            payload=payload,
             trace_id=state["trace_id"],
         )
         try:

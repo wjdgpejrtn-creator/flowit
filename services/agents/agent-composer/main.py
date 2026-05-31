@@ -114,6 +114,7 @@ class AgentComposer:
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.memory.gcs_session_frame_store import GCSSessionFrameStore
         from ai_agent.adapters.memory.gcs_workflow_draft_store import GCSWorkflowDraftStore
+        from ai_agent.adapters.memory.gcs_composer_state_store import GCSComposerStateStore
         from ai_agent.adapters.memory.gcs_memory_store import GCSMemoryStore
         from ai_agent.adapters.node_registry_adapter import NodeRegistryAdapter
         from ai_agent.adapters.langgraph.composer_graph import LangGraphOrchestrator
@@ -147,6 +148,7 @@ class AgentComposer:
         self._orchestrator_cls = LangGraphOrchestrator
         self._session_frame_store = GCSSessionFrameStore()
         self._workflow_draft_store = GCSWorkflowDraftStore()
+        self._composer_state_store = GCSComposerStateStore()  # two-shot 1차 상태 영속 (REQ-013)
         self._personal_memory_store = GCSMemoryStore()
         self._diff_service = WorkflowDiffService()
         self._execution_engine_url = os.getenv("EXECUTION_ENGINE_URL", "")
@@ -242,12 +244,15 @@ class AgentComposer:
                             personal_memory_store=self._personal_memory_store,
                             skill_search=skill_search,
                             embedder=self._embedder,
+                            composer_state_store=self._composer_state_store,
                         )
                         async for frame in await graph.stream(
                             user_id=req.user_id,
                             session_id=req.session_id,
                             message=req.payload.get("message", ""),
                             personal_memory=list(req.personal_memory),
+                            round=req.payload.get("round", 1),
+                            selected_skill_id=req.payload.get("selected_skill_id"),
                         ):
                             resp = AgentProtocolResponse(
                                 frames=[frame],
