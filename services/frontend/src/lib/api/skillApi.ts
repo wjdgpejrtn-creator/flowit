@@ -85,6 +85,14 @@ export async function listMarketplaceSkills(
   return apiJson<MarketplaceSkill[]>(`/api/v1/skills/marketplace?${params}`);
 }
 
+export async function getMarketplaceSkill(
+  scope: MarketplaceScope,
+  skillId: string,
+): Promise<MarketplaceSkill> {
+  const params = new URLSearchParams({ scope });
+  return apiJson<MarketplaceSkill>(`/api/v1/skills/marketplace/${skillId}?${params}`);
+}
+
 export async function getPersonalSkill(skillId: string): Promise<PersonalSkill> {
   return apiJson<PersonalSkill>(`/api/v1/skills/personal/${skillId}`);
 }

@@ -208,9 +208,10 @@ function MarketplaceTabContent({ scope }: { scope: MarketplaceScope }) {
   return (
     <div className="grid grid-cols-3 gap-[10px]">
       {skills.map((sk) => (
-        <div
+        <Link
           key={sk.skill_id}
-          className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[10px] flex flex-col gap-2"
+          href={`/skills/marketplace/${sk.skill_id}?scope=${scope}`}
+          className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[10px] flex flex-col gap-2 no-underline text-[var(--color-ink)] hover:bg-[var(--color-paper2)] transition-colors"
         >
           <div className="flex items-center justify-between">
             {sk.tags.length > 0 && (
@@ -231,7 +232,7 @@ function MarketplaceTabContent({ scope }: { scope: MarketplaceScope }) {
             <span>v{sk.version}</span>
             <span>{new Date(sk.updated_at).toLocaleDateString('ko-KR')}</span>
           </div>
-        </div>
+        </Link>
       ))}
     </div>
   );

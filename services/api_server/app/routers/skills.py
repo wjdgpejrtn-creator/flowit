@@ -31,6 +31,7 @@ from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
     CreateDraftSkillUseCase,
     DeletePersonalSkillUseCase,
+    GetMarketplaceSkillUseCase,
     GetPersonalSkillUseCase,
     ListMarketplaceSkillsUseCase,
     ListUserPersonalSkillsUseCase,
@@ -50,6 +51,7 @@ from app.dependencies.use_cases import (
     get_approve_skill_use_case,
     get_create_draft_skill_use_case,
     get_delete_personal_skill_use_case,
+    get_get_marketplace_skill_use_case,
     get_get_personal_skill_use_case,
     get_list_marketplace_skills_use_case,
     get_list_personal_skills_use_case,
@@ -358,3 +360,20 @@ async def list_marketplace_skills(
         scope=scope, lifecycle_state=SkillState.PUBLISHED, limit=limit, offset=offset
     )
     return [_to_marketplace_response(s, scope) for s in skills]
+
+
+@router.get("/marketplace/{skill_id}", response_model=MarketplaceSkillResponse)
+async def get_marketplace_skill(
+    skill_id: UUID,
+    scope: SkillScope = Query(..., description="team | company (personal은 GET /personal/{id} 사용)"),
+    permission: PermissionSource = Depends(get_permission_source),
+    use_case: GetMarketplaceSkillUseCase = Depends(get_get_marketplace_skill_use_case),
+) -> MarketplaceSkillResponse:
+    """마켓플레이스 스킬 단건 상세 — Team/Company 탭 카드 → 상세 페이지.
+
+    목록과 동일하게 **PUBLISHED만** 반환(use case가 미게시/미존재를 동일 404로 가림 — id 직접
+    접근으로 미검토 스킬 메타를 읽는 것 차단). 인증 필수. personal scope는 use case가
+    `ValidationError`→400(개인 스킬은 GET /personal/{id}, owner 게이트).
+    """
+    skill = await use_case.execute(scope=scope, skill_id=skill_id)
+    return _to_marketplace_response(skill, scope)
