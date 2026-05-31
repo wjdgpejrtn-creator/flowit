@@ -7,6 +7,15 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.18.0] - 2026-05-31
+
+### Added — 스킬 선택 SSE 프레임 (REQ-013 two-shot HITL 생산자)
+- `transport/sse.py`:
+  - `SkillSelectionFrame` 신규 — 스킬 검색 후 사용자에게 적용할 스킬을 옵션으로 제시(two-shot 1차). `prompt` + `options: list[SkillOption]` + `field_name`("skill_selection") + `allow_skip`. 프론트가 옵션 렌더 → 사용자 선택 → `POST /sessions/{id}/slot`로 2차 트리거.
+  - `SkillOption` 신규(중첩 모델) — `skill_id` + `name` + `description` + `document_preview?`(SkillDocument.instructions 미리보기) + `node_definition_id?`(노드형 호환, 지침서형은 None).
+  - `AnySSEFrame` Union에 `Tag("skill_selection")` 등록. `SlotFillQuestionFrame`(question/field_name만)은 복수 옵션·skill_id 불가라 신규 프레임 채택.
+- 신규 프레임/모델(기존 변경 없음) → MINOR. TS regenerate 완료.
+
 ## [0.17.0] - 2026-05-31
 
 ### Added — 스킬 런타임 주입 바인딩 (REQ-013 코어)

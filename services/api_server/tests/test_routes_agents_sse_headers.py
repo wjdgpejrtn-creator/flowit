@@ -112,3 +112,37 @@ def test_stream_session_frames_sse_headers_present(app):
             assert resp.status_code == 200
             _assert_sse_headers(resp.headers)
             list(resp.iter_lines())
+
+
+def test_slot_answer_streams_round2_payload_to_orchestrator(app):
+    """POST /sessions/{id}/slot — 스킬 선택을 round=2 + selected_skill_id로 orchestrator에 프록시(REQ-013)."""
+    _override_permission(app)
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        captured.update(_json.loads(request.content))
+        return httpx.Response(
+            200,
+            content=b'data: {"frames": []}\n\n',
+            headers={"content-type": "text/event-stream"},
+        )
+
+    mock_transport = httpx.MockTransport(handler)
+    mock_client = httpx.AsyncClient(base_url="http://mock", transport=mock_transport)
+    app.dependency_overrides[get_orchestrator_http] = lambda: mock_client
+
+    skill_id = str(uuid4())
+    client = TestClient(app)
+    with client.stream(
+        "POST",
+        f"/api/v1/agents/sessions/{uuid4()}/slot",
+        json={"skill_id": skill_id, "field_name": "skill_selection"},
+        headers={"Authorization": f"Bearer {_bearer_token()}"},
+    ) as resp:
+        assert resp.status_code == 200
+        _assert_sse_headers(resp.headers)
+        list(resp.iter_lines())
+
+    assert captured["payload"]["round"] == 2
+    assert captured["payload"]["selected_skill_id"] == skill_id
