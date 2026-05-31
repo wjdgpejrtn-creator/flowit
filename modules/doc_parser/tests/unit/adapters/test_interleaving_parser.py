@@ -327,3 +327,33 @@ class TestInterleavingParser:
 
         assert result.vision_block_count == 0
         assert result.failed_block_count == 2
+
+    def test_base_doc_file_meta_보존_page_count(self):
+        """재조립 시 base_parser가 보강한 file_meta(page_count 등)를 보존한다.
+
+        회귀: 과거엔 인자 file_meta로 덮어써서 PdfParser가 채운 page_count가 소실 →
+        QualityGate total_pages=0 버그. base_doc.file_meta를 흘려보내야 한다.
+        """
+        block = _make_table_block(page=1)
+        vision_block = _make_vision_block(page=1)
+        # base_parser가 page_count=3으로 보강한 file_meta를 반환하는 상황 모사.
+        enriched = _make_file_meta("application/pdf").model_copy(update={"page_count": 3})
+        base_doc = DocumentBlock(
+            document_id=uuid4(),
+            file_meta=enriched,
+            parser=ParserMeta(parser_name="PdfParser", parser_version="1.0.0"),
+            blocks=[block],
+        )
+        # parse()에 넘기는 원본 file_meta는 page_count=1 (보강 전).
+        input_meta = _make_file_meta("application/pdf")
+
+        parser, _, _, _ = _make_parser(
+            base_doc=base_doc,
+            detect_returns=[VisionType.TABLE],
+            extract_return=vision_block,
+        )
+
+        result = parser.parse("test.pdf", input_meta)
+
+        # 인자 file_meta(1)가 아니라 base_doc의 보강된 page_count(3)가 보존돼야 한다.
+        assert result.file_meta.page_count == 3
