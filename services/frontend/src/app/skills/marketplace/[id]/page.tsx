@@ -8,7 +8,9 @@ import Skel from '@/components/common/Skel';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import {
   getMarketplaceSkill,
+  getMarketplaceSkillDocument,
   type MarketplaceSkill,
+  type MarketplaceSkillDocument,
   type MarketplaceScope,
   type SkillLifecycleState,
 } from '@/lib/api/skillApi';
@@ -77,10 +79,17 @@ function MarketplaceSkillDetailContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // 지침서(SKILL.md) — 메타와 별개로 lazy-load. 404는 "지침서 없음"(에러 아님)으로 구분.
+  const [doc, setDoc] = useState<MarketplaceSkillDocument | null>(null);
+  const [docLoading, setDocLoading] = useState(true);
+  const [docMissing, setDocMissing] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
+
   const fetchSkill = useCallback(() => {
     if (!scope) {
       setError('잘못된 스킬 범위입니다.');
       setLoading(false);
+      setDocLoading(false);
       return;
     }
     setLoading(true);
@@ -89,6 +98,18 @@ function MarketplaceSkillDetailContent() {
       .then(setSkill)
       .catch((err) => setError(toErrorMessage(err)))
       .finally(() => setLoading(false));
+
+    setDocLoading(true);
+    setDocMissing(false);
+    setDocError(null);
+    getMarketplaceSkillDocument(scope, id)
+      .then(setDoc)
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : '';
+        if (msg.startsWith('404')) setDocMissing(true);
+        else setDocError(toErrorMessage(err));
+      })
+      .finally(() => setDocLoading(false));
   }, [scope, id]);
 
   useEffect(() => {
@@ -163,6 +184,26 @@ function MarketplaceSkillDetailContent() {
             <Field label="생성일">{new Date(skill.created_at).toLocaleString('ko-KR')}</Field>
             <Field label="수정일">{new Date(skill.updated_at).toLocaleString('ko-KR')}</Field>
             {skill.node_definition_id && <Field label="노드 ID">{skill.node_definition_id}</Field>}
+          </div>
+
+          {/* 지침서(SKILL.md) 본문 */}
+          <div className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[14px] flex flex-col gap-2">
+            <div className="text-[13px] font-bold text-[var(--color-ink)]">지침서</div>
+            {docLoading ? (
+              <div className="flex flex-col gap-2">
+                <Skel className="h-[14px] w-full" />
+                <Skel className="h-[14px] w-[90%]" />
+                <Skel className="h-[14px] w-[70%]" />
+              </div>
+            ) : docError ? (
+              <span className="text-[13px] text-red-600">{docError}</span>
+            ) : docMissing || !doc ? (
+              <span className="text-[13px] text-[var(--color-ink3)]">등록된 지침서가 없습니다.</span>
+            ) : (
+              <pre className="text-[12px] text-[var(--color-ink)] whitespace-pre-wrap break-words font-mono leading-[1.5] bg-[var(--color-paper)] border border-[var(--color-line-soft)] rounded p-[10px] max-h-[480px] overflow-auto">
+                {doc.instructions || '(빈 지침서)'}
+              </pre>
+            )}
           </div>
         </div>
       )}

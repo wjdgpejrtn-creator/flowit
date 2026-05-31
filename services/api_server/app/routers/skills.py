@@ -31,6 +31,7 @@ from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
     CreateDraftSkillUseCase,
     DeletePersonalSkillUseCase,
+    GetMarketplaceSkillDocumentUseCase,
     GetMarketplaceSkillUseCase,
     GetPersonalSkillUseCase,
     ListMarketplaceSkillsUseCase,
@@ -51,6 +52,7 @@ from app.dependencies.use_cases import (
     get_approve_skill_use_case,
     get_create_draft_skill_use_case,
     get_delete_personal_skill_use_case,
+    get_get_marketplace_skill_document_use_case,
     get_get_marketplace_skill_use_case,
     get_get_personal_skill_use_case,
     get_list_marketplace_skills_use_case,
@@ -377,3 +379,34 @@ async def get_marketplace_skill(
     """
     skill = await use_case.execute(scope=scope, skill_id=skill_id)
     return _to_marketplace_response(skill, scope)
+
+
+# instructions = SKILL.md markdown 본문(지침서). scripts/templates(선택 자산)는 상세 본문 노출엔
+# 불필요해 제외 — 필요 시 별도 확장. embedding/메타는 단건 GET(위)에서 이미 제공.
+class MarketplaceSkillDocumentResponse(BaseModel):
+    skill_id: UUID
+    name: str
+    description: str
+    instructions: str
+
+
+@router.get("/marketplace/{skill_id}/document", response_model=MarketplaceSkillDocumentResponse)
+async def get_marketplace_skill_document(
+    skill_id: UUID,
+    scope: SkillScope = Query(..., description="team | company"),
+    permission: PermissionSource = Depends(get_permission_source),
+    use_case: GetMarketplaceSkillDocumentUseCase = Depends(get_get_marketplace_skill_document_use_case),
+) -> MarketplaceSkillDocumentResponse:
+    """마켓플레이스 스킬 지침서(SKILL.md) 본문 — 상세 페이지가 메타 조회 후 lazy-load.
+
+    단건 메타 조회와 동일하게 **PUBLISHED만**(use case가 미게시/미존재를 404로 가림). 지침서가
+    GCS에 없으면(수동 생성 스킬 등) 404 → 프론트는 "등록된 지침서 없음"으로 graceful 처리.
+    인증 필수. personal scope는 use case가 ValidationError→400.
+    """
+    document = await use_case.execute(scope=scope, skill_id=skill_id)
+    return MarketplaceSkillDocumentResponse(
+        skill_id=document.skill_id,
+        name=document.name,
+        description=document.description,
+        instructions=document.instructions,
+    )

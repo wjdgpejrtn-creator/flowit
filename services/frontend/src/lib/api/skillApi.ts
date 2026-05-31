@@ -36,6 +36,15 @@ export interface MarketplaceSkill {
   updated_at: string;
 }
 
+// 스킬 지침서(SKILL.md) 본문 — 상세 페이지가 메타 조회 후 lazy-load (백엔드
+// MarketplaceSkillDocumentResponse 대응). instructions = markdown 본문.
+export interface MarketplaceSkillDocument {
+  skill_id: string;
+  name: string;
+  description: string;
+  instructions: string;
+}
+
 export interface CreatePersonalSkillRequest {
   name: string;
   description: string;
@@ -91,6 +100,16 @@ export async function getMarketplaceSkill(
 ): Promise<MarketplaceSkill> {
   const params = new URLSearchParams({ scope });
   return apiJson<MarketplaceSkill>(`/api/v1/skills/marketplace/${skillId}?${params}`);
+}
+
+export async function getMarketplaceSkillDocument(
+  scope: MarketplaceScope,
+  skillId: string,
+): Promise<MarketplaceSkillDocument> {
+  const params = new URLSearchParams({ scope });
+  return apiJson<MarketplaceSkillDocument>(
+    `/api/v1/skills/marketplace/${skillId}/document?${params}`,
+  );
 }
 
 export async function getPersonalSkill(skillId: string): Promise<PersonalSkill> {
