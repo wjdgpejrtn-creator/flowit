@@ -126,6 +126,8 @@ class OrchestratorAgent:
                         message=req.payload.get("message", ""),
                         trace_id=req.trace_id,
                         turn_count=req.state.turn_count,
+                        round=req.payload.get("round", 1),
+                        selected_skill_id=req.payload.get("selected_skill_id"),
                     ):
                         resp = AgentProtocolResponse(
                             frames=[frame],
