@@ -7,6 +7,14 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.17.0] - 2026-05-31
+
+### Added — 스킬 런타임 주입 바인딩 (REQ-013 코어)
+- `workflow.py` `NodeInstance`에 `skill_id: Optional[UUID] = None` 추가. 노드에 바인딩된 SkillDocument(도메인 지침서)를 가리키며, execution_engine이 LLM 노드(`category=="ai"`이면서 input_schema에 `system` 필드 보유) 실행 시 해당 스킬의 `instructions`를 `system` 프롬프트에 주입한다. `credential_id`(노드별 외부 참조)와 동일 패턴.
+- 신규 Optional 필드(기존 필드 변경 없음) → MINOR. default None이라 기존 workflows JSONB row 역호환(`NodeInstance.model_validate`).
+- 바인딩 소스(노드에 skill_id를 박는 것)는 Composer two-shot HITL 후속 PR. 본 변경은 필드 + 실행 시 소비(주입)만 추가.
+- TS regenerate 완료 — `NodeInstance` 인터페이스에 `skill_id?: string | null` 자동 반영.
+
 ## [0.16.0] - 2026-05-31
 
 ### Added — 컨펌 게이트 신뢰 매니페스트 (confirm-gate-explanation)

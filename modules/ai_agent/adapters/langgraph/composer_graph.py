@@ -38,6 +38,7 @@ from common_schemas.transport import (
     IntentResultFrame,
     PipelineStatusFrame,
     QAMetricFrame,
+    RationaleDeltaFrame,
     ResultFrame,
     SessionFrame,
     SlotFillQuestionFrame,
@@ -241,8 +242,6 @@ class LangGraphOrchestrator:
             "execution_result": None,
             "output_quality_score": 0.0,
             "output_quality_feedback": "",
-            "skill_suggested": False,
-            "suggested_skills": [],
             "validation_issues": None,
             "retry_count": 0,
         }
@@ -637,10 +636,13 @@ class LangGraphOrchestrator:
                 _logger.warning("skill search failed: %s", _skill_exc)
 
         elapsed = int((time.monotonic() - t0) * 1000)
+        node_types = ", ".join(c.node_type for c in candidates[:5])
+        more = f" 외 {len(candidates) - 5}개" if len(candidates) > 5 else ""
         return {
             "node_candidates": candidates,
             "collected_frames": [
-                PipelineStatusFrame(service_name="retriever", status="completed", elapsed_ms=elapsed)
+                RationaleDeltaFrame(delta=f"🔍 노드 검색 완료 — {len(candidates)}개 후보 발견: {node_types}{more}"),
+                PipelineStatusFrame(service_name="retriever", status="completed", elapsed_ms=elapsed),
             ],
         }
 
@@ -735,9 +737,11 @@ class LangGraphOrchestrator:
         elapsed = int((time.monotonic() - t0) * 1000)
         nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
         connections_data = [c.model_dump(mode="json") for c in workflow.connections]
+        node_summary = ", ".join(n.node_type for n in workflow.nodes)
         return {
             "workflow_draft": workflow,
             "collected_frames": [
+                RationaleDeltaFrame(delta=f"✏️ 워크플로우 초안 작성 완료 — 노드 {len(workflow.nodes)}개 ({node_summary}), 연결 {len(workflow.connections)}개"),
                 DraftSpecDeltaFrame(delta={"attempt": state["qa_attempts"] + 1}),
                 WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
                 PipelineStatusFrame(service_name="drafter", status="completed", elapsed_ms=elapsed),
@@ -746,6 +750,7 @@ class LangGraphOrchestrator:
 
     # 8. validator_node — 그래프 구조 검증 + RiskLevel 강제
     async def _validator_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
         workflow = state["workflow_draft"]
         if workflow is None:
             return {}
@@ -783,7 +788,14 @@ class LangGraphOrchestrator:
                 except Exception:
                     continue  # 스키마 조회 실패 시 스킵
 
-        return {"pass_flag": True, "validation_issues": None}
+        return {
+            "pass_flag": True,
+            "validation_issues": None,
+            "collected_frames": [
+                RationaleDeltaFrame(delta="✅ 그래프 구조 검증 통과 — DAG, 사이클, 고립 노드, 필수 파라미터 이상 없음"),
+                PipelineStatusFrame(service_name="validator", status="completed", elapsed_ms=int((time.monotonic() - t0) * 1000)),
+            ],
+        }
 
     # 9. qa_evaluator_node — LLM-as-a-Judge 품질 평가
     async def _qa_evaluator_node(self, state: _State) -> dict:
@@ -798,12 +810,14 @@ class LangGraphOrchestrator:
             return {"error": f"qa_evaluator 실패: {exc}"}
         elapsed = int((time.monotonic() - t0) * 1000)
         attempt = state["qa_attempts"] + 1
+        status_text = "통과" if result.pass_flag else "재시도 필요"
         return {
             "qa_attempts": attempt,
             "qa_score": result.score,
             "pass_flag": result.pass_flag,
             "qa_feedback": result.feedback,
             "collected_frames": [
+                RationaleDeltaFrame(delta=f"⭐ 품질 평가 완료 — 점수: {result.score}/10 ({status_text}) | {result.reason or ''}"),
                 QAMetricFrame(
                     score=result.score,
                     attempt=attempt,

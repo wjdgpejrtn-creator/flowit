@@ -113,6 +113,7 @@ export interface NodeInstance {
   node_id: string;
   parameters: Record<string, unknown>;
   credential_id?: string | null;
+  skill_id?: string | null;
   position: Position;
 }
 

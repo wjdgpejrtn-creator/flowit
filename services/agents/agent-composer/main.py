@@ -76,7 +76,7 @@ class AgentComposer:
         import os
         import tempfile
         from pathlib import Path
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from services.common.gcp_secrets import load_secrets_to_env
 
@@ -105,30 +105,9 @@ class AgentComposer:
                 "gcs-personal-bucket secret 미등록 — personal memory 비활성: %s", exc
             )
 
-        # Connector를 getconn() 안에서 lazy 초기화 + 명시적 loop 바인딩
-        # storage/orm/session_factory.py 동일 패턴 — ConnectorLoopError 해결
-        self._connector = None
-
-        async def getconn():
-            import asyncio
-            from google.cloud.sql.connector import Connector, IPTypes
-            if self._connector is None:
-                self._connector = Connector(loop=asyncio.get_running_loop())
-            return await self._connector.connect_async(
-                os.environ["CLOUD_SQL_INSTANCE"],
-                "asyncpg",
-                user=os.environ["DB_IAM_USER"],
-                db=os.environ["DB_NAME"],
-                enable_iam_auth=True,
-                ip_type=IPTypes.PUBLIC,
-            )
-
-        self._engine = create_async_engine(
-            "postgresql+asyncpg://",
-            async_creator=getconn,
-            pool_pre_ping=True,
-        )
-        self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
+        # 엔진/커넥터는 요청마다 생성 (_create_session 참조) — boot()에서 생성 안 함.
+        # @modal.concurrent ASGI 환경에서 boot() 루프와 요청 루프가 달라 loop mismatch hang
+        # 발생. worker(document_tasks)의 NullPool per-request 패턴으로 해결.
 
         # 어댑터 + 서비스 wiring
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
@@ -176,11 +155,37 @@ class AgentComposer:
 
     @modal.exit()
     def shutdown(self) -> None:
-        import asyncio
-        if getattr(self, "_engine", None):
-            asyncio.run(self._engine.dispose())
-        if getattr(self, "_connector", None):
-            asyncio.run(self._connector.close_async())
+        pass  # 엔진/커넥터는 요청마다 dispose — 여기서 할 일 없음
+
+    async def _create_session(self):
+        """요청마다 fresh connector + NullPool engine 생성 (worker 검증 패턴).
+
+        boot() 루프와 요청 루프 불일치(loop mismatch)를 피하기 위해
+        per-request로 생성하고 요청 종료 시 dispose한다.
+        """
+        import os
+        from google.cloud.sql.connector import create_async_connector, IPTypes
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        from sqlalchemy.pool import NullPool
+
+        connector = await create_async_connector()
+
+        async def getconn():
+            return await connector.connect_async(
+                os.environ["CLOUD_SQL_INSTANCE"],
+                "asyncpg",
+                user=os.environ["DB_IAM_USER"],
+                db=os.environ["DB_NAME"],
+                enable_iam_auth=True,
+                ip_type=IPTypes.PUBLIC,
+            )
+
+        engine = create_async_engine(
+            "postgresql+asyncpg://",
+            async_creator=getconn,
+            poolclass=NullPool,
+        )
+        return connector, engine, async_sessionmaker(engine, expire_on_commit=False)
 
     @modal.asgi_app()
     def fastapi(self):
@@ -193,8 +198,9 @@ class AgentComposer:
             import logging
             from sqlalchemy import text
             logger = logging.getLogger(__name__)
+            connector, engine, _ = await self._create_session()
             try:
-                async with self._engine.connect() as conn:
+                async with engine.connect() as conn:
                     await conn.execute(text("SELECT 1"))
             except Exception as exc:
                 logger.warning("db unreachable: %s", repr(exc))
@@ -202,13 +208,19 @@ class AgentComposer:
                     status_code=503,
                     detail={"db": "unreachable"},
                 )
+            finally:
+                await engine.dispose()
+                await connector.close_async()
             return {"status": "ok", "db": "iam-connected"}
 
         @api.post("/v1/agent/route")
         async def route(req: AgentProtocolRequest = Body(...)):
             async def generate():
+                connector = None
+                engine = None
                 try:
-                    async with self._session_factory() as session:
+                    connector, engine, session_factory = await self._create_session()
+                    async with session_factory() as session:
                         node_repo = self._node_repo_cls(session)
                         workflow_repo = self._workflow_repo_cls(session)
                         skill_repo = self._skill_repo_cls(session)
@@ -250,19 +262,14 @@ class AgentComposer:
                         next_action="error",
                     )
                     yield f"data: {err.model_dump_json()}\n\n"
-                    done = AgentProtocolResponse(
-                        frames=[],
-                        state_delta={},
-                        next_action="complete",
-                    )
-                    yield f"data: {done.model_dump_json()}\n\n"
+                    yield f"data: {AgentProtocolResponse(frames=[], state_delta={}, next_action='complete').model_dump_json()}\n\n"
                     return
-                done = AgentProtocolResponse(
-                    frames=[],
-                    state_delta={},
-                    next_action="complete",
-                )
-                yield f"data: {done.model_dump_json()}\n\n"
+                finally:
+                    if engine:
+                        await engine.dispose()
+                    if connector:
+                        await connector.close_async()
+                yield f"data: {AgentProtocolResponse(frames=[], state_delta={}, next_action='complete').model_dump_json()}\n\n"
 
             return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -285,15 +292,20 @@ class AgentComposer:
             except (KeyError, ValueError) as exc:
                 raise HTTPException(status_code=422, detail=f"잘못된 파라미터: {exc}") from exc
 
-            async with self._session_factory() as session:
-                workflow_repo = self._workflow_repo_cls(session)
-                use_case = ApproveWorkflowUseCase(
-                    workflow_draft_store=self._workflow_draft_store,
-                    workflow_repo=workflow_repo,
-                    diff_service=self._diff_service,
-                    personalization_client=None,  # TODO: PersonalizationClient 주입
-                )
-                diff = await use_case.execute(session_id, user_id, workflow_id)
+            connector, engine, session_factory = await self._create_session()
+            try:
+                async with session_factory() as session:
+                    workflow_repo = self._workflow_repo_cls(session)
+                    use_case = ApproveWorkflowUseCase(
+                        workflow_draft_store=self._workflow_draft_store,
+                        workflow_repo=workflow_repo,
+                        diff_service=self._diff_service,
+                        personalization_client=None,  # TODO: PersonalizationClient 주입
+                    )
+                    diff = await use_case.execute(session_id, user_id, workflow_id)
+            finally:
+                await engine.dispose()
+                await connector.close_async()
 
             if diff is None:
                 return {"status": "no_draft", "diff": None}

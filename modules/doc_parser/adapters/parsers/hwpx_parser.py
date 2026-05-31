@@ -17,7 +17,7 @@ ZIP + lxml 기반 HWPX 2.0 파서
     - 복잡 표·서식 완전 복원 불가 / 이미지 내 텍스트 제외
     - 본문 텍스트는 section0 만 파싱 → block.page 는 section0 기준 (page_count 만 전 섹션)
     - 레이아웃 캐시가 없는 문서(한글 외 도구 생성)는 페이지 수를 정확히 알 수 없어 하한선 추정
-    - 페이지 경계는 휴리스틱 → 한글 표시 페이지 수와 ±1 오차 가능 (검증: hwpx_page_probe.py)
+    - 페이지 경계는 휴리스틱 → 한글 표시 페이지 수와 ±1 오차 가능 (검증: tests/test_hwpx_page_count.py 골든 케이스)
 """
 from __future__ import annotations
 
