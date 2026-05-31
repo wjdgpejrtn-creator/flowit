@@ -19,6 +19,23 @@ export interface PersonalSkill {
   updated_at: string;
 }
 
+export type MarketplaceScope = 'team' | 'company';
+
+// 마켓플레이스 Team/Company 탭 browse 응답 (백엔드 MarketplaceSkillResponse 대응).
+// 검색어 없는 게시 스킬 목록 — SearchSkillsUseCase(embedding 유사도)와 별개 경로.
+export interface MarketplaceSkill {
+  skill_id: string;
+  scope: MarketplaceScope;
+  name: string;
+  description: string;
+  node_definition_id: string | null;
+  lifecycle_state: SkillLifecycleState;
+  tags: string[];
+  version: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CreatePersonalSkillRequest {
   name: string;
   description: string;
@@ -54,6 +71,18 @@ export async function listPersonalSkills(
   params.set('limit', String(limit));
   params.set('offset', String(offset));
   return apiJson<PersonalSkill[]>(`/api/v1/skills/personal?${params}`);
+}
+
+export async function listMarketplaceSkills(
+  scope: MarketplaceScope,
+  limit = 50,
+  offset = 0,
+): Promise<MarketplaceSkill[]> {
+  const params = new URLSearchParams();
+  params.set('scope', scope);
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
+  return apiJson<MarketplaceSkill[]>(`/api/v1/skills/marketplace?${params}`);
 }
 
 export async function getPersonalSkill(skillId: string): Promise<PersonalSkill> {

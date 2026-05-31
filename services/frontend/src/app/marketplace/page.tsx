@@ -4,12 +4,15 @@ import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
-import RiskPill from '@/components/common/RiskPill';
-import ScopePill from '@/components/common/ScopePill';
-import Btn from '@/components/common/Btn';
 import Skel from '@/components/common/Skel';
-import { RiskLevel } from '@common/generated';
-import { listPersonalSkills, type PersonalSkill, type SkillLifecycleState } from '@/lib/api/skillApi';
+import {
+  listPersonalSkills,
+  listMarketplaceSkills,
+  type PersonalSkill,
+  type MarketplaceSkill,
+  type MarketplaceScope,
+  type SkillLifecycleState,
+} from '@/lib/api/skillApi';
 
 /* ── Lifecycle 상태 pill ── */
 
@@ -33,26 +36,6 @@ function LifecyclePill({ state }: { state: SkillLifecycleState }) {
     </span>
   );
 }
-
-/* ── Team/Company 더미 데이터 (기존) ── */
-
-type SkillItem = {
-  name: string;
-  cat: string;
-  risk: RiskLevel;
-  scope: 'private' | 'team' | 'public';
-  users: number;
-  official?: boolean;
-};
-
-const DUMMY_SKILLS: SkillItem[] = [
-  { name: '주간 OKR 요약',      cat: '리포트',  risk: RiskLevel.LOW,        scope: 'team',   users: 12, official: false },
-  { name: 'CS 분류기',          cat: 'AI 분류', risk: RiskLevel.MEDIUM,     scope: 'team',   users: 34, official: true  },
-  { name: '예산 알림',          cat: '알림',    risk: RiskLevel.HIGH,       scope: 'team',   users: 7,  official: false },
-  { name: '견적서 자동 응답',    cat: '문서',    risk: RiskLevel.MEDIUM,     scope: 'public', users: 22, official: true  },
-  { name: '회의록 요약봇',       cat: 'AI 분류', risk: RiskLevel.LOW,        scope: 'public', users: 58, official: true  },
-  { name: '인사 온보딩 자동화',  cat: '인사',    risk: RiskLevel.LOW,        scope: 'team',   users: 9,  official: false },
-];
 
 /* ── 에러 메시지 분류 ── */
 
@@ -162,33 +145,92 @@ function PersonalTabContent() {
   );
 }
 
-/* ── Team/Company 더미 카드 그리드 ── */
+/* ── Team/Company 탭 콘텐츠 (실 API) ── */
 
-function DummySkillGrid() {
+const EMPTY_LABEL: Record<MarketplaceScope, string> = {
+  team: '게시된 팀 스킬이 없습니다.',
+  company: '게시된 전사 스킬이 없습니다.',
+};
+
+function MarketplaceTabContent({ scope }: { scope: MarketplaceScope }) {
+  const [skills, setSkills] = useState<MarketplaceSkill[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [fetchKey, setFetchKey] = useState(0);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    listMarketplaceSkills(scope)
+      .then(setSkills)
+      .catch((err) => setError(toErrorMessage(err)))
+      .finally(() => setLoading(false));
+  }, [scope, fetchKey]);
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-3 gap-[10px]">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[10px] flex flex-col gap-2">
+            <Skel className="h-[18px] w-[60px]" />
+            <Skel className="h-[20px] w-[120px]" />
+            <Skel className="h-[14px] w-full" />
+            <Skel className="h-[14px] w-[80px]" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] px-[10px] py-[24px] text-center text-[13px] text-red-600 flex flex-col items-center gap-2">
+        <span>{error}</span>
+        <button
+          type="button"
+          onClick={() => setFetchKey((k) => k + 1)}
+          className="text-[12px] px-3 py-1 border border-red-300 rounded bg-white text-red-600 hover:bg-red-50 cursor-pointer"
+        >
+          다시 시도
+        </button>
+      </div>
+    );
+  }
+
+  if (skills.length === 0) {
+    return (
+      <div className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] px-[10px] py-[24px] text-center text-[13px] text-[var(--color-ink3)]">
+        {EMPTY_LABEL[scope]}
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-3 gap-[10px]">
-      {DUMMY_SKILLS.map((sk) => (
+      {skills.map((sk) => (
         <div
-          key={sk.name}
+          key={sk.skill_id}
           className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[10px] flex flex-col gap-2"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] border border-[var(--color-ink4)] rounded px-[6px] py-0 text-[var(--color-ink3)]">
-              {sk.cat}
-            </span>
-            <RiskPill level={sk.risk} />
-          </div>
-          <div className="font-bold text-[15px] text-[var(--color-ink)]">{sk.name}</div>
-          <div className="flex items-center gap-2">
-            <ScopePill scope={sk.scope} />
-            {sk.official && (
-              <span className="text-[10px] border-[1.5px] border-[var(--color-accent)] text-[var(--color-accent)] rounded px-[5px] py-0 font-bold">
-                공식
+            {sk.tags.length > 0 && (
+              <span className="text-[11px] border border-[var(--color-ink4)] rounded px-[6px] py-0 text-[var(--color-ink3)]">
+                {sk.tags[0]}
               </span>
             )}
+            <LifecyclePill state={sk.lifecycle_state} />
           </div>
-          <div className="text-[13px] text-[var(--color-ink3)]">사용 {sk.users}명</div>
-          <Btn primary>+ 내 워크플로우에 추가</Btn>
+
+          <div className="font-bold text-[15px] text-[var(--color-ink)]">{sk.name}</div>
+
+          <div className="text-[12px] text-[var(--color-ink3)] line-clamp-2">
+            {sk.description}
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-[var(--color-ink4)]">
+            <span>v{sk.version}</span>
+            <span>{new Date(sk.updated_at).toLocaleDateString('ko-KR')}</span>
+          </div>
         </div>
       ))}
     </div>
@@ -228,7 +270,11 @@ function MarketplaceContent() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'personal' ? <PersonalTabContent /> : <DummySkillGrid />}
+      {activeTab === 'personal' ? (
+        <PersonalTabContent />
+      ) : (
+        <MarketplaceTabContent scope={activeTab} />
+      )}
     </div>
   );
 }

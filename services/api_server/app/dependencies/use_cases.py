@@ -9,6 +9,7 @@ from skills_marketplace.application.use_cases import (
     CreateDraftSkillUseCase,
     DeletePersonalSkillUseCase,
     GetPersonalSkillUseCase,
+    ListMarketplaceSkillsUseCase,
     ListUserPersonalSkillsUseCase,
     PublishSkillUseCase,
     UpdatePersonalSkillUseCase,
@@ -63,6 +64,13 @@ def get_list_personal_skills_use_case(
     repo: SkillRepository = Depends(get_marketplace_skill_repository),
 ) -> ListUserPersonalSkillsUseCase:
     return ListUserPersonalSkillsUseCase(repo=repo)
+
+
+def get_list_marketplace_skills_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+) -> ListMarketplaceSkillsUseCase:
+    """마켓플레이스 Team/Company 탭 browse 목록 (검색어 없는 게시 스킬 나열)."""
+    return ListMarketplaceSkillsUseCase(repo=repo)
 
 
 def get_get_personal_skill_use_case(
