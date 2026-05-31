@@ -133,3 +133,60 @@ export async function deletePersonalSkill(skillId: string): Promise<void> {
     throw new Error(`${res.status} ${res.statusText}: ${body}`);
   }
 }
+
+// ── 문서→스킬 자동 추출 (REQ-010/013, 스킬빌더 위저드 1단계) ────────────────────
+
+// extract_draft 결과 1건 — SOP에서 추출된 SkillNode 초안. instructions가 전문 SKILL.md 본문.
+export interface ExtractedSkillDraft {
+  node_type: string;
+  name: string;
+  description: string;
+  instructions: string;
+}
+
+// SOP 문서에서 스킬 초안을 추출하는 SSE 스트림 (POST /api/v1/skills/extract).
+// onFrame으로 raw frame을 넘긴다 — 호출측이 frame_type으로 분기(agent_node/result/error).
+// 저장은 하지 않는다(검토용) — 확정은 createPersonalSkill로 수행.
+export async function streamExtractSkillFromDocument(
+  sourceDocumentId: string,
+  onFrame: (frame: Record<string, unknown>) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await apiFetch('/api/v1/skills/extract', {
+    method: 'POST',
+    body: JSON.stringify({ source_document_id: sourceDocumentId }),
+    signal,
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() ?? '';
+
+      for (const part of parts) {
+        for (const line of part.split('\n')) {
+          if (line.startsWith('data: ')) {
+            try {
+              onFrame(JSON.parse(line.slice(6)) as Record<string, unknown>);
+            } catch { /* skip malformed */ }
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

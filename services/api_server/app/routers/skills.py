@@ -19,13 +19,17 @@ Personal CRUD(REQ-013, 가원 요청): `GET /personal`, `GET/PUT/DELETE /persona
 """
 from __future__ import annotations
 
+import json
+import logging
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
+import httpx
 from common_schemas import PermissionSource
 from common_schemas.enums import RiskLevel
 from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
@@ -46,6 +50,7 @@ from skills_marketplace.domain.value_objects.node_spec_staging import NodeSpecSt
 from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 from skills_marketplace.domain.value_objects.skill_state import SkillState
 
+from app.dependencies.clients import get_skills_builder_http
 from app.dependencies.permission import get_permission_source
 from app.dependencies.repositories import get_document_repository
 from app.dependencies.use_cases import (
@@ -60,6 +65,9 @@ from app.dependencies.use_cases import (
     get_publish_skill_use_case,
     get_update_personal_skill_use_case,
 )
+from app.sse_proxy import SSE_HEADERS, unwrap_agent_sse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/skills", tags=["skills"])
 
@@ -237,6 +245,94 @@ async def create_personal_skill(
         )
     created = await get_use_case.execute(skill_id=skill_id, actor_user_id=permission.user_id)
     return _to_response(created)
+
+
+# ── 문서→스킬 자동 추출 (REQ-010/013, ADR-0020 Q8 wizard 1차) ──────────────────
+
+
+class ExtractSkillRequest(BaseModel):
+    # 분석 완료된 SOP 문서 id — 본문(blocks)을 LLM에 넣어 SkillNode 초안을 추출한다.
+    source_document_id: UUID
+
+
+@router.post("/extract")
+async def extract_skill_from_document(
+    body: ExtractSkillRequest,
+    permission: PermissionSource = Depends(get_permission_source),
+    doc_repo: DocumentRepositoryPort = Depends(get_document_repository),
+    client: httpx.AsyncClient | None = Depends(get_skills_builder_http),
+) -> StreamingResponse:
+    """SOP 문서 → Skills Builder(extract) → 추출 초안 SSE 스트림 (저장 X, 검토용).
+
+    스킬빌더 위저드 1단계. 문서 소유·분석을 검증한 뒤 skills-builder `/v1/agent/route`
+    (`source_type="sop"`, `step="extract"`)로 **전체 DocumentBlock**을 전달하고, LLM이 추출한
+    SkillNode 초안(name/description/**instructions(SKILL.md 본문)**)을 SSE로 프록시한다.
+    orchestrator(의도 분류)를 우회하는 결정적 추출 경로 — skills-builder 전용 클라이언트 직결.
+
+    프레임: `agent_node`(진행) → `result`(payload.skills 초안 목록) | `error`. 확정·저장은
+    사용자가 폼에서 검토 후 `POST /personal`(instructions 포함)로 수행한다 — 단일 생성 경로 유지.
+    """
+    if client is None:
+        raise HTTPException(
+            status_code=503, detail="Skills Builder unavailable — SKILLS_BUILDER_URL 미설정"
+        )
+
+    # 소유/존재 검증 — doc_parser GET /{id}와 동일한 404/403 패턴 (composition root 책임).
+    document = await doc_repo.get_by_id(body.source_document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"Document {body.source_document_id} not found")
+    if document.user_id != permission.user_id:
+        raise HTTPException(status_code=403, detail="Document belongs to another user")
+    # blocks가 없으면 추출할 본문이 없음(분석 미완료/실패) — 추출 호출 전에 409로 빠르게 안내.
+    if not document.blocks:
+        raise HTTPException(
+            status_code=409,
+            detail="Document has no parsed blocks — 먼저 문서 분석을 완료하세요",
+        )
+
+    # AgentProtocolRequest 봉투(plain dict) — agents._build_agent_payload와 동일 패턴.
+    # 수신 측 skills-builder(Modal)가 AgentProtocolRequest로 검증한다. state는 추출 경로에서
+    # 쓰이지 않지만 스키마상 필수라 최소 형태로 채운다(orchestrator create_session과 동일).
+    session_id = str(uuid4())
+    user_id = str(permission.user_id)
+    proxy_payload = {
+        "session_id": session_id,
+        "user_id": user_id,
+        "personal_memory": [],
+        "payload": {
+            "source_type": "sop",
+            "step": "extract",
+            "document": document.model_dump(mode="json"),
+        },
+        "state": {
+            "session_id": session_id,
+            "user_id": user_id,
+            "messages": [],
+            "turn_count": 0,
+            "mode": "general",
+            "execution_status": "pending",
+            "node_candidates": [],
+        },
+    }
+
+    async def generate():
+        try:
+            # timeout은 클라이언트 default(init_skills_builder_http가 settings.skills_builder_timeout_s로
+            # 설정)에 위임 — per-request 오버라이드를 두면 SKILLS_BUILDER_TIMEOUT_S env가 무력화된다.
+            async with client.stream(
+                "POST", "/v1/agent/route", json=proxy_payload
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    for frame_line in unwrap_agent_sse(line[6:]):
+                        yield frame_line
+        except Exception as exc:
+            logger.error("skills-builder extract 스트리밍 실패: %s", exc)
+            err = {"frame_type": "error", "code": "E_PROXY", "message": str(exc)}
+            yield f"data: {json.dumps(err)}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @router.get("/personal", response_model=list[PersonalSkillResponse])

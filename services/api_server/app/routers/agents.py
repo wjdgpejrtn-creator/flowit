@@ -5,13 +5,14 @@ import logging
 from uuid import uuid4
 
 import httpx
+from common_schemas import PermissionSource
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.dependencies.clients import get_orchestrator_http
 from app.dependencies.permission import get_permission_source
-from common_schemas import PermissionSource
+from app.sse_proxy import SSE_HEADERS, unwrap_agent_sse
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +25,8 @@ ai_sessions_router = APIRouter(prefix="/api/v1/ai/sessions", tags=["agents"])
 # 여기서는 raw dict으로 다루는 프록시라 import 없이 envelope.get("frames") 로만 접근.
 _PROXY_TIMEOUT = 290.0  # Cloud Run 기본 request timeout 300s 이내로 보수적으로 설정
 
-# SSE 응답 표준 헤더 — Google Cloud LB의 gzip 압축으로 SSE 스트리밍이 깨지는 것 차단.
-# - Cache-Control no-transform: LB에 응답 바디 변환 금지 지시 (핵심)
-# - X-Accel-Buffering no: nginx/reverse-proxy 버퍼링 차단
-# - Connection keep-alive: HTTP/1.1 keep-alive 명시
-_SSE_HEADERS = {
-    "Cache-Control": "no-cache, no-transform",
-    "X-Accel-Buffering": "no",
-    "Connection": "keep-alive",
-}
+# SSE 표준 헤더(SSE_HEADERS) + 봉투 언래핑(unwrap_agent_sse)은 app.sse_proxy에 단일 정의 —
+# skills 추출 라우터와 공유 (Google LB gzip 차단 헤더 SSOT).
 
 
 class SessionRequest(BaseModel):
@@ -76,16 +70,6 @@ def _build_agent_payload(
     }
 
 
-def _unwrap_sse(raw: str):
-    """AgentProtocolResponse(common_schemas.agent_protocol) 봉투에서 frame을 꺼내 SSE 라인으로 변환."""
-    try:
-        envelope = json.loads(raw)
-    except json.JSONDecodeError:
-        return
-    for frame in envelope.get("frames", []):
-        yield f"data: {json.dumps(frame, ensure_ascii=False)}\n\n"
-
-
 @agents_router.post("/sessions")
 async def create_session(
     req: SessionRequest = Body(...),
@@ -109,14 +93,14 @@ async def create_session(
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
                         continue
-                    for frame_line in _unwrap_sse(line[6:]):
+                    for frame_line in unwrap_agent_sse(line[6:]):
                         yield frame_line
         except Exception as exc:
             logger.error("agent-composer 스트리밍 실패: %s", exc)
             err = {"frame_type": "error", "code": "E_PROXY", "message": str(exc)}
             yield f"data: {json.dumps(err)}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream", headers=_SSE_HEADERS)
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @agents_router.post("/sessions/{session_id}/slot")
@@ -149,14 +133,14 @@ async def send_slot_answer(
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
                         continue
-                    for frame_line in _unwrap_sse(line[6:]):
+                    for frame_line in unwrap_agent_sse(line[6:]):
                         yield frame_line
         except Exception as exc:
             logger.error("slot 답변 스트리밍 실패: %s", exc)
             err = {"frame_type": "error", "code": "E_PROXY", "message": str(exc)}
             yield f"data: {json.dumps(err)}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream", headers=_SSE_HEADERS)
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @ai_sessions_router.get("/{session_id}/stream")
@@ -186,4 +170,4 @@ async def stream_session_frames(
             err = {"frame_type": "error", "code": "E_FRAMES", "message": str(exc)}
             yield f"data: {json.dumps(err)}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream", headers=_SSE_HEADERS)
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
