@@ -83,6 +83,14 @@ from common_schemas.transport import (
 |--------|------|
 | `NodeContext` | 노드 1회 실행분 컨텍스트 (execution_id, user_id, connection_token) — ADR-0018, `BaseNode.process(input, context)` 전달용 |
 
+### workflow_explanation.py — 컨펌 게이트 신뢰 매니페스트
+
+| 클래스 | 설명 |
+|--------|------|
+| `WorkflowExplanation` | 컨펌 게이트 설명 (`intent_restatement`, `summary`, `steps`, `permissions`, `assumptions`) — `ResultFrame.payload["explanation"]`로 흐름 (confirm-gate-explanation) |
+| `ExplanationStep` | 실행 단계 1개 (`order`, `node_name`, `description`, `risk_level`) — 노드 1개 대응 |
+| `PermissionItem` | 요구 권한 1건 (`connection`, `node_name`, `risk_level`) — `NodeConfig.required_connections` 노출 |
+
 ### agent.py — AI 에이전트 상태
 
 | 클래스 | 설명 |

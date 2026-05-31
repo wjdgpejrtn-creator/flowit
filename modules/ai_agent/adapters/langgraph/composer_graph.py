@@ -38,8 +38,11 @@ from common_schemas.transport import (
     IntentResultFrame,
     PipelineStatusFrame,
     QAMetricFrame,
+    RationaleDeltaFrame,
     ResultFrame,
     SessionFrame,
+    SkillOption,
+    SkillSelectionFrame,
     SlotFillQuestionFrame,
     SSEFrame,
     WorkflowDraftFrame,
@@ -54,6 +57,7 @@ from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 
 from ...domain.entities.memory_file import MemoryFile, MemoryFileRef
 from ...domain.entities.session_ref import SessionRef
+from ...domain.ports.composer_state_store import ComposerStateStore
 from ...domain.ports.llm_port import LLMPort
 from ...domain.ports.personal_memory_store import PersonalMemoryStore
 from ...domain.ports.node_registry import NodeRegistry
@@ -140,6 +144,12 @@ class _State(TypedDict):
     # fixed DAG 필드
     validation_issues: str | None           # validator 실패 사유 (non-fatal — error 필드와 분리)
     retry_count: int                        # draft/validate/qa 재시도 횟수
+    # two-shot HITL 스킬 선택 필드 (REQ-013)
+    round: int                              # 1=옵션 제시 라운드, 2=선택 입력 후 재개 라운드
+    selected_skill_id: UUID | None          # 2차 라운드에서 사용자가 선택한 스킬 (LLM 노드 바인딩 대상)
+    awaiting_skill_selection: bool          # suggest_skill_select가 옵션 emit + 중단했는지 (라우팅용)
+    resume_ok: bool                         # 2차 resume에서 GCS 상태 복원 성공 여부 (라우팅용)
+    offered_skill_ids: list[str]            # 1차에 제시한 옵션 skill_id 집합 (2차 bind 멤버십 검증 — IDOR 차단)
 
 
 class LangGraphOrchestrator:
@@ -166,6 +176,7 @@ class LangGraphOrchestrator:
         workflow_draft_store: WorkflowDraftStore | None = None,
         execution_engine_url: str | None = None,
         personal_memory_store: PersonalMemoryStore | None = None,
+        composer_state_store: ComposerStateStore | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -182,6 +193,7 @@ class LangGraphOrchestrator:
         self._workflow_draft_store = workflow_draft_store
         self._execution_engine_url = execution_engine_url or os.getenv("EXECUTION_ENGINE_URL", "")
         self._personal_memory_store = personal_memory_store
+        self._composer_state_store = composer_state_store
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -195,8 +207,22 @@ class LangGraphOrchestrator:
         personal_memory: list[MemoryEntry] | None = None,
         user_role: str = "User",
         department_id: UUID | None = None,
+        round: int = 1,
+        selected_skill_id: UUID | str | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
-        return self._run(user_id, session_id, message, personal_memory or [], user_role, department_id)
+        # selected_skill_id는 relay(JSON)를 거치며 str로 도착할 수 있어 UUID로 강제
+        coerced_skill_id: UUID | None = None
+        if isinstance(selected_skill_id, UUID):
+            coerced_skill_id = selected_skill_id
+        elif isinstance(selected_skill_id, str) and selected_skill_id:
+            try:
+                coerced_skill_id = UUID(selected_skill_id)
+            except ValueError:
+                coerced_skill_id = None
+        return self._run(
+            user_id, session_id, message, personal_memory or [], user_role,
+            department_id, round, coerced_skill_id,
+        )
 
     async def _run(
         self,
@@ -206,6 +232,8 @@ class LangGraphOrchestrator:
         personal_memory: list[MemoryEntry],
         user_role: str,
         department_id: UUID | None,
+        round: int = 1,
+        selected_skill_id: UUID | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
         session_frame = SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
         yield session_frame
@@ -241,10 +269,13 @@ class LangGraphOrchestrator:
             "execution_result": None,
             "output_quality_score": 0.0,
             "output_quality_feedback": "",
-            "skill_suggested": False,
-            "suggested_skills": [],
             "validation_issues": None,
             "retry_count": 0,
+            "round": round,
+            "selected_skill_id": selected_skill_id,
+            "awaiting_skill_selection": False,
+            "resume_ok": False,
+            "offered_skill_ids": [],
         }
 
         try:
@@ -475,6 +506,23 @@ class LangGraphOrchestrator:
             return "retry_draft"
         return "qa_failed"
 
+    # ---- two-shot HITL 라우터 (REQ-013) ----
+
+    @staticmethod
+    def _route_entry(state: _State) -> str:
+        """진입 분기 — 2차(선택 입력) 라운드는 GCS 복원(resume)부터, 1차는 기존 전처리(compress)부터."""
+        return "resume" if state.get("round", 1) == 2 else "compress"
+
+    @staticmethod
+    def _route_after_resume(state: _State) -> str:
+        """복원 성공 시 draft로, 실패(세션 만료) 시 종료."""
+        return "draft" if state.get("resume_ok") else "end"
+
+    @staticmethod
+    def _route_after_suggest(state: _State) -> str:
+        """옵션 emit + 중단(two-shot) → END, 옵션 없음/skill_search 미주입 → 한 라운드 내 draft(one-shot 폴백)."""
+        return "wait" if state.get("awaiting_skill_selection") else "draft"
+
     # ------------------------------------------------------------------ preprocessing nodes
 
     # 1. compress_node — turn_count >= 25 시 메시지 압축
@@ -637,10 +685,13 @@ class LangGraphOrchestrator:
                 _logger.warning("skill search failed: %s", _skill_exc)
 
         elapsed = int((time.monotonic() - t0) * 1000)
+        node_types = ", ".join(c.node_type for c in candidates[:5])
+        more = f" 외 {len(candidates) - 5}개" if len(candidates) > 5 else ""
         return {
             "node_candidates": candidates,
             "collected_frames": [
-                PipelineStatusFrame(service_name="retriever", status="completed", elapsed_ms=elapsed)
+                RationaleDeltaFrame(delta=f"🔍 노드 검색 완료 — {len(candidates)}개 후보 발견: {node_types}{more}"),
+                PipelineStatusFrame(service_name="retriever", status="completed", elapsed_ms=elapsed),
             ],
         }
 
@@ -721,6 +772,200 @@ class LangGraphOrchestrator:
             ],
         }
 
+    # 6.7. suggest_skill_select_node — two-shot 1차: 스킬 옵션 제시 + 상태 영속 후 중단 (REQ-013)
+    async def _suggest_skill_select_node(self, state: _State) -> dict:
+        """스킬 검색 후 SkillSelectionFrame으로 옵션 제시하고 1차 라운드를 종료한다.
+
+        skill_search/embedder 미주입 또는 후보 0건이면 `awaiting_skill_selection=False`로
+        반환해 한 라운드 안에서 draft로 진행(one-shot 폴백, 회귀 보존).
+        후보가 있으면 그래프 상태를 GCS에 영속(2차 resume 재료)하고 옵션 frame을 emit한다.
+        """
+        if self._skill_search is None or self._embedder is None:
+            return {"awaiting_skill_selection": False}
+
+        t0 = time.monotonic()
+        spec = state.get("draft_spec")
+        query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
+        try:
+            query_embedding = await self._embedder.embed(query)
+            skill_results = await self._skill_search.execute(
+                query_embedding=query_embedding,
+                scope=SkillScope.COMPANY,
+                limit=5,
+            )
+        except Exception as exc:
+            _logger.warning("suggest_skill_select 검색 실패 (one-shot 폴백): %s", exc)
+            return {"awaiting_skill_selection": False}
+
+        options: list[SkillOption] = []
+        for skill in skill_results:
+            skill_id = getattr(skill, "skill_id", None)
+            if skill_id is None:  # 지침서형/노드형 무관 — skill_id만 있으면 선택지로 노출(필터 제거)
+                continue
+            options.append(
+                SkillOption(
+                    skill_id=skill_id,
+                    name=getattr(skill, "name", ""),
+                    description=getattr(skill, "description", ""),
+                    node_definition_id=getattr(skill, "node_definition_id", None),
+                )
+            )
+
+        if not options:
+            return {"awaiting_skill_selection": False}
+
+        # 2차 resume 재료를 GCS에 영속 — store 미주입 시 옵션 제시 자체를 포기하고 one-shot 폴백.
+        # 제시한 옵션 skill_id 집합 + user_id를 함께 저장(2차 멤버십·소유권 검증 재료 — IDOR/세션탈취 차단).
+        offered_skill_ids = [str(o.skill_id) for o in options]
+        if self._composer_state_store is None:
+            _logger.warning("composer_state_store 미주입 — two-shot 불가, one-shot 폴백")
+            return {"awaiting_skill_selection": False}
+        try:
+            await self._composer_state_store.save_state(
+                state["session_id"], self._serialize_resume_state(state, offered_skill_ids)
+            )
+        except Exception as exc:
+            _logger.warning("composer 상태 영속 실패 (one-shot 폴백): %s", exc)
+            return {"awaiting_skill_selection": False}
+
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "awaiting_skill_selection": True,
+            "suggested_skills": [o.model_dump(mode="json") for o in options],
+            "collected_frames": [
+                SkillSelectionFrame(
+                    prompt="요청에 맞는 스킬 지침서를 찾았어요. 워크플로우에 적용할 스킬을 선택해 주세요.",
+                    options=options,
+                    allow_skip=True,
+                ),
+                PipelineStatusFrame(service_name="suggest_skill_select", status="completed", elapsed_ms=elapsed),
+            ],
+        }
+
+    @staticmethod
+    def _serialize_resume_state(state: _State, offered_skill_ids: list[str]) -> dict[str, Any]:
+        """2차 resume에 필요한 그래프 상태를 직렬화 dict로 추출 (Pydantic은 model_dump).
+
+        user_id(세션 소유권 검증)·offered_skill_ids(옵션 멤버십 검증)를 함께 영속해
+        2차 라운드에서 IDOR/세션 탈취를 차단한다.
+        """
+        spec = state.get("draft_spec")
+        return {
+            "user_id": str(state["user_id"]),
+            "offered_skill_ids": offered_skill_ids,
+            "draft_spec": spec.model_dump(mode="json") if spec else None,
+            "node_candidates": [c.model_dump(mode="json") for c in state.get("node_candidates") or []],
+            "intent": state.get("intent"),
+            "intent_analyzed_entities": state.get("intent_analyzed_entities") or {},
+        }
+
+    @staticmethod
+    def _resume_error(code: str, message: str) -> dict:
+        return {"resume_ok": False, "collected_frames": [ErrorFrame(code=code, message=message)]}
+
+    # 6.8. resume_node — two-shot 2차 진입: GCS에서 1차 상태 복원 (REQ-013)
+    async def _resume_node(self, state: _State) -> dict:
+        """2차 라운드 진입점. 1차에서 영속한 그래프 상태를 복원해 draft부터 이어간다.
+
+        - 미존재(None) → `E_SESSION_EXPIRED`(진짜 만료/오타 session_id).
+        - 일시적 저장소 오류(예외) → `E_RESUME_FAILED`(재시도 안내) — 만료와 구분(LOW #3).
+        - 영속 user_id ≠ 호출자 → `E_SESSION_EXPIRED`(generic, 세션 탈취 차단 + 존재 누설 방지, MED #1).
+        """
+        if self._composer_state_store is None:
+            return self._resume_error(
+                "E_SESSION_EXPIRED", "세션 상태 저장소가 없어 재개할 수 없습니다. 처음부터 다시 시작해 주세요."
+            )
+        try:
+            blob = await self._composer_state_store.load_state(state["session_id"])
+        except Exception as exc:
+            # 일시적 GCS/인증 오류 — 만료와 구분해 재시도 유도 (LOW #3)
+            _logger.warning("composer 상태 복원 일시 오류: %s", exc)
+            return self._resume_error(
+                "E_RESUME_FAILED", "일시적인 오류로 재개에 실패했어요. 잠시 후 다시 시도해 주세요."
+            )
+        if not blob:
+            return self._resume_error(
+                "E_SESSION_EXPIRED", "세션이 만료되었습니다. 워크플로우 요청을 다시 말씀해 주세요."
+            )
+
+        # 세션 소유권 검증 — 1차 영속 user_id ≠ 2차 호출자면 거부 (타 세션 resume 가로채기 차단, MED #1)
+        persisted_user = blob.get("user_id")
+        if persisted_user is not None and persisted_user != str(state["user_id"]):
+            _logger.warning("composer resume 소유권 불일치 차단: session=%s", state["session_id"])
+            return self._resume_error(
+                "E_SESSION_EXPIRED", "세션이 만료되었습니다. 워크플로우 요청을 다시 말씀해 주세요."
+            )
+
+        draft_spec = DraftSpec.model_validate(blob["draft_spec"]) if blob.get("draft_spec") else None
+        node_candidates = [NodeConfig.model_validate(c) for c in blob.get("node_candidates") or []]
+        return {
+            "resume_ok": True,
+            "draft_spec": draft_spec,
+            "node_candidates": node_candidates,
+            "intent": blob.get("intent"),
+            "intent_analyzed_entities": blob.get("intent_analyzed_entities") or {},
+            "offered_skill_ids": blob.get("offered_skill_ids") or [],
+            "collected_frames": [
+                PipelineStatusFrame(service_name="resume", status="completed", elapsed_ms=0),
+            ],
+        }
+
+    # 6.9. bind_skill_node — draft 후 LLM 노드에 선택 skill_id 바인딩 (결정론적 후처리, REQ-013)
+    async def _bind_skill_node(self, state: _State) -> dict:
+        """선택된 skill_id를 draft된 워크플로우의 첫 LLM 노드(category=="ai")에 바인딩.
+
+        drafter 무변경(바인딩=composer 후처리). 선택 없음/LLM 노드 0개면 no-op(경고).
+        복수 LLM 노드면 첫 노드(MVP 휴리스틱, 향후 옵션에 target_node 추가).
+        """
+        sel = state.get("selected_skill_id")
+        workflow = state.get("workflow_draft")
+        if sel is None or workflow is None:
+            return {}
+
+        # 옵션 멤버십 검증 — 1차에 제시된 옵션(이미 호출자 스코프로 제한됨)에 없는 skill_id는 거부.
+        # /slot이 임의 skill_id를 받을 수 있으므로 미제시 값 바인딩 차단 (스코프 밖 지침서 주입=IDOR 방지, MED #1).
+        offered = set(state.get("offered_skill_ids") or [])
+        if str(sel) not in offered:
+            _logger.warning("bind_skill 거부 — 미제시 skill_id 바인딩 시도 차단: %s", sel)
+            return {
+                "collected_frames": [
+                    RationaleDeltaFrame(delta="⚠️ 제시되지 않은 스킬은 바인딩할 수 없어 건너뜁니다."),
+                ]
+            }
+
+        # node_id → category 맵 (node_candidates 우선, 누락분만 registry 조회)
+        category_by_node_id = {c.node_id: c.category for c in state.get("node_candidates") or []}
+
+        target_idx: int | None = None
+        for i, node in enumerate(workflow.nodes):
+            category = category_by_node_id.get(node.node_id)
+            if category is None:
+                try:
+                    schema = await self._node_registry.get_schema(node.node_id)
+                    category = getattr(schema, "category", None)
+                except Exception:
+                    category = None
+            if category == "ai":
+                target_idx = i
+                break
+
+        if target_idx is None:
+            return {
+                "collected_frames": [
+                    RationaleDeltaFrame(delta="⚠️ 선택한 스킬을 바인딩할 LLM 노드가 워크플로우에 없어 건너뜁니다."),
+                ]
+            }
+
+        nodes = list(workflow.nodes)
+        nodes[target_idx] = nodes[target_idx].model_copy(update={"skill_id": sel})
+        bound = workflow.model_copy(update={"nodes": nodes})
+        return {
+            "workflow_draft": bound,
+            "collected_frames": [
+                RationaleDeltaFrame(delta=f"🔗 스킬 지침서 바인딩 완료 — LLM 노드에 skill_id={sel} 주입"),
+            ],
+        }
+
     # 7. drafter_node — 워크플로우 초안 생성
     async def _drafter_node(self, state: _State) -> dict:
         t0 = time.monotonic()
@@ -735,9 +980,13 @@ class LangGraphOrchestrator:
         elapsed = int((time.monotonic() - t0) * 1000)
         nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
         connections_data = [c.model_dump(mode="json") for c in workflow.connections]
+        # NodeInstance엔 node_type 없음(NodeConfig 필드) — node_candidates로 매핑해 요약 (REQ-004 버그 fix)
+        type_by_id = {c.node_id: c.node_type for c in state.get("node_candidates") or []}
+        node_summary = ", ".join(type_by_id.get(n.node_id, str(n.node_id)) for n in workflow.nodes)
         return {
             "workflow_draft": workflow,
             "collected_frames": [
+                RationaleDeltaFrame(delta=f"✏️ 워크플로우 초안 작성 완료 — 노드 {len(workflow.nodes)}개 ({node_summary}), 연결 {len(workflow.connections)}개"),
                 DraftSpecDeltaFrame(delta={"attempt": state["qa_attempts"] + 1}),
                 WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
                 PipelineStatusFrame(service_name="drafter", status="completed", elapsed_ms=elapsed),
@@ -746,6 +995,7 @@ class LangGraphOrchestrator:
 
     # 8. validator_node — 그래프 구조 검증 + RiskLevel 강제
     async def _validator_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
         workflow = state["workflow_draft"]
         if workflow is None:
             return {}
@@ -783,7 +1033,14 @@ class LangGraphOrchestrator:
                 except Exception:
                     continue  # 스키마 조회 실패 시 스킵
 
-        return {"pass_flag": True, "validation_issues": None}
+        return {
+            "pass_flag": True,
+            "validation_issues": None,
+            "collected_frames": [
+                RationaleDeltaFrame(delta="✅ 그래프 구조 검증 통과 — DAG, 사이클, 고립 노드, 필수 파라미터 이상 없음"),
+                PipelineStatusFrame(service_name="validator", status="completed", elapsed_ms=int((time.monotonic() - t0) * 1000)),
+            ],
+        }
 
     # 9. qa_evaluator_node — LLM-as-a-Judge 품질 평가
     async def _qa_evaluator_node(self, state: _State) -> dict:
@@ -798,12 +1055,14 @@ class LangGraphOrchestrator:
             return {"error": f"qa_evaluator 실패: {exc}"}
         elapsed = int((time.monotonic() - t0) * 1000)
         attempt = state["qa_attempts"] + 1
+        status_text = "통과" if result.pass_flag else "재시도 필요"
         return {
             "qa_attempts": attempt,
             "qa_score": result.score,
             "pass_flag": result.pass_flag,
             "qa_feedback": result.feedback,
             "collected_frames": [
+                RationaleDeltaFrame(delta=f"⭐ 품질 평가 완료 — 점수: {result.score}/10 ({status_text}) | {result.reason or ''}"),
                 QAMetricFrame(
                     score=result.score,
                     attempt=attempt,
@@ -1082,6 +1341,13 @@ class LangGraphOrchestrator:
 
     # 16. memory_save_node — 워크플로우 생성 패턴을 GCS PersonalMemoryStore에 저장
     async def _memory_save_node(self, state: _State) -> dict:
+        # two-shot 2차 성공 종료 — 재개 상태 정리 (멱등, non-fatal)
+        if state.get("round", 1) == 2 and self._composer_state_store is not None:
+            try:
+                await self._composer_state_store.delete_state(state["session_id"])
+            except Exception as exc:
+                _logger.warning("composer 상태 정리 실패 (non-fatal): %s", exc)
+
         if self._personal_memory_store is None:
             return {}
 
@@ -1136,13 +1402,19 @@ class LangGraphOrchestrator:
     def _build(self):
         graph: StateGraph = StateGraph(_State)
 
-        # fixed DAG: compress → security → intent → search_nodes → draft → validate → qa → promote → save → confirm → memory → END
+        # two-shot DAG (REQ-013):
+        #   [1차] compress → security → intent → search_nodes → suggest_skill_select
+        #         → (옵션 emit) END  /  (옵션 없음·미주입 one-shot 폴백) draft_workflow → …
+        #   [2차] resume → draft_workflow → bind_skill → validate → qa → promote → save → confirm → memory → END
         graph.add_node("compress", self._compress_node)
         graph.add_node("security", self._security_node)
         graph.add_node("intent", self._intent_node)
         graph.add_node("consultant", self._consultant_node)
         graph.add_node("slot_fill", self._slot_fill_node)
         graph.add_node("search_nodes", self._retriever_node)
+        graph.add_node("suggest_skill_select", self._suggest_skill_select_node)  # two-shot 1차 종단
+        graph.add_node("resume", self._resume_node)                              # two-shot 2차 진입
+        graph.add_node("bind_skill", self._bind_skill_node)                      # 2차 skill_id 바인딩
         graph.add_node("draft_workflow", self._drafter_node)
         graph.add_node("validate_workflow", self._validator_node)
         graph.add_node("retry_draft", self._qa_retry_node)
@@ -1154,7 +1426,17 @@ class LangGraphOrchestrator:
         graph.add_node("confirm_result", self._user_confirm_node)
         graph.add_node("save_memory", self._memory_save_node)
 
-        graph.set_entry_point("compress")
+        # 진입 분기 — round=2(선택 입력)는 resume부터, round=1은 compress(전처리)부터
+        graph.set_conditional_entry_point(
+            self._route_entry,
+            {"compress": "compress", "resume": "resume"},
+        )
+        # 2차 resume: 복원 성공 → draft, 실패 → 종료(E_SESSION_EXPIRED는 노드에서 emit)
+        graph.add_conditional_edges(
+            "resume",
+            self._route_after_resume,
+            {"draft": "draft_workflow", "end": END},
+        )
         graph.add_conditional_edges(
             "compress",
             self._should_compress,
@@ -1172,8 +1454,17 @@ class LangGraphOrchestrator:
         )
         graph.add_edge("consultant", "slot_fill")
         graph.add_edge("slot_fill", END)
-        graph.add_edge("search_nodes", "draft_workflow")
-        graph.add_edge("draft_workflow", "validate_workflow")
+        # 1차: 노드 검색 직후 스킬 옵션 제시 단계로 (draft는 아직 미생성)
+        graph.add_edge("search_nodes", "suggest_skill_select")
+        # 옵션 emit+중단(two-shot) → END / 옵션 없음·미주입(one-shot 폴백) → draft
+        graph.add_conditional_edges(
+            "suggest_skill_select",
+            self._route_after_suggest,
+            {"wait": END, "draft": "draft_workflow"},
+        )
+        # draft 직후 항상 bind_skill 경유 (1차 폴백=no-op, 2차=skill_id 주입)
+        graph.add_edge("draft_workflow", "bind_skill")
+        graph.add_edge("bind_skill", "validate_workflow")
         graph.add_conditional_edges(
             "validate_workflow",
             self._route_after_validate,

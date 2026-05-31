@@ -209,6 +209,23 @@ def _build_credential_service_factory():
     return factory
 
 
+def _build_skill_document_store() -> Any:
+    """바인딩된 스킬 지침서(SkillDocument) 로더. `SKILLS_MARKETPLACE_BUCKET` 미설정 시 None.
+
+    None이면 CatalogNodeExecutor가 skill 주입을 무주입 degrade(기존 동작)하므로 env 추가
+    전까지 deploy-safe. GCS는 asyncpg 이벤트 루프 바인딩과 무관하므로 단일 인스턴스 주입으로
+    충분하다 (credential service factory의 fresh-engine 패턴 불요). api_server
+    dependencies/storage.py 선례 미러.
+    """
+    bucket = os.getenv("SKILLS_MARKETPLACE_BUCKET")
+    if not bucket:
+        return None
+    from storage.adapters.gcs_adapter import GCSAdapter
+    from storage.adapters.gcs_skill_document_store import GcsSkillDocumentStore
+
+    return GcsSkillDocumentStore(object_storage=GCSAdapter(bucket_name=bucket))
+
+
 def create_container() -> Container:
     global _container
     if _container is not None:
@@ -230,6 +247,7 @@ def create_container() -> Container:
     node_executor = CatalogNodeExecutor(
         get_all_node_classes(),
         credential_service_factory=_build_credential_service_factory(),
+        skill_document_store=_build_skill_document_store(),
     )
 
     from .._celery_app import celery_app

@@ -2,7 +2,7 @@ import common_schemas
 
 
 def test_all_exports():
-    assert len(common_schemas.__all__) == 72
+    assert len(common_schemas.__all__) == 77
 
 
 def test_key_symbols_importable():
@@ -32,6 +32,7 @@ def test_key_symbols_importable():
         ToolCall,
         ValidationErrorResponse,
         WorkflowDraftFrame,
+        WorkflowExplanation,
         WorkflowSchema,
     )
 
@@ -60,4 +61,5 @@ def test_key_symbols_importable():
     assert ToolCall is not None
     assert ValidationErrorResponse is not None
     assert WorkflowDraftFrame is not None
+    assert WorkflowExplanation is not None
     assert WorkflowSchema is not None

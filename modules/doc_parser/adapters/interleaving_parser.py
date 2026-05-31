@@ -117,20 +117,25 @@ class InterleavingParser(ParserPort):
                 result_blocks.append(block)
                 failed_count += 1
 
-        return self._rebuild_doc(base_doc, result_blocks, file_meta, vision_count, failed_count)
+        return self._rebuild_doc(base_doc, result_blocks, vision_count, failed_count)
 
     def _rebuild_doc(
         self,
         base_doc: DocumentBlock,
         blocks: list[ContentBlock],
-        file_meta: FileMeta,
         vision_count: int = 0,
         failed_count: int = 0,
     ) -> DocumentBlock:
-        """새 블록 목록으로 DocumentBlock 재조립."""
+        """새 블록 목록으로 DocumentBlock 재조립.
+
+        file_meta는 base_doc의 것을 보존한다 — 인자로 받은 원본 file_meta가 아니라
+        base_parser가 파싱 중 보강한 값(예: PdfParser가 채운 page_count)을 그대로
+        흘려보내기 위함. 원본 file_meta로 덮어쓰면 page_count 보강이 소실되어
+        QualityGate `_calc_coverage`의 total_pages가 0이 된다.
+        """
         return DocumentBlock(
             document_id=base_doc.document_id,
-            file_meta=file_meta,
+            file_meta=base_doc.file_meta,
             parser=ParserMeta(
                 parser_name=f"Interleaving({base_doc.parser.parser_name})",
                 parser_version="1.1.0",

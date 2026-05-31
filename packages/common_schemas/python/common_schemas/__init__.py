@@ -47,6 +47,8 @@ from .transport import (
     RationaleDeltaFrame,
     ResultFrame,
     SessionFrame,
+    SkillOption,
+    SkillSelectionFrame,
     SlotFillQuestionFrame,
     SSEFrame,
     ToolCall,
@@ -55,6 +57,7 @@ from .transport import (
 from .types import UtcDatetime
 from .validation import ValidationErrorItem, ValidationErrorResponse
 from .workflow import Edge, NodeConfig, NodeExecutionState, NodeInstance, Position, WorkflowSchema
+from .workflow_explanation import ExplanationStep, PermissionItem, WorkflowExplanation
 
 __all__ = [
     # enums
@@ -79,6 +82,10 @@ __all__ = [
     "WorkflowSchema",
     # node — 노드 실행 컨텍스트 (ADR-0018)
     "NodeContext",
+    # workflow_explanation — 컨펌 게이트 신뢰 매니페스트 (confirm-gate-explanation)
+    "ExplanationStep",
+    "PermissionItem",
+    "WorkflowExplanation",
     # document
     "AnalysisResult",
     "AnalyzeDispatchResponse",
@@ -119,6 +126,8 @@ __all__ = [
     "ResultFrame",
     "SSEFrame",
     "SessionFrame",
+    "SkillOption",
+    "SkillSelectionFrame",
     "SlotFillQuestionFrame",
     # transport — SSE monitoring frames (PR #74, 사이드바 + 캔버스 실시간)
     "ChatMessageFrame",

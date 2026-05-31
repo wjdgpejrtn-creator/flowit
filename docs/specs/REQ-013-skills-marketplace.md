@@ -133,3 +133,42 @@ Downstream (이 모듈에 의존):
 | personal 미리보기/편집 백엔드 (가원 요청) | Port `list_personal_by_user`/`delete_personal` + `SkillDocumentStore.delete` + UseCase 3(List/Update/Delete) | ✅ PR #192 |
 | personal 미리보기/편집 storage 구현체 (조장) | `PgMarketplaceSkillRepository.list_personal_by_user`/`delete_personal` + `GcsSkillDocumentStore.delete` + `GCSAdapter.delete` 정규화 | ✅ PR #193 |
 | personal 미리보기/편집 api_server 라우트 (조장) | 4 엔드포인트(`GET /personal`, `GET/PUT/DELETE /personal/{id}`) + `PersonalSkillResponse` 슬림 DTO + `GetPersonalSkillUseCase`(조장 신설, owner-검사 라우터 분산 방지) | 🔵 PR #195 OPEN |
+| 런타임 주입 코어 (조장, 박아름 위임) | `NodeInstance.skill_id` + execution_engine 실행 시 instructions를 LLM 노드 system에 주입 | ✅ PR #265 머지 (worker `00025-hw7`) |
+| two-shot 1차 SSE 계약 (조장, 위임) | `SkillSelectionFrame`+`SkillOption`(common_schemas transport, v0.18.0) | ✅ PR #267 OPEN |
+| two-shot 바인딩 생산자 Phase 2 (조장, 위임) | `ComposerStateStore`+`GCSComposerStateStore` + composer round 분기/3 신규 노드 + payload relay 4-hop + `/slot` SSE (§6.5) | 🔵 진행 중 (feature/req-013-composer-two-shot) |
+| two-shot frontend Phase 3 (가원) | `skill_selection` 프레임 소비 + 옵션 UI + `/slot` 트리거 | ⬜ 대기 |
+
+## 6. 런타임 주입 — 워크플로우 실행 시 SkillDocument → LLM 노드 (REQ-013 코어, PR #265)
+
+Skill의 본질 = **워크플로우 LLM 노드 실행 시 프롬프트로 주입되는 도메인 전문가 지침서**(Anthropic SKILL.md 패러다임). 생성 단계의 검색(`SearchSkillsUseCase`, Composer)과 별개로, **실행 단계에서 바인딩된 SkillDocument의 `instructions`를 LLM 노드 `system` 프롬프트에 주입**하는 계약이다.
+
+### 6.1 바인딩
+- `common_schemas.NodeInstance.skill_id: Optional[UUID]` — 노드에 바인딩된 스킬(`credential_id`와 동일한 "노드별 외부 참조" 패턴, default None).
+- 바인딩 **소스**(노드에 skill_id를 박는 생산자) = Composer two-shot HITL 스킬 선택(**후속 PR**). 본 코어는 **소비**(주입)만 담당.
+
+### 6.2 주입 (execution_engine)
+- `CatalogNodeExecutor`가 노드 실행 시: `node.skill_id`가 있고 LLM 노드(`category=="ai"` **AND** input_schema에 `system` 필드 보유)이면 `SkillDocumentStore.load(skill_id)` → `SkillDocument.instructions`를 `system`에 병합(기존 system 있으면 지침서 prepend + `---` 구분자).
+- instructions SSOT = GCS(`skills/{skill_id}/SKILL.md`), `load(skill_id)`로 로드(scope 불필요).
+- **degrade 안전**: store 미배선 / load None·예외 / 비-LLM 노드 → 무주입 진행(skill은 선택적 보강이라 RuntimeError 없음). 기존 워크플로우(skill_id 없음) 완전 역호환.
+- ⚠️ **카탈로그 불변식 (게이트 정확성 의존)**: 주입 게이트는 *"LLM(ai 모듈)을 호출하는 노드 ⇒ `category=="ai"`"* 규약에 묶인다. 현재 LLM 호출 노드는 `anthropic_chat`/`gemma_chat` 2개뿐이고 둘 다 충족(누락 0). **향후 LLM을 내부 호출하면서 `output`/`transform` 등으로 태깅된 편의 노드를 추가하면 스킬 주입에서 silent 누락**(degrade라 무에러)되므로, 그런 노드는 `category="ai"` 유지 또는 게이트 판별식 동반 갱신이 필수다.
+
+### 6.3 의존성 / 인프라
+- execution_engine → `skills_marketplace.domain.ports.SkillDocumentStore`(port, `TYPE_CHECKING` import — DIP). 구현 `GcsSkillDocumentStore`(storage/adapters)는 container(composition root)에서 조립.
+- worker SA는 `skills_marketplace_bucket`에 **reader** 권한 필요(`load()` read-only). 미부여 시 403 → 무주입 silent degrade.
+
+### 6.5 바인딩 생산자 — Composer two-shot HITL 스킬 선택 (REQ-013, Phase 2, 황대원/위임)
+§6.1의 "바인딩 소스". Composer를 one-shot → **two-shot**으로 전환해 사용자가 선택한 `skill_id`를 워크플로우 LLM 노드에 박는다. **접근 = 세션 라운드트립**(composer는 stateless Modal·checkpointer 없음이라 interrupt 부적합 — execution_engine pause/resume 아날로그).
+
+- **흐름**:
+  - **[1차]** `compress→security→intent→search_nodes→suggest_skill_select`: 스킬 검색(지침서형/노드형 무관, `skill_id`만 있으면 옵션화) → `SkillSelectionFrame`(common_schemas `transport/sse.py`, PR #267) emit → 그래프 상태(`draft_spec`/`node_candidates`/`intent`)를 GCS 영속 → **END**(draft 미생성).
+  - **[선택]** frontend가 옵션 렌더 → `POST /api/v1/agents/sessions/{id}/slot {skill_id, field_name}`.
+  - **[2차]** `/slot` → orchestrator → composer `resume`: GCS 복원 + `selected_skill_id` 주입 → `draft_workflow→bind_skill→validate→qa→promote→save→confirm→memory→END`.
+- **신규 노드 (composer_graph)**: `suggest_skill_select`(1차 종단), `resume`(2차 진입, 복원 실패 시 `E_SESSION_EXPIRED`), `bind_skill`(draft 후 결정론적 후처리 — 첫 LLM 노드(`category=="ai"`)에 `model_copy(skill_id=…)`. 0개→skip+경고, 복수→첫 노드 MVP 휴리스틱). round 분기는 `set_conditional_entry_point`(round=2→resume, else→compress).
+- **drafter_service 무변경** — 바인딩은 composer 후처리(소유 모듈 정혜님 충돌 최소화).
+- **상태 영속**: `ComposerStateStore`(ai_agent `domain/ports`, `save/load/delete_state: dict`) + `GCSComposerStateStore`(`adapters/memory`, `composer_state/{session_id}.json`, `GCS_SESSION_BUCKET`). 2차 성공 종료 시 `delete_state`(멱등).
+- **payload relay 4-hop**(round/selected_skill_id 보존): api_server `/slot`(round=2 payload) → orchestrator main → supervisor(`_relay_stream` payload + round=2 직행 relay, intent 재분석 생략) → composer main → `composer_graph.stream(round, selected_skill_id)`. selected_skill_id는 JSON relay로 str 도착 → composer 경계에서 UUID 강제.
+- **one-shot 폴백(회귀 보존)**: `skill_search`/`embedder`/`composer_state_store` 미주입 또는 후보 0건이면 `suggest_skill_select`가 한 라운드 안에서 draft로 진행(중단 없음).
+- **레거시 정리**: 기존 `_suggest_skill_node`(스킬을 `SlotFillQuestionFrame.question` 문자열로 욱여넣던 경로)와 `_use_suggested_skill_node`는 현 `_build` 미등록 dead code — 본 PR은 신규 노드를 **가산**하고 dead code는 보존(제거는 정혜님 협의 + agent tool-loop 정리와 함께). PR #267 리뷰 LOW #2 후속.
+
+### 6.4 후속 설계 — ②"워크플로우 작성 가이드"형 스킬 (박아름 복귀 후)
+본 코어(§6)는 **①노드 바인딩 지침서 → 실행 시 LLM 노드 주입**만 다룬다. 스킬에는 개념적으로 **②"워크플로우를 *어떻게 조립*하는지"에 대한 작성 가이드**도 존재할 수 있고, 이는 런타임 노드가 아니라 **생성 단계 Composer(workflow agent)의 system 프롬프트에 주입**돼야 한다(①과 대칭). 현 모델 미지원 — (a) `SkillDocument`에 종류(`kind`) 판별자 없음, (b) 스킬이 `node_definition_id` 중심(노드=스킬)이라 노드 없는 순수 작성 가이드 표현 불가, (c) `_suggest_skill_node`가 `node_definition_id is None` 스킬을 skip해 surfacing 불가, (d) Composer가 `SkillDocument.instructions`를 자기 프롬프트에 안 읽음(name/description만 사용). → ② 지원 시 스킬 `kind` 판별자 + Composer 생성 시 instructions를 workflow-agent system에 병합하는 대칭 주입점 필요. **REQ-013 owner(박아름) 복귀 후 설계 결정 사안.**

@@ -34,6 +34,31 @@ class SlotFillQuestionFrame(SSEFrame):
     field_name: str
 
 
+class SkillOption(BaseModel):
+    """스킬 선택지 1개 — SkillSelectionFrame.options 원소 (REQ-013 two-shot HITL)."""
+    model_config = ConfigDict(frozen=True)
+
+    skill_id: UUID
+    name: str
+    description: str
+    document_preview: Optional[str] = None    # SkillDocument.instructions 앞부분(선택)
+    node_definition_id: Optional[UUID] = None  # 노드형 스킬 호환(지침서형은 None)
+
+
+class SkillSelectionFrame(SSEFrame):
+    """스킬 검색 후 사용자에게 적용할 스킬을 옵션으로 제시(two-shot HITL 1차).
+
+    프론트가 옵션을 렌더 → 사용자 선택 → `POST /sessions/{id}/slot`
+    (`field_name`, `skill_id`)로 2차 라운드 트리거. SlotFillQuestionFrame과 달리
+    복수 옵션 + skill_id + 미리보기를 담는다.
+    """
+    frame_type: Literal["skill_selection"] = "skill_selection"
+    field_name: str = "skill_selection"
+    prompt: str
+    options: list[SkillOption]
+    allow_skip: bool = True
+
+
 class DraftSpecDeltaFrame(SSEFrame):
     frame_type: Literal["draft_spec_delta"] = "draft_spec_delta"
     delta: dict[str, Any]
@@ -107,6 +132,7 @@ AnySSEFrame = Annotated[
         Annotated[AgentNodeFrame, Tag("agent_node")],
         Annotated[RationaleDeltaFrame, Tag("rationale_delta")],
         Annotated[SlotFillQuestionFrame, Tag("slot_fill_question")],
+        Annotated[SkillSelectionFrame, Tag("skill_selection")],
         Annotated[DraftSpecDeltaFrame, Tag("draft_spec_delta")],
         Annotated[ResultFrame, Tag("result")],
         Annotated[ErrorFrame, Tag("error")],
