@@ -171,7 +171,10 @@ module "skills_marketplace_bucket" {
     var.agent_secret_accessors,
     var.api_server_service_account != "" ? ["serviceAccount:${var.api_server_service_account}"] : [],
   ))
-  reader_members = []
+  # worker SA는 read-only — 워크플로우 실행 시 LLM 노드 바인딩 SkillDocument를 load()만 한다
+  # (REQ-013 런타임 주입). write는 api_server/skills_builder. 누락 시 load()가 403→무주입
+  # degrade로 silent fail하므로 명시적 reader 부여 필수.
+  reader_members = var.execution_engine_worker_service_account != "" ? ["serviceAccount:${var.execution_engine_worker_service_account}"] : []
 
   labels = merge(local.common_labels, { role = "skills-marketplace" })
 }
@@ -447,6 +450,9 @@ module "execution_engine_worker" {
     # `_build_vision_llm()`이 이 값+LLM_BASE_URL로 HttpVisionLLM 주입 → doc_parser vision 추출.
     # off/누락 시 텍스트 전용 degrade. ①(#245 llm-base images) + ②(#247 doc_parser) 머지 완료 후 활성.
     DOC_PARSER_VISION_ENABLED = "true"
+    # 워크플로우 실행 시 LLM 노드에 바인딩된 SkillDocument(지침서)를 GCS에서 로드 → system 주입 (REQ-013).
+    # CatalogNodeExecutor._build_skill_document_store()가 읽음. 누락 시 None=무주입 degrade(deploy-safe).
+    SKILLS_MARKETPLACE_BUCKET = module.skills_marketplace_bucket.bucket_name
   }
 
   # PR #80 GCP Secret Manager에서 직접 주입 — load_secrets_to_env 우회.

@@ -31,6 +31,8 @@ class NodeInstance(BaseModel):
     node_id: UUID
     parameters: dict[str, Any]
     credential_id: Optional[UUID] = None
+    # 바인딩된 SkillDocument(도메인 지침서) — 실행 시 LLM 노드 system 프롬프트에 주입 (REQ-013)
+    skill_id: Optional[UUID] = None
     position: Position
 
 
