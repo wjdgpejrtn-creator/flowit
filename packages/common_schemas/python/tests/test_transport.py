@@ -11,6 +11,8 @@ from common_schemas.transport import (
     RationaleDeltaFrame,
     ResultFrame,
     SessionFrame,
+    SkillOption,
+    SkillSelectionFrame,
     SlotFillQuestionFrame,
 )
 
@@ -37,6 +39,22 @@ class TestSlotFillQuestionFrame:
     def test_create(self):
         f = SlotFillQuestionFrame(question="What email?", field_name="recipient")
         assert f.frame_type == "slot_fill_question"
+
+
+class TestSkillSelectionFrame:
+    def test_create(self):
+        f = SkillSelectionFrame(
+            prompt="적용할 스킬을 선택하세요",
+            options=[
+                SkillOption(skill_id=uuid4(), name="세무 전문가", description="세무 도메인 지침"),
+            ],
+        )
+        assert f.frame_type == "skill_selection"
+        assert f.field_name == "skill_selection"
+        assert f.allow_skip is True
+        assert f.options[0].name == "세무 전문가"
+        assert f.options[0].document_preview is None
+        assert f.options[0].node_definition_id is None
 
 
 class TestDraftSpecDeltaFrame:
@@ -93,3 +111,16 @@ class TestAnySSEFrameDiscriminator:
             {"frame_type": "chat_message", "role": "user", "content": "hello"}
         )
         assert isinstance(frame, ChatMessageFrame)
+
+    def test_discriminate_skill_selection(self):
+        adapter = TypeAdapter(AnySSEFrame)
+        sid = uuid4()
+        frame = adapter.validate_python(
+            {
+                "frame_type": "skill_selection",
+                "prompt": "스킬 선택",
+                "options": [{"skill_id": str(sid), "name": "n", "description": "d"}],
+            }
+        )
+        assert isinstance(frame, SkillSelectionFrame)
+        assert frame.options[0].skill_id == sid

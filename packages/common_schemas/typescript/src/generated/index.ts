@@ -113,6 +113,7 @@ export interface NodeInstance {
   node_id: string;
   parameters: Record<string, unknown>;
   credential_id?: string | null;
+  skill_id?: string | null;
   position: Position;
 }
 
@@ -188,6 +189,22 @@ export interface SlotFillQuestionFrame {
   field_name: string;
 }
 
+export interface SkillOption {
+  skill_id: string;
+  name: string;
+  description: string;
+  document_preview?: string | null;
+  node_definition_id?: string | null;
+}
+
+export interface SkillSelectionFrame {
+  frame_type: "skill_selection";
+  field_name: string;
+  prompt: string;
+  options: Array<SkillOption>;
+  allow_skip: boolean;
+}
+
 export interface DraftSpecDeltaFrame {
   frame_type: "draft_spec_delta";
   delta: Record<string, unknown>;
@@ -239,7 +256,7 @@ export interface ChatMessageFrame {
 }
 
 export interface AgentProtocolResponse {
-  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame>;
+  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | SkillSelectionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame>;
   state_delta: Record<string, unknown>;
   next_action: "continue" | "complete" | "error";
 }
@@ -395,6 +412,13 @@ export interface EvaluationResult {
   feedback: string;
 }
 
+export interface ExplanationStep {
+  order: number;
+  node_name: string;
+  description: string;
+  risk_level: RiskLevel;
+}
+
 export interface HandoffPayload {
   handoff_type: "recovery_mode" | "result_review";
   direction: "forward" | "reverse";
@@ -434,6 +458,12 @@ export interface NodeExecutionState {
   status: "pending" | "running" | "succeeded" | "failed" | "retrying" | "cancelled";
   attempt: number;
   last_error?: string | null;
+}
+
+export interface PermissionItem {
+  connection: string;
+  node_name: string;
+  risk_level: RiskLevel;
 }
 
 export interface PermissionSource {
@@ -506,4 +536,12 @@ export interface ValidationErrorResponse {
   errors: Array<ValidationErrorItem>;
 }
 
-export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame;
+export interface WorkflowExplanation {
+  intent_restatement: string;
+  summary: string;
+  steps: Array<ExplanationStep>;
+  permissions: Array<PermissionItem>;
+  assumptions: Array<string>;
+}
+
+export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | SkillSelectionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame;

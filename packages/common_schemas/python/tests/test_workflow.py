@@ -41,7 +41,19 @@ class TestNodeInstance:
             position=Position(x=0, y=0),
         )
         assert ni.credential_id is None
+        assert ni.skill_id is None
         assert ni.parameters == {"key": "value"}
+
+    def test_skill_id_binding(self):
+        skill = uuid4()
+        ni = NodeInstance(
+            instance_id=uuid4(),
+            node_id=uuid4(),
+            parameters={},
+            skill_id=skill,
+            position=Position(x=0, y=0),
+        )
+        assert ni.skill_id == skill
 
 
 class TestNodeConfig:

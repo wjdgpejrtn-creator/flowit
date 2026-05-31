@@ -7,6 +7,34 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.18.0] - 2026-05-31
+
+### Added — 스킬 선택 SSE 프레임 (REQ-013 two-shot HITL 생산자)
+- `transport/sse.py`:
+  - `SkillSelectionFrame` 신규 — 스킬 검색 후 사용자에게 적용할 스킬을 옵션으로 제시(two-shot 1차). `prompt` + `options: list[SkillOption]` + `field_name`("skill_selection") + `allow_skip`. 프론트가 옵션 렌더 → 사용자 선택 → `POST /sessions/{id}/slot`로 2차 트리거.
+  - `SkillOption` 신규(중첩 모델) — `skill_id` + `name` + `description` + `document_preview?`(SkillDocument.instructions 미리보기) + `node_definition_id?`(노드형 호환, 지침서형은 None).
+  - `AnySSEFrame` Union에 `Tag("skill_selection")` 등록. `SlotFillQuestionFrame`(question/field_name만)은 복수 옵션·skill_id 불가라 신규 프레임 채택.
+- 신규 프레임/모델(기존 변경 없음) → MINOR. TS regenerate 완료.
+
+## [0.17.0] - 2026-05-31
+
+### Added — 스킬 런타임 주입 바인딩 (REQ-013 코어)
+- `workflow.py` `NodeInstance`에 `skill_id: Optional[UUID] = None` 추가. 노드에 바인딩된 SkillDocument(도메인 지침서)를 가리키며, execution_engine이 LLM 노드(`category=="ai"`이면서 input_schema에 `system` 필드 보유) 실행 시 해당 스킬의 `instructions`를 `system` 프롬프트에 주입한다. `credential_id`(노드별 외부 참조)와 동일 패턴.
+- 신규 Optional 필드(기존 필드 변경 없음) → MINOR. default None이라 기존 workflows JSONB row 역호환(`NodeInstance.model_validate`).
+- 바인딩 소스(노드에 skill_id를 박는 것)는 Composer two-shot HITL 후속 PR. 본 변경은 필드 + 실행 시 소비(주입)만 추가.
+- TS regenerate 완료 — `NodeInstance` 인터페이스에 `skill_id?: string | null` 자동 반영.
+
+## [0.16.0] - 2026-05-31
+
+### Added — 컨펌 게이트 신뢰 매니페스트 (confirm-gate-explanation)
+- `workflow_explanation.py` 신규 — one-shot(HITL 없음) 철학에서 신뢰가 몰리는 최종 컨펌 게이트용 구조화 설명. AI 워크플로우 초안을 실행하기 전 "무엇을 하고/무엇을 건드리며/무엇을 가정했는지"를 사용자에게 노출한다.
+  - `WorkflowExplanation`: `intent_restatement`(의도 재진술) · `summary`(평문 요약) · `steps` · `permissions` · `assumptions`.
+  - `ExplanationStep`: `order` · `node_name` · `description` · `risk_level` — 노드 1개 = 단계 1개.
+  - `PermissionItem`: `connection` · `node_name` · `risk_level` — `NodeConfig.required_connections` 원소를 권한 매니페스트로 노출.
+- 전부 신규 모델(기존 필드 변경 없음) → MINOR. steps/permissions/assumptions는 `WorkflowSchema`+`NodeConfig`에서 결정론적으로 추출되는 사실 계약이며, summary만 LLM 다듬기 허용(설계 원칙: §docs/specs/plan/confirm-gate-explanation.md).
+- `ResultFrame.payload["explanation"]`에 직렬화되어 orchestrator→api→프론트로 흐른다. 소비처: ai_agent composer `_explain_node`(영역 C) + frontend `ConfirmCard`(영역 D).
+- TS regenerate 완료 — `WorkflowExplanation` / `ExplanationStep` / `PermissionItem` 인터페이스 자동 생성.
+
 ## [0.15.0] - 2026-05-30
 
 ### Added — 문서 파싱 커버리지 노출 (REQ-009 — analyze 결과 가시화)
