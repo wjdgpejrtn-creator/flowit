@@ -395,6 +395,13 @@ export interface EvaluationResult {
   feedback: string;
 }
 
+export interface ExplanationStep {
+  order: number;
+  node_name: string;
+  description: string;
+  risk_level: RiskLevel;
+}
+
 export interface HandoffPayload {
   handoff_type: "recovery_mode" | "result_review";
   direction: "forward" | "reverse";
@@ -434,6 +441,12 @@ export interface NodeExecutionState {
   status: "pending" | "running" | "succeeded" | "failed" | "retrying" | "cancelled";
   attempt: number;
   last_error?: string | null;
+}
+
+export interface PermissionItem {
+  connection: string;
+  node_name: string;
+  risk_level: RiskLevel;
 }
 
 export interface PermissionSource {
@@ -504,6 +517,14 @@ export interface ValidationErrorItem {
 export interface ValidationErrorResponse {
   validation_status: "passed" | "failed";
   errors: Array<ValidationErrorItem>;
+}
+
+export interface WorkflowExplanation {
+  intent_restatement: string;
+  summary: string;
+  steps: Array<ExplanationStep>;
+  permissions: Array<PermissionItem>;
+  assumptions: Array<string>;
 }
 
 export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame;

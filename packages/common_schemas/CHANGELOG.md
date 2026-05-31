@@ -7,6 +7,17 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.16.0] - 2026-05-31
+
+### Added — 컨펌 게이트 신뢰 매니페스트 (confirm-gate-explanation)
+- `workflow_explanation.py` 신규 — one-shot(HITL 없음) 철학에서 신뢰가 몰리는 최종 컨펌 게이트용 구조화 설명. AI 워크플로우 초안을 실행하기 전 "무엇을 하고/무엇을 건드리며/무엇을 가정했는지"를 사용자에게 노출한다.
+  - `WorkflowExplanation`: `intent_restatement`(의도 재진술) · `summary`(평문 요약) · `steps` · `permissions` · `assumptions`.
+  - `ExplanationStep`: `order` · `node_name` · `description` · `risk_level` — 노드 1개 = 단계 1개.
+  - `PermissionItem`: `connection` · `node_name` · `risk_level` — `NodeConfig.required_connections` 원소를 권한 매니페스트로 노출.
+- 전부 신규 모델(기존 필드 변경 없음) → MINOR. steps/permissions/assumptions는 `WorkflowSchema`+`NodeConfig`에서 결정론적으로 추출되는 사실 계약이며, summary만 LLM 다듬기 허용(설계 원칙: §docs/specs/plan/confirm-gate-explanation.md).
+- `ResultFrame.payload["explanation"]`에 직렬화되어 orchestrator→api→프론트로 흐른다. 소비처: ai_agent composer `_explain_node`(영역 C) + frontend `ConfirmCard`(영역 D).
+- TS regenerate 완료 — `WorkflowExplanation` / `ExplanationStep` / `PermissionItem` 인터페이스 자동 생성.
+
 ## [0.15.0] - 2026-05-30
 
 ### Added — 문서 파싱 커버리지 노출 (REQ-009 — analyze 결과 가시화)

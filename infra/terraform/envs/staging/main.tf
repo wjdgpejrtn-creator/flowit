@@ -443,6 +443,10 @@ module "execution_engine_worker" {
     # documents analyze task가 GCS에서 download → 로컬 tmpfile → doc_parser 실행 (REQ-006/009).
     # api_server upload 측과 동일 버킷 — Phase B analyze task에서 `os.getenv("DOCUMENTS_BUCKET")`로 읽음.
     DOCUMENTS_BUCKET = module.documents_bucket.bucket_name
+    # Gemma 4 멀티모달 vision(InterleavingParser) 활성화 토글 (REQ-007 ③, worker-vision-enable.md).
+    # `_build_vision_llm()`이 이 값+LLM_BASE_URL로 HttpVisionLLM 주입 → doc_parser vision 추출.
+    # off/누락 시 텍스트 전용 degrade. ①(#245 llm-base images) + ②(#247 doc_parser) 머지 완료 후 활성.
+    DOC_PARSER_VISION_ENABLED = "true"
   }
 
   # PR #80 GCP Secret Manager에서 직접 주입 — load_secrets_to_env 우회.
