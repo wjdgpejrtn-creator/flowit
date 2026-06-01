@@ -6,7 +6,7 @@ import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import Steps from '@/components/common/Steps';
 import RunMode from '@/components/agent/RunMode';
-import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/agentStore';
+import { useAgentStore, WorkspaceMode, ChatMessage } from '@/stores/agentStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession } from '@/lib/api/agentApi';
 import { executeWorkflow } from '@/lib/api/workflowApi';
@@ -18,57 +18,9 @@ import RiskPill from '@/components/common/RiskPill';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
+import { STEP_ORDER, STEP_LABELS, nextMonotonicStep } from '@/lib/agentSteps';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
-
-const STEP_ORDER: AgentStep[] = [
-  'security', 'intent', 'retriever', 'drafter', 'validator', 'qa_eval', 'promote',
-];
-
-const TOOL_TO_STEP: Record<string, AgentStep> = {
-  // supervisor 노드
-  load_memory:       'security',
-  analyze_intent:    'intent',
-  // composer fixed DAG 노드
-  compress:          'security',
-  security:          'security',
-  intent:            'intent',
-  consultant:        'intent',
-  slot_fill:         'intent',
-  search_nodes:      'retriever',
-  draft_workflow:    'drafter',
-  retry_draft:       'drafter',
-  validate_workflow: 'validator',
-  qa_evaluator:      'qa_eval',
-  validation_failed: 'validator',
-  qa_failed:         'qa_eval',
-  promote:           'promote',
-  save_workflow:     'promote',
-  confirm_result:    'promote',
-  save_memory:       'promote',
-};
-
-const STEP_LABELS: Record<AgentStep, string> = {
-  security:  '보안 검토',
-  intent:    '의도 분류',
-  retriever: '노드 검색',
-  drafter:   '초안 생성',
-  validator: '그래프 검증',
-  qa_eval:   '품질 평가',
-  promote:   '워크플로우 확정',
-};
-
-// agent_node 프레임 → 표시 단계. STEP_ORDER 기준 **단조 증가만** 허용해 역행(#297)을 막는다.
-// (#298이 @/lib/agentSteps로 추출한 동일 로직을 인라인 반영 — 머지 순서와 무관하게 가드 보존)
-function nextMonotonicStep(prev: AgentStep | null, toolName: string): AgentStep {
-  const mapped = TOOL_TO_STEP[toolName] ?? (toolName as AgentStep);
-  if (prev === null) return mapped;
-  const mi = STEP_ORDER.indexOf(mapped);
-  const pi = STEP_ORDER.indexOf(prev);
-  // 매핑 안 되는 단계(mi<0)는 STEP_ORDER 밖 — 가드 없이 그대로 반영.
-  if (mi < 0) return mapped;
-  return mi >= pi ? mapped : prev;
-}
 
 const NODE_TYPES = { custom: CustomNode };
 
@@ -507,9 +459,9 @@ function AgentPageContent() {
               break;
             case 'agent_node': {
               const toolName = frame.agent_node_name as string;
-              // 콜백 내 stale closure 회피 위해 store에서 직전 단계를 동기 조회.
-              const prevStep = useAgentStore.getState().currentStep;
-              setCurrentStep(nextMonotonicStep(prevStep, toolName));
+              // SSE 콜백은 클로저라 구조분해된 currentStep이 stale될 수 있어 store에서 최신값을 읽는다.
+              const prev = useAgentStore.getState().currentStep;
+              setCurrentStep(nextMonotonicStep(prev, toolName));
               break;
             }
             case 'rationale_delta':
