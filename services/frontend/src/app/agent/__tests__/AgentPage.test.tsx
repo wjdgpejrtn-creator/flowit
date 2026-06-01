@@ -35,6 +35,7 @@ jest.mock('../../../hooks/useSSEStream', () => ({
 
 jest.mock('../../../lib/api/workflowApi', () => ({
   executeWorkflow: jest.fn(),
+  getWorkflow: jest.fn(() => Promise.resolve(null)),
 }));
 
 jest.mock('../../../stores/authStore', () => ({

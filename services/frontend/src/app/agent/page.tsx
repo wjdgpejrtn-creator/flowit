@@ -9,7 +9,9 @@ import RunMode from '@/components/agent/RunMode';
 import { useAgentStore, WorkspaceMode, ChatMessage } from '@/stores/agentStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession, streamSlotAnswer } from '@/lib/api/agentApi';
-import { executeWorkflow } from '@/lib/api/workflowApi';
+import { executeWorkflow, getWorkflow } from '@/lib/api/workflowApi';
+import { useWorkflowStore } from '@/stores/workflowStore';
+import WorkflowCanvas from '@/components/workflow/WorkflowCanvas';
 import { ReactFlow, Background, BackgroundVariant, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getCatalog } from '@/lib/api/nodeApi';
@@ -491,9 +493,35 @@ function AgentPageContent() {
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
 
+  // 완성된 워크플로우를 편집 캔버스에 로드 — useWorkflowStore(WorkflowCanvas가 읽음).
+  const setLoadedWorkflow = useWorkflowStore((s) => s.setWorkflow);
+  const loadedWorkflow = useWorkflowStore((s) => s.workflow);
+  const [editCatalog, setEditCatalog] = useState<NodeConfig[] | null>(null);
+
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
   }, []);
+
+  // 노드 카탈로그 1회 로드 (편집 캔버스 노드 라벨/리스크 표시용).
+  useEffect(() => {
+    let cancelled = false;
+    getCatalog().then((c) => { if (!cancelled) setEditCatalog(c); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // 워크플로우 완성(readyToExecute) 시 DB에서 로드해 편집 캔버스에 반영.
+  // 로딩 실패(404 등)는 곧 workflow_id가 유효 저장본이 아니라는 신호 → 사용자에게 노출.
+  useEffect(() => {
+    const wfId = readyToExecute?.workflowId;
+    if (!wfId) return;
+    let cancelled = false;
+    getWorkflow(wfId)
+      .then((wf) => { if (!cancelled) setLoadedWorkflow(wf); })
+      .catch((err) => {
+        showToast(`워크플로우 불러오기 실패: ${err instanceof Error ? err.message : '저장본을 찾을 수 없습니다'}`);
+      });
+    return () => { cancelled = true; };
+  }, [readyToExecute?.workflowId, setLoadedWorkflow]);
 
   useSSEStream(sessionId, {
     onResult: (frame) => {
@@ -515,8 +543,9 @@ function AgentPageContent() {
       await executeWorkflow(readyToExecute.workflowId);
       setReadyToExecute(null);
       setMode('run');
-    } catch {
-      // 실행 실패는 run 모드로 전환하지 않고 버튼 유지
+    } catch (err) {
+      // 실패 시 run 모드로 전환하지 않고 버튼 유지 + 원인을 사용자에게 노출(과거: silent).
+      showToast(`실행 실패: ${err instanceof Error ? err.message : '워크플로우를 실행할 수 없습니다'}`);
     } finally {
       setExecuteLoading(false);
     }
@@ -679,6 +708,7 @@ function AgentPageContent() {
     setSlotQuestion(null);
     setReadyToExecute(null);
     setSkillSelection(null);
+    setLoadedWorkflow(null);
     autoSentRef.current = false;
     setMode('wizard');
   };
@@ -928,9 +958,11 @@ function AgentPageContent() {
           )}
 
           {/* ── Edit Mode ───────────────────────────────────────── */}
+          {/* 완성된 워크플로우가 로드돼 있으면 store 기반 캔버스로 표시(adapter 렌더), */}
+          {/* 아니면 빈 빌더(FlowEditor)로 처음부터 작성. */}
           {mode === 'edit' && (
-            <div className="flex-1 min-h-0">
-              <FlowEditor />
+            <div className="flex-1 min-h-0 flex">
+              {loadedWorkflow ? <WorkflowCanvas catalog={editCatalog} /> : <FlowEditor />}
             </div>
           )}
 
