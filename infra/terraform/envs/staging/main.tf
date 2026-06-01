@@ -363,6 +363,11 @@ module "api_server" {
     GOOGLE_CLIENT_SECRET = { secret_id = "google-client-secret", version = "latest" }
     GOOGLE_REDIRECT_URI  = { secret_id = "google-redirect-uri", version = "latest" }
     ORCHESTRATOR_URL     = { secret_id = "orchestrator-url", version = "latest" }
+    # 문서→스킬 추출(extract) 직결 — POST /api/v1/skills/extract가 orchestrator 의도분류를
+    # 우회해 skills-builder `/v1/agent/route`(source_type=sop, step=extract)를 직접 호출(REQ-010/013).
+    # orchestrator가 sub-agent 라우팅에 쓰는 동일 `skills-builder-url` secret 재사용 — 값 일원화.
+    # 미설정 시 라우트가 503으로 graceful degrade(api_server boot는 안 깨짐).
+    SKILLS_BUILDER_URL = { secret_id = "skills-builder-url", version = "latest" }
   }
 
   labels = merge(local.common_labels, { role = "api-server" })

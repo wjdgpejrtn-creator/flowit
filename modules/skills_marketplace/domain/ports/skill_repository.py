@@ -77,6 +77,31 @@ class SkillRepository(ABC):
         ...
 
     @abstractmethod
+    async def list_by_scope(
+        self,
+        scope: SkillScope,
+        lifecycle_state: SkillState | None = SkillState.PUBLISHED,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MarketplaceTeamSkill | MarketplaceCompanySkill]:
+        """마켓플레이스 탐색(browse) 목록 — scope(team/company) 게시 스킬을 쿼리 없이 나열.
+
+        `search`(embedding 코사인 유사도)와 별개. 마켓플레이스 UI의 Team/Company 탭은 검색어
+        없이 게시된 스킬 전체를 최신순으로 보여주므로 embedding이 필요 없다 — 본 메서드가 그 경로.
+
+        scope=PERSONAL은 본 메서드 대상 아님(개인 스킬은 owner 범위라 `list_personal_by_user`
+        사용) — 구현체는 PERSONAL이 오면 ValueError를 던진다.
+
+        lifecycle_state 기본 PUBLISHED(ADR-0020 (b)): 미검토 DRAFT/REVIEW를 마켓플레이스에 노출하지
+        않는다. None이면 전체 상태(관리/디버그).
+
+        승격 완료 원본(team의 `promoted_to_company_id` 존재)은 제외 — 승격=복제이므로 상위 scope에
+        같은 스킬이 이미 존재해 중복 노출 방지(`search`의 include_promoted=False 정책과 동일).
+        company는 최상위라 승격 마킹 컬럼이 없어 해당 필터 없음. 정렬은 구현에서 `updated_at DESC`.
+        """
+        ...
+
+    @abstractmethod
     async def save_approval(self, approval: ApprovalWorkflow) -> ApprovalWorkflow:
         """게시 승인 워크플로우 레코드 저장 (ADR-0020 + 감사 추적).
 

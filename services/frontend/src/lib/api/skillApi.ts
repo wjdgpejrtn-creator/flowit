@@ -19,6 +19,32 @@ export interface PersonalSkill {
   updated_at: string;
 }
 
+export type MarketplaceScope = 'team' | 'company';
+
+// 마켓플레이스 Team/Company 탭 browse 응답 (백엔드 MarketplaceSkillResponse 대응).
+// 검색어 없는 게시 스킬 목록 — SearchSkillsUseCase(embedding 유사도)와 별개 경로.
+export interface MarketplaceSkill {
+  skill_id: string;
+  scope: MarketplaceScope;
+  name: string;
+  description: string;
+  node_definition_id: string | null;
+  lifecycle_state: SkillLifecycleState;
+  tags: string[];
+  version: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// 스킬 지침서(SKILL.md) 본문 — 상세 페이지가 메타 조회 후 lazy-load (백엔드
+// MarketplaceSkillDocumentResponse 대응). instructions = markdown 본문.
+export interface MarketplaceSkillDocument {
+  skill_id: string;
+  name: string;
+  description: string;
+  instructions: string;
+}
+
 export interface CreatePersonalSkillRequest {
   name: string;
   description: string;
@@ -56,6 +82,36 @@ export async function listPersonalSkills(
   return apiJson<PersonalSkill[]>(`/api/v1/skills/personal?${params}`);
 }
 
+export async function listMarketplaceSkills(
+  scope: MarketplaceScope,
+  limit = 50,
+  offset = 0,
+): Promise<MarketplaceSkill[]> {
+  const params = new URLSearchParams();
+  params.set('scope', scope);
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
+  return apiJson<MarketplaceSkill[]>(`/api/v1/skills/marketplace?${params}`);
+}
+
+export async function getMarketplaceSkill(
+  scope: MarketplaceScope,
+  skillId: string,
+): Promise<MarketplaceSkill> {
+  const params = new URLSearchParams({ scope });
+  return apiJson<MarketplaceSkill>(`/api/v1/skills/marketplace/${skillId}?${params}`);
+}
+
+export async function getMarketplaceSkillDocument(
+  scope: MarketplaceScope,
+  skillId: string,
+): Promise<MarketplaceSkillDocument> {
+  const params = new URLSearchParams({ scope });
+  return apiJson<MarketplaceSkillDocument>(
+    `/api/v1/skills/marketplace/${skillId}/document?${params}`,
+  );
+}
+
 export async function getPersonalSkill(skillId: string): Promise<PersonalSkill> {
   return apiJson<PersonalSkill>(`/api/v1/skills/personal/${skillId}`);
 }
@@ -75,5 +131,84 @@ export async function deletePersonalSkill(skillId: string): Promise<void> {
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${body}`);
+  }
+}
+
+// ── default 템플릿(seed) — 문서 없는 사용자용 위저드 재료 (위저드 재설계 Phase 0/1) ──
+
+export type SkillTemplateKind = 'industry' | 'functional';
+
+// default 위저드 카드 1건 (백엔드 SkillTemplate 대응). code → extract의 template_code.
+export interface SkillTemplate {
+  code: string;
+  name: string;
+  description: string;
+  kind: SkillTemplateKind;
+}
+
+// 사용 가능한 default 템플릿(업종 6 + 직무 5) 목록 — GET /api/v1/skills/templates.
+export async function listSkillTemplates(): Promise<SkillTemplate[]> {
+  return apiJson<SkillTemplate[]>('/api/v1/skills/templates');
+}
+
+// ── 문서/템플릿→스킬 자동 추출 (REQ-010/013, 스킬빌더 위저드 1단계) ──────────────
+
+// extract_draft 결과 1건 — SOP에서 추출된 SkillNode 초안. instructions가 전문 SKILL.md 본문.
+export interface ExtractedSkillDraft {
+  node_type: string;
+  name: string;
+  description: string;
+  instructions: string;
+}
+
+// 추출 재료 — 내 문서(source_document_id) XOR default 템플릿(template_code). 백엔드 배타 검증.
+export type ExtractMaterial =
+  | { source_document_id: string }
+  | { template_code: string };
+
+// 문서 또는 default 템플릿에서 스킬 초안을 추출하는 SSE 스트림 (POST /api/v1/skills/extract).
+// onFrame으로 raw frame을 넘긴다 — 호출측이 frame_type으로 분기(agent_node/result/error).
+// 저장은 하지 않는다(검토용) — 확정은 createPersonalSkill로 수행.
+export async function streamExtractSkill(
+  material: ExtractMaterial,
+  onFrame: (frame: Record<string, unknown>) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await apiFetch('/api/v1/skills/extract', {
+    method: 'POST',
+    body: JSON.stringify(material),
+    signal,
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() ?? '';
+
+      for (const part of parts) {
+        for (const line of part.split('\n')) {
+          if (line.startsWith('data: ')) {
+            try {
+              onFrame(JSON.parse(line.slice(6)) as Record<string, unknown>);
+            } catch { /* skip malformed */ }
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
   }
 }

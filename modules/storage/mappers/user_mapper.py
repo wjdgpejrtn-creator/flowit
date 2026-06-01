@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from auth.domain.entities.user import User, UserRole
+from auth.domain.entities.user import User
 
 from ..orm.user_model import UserModel
 
@@ -14,6 +14,7 @@ class UserMapper:
             name=orm.name,
             role=orm.role,  # type: ignore[arg-type]
             department_id=orm.department_id,
+            department=orm.department,
             is_active=orm.is_active,
             created_at=orm.created_at,
             updated_at=orm.updated_at,
@@ -27,6 +28,7 @@ class UserMapper:
             name=entity.name,
             role=entity.role,
             department_id=entity.department_id,
+            department=entity.department,
             is_active=entity.is_active,
             created_at=entity.created_at,
             updated_at=entity.updated_at,

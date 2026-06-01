@@ -19,7 +19,9 @@ export function useAuth() {
         role: user.role,
         userId: user.user_id,
         userName: user.name,
-        dept: user.department_id,
+        // 표시용 부서 라벨(department 문자열). 미설정 시 빈 문자열 → AppBar가 '—' 표시.
+        // department_id(UUID)는 authz 전용이라 배지에 노출하지 않는다(사용자 ID처럼 보이는 문제 해소).
+        dept: user.department ?? '',
       });
       return true;
     } catch {
