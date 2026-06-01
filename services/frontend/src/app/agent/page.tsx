@@ -8,7 +8,7 @@ import Steps from '@/components/common/Steps';
 import RunMode from '@/components/agent/RunMode';
 import { useAgentStore, WorkspaceMode, ChatMessage } from '@/stores/agentStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
-import { streamCreateSession } from '@/lib/api/agentApi';
+import { streamCreateSession, streamSlotAnswer } from '@/lib/api/agentApi';
 import { executeWorkflow } from '@/lib/api/workflowApi';
 import { ReactFlow, Background, BackgroundVariant, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -481,6 +481,12 @@ function AgentPageContent() {
   const [input, setInput] = useState('');
   const [executeLoading, setExecuteLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  // two-shot 스킬 선택 카드 (skill_selection 프레임 수신 시 표시, REQ-013)
+  const [skillSelection, setSkillSelection] = useState<{
+    prompt: string;
+    options: { skill_id: string; name: string; description?: string }[];
+    allowSkip: boolean;
+  } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
@@ -520,6 +526,72 @@ function AgentPageContent() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
+  // round1 생성 / round2 슬롯 응답 공용 SSE 프레임 핸들러.
+  const handleFrame = (frame: Record<string, unknown>) => {
+    switch (frame.frame_type) {
+      case 'session':
+        setSessionId(frame.session_id as string);
+        break;
+      case 'agent_node': {
+        const toolName = frame.agent_node_name as string;
+        // SSE 콜백은 클로저라 구조분해된 currentStep이 stale될 수 있어 store에서 최신값을 읽는다.
+        const prev = useAgentStore.getState().currentStep;
+        setCurrentStep(nextMonotonicStep(prev, toolName));
+        break;
+      }
+      case 'rationale_delta':
+        appendRationale(frame.delta as string);
+        break;
+      case 'slot_fill_question':
+        setSlotQuestion({
+          fieldName: frame.field_name as string,
+          question: frame.question as string,
+        });
+        break;
+      case 'skill_selection': {
+        const options = Array.isArray(frame.options)
+          ? (frame.options as { skill_id: string; name: string; description?: string }[])
+          : [];
+        setSkillSelection({
+          prompt: (frame.prompt as string) ?? '적용할 스킬을 선택해 주세요.',
+          options,
+          allowSkip: frame.allow_skip !== false,
+        });
+        break;
+      }
+      case 'result': {
+        const payload = frame.payload as Record<string, unknown> | undefined;
+        if (payload?.status === 'ready_to_execute') {
+          setReadyToExecute({
+            workflowId: payload.workflow_id as string,
+            message: (payload.message as string) ?? '워크플로우가 완성됐습니다.',
+            explanation: payload.explanation as WorkflowExplanation | undefined,
+          });
+        }
+        const msg = payload?.message;
+        if (typeof msg === 'string') {
+          addMessage({ id: `a${Date.now()}`, role: 'agent', content: msg, timestamp: Date.now() });
+        }
+        break;
+      }
+      case 'chat_message': {
+        const chatContent = (frame.content ?? frame.message) as string | undefined;
+        if (typeof chatContent === 'string') {
+          addMessage({ id: `c${Date.now()}`, role: 'agent', content: chatContent, timestamp: Date.now() });
+        }
+        break;
+      }
+      case 'error':
+        addMessage({
+          id: `e${Date.now()}`,
+          role: 'agent',
+          content: `오류가 발생했습니다: ${(frame.message as string) ?? '알 수 없는 오류'}`,
+          timestamp: Date.now(),
+        });
+        break;
+    }
+  };
+
   const handleSend = async (overrideText?: string) => {
     const text = (overrideText ?? input).trim();
     if (!text || streaming) return;
@@ -532,66 +604,44 @@ function AgentPageContent() {
     setInput('');
     setStreaming(true);
     setCurrentStep(null);
+    setSkillSelection(null);
     clearRationale();
 
     try {
       await streamCreateSession(
         { message: text, session_id: sessionId ?? undefined },
-        (frame) => {
-          switch (frame.frame_type) {
-            case 'session':
-              setSessionId(frame.session_id as string);
-              break;
-            case 'agent_node': {
-              const toolName = frame.agent_node_name as string;
-              // SSE 콜백은 클로저라 구조분해된 currentStep이 stale될 수 있어 store에서 최신값을 읽는다.
-              const prev = useAgentStore.getState().currentStep;
-              setCurrentStep(nextMonotonicStep(prev, toolName));
-              break;
-            }
-            case 'rationale_delta':
-              appendRationale(frame.delta as string);
-              break;
-            case 'slot_fill_question':
-              setSlotQuestion({
-                fieldName: frame.field_name as string,
-                question: frame.question as string,
-              });
-              break;
-            case 'result': {
-              const payload = frame.payload as Record<string, unknown> | undefined;
-              if (payload?.status === 'ready_to_execute') {
-                setReadyToExecute({
-                  workflowId: payload.workflow_id as string,
-                  message: (payload.message as string) ?? '워크플로우가 완성됐습니다.',
-                  explanation: payload.explanation as WorkflowExplanation | undefined,
-                });
-              }
-              const msg = payload?.message;
-              if (typeof msg === 'string') {
-                addMessage({ id: `a${Date.now()}`, role: 'agent', content: msg, timestamp: Date.now() });
-              }
-              break;
-            }
-            case 'chat_message': {
-              const chatContent = (frame.content ?? frame.message) as string | undefined;
-              if (typeof chatContent === 'string') {
-                addMessage({ id: `c${Date.now()}`, role: 'agent', content: chatContent, timestamp: Date.now() });
-              }
-              break;
-            }
-            case 'error':
-              addMessage({
-                id: `e${Date.now()}`,
-                role: 'agent',
-                content: `오류가 발생했습니다: ${(frame.message as string) ?? '알 수 없는 오류'}`,
-                timestamp: Date.now(),
-              });
-              break;
-          }
-        },
+        handleFrame,
         controller.signal,
       );
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      addMessage({
+        id: `e${Date.now()}`,
+        role: 'agent',
+        content: `연결 오류: ${err instanceof Error ? err.message : '서버에 연결할 수 없습니다.'}`,
+        timestamp: Date.now(),
+      });
+    } finally {
+      setStreaming(false);
+    }
+  };
+
+  // two-shot 2차: 스킬 선택(또는 건너뛰기) → round=2 스트림을 같은 handleFrame으로 이어 처리.
+  const submitSkillSelection = async (skillId: string | null) => {
+    if (!sessionId || streaming) return;
+    const chosen = skillId
+      ? (skillSelection?.options.find((o) => o.skill_id === skillId)?.name ?? '선택한 스킬')
+      : '건너뛰기';
+    addMessage({ id: `sk${Date.now()}`, role: 'user', content: `스킬: ${chosen}`, timestamp: Date.now() });
+    setSkillSelection(null);
+    setStreaming(true);
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      await streamSlotAnswer(sessionId, skillId, handleFrame, controller.signal);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       addMessage({
@@ -628,6 +678,7 @@ function AgentPageContent() {
     setCurrentStep(null);
     setSlotQuestion(null);
     setReadyToExecute(null);
+    setSkillSelection(null);
     autoSentRef.current = false;
     setMode('wizard');
   };
@@ -762,6 +813,35 @@ function AgentPageContent() {
                       onEdit={() => setMode('edit')}
                       loading={executeLoading}
                     />
+                  )}
+                  {skillSelection && !streaming && (
+                    <div className="self-start max-w-[80%] border-[1.5px] border-[var(--color-accent)] rounded-[8px_12px_12px_4px] bg-[var(--color-surface)] p-3">
+                      <div className="text-[12px] font-bold text-[var(--color-ink)] mb-2">{skillSelection.prompt}</div>
+                      <div className="flex flex-col gap-1.5">
+                        {skillSelection.options.map((opt) => (
+                          <button
+                            key={opt.skill_id}
+                            onClick={() => void submitSkillSelection(opt.skill_id)}
+                            className="text-left px-[10px] py-[7px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] bg-[var(--color-paper)] hover:border-[var(--color-accent)] hover:bg-[var(--color-hl)] transition-colors"
+                          >
+                            <div className="text-[12px] font-bold text-[var(--color-ink)]">{opt.name}</div>
+                            {opt.description && (
+                              <div className="text-[11px] text-[var(--color-ink3)] mt-0.5 leading-snug">{opt.description}</div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                      {skillSelection.allowSkip && (
+                        <div className="mt-2 flex justify-end">
+                          <button
+                            onClick={() => void submitSkillSelection(null)}
+                            className="text-[11px] text-[var(--color-ink3)] underline hover:text-[var(--color-ink)]"
+                          >
+                            건너뛰기 (스킬 없이 진행)
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                   <div ref={bottomRef} />
                 </div>
