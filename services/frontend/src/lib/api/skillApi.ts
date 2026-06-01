@@ -134,7 +134,24 @@ export async function deletePersonalSkill(skillId: string): Promise<void> {
   }
 }
 
-// ── 문서→스킬 자동 추출 (REQ-010/013, 스킬빌더 위저드 1단계) ────────────────────
+// ── default 템플릿(seed) — 문서 없는 사용자용 위저드 재료 (위저드 재설계 Phase 0/1) ──
+
+export type SkillTemplateKind = 'industry' | 'functional';
+
+// default 위저드 카드 1건 (백엔드 SkillTemplate 대응). code → extract의 template_code.
+export interface SkillTemplate {
+  code: string;
+  name: string;
+  description: string;
+  kind: SkillTemplateKind;
+}
+
+// 사용 가능한 default 템플릿(업종 6 + 직무 5) 목록 — GET /api/v1/skills/templates.
+export async function listSkillTemplates(): Promise<SkillTemplate[]> {
+  return apiJson<SkillTemplate[]>('/api/v1/skills/templates');
+}
+
+// ── 문서/템플릿→스킬 자동 추출 (REQ-010/013, 스킬빌더 위저드 1단계) ──────────────
 
 // extract_draft 결과 1건 — SOP에서 추출된 SkillNode 초안. instructions가 전문 SKILL.md 본문.
 export interface ExtractedSkillDraft {
@@ -144,17 +161,22 @@ export interface ExtractedSkillDraft {
   instructions: string;
 }
 
-// SOP 문서에서 스킬 초안을 추출하는 SSE 스트림 (POST /api/v1/skills/extract).
+// 추출 재료 — 내 문서(source_document_id) XOR default 템플릿(template_code). 백엔드 배타 검증.
+export type ExtractMaterial =
+  | { source_document_id: string }
+  | { template_code: string };
+
+// 문서 또는 default 템플릿에서 스킬 초안을 추출하는 SSE 스트림 (POST /api/v1/skills/extract).
 // onFrame으로 raw frame을 넘긴다 — 호출측이 frame_type으로 분기(agent_node/result/error).
 // 저장은 하지 않는다(검토용) — 확정은 createPersonalSkill로 수행.
-export async function streamExtractSkillFromDocument(
-  sourceDocumentId: string,
+export async function streamExtractSkill(
+  material: ExtractMaterial,
   onFrame: (frame: Record<string, unknown>) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await apiFetch('/api/v1/skills/extract', {
     method: 'POST',
-    body: JSON.stringify({ source_document_id: sourceDocumentId }),
+    body: JSON.stringify(material),
     signal,
   });
 
