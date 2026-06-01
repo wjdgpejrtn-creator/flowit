@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { getAuthorizeUrl, me, type MeResponse } from '@/lib/api/authApi';
+import { setPendingToast } from '@/lib/pendingToast';
 
 export function useAuth() {
   const { isAuthenticated, userId, userName, dept, role, setAuth, clearAuth } = useAuthStore();
@@ -34,10 +35,12 @@ export function useAuth() {
     window.location.href = authorization_url;
   }, []);
 
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (toastMessage = '로그아웃 되었습니다.') => {
     // BFF 래퍼 제거 — 백엔드 /api/v1/auth/logout 직접 호출 (ADR-0021, 서버 세션 revoke 포함)
     await fetch('/api/v1/auth/logout', { method: 'POST' });
     clearAuth();
+    // 전체 이동으로 토스트가 소실되므로 로그인 페이지에서 1회 소비하도록 보류 저장
+    setPendingToast(toastMessage);
     window.location.href = '/login';
   }, [clearAuth]);
 

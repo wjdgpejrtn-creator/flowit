@@ -1,6 +1,6 @@
 'use client';
 
-import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
+import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react';
 import { useWorkflowStore } from '@/stores/workflowStore';
 
 export default function EdgeLine(props: EdgeProps) {
@@ -15,17 +15,17 @@ export default function EdgeLine(props: EdgeProps) {
     markerEnd,
     selected,
   } = props;
-  const [path, labelX, labelY] = getSmoothStepPath({
+  // 시안: 베지어 곡선 연결선. 평상시 점선(#D8CBB8), 선택 시 coral.
+  const [path, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
     targetX,
     targetY,
     sourcePosition,
     targetPosition,
-    borderRadius: 6,
   });
   const removeEdge = useWorkflowStore((s) => s.removeEdge);
-  const stroke = selected ? 'var(--color-accent)' : 'var(--color-ink)';
+  const stroke = selected ? 'var(--color-accent-coral)' : '#D8CBB8';
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -38,7 +38,7 @@ export default function EdgeLine(props: EdgeProps) {
       <BaseEdge
         path={path}
         markerEnd={markerEnd}
-        style={{ stroke, strokeWidth: selected ? 2.5 : 1.5 }}
+        style={{ stroke, strokeWidth: 2, strokeDasharray: '4 4' }}
       />
       {selected && (
         <EdgeLabelRenderer>

@@ -246,7 +246,8 @@ function SecurityPanel() {
 
   const logoutAll = () => {
     showToast('모든 기기에서 로그아웃합니다...');
-    setTimeout(() => void logout(), 700);
+    // 시안: 0.9초 후 로그인 이동 + 최종 토스트(전체 이동 후 로그인 페이지에서 표시)
+    setTimeout(() => void logout('모든 세션이 종료되어 로그아웃되었습니다.'), 900);
   };
 
   return (
