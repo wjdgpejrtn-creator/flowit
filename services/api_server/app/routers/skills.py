@@ -25,12 +25,12 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 import httpx
-from common_schemas import PermissionSource
+from common_schemas import DocumentBlock, PermissionSource
 from common_schemas.enums import RiskLevel
 from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
     CreateDraftSkillUseCase,
@@ -64,6 +64,11 @@ from app.dependencies.use_cases import (
     get_list_personal_skills_use_case,
     get_publish_skill_use_case,
     get_update_personal_skill_use_case,
+)
+from app.services.skill_templates import (
+    SkillTemplate,
+    list_templates,
+    synthesize_sop_document,
 )
 from app.sse_proxy import SSE_HEADERS, unwrap_agent_sse
 
@@ -247,12 +252,39 @@ async def create_personal_skill(
     return _to_response(created)
 
 
-# ── 문서→스킬 자동 추출 (REQ-010/013, ADR-0020 Q8 wizard 1차) ──────────────────
+# ── default 템플릿(seed) 노출 — 문서 없는 사용자용 위저드 재료 (위저드 재설계 Phase 0) ────
+
+
+@router.get("/templates", response_model=list[SkillTemplate])
+async def list_skill_templates(
+    permission: PermissionSource = Depends(get_permission_source),
+) -> list[SkillTemplate]:
+    """default 위저드 카드 목록 — 업종 6 + 직무 5 seed 메타(code/name/description/kind).
+
+    스킬빌더 첫 화면에서 "문서가 없어요 → 직접 만들게요"를 고른 사용자에게 보여줄 선택지.
+    사용자가 카드를 고르면 `POST /skills/extract`에 `template_code`를 실어, 서버가 해당 seed를
+    SOP 문서로 합성해 동일한 추출 위저드로 합류시킨다(skill-builder-wizard-redesign.md).
+    seed 메타만 읽는 읽기 전용 — 인증 필수.
+    """
+    return list(list_templates())
+
+
+# ── 문서/템플릿 → 스킬 자동 추출 (REQ-010/013, ADR-0020 Q8 wizard 1차) ──────────
 
 
 class ExtractSkillRequest(BaseModel):
+    """추출 재료 — `source_document_id`(내 문서) XOR `template_code`(default seed) 중 정확히 하나."""
+
     # 분석 완료된 SOP 문서 id — 본문(blocks)을 LLM에 넣어 SkillNode 초안을 추출한다.
-    source_document_id: UUID
+    source_document_id: UUID | None = None
+    # default 위저드 — 업종/직무 seed code. 서버가 seed를 SOP DocumentBlock으로 합성해 동일 경로 투입.
+    template_code: str | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> ExtractSkillRequest:
+        if (self.source_document_id is None) == (self.template_code is None):
+            raise ValueError("source_document_id 또는 template_code 중 정확히 하나를 지정하세요")
+        return self
 
 
 @router.post("/extract")
@@ -262,12 +294,15 @@ async def extract_skill_from_document(
     doc_repo: DocumentRepositoryPort = Depends(get_document_repository),
     client: httpx.AsyncClient | None = Depends(get_skills_builder_http),
 ) -> StreamingResponse:
-    """SOP 문서 → Skills Builder(extract) → 추출 초안 SSE 스트림 (저장 X, 검토용).
+    """문서 또는 default 템플릿 → Skills Builder(extract) → 추출 초안 SSE 스트림 (저장 X, 검토용).
 
-    스킬빌더 위저드 1단계. 문서 소유·분석을 검증한 뒤 skills-builder `/v1/agent/route`
-    (`source_type="sop"`, `step="extract"`)로 **전체 DocumentBlock**을 전달하고, LLM이 추출한
-    SkillNode 초안(name/description/**instructions(SKILL.md 본문)**)을 SSE로 프록시한다.
-    orchestrator(의도 분류)를 우회하는 결정적 추출 경로 — skills-builder 전용 클라이언트 직결.
+    스킬빌더 위저드 1단계. 두 갈래는 **추출 입력(DocumentBlock)을 무엇으로 만드느냐만** 다르고,
+    skills-builder `/v1/agent/route`(`source_type="sop"`, `step="extract"`)로 **전체 DocumentBlock**을
+    전달하는 이후 경로는 완전히 동일하다 — LLM이 추출한 SkillNode 초안(name/description/
+    **instructions(SKILL.md 본문)**)을 SSE로 프록시한다. orchestrator(의도 분류)를 우회하는 결정적 경로.
+
+    - `source_document_id`: 내 분석 완료 문서. 소유/존재/blocks 검증(404/403/409).
+    - `template_code`: default seed(업종/직무). 서버가 seed→SOP DocumentBlock 합성(미존재 404).
 
     프레임: `agent_node`(진행) → `result`(payload.skills 초안 목록) | `error`. 확정·저장은
     사용자가 폼에서 검토 후 `POST /personal`(instructions 포함)로 수행한다 — 단일 생성 경로 유지.
@@ -277,18 +312,26 @@ async def extract_skill_from_document(
             status_code=503, detail="Skills Builder unavailable — SKILLS_BUILDER_URL 미설정"
         )
 
-    # 소유/존재 검증 — doc_parser GET /{id}와 동일한 404/403 패턴 (composition root 책임).
-    document = await doc_repo.get_by_id(body.source_document_id)
-    if document is None:
-        raise HTTPException(status_code=404, detail=f"Document {body.source_document_id} not found")
-    if document.user_id != permission.user_id:
-        raise HTTPException(status_code=403, detail="Document belongs to another user")
-    # blocks가 없으면 추출할 본문이 없음(분석 미완료/실패) — 추출 호출 전에 409로 빠르게 안내.
-    if not document.blocks:
-        raise HTTPException(
-            status_code=409,
-            detail="Document has no parsed blocks — 먼저 문서 분석을 완료하세요",
-        )
+    document: DocumentBlock
+    if body.template_code is not None:
+        # default 위저드 — seed를 SOP 문서로 합성(영속 X). 미존재 template_code는 404.
+        synthesized = synthesize_sop_document(body.template_code, permission.user_id)
+        if synthesized is None:
+            raise HTTPException(status_code=404, detail=f"Template '{body.template_code}' not found")
+        document = synthesized
+    else:
+        # 문서 위저드 — 소유/존재 검증(doc_parser GET /{id}와 동일한 404/403 패턴, composition root 책임).
+        document = await doc_repo.get_by_id(body.source_document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail=f"Document {body.source_document_id} not found")
+        if document.user_id != permission.user_id:
+            raise HTTPException(status_code=403, detail="Document belongs to another user")
+        # blocks가 없으면 추출할 본문이 없음(분석 미완료/실패) — 추출 호출 전에 409로 빠르게 안내.
+        if not document.blocks:
+            raise HTTPException(
+                status_code=409,
+                detail="Document has no parsed blocks — 먼저 문서 분석을 완료하세요",
+            )
 
     # AgentProtocolRequest 봉투(plain dict) — agents._build_agent_payload와 동일 패턴.
     # 수신 측 skills-builder(Modal)가 AgentProtocolRequest로 검증한다. state는 추출 경로에서
