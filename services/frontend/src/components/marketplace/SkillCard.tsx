@@ -24,6 +24,8 @@ export interface SkillCardActions {
   onArchive: (id: string) => void;
   onRestore: (id: string) => void;
   onAddToWorkflow: (id: string) => void;
+  // 승격 요청 — personal published → team, team → company. 상위 scope로 복제 후 관리자 심사.
+  onPromote: (id: string) => void;
 }
 
 // 태그 색 — 실 API tags는 색 정보가 없어 인덱스로 Flowit 팔레트를 순환(시안의 컬러 태그 느낌 유지).
@@ -39,7 +41,32 @@ function fmtDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('ko-KR');
 }
 
-function PersonalActions({ skill, actions, busy }: { skill: CardSkill; actions: SkillCardActions; busy: boolean }) {
+// "승격 요청" 버튼 — personal published(→team) / team(→company) 공통. 이름 통일(승격 요청).
+function PromoteButton({ id, actions, busy }: { id: string; actions: SkillCardActions; busy: boolean }) {
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => actions.onPromote(id)}
+      className="px-3 py-1.5 rounded-lg bg-accent text-white text-[11px] font-bold shadow-sm hover:bg-accent3 transition-all flex items-center gap-1 disabled:opacity-60"
+    >
+      <Icon name="trending-up" className="w-3.5 h-3.5" />
+      승격 요청
+    </button>
+  );
+}
+
+function PersonalActions({
+  skill,
+  actions,
+  busy,
+  canPromote,
+}: {
+  skill: CardSkill;
+  actions: SkillCardActions;
+  busy: boolean;
+  canPromote: boolean;
+}) {
   if (skill.lifecycle_state === 'archived') {
     return (
       <div className="mt-3 pt-3 border-t border-line-soft flex items-center justify-between">
@@ -134,22 +161,25 @@ function PersonalActions({ skill, actions, busy }: { skill: CardSkill; actions: 
     );
   }
 
-  // published — 내 소유(Personal 탭은 모두 내 스킬)
+  // published — 내 소유(Personal 탭은 모두 내 스킬). 게시된 personal은 team으로 승격 요청 가능.
   return (
-    <div className="mt-3 pt-3 border-t border-line-soft flex items-center justify-between">
+    <div className="mt-3 pt-3 border-t border-line-soft flex items-center justify-between gap-2">
       <span className="text-[10px] text-ink4 font-bold flex items-center gap-1">
         <Icon name="check-circle-2" className="w-3.5 h-3.5" />
         게시됨
       </span>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => actions.onArchive(skill.skill_id)}
-        className="px-3 py-1.5 rounded-lg border border-line-soft bg-white text-ink text-[11px] font-bold hover:bg-paper2 transition-all flex items-center gap-1 disabled:opacity-60"
-      >
-        <Icon name="archive" className="w-3.5 h-3.5" />
-        보관
-      </button>
+      <div className="flex items-center gap-2">
+        {canPromote && <PromoteButton id={skill.skill_id} actions={actions} busy={busy} />}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => actions.onArchive(skill.skill_id)}
+          className="px-3 py-1.5 rounded-lg border border-line-soft bg-white text-ink text-[11px] font-bold hover:bg-paper2 transition-all flex items-center gap-1 disabled:opacity-60"
+        >
+          <Icon name="archive" className="w-3.5 h-3.5" />
+          보관
+        </button>
+      </div>
     </div>
   );
 }
@@ -159,12 +189,20 @@ function MarketplaceActions({
   actions,
   adopted,
   busy,
+  canPromote,
 }: {
   skill: CardSkill;
   actions: SkillCardActions;
   adopted: boolean;
   busy: boolean;
+  canPromote: boolean;
 }) {
+  // 승격 요청(team → company) — 도입 버튼과 함께 노출. company 탭은 canPromote=false라 미노출.
+  const promoteRow = canPromote && (
+    <div className="flex items-center justify-end pt-2">
+      <PromoteButton id={skill.skill_id} actions={actions} busy={busy} />
+    </div>
+  );
   if (adopted) {
     return (
       <div className="mt-3 pt-3 border-t border-line-soft">
@@ -176,6 +214,7 @@ function MarketplaceActions({
           <Icon name="check" className="w-4 h-4" />
           도입 완료
         </button>
+        {promoteRow}
       </div>
     );
   }
@@ -190,6 +229,7 @@ function MarketplaceActions({
         <Icon name="plus" className="w-4 h-4" />
         내 워크플로우에 넣기
       </button>
+      {promoteRow}
     </div>
   );
 }
@@ -201,6 +241,7 @@ export default function SkillCard({
   actions,
   adopted = false,
   busy = false,
+  canPromote = false,
 }: {
   skill: CardSkill;
   variant: 'personal' | 'marketplace';
@@ -208,6 +249,8 @@ export default function SkillCard({
   actions: SkillCardActions;
   adopted?: boolean;
   busy?: boolean;
+  // 승격 요청 버튼 노출 여부 — page가 결정(personal published / team). company는 false.
+  canPromote?: boolean;
 }) {
   return (
     <div
@@ -247,9 +290,15 @@ export default function SkillCard({
       </div>
 
       {variant === 'personal' ? (
-        <PersonalActions skill={skill} actions={actions} busy={busy} />
+        <PersonalActions skill={skill} actions={actions} busy={busy} canPromote={canPromote} />
       ) : (
-        <MarketplaceActions skill={skill} actions={actions} adopted={adopted} busy={busy} />
+        <MarketplaceActions
+          skill={skill}
+          actions={actions}
+          adopted={adopted}
+          busy={busy}
+          canPromote={canPromote}
+        />
       )}
     </div>
   );

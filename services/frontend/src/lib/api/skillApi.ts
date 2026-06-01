@@ -131,6 +131,44 @@ export async function selfPublishPersonalSkill(skillId: string): Promise<void> {
   }
 }
 
+// 승격 요청 — 하위 scope 스킬을 상위 scope로 복제(재심사 리셋) 후 REVIEW로 올린다.
+// personal → team, team → company. 백엔드가 promote→submit을 한 번에 수행(POST /{id}/promote)하므로
+// 결과 스킬은 관리자 리뷰 큐(GET /review-queue?scope=...)에 나타난다. 원본은 그대로 둔다.
+export async function promoteSkill(
+  skillId: string,
+  fromScope: 'personal' | 'team',
+): Promise<void> {
+  await apiJson(`/api/v1/skills/${skillId}/promote`, {
+    method: 'POST',
+    body: JSON.stringify({ from_scope: fromScope }),
+  });
+}
+
+// 관리자 리뷰 큐 항목 (백엔드 ReviewQueueItemResponse 대응) — personal/team/company 공통.
+// owner_user_id는 personal만(team/company 엔티티엔 없어 null).
+export interface ReviewQueueItem {
+  skill_id: string;
+  scope: SkillScope;
+  name: string;
+  description: string;
+  lifecycle_state: SkillLifecycleState;
+  owner_user_id: string | null;
+  tags: string[];
+  version: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// 관리자 리뷰 큐 — scope별 REVIEW 스킬 목록 (Admin only — 비-Admin은 403). 관리자 승인 페이지가 소비.
+export async function listReviewQueue(
+  scope: SkillScope = 'personal',
+  limit = 50,
+  offset = 0,
+): Promise<ReviewQueueItem[]> {
+  const params = new URLSearchParams({ scope, limit: String(limit), offset: String(offset) });
+  return apiJson<ReviewQueueItem[]>(`/api/v1/skills/review-queue?${params}`);
+}
+
 export async function listPersonalSkills(
   lifecycleState?: SkillLifecycleState,
   limit = 50,

@@ -12,6 +12,7 @@ import {
   listMarketplaceSkills,
   submitSkill,
   publishSkill,
+  promoteSkill,
   deletePersonalSkill,
   archivePersonalSkill,
   restorePersonalSkill,
@@ -143,6 +144,17 @@ function MarketplaceContent() {
         () => setAdopted((prev) => new Set(prev).add(id)),
         '내 워크플로우에 추가했습니다.',
       ),
+    // 승격 요청 — personal→team, team→company. 상위 scope에 REVIEW 스킬을 만들어 관리자 심사로 보낸다.
+    // 원본은 그대로 둔다(로컬 상태 변경 없음). 결과는 관리자 승인 페이지(/admin/approvals)에 노출.
+    onPromote: (id) =>
+      void runAction(
+        id,
+        () => promoteSkill(id, scope === 'personal' ? 'personal' : 'team'),
+        () => {},
+        scope === 'personal'
+          ? 'Team 스킬로 승격 요청했습니다. 관리자 승인을 기다립니다.'
+          : 'Company 스킬로 승격 요청했습니다. 관리자 승인을 기다립니다.',
+      ),
   };
 
   const filtered = useMemo(() => items.filter((s) => matchesQuery(s, query)), [items, query]);
@@ -248,6 +260,12 @@ function MarketplaceContent() {
                 actions={actions}
                 adopted={adopted.has(skill.skill_id)}
                 busy={busyId === skill.skill_id}
+                // 승격 요청 노출: personal은 게시된 스킬만(→team), team 탭은 전부(→company), company는 없음.
+                canPromote={
+                  scope === 'personal'
+                    ? skill.lifecycle_state === 'published'
+                    : scope === 'team'
+                }
               />
             ))}
           </div>
