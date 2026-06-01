@@ -1,7 +1,7 @@
-import type { MockSkillState } from '@/lib/api/marketplaceMockApi';
+import type { SkillLifecycleState } from '@/lib/api/skillApi';
 
 /** 시안 STATE_PILL — [라벨, 배경, 글자] */
-const STATE_PILL: Record<MockSkillState, [label: string, bg: string, fg: string]> = {
+const STATE_PILL: Record<SkillLifecycleState, [label: string, bg: string, fg: string]> = {
   draft: ['초안', '#F1ECE4', '#9C8B7B'],
   review: ['검토중', '#FBE9D8', '#C8860B'],
   approved: ['승인됨', '#E7F6EF', '#10B981'],
@@ -9,7 +9,7 @@ const STATE_PILL: Record<MockSkillState, [label: string, bg: string, fg: string]
   archived: ['보관됨', '#F1ECE4', '#A2917F'],
 };
 
-export default function SkillStatePill({ state }: { state: MockSkillState }) {
+export default function SkillStatePill({ state }: { state: SkillLifecycleState }) {
   const [label, bg, fg] = STATE_PILL[state];
   return (
     <span

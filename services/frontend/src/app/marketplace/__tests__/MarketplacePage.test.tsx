@@ -7,6 +7,22 @@ jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
 }));
 
+const mockListPersonal = jest.fn();
+const mockListMarketplace = jest.fn();
+const mockSubmit = jest.fn();
+const mockPublish = jest.fn();
+const mockDelete = jest.fn();
+jest.mock('../../../lib/api/skillApi', () => ({
+  listPersonalSkills: (...a: unknown[]) => mockListPersonal(...a),
+  listMarketplaceSkills: (...a: unknown[]) => mockListMarketplace(...a),
+  submitSkill: (...a: unknown[]) => mockSubmit(...a),
+  publishSkill: (...a: unknown[]) => mockPublish(...a),
+  deletePersonalSkill: (...a: unknown[]) => mockDelete(...a),
+  archivePersonalSkill: jest.fn(() => Promise.resolve()),
+  restorePersonalSkill: jest.fn(() => Promise.resolve()),
+  addSkillToWorkflow: jest.fn(() => Promise.resolve()),
+}));
+
 jest.mock('../../../stores/authStore', () => ({
   useAuthStore: () => ({ role: 'User', userName: 'tester', dept: '', isAuthenticated: true }),
 }));
@@ -16,71 +32,89 @@ jest.mock('../../../hooks/useAuth', () => ({
 }));
 
 import MarketplacePage from '../page';
-import { __resetMarketplaceMock } from '../../../lib/api/marketplaceMockApi';
+
+function personalSkill(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    skill_id: 'sk-1',
+    owner_user_id: 'u1',
+    name: '주간 리포트 자동화',
+    description: '매주 월요일 OKR 요약 리포트를 자동 생성합니다.',
+    node_definition_id: null,
+    lifecycle_state: 'draft',
+    skill_document_uri: null,
+    workflow_id: null,
+    source_document_id: null,
+    tags: ['리포트', 'OKR'],
+    version: '0.1.0',
+    promoted_to_team_id: null,
+    created_at: '2026-05-20T09:00:00Z',
+    updated_at: '2026-05-25T14:30:00Z',
+    ...over,
+  };
+}
 
 beforeEach(() => {
-  __resetMarketplaceMock();
+  mockListPersonal.mockReset();
+  mockListMarketplace.mockReset();
+  mockSubmit.mockReset();
+  mockPublish.mockReset();
+  mockDelete.mockReset();
+  mockListPersonal.mockResolvedValue([]);
+  mockListMarketplace.mockResolvedValue([]);
+  mockSubmit.mockResolvedValue(undefined);
 });
 
-describe('MarketplacePage — 재설계(Flowit)', () => {
+describe('MarketplacePage — 실 API 연동(Flowit)', () => {
   it('초기 로드 시 스켈레톤을 표시한다', () => {
-    // listSkills resolve는 마이크로태스크 — 동기 시점엔 아직 loading=true
+    mockListPersonal.mockReturnValue(new Promise(() => {}));
     render(<MarketplacePage />);
     expect(document.querySelectorAll('.animate-shimmer').length).toBeGreaterThan(0);
   });
 
-  it('Personal 스킬 카드를 렌더링한다 (이름·상태 pill·버전)', async () => {
+  it('Personal 스킬을 실 listPersonalSkills로 조회해 카드로 렌더링한다', async () => {
+    mockListPersonal.mockResolvedValueOnce([personalSkill()]);
     render(<MarketplacePage />);
-    await waitFor(() => {
-      expect(screen.getByText('슬랙 통합 리포트 마스터')).toBeInTheDocument();
-    });
-    // draft 상태 pill
+    await waitFor(() => expect(screen.getByText('주간 리포트 자동화')).toBeInTheDocument());
+    expect(mockListPersonal).toHaveBeenCalled();
     expect(screen.getByText('초안')).toBeInTheDocument();
-    // 헤더
+    expect(screen.getByText('v0.1.0')).toBeInTheDocument();
     expect(screen.getByText('내가 만든 스킬')).toBeInTheDocument();
   });
 
-  it('검색어로 필터링하고, 결과 없으면 안내를 표시한다', async () => {
+  it('카드 제목이 상세 페이지로 링크된다', async () => {
+    mockListPersonal.mockResolvedValueOnce([personalSkill()]);
     render(<MarketplacePage />);
-    await waitFor(() => screen.getByText('슬랙 통합 리포트 마스터'));
+    await waitFor(() => screen.getByText('주간 리포트 자동화'));
+    expect(screen.getByText('주간 리포트 자동화').closest('a')).toHaveAttribute('href', '/skills/sk-1');
+  });
 
-    const search = screen.getByLabelText('스킬 검색');
-    await userEvent.type(search, '문서');
-    expect(screen.getByText('문서 자동 분류 봇')).toBeInTheDocument();
-    expect(screen.queryByText('슬랙 통합 리포트 마스터')).not.toBeInTheDocument();
+  it('네트워크 에러 시 메시지 + 재시도로 다시 조회한다', async () => {
+    mockListPersonal.mockRejectedValueOnce(new Error('Failed to fetch')).mockResolvedValueOnce([]);
+    render(<MarketplacePage />);
+    await waitFor(() => expect(screen.getByText('네트워크 연결을 확인해 주세요.')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    await waitFor(() => expect(screen.getByText('등록된 스킬이 없습니다.')).toBeInTheDocument());
+    expect(mockListPersonal).toHaveBeenCalledTimes(2);
+  });
 
-    await userEvent.clear(search);
-    await userEvent.type(search, '존재하지않는스킬');
+  it('검색어로 필터링하고, 결과 없으면 안내를 표시한다', async () => {
+    mockListPersonal.mockResolvedValueOnce([personalSkill()]);
+    render(<MarketplacePage />);
+    await waitFor(() => screen.getByText('주간 리포트 자동화'));
+    await userEvent.type(screen.getByLabelText('스킬 검색'), '존재하지않는스킬');
     await waitFor(() => {
       expect(screen.getByText("'존재하지않는스킬' 검색 결과가 없습니다.")).toBeInTheDocument();
     });
   });
 
-  it('Team 탭으로 전환하면 팀 헤더와 스킬을 보여준다', async () => {
+  it('초안 스킬 리뷰요청 시 submitSkill 호출 + 검토중으로 전환', async () => {
+    mockListPersonal.mockResolvedValueOnce([personalSkill()]);
     render(<MarketplacePage />);
-    await waitFor(() => screen.getByText('슬랙 통합 리포트 마스터'));
+    await waitFor(() => screen.getByText('주간 리포트 자동화'));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Team' }));
-    await waitFor(() => {
-      expect(screen.getByText('동료가 공유한 스킬')).toBeInTheDocument();
-    });
-    expect(screen.getByText('인사 정보 ERP 자동 기입봇')).toBeInTheDocument();
-  });
-
-  it('초안 스킬의 리뷰요청 시 검토중으로 전환된다', async () => {
-    render(<MarketplacePage />);
-    await waitFor(() => screen.getByText('슬랙 통합 리포트 마스터'));
-
-    // 시드: review 1건('문서 자동 분류 봇') 이미 존재
-    expect(screen.getAllByText('검토중')).toHaveLength(1);
-
-    // 초안(슬랙 리포트)의 리뷰요청 — draft는 1건뿐이라 버튼도 1개
     await userEvent.click(screen.getByRole('button', { name: /리뷰요청/ }));
-
-    await waitFor(() => {
-      expect(screen.getAllByText('검토중')).toHaveLength(2);
-    });
-    // 초안이 사라져 리뷰요청 버튼도 사라진다
-    expect(screen.queryByRole('button', { name: /리뷰요청/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(mockSubmit).toHaveBeenCalledWith('sk-1', 'personal'));
+    await waitFor(() => expect(screen.getByText('검토중')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /검토 대기중/ })).toBeDisabled();
   });
 });

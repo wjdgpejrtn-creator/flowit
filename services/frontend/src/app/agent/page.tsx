@@ -58,6 +58,18 @@ const STEP_LABELS: Record<AgentStep, string> = {
   promote:   '워크플로우 확정',
 };
 
+// agent_node 프레임 → 표시 단계. STEP_ORDER 기준 **단조 증가만** 허용해 역행(#297)을 막는다.
+// (#298이 @/lib/agentSteps로 추출한 동일 로직을 인라인 반영 — 머지 순서와 무관하게 가드 보존)
+function nextMonotonicStep(prev: AgentStep | null, toolName: string): AgentStep {
+  const mapped = TOOL_TO_STEP[toolName] ?? (toolName as AgentStep);
+  if (prev === null) return mapped;
+  const mi = STEP_ORDER.indexOf(mapped);
+  const pi = STEP_ORDER.indexOf(prev);
+  // 매핑 안 되는 단계(mi<0)는 STEP_ORDER 밖 — 가드 없이 그대로 반영.
+  if (mi < 0) return mapped;
+  return mi >= pi ? mapped : prev;
+}
+
 const NODE_TYPES = { custom: CustomNode };
 
 // ─── FlowEditor helpers ────────────────────────────────────────────────────────
@@ -495,7 +507,9 @@ function AgentPageContent() {
               break;
             case 'agent_node': {
               const toolName = frame.agent_node_name as string;
-              setCurrentStep(TOOL_TO_STEP[toolName] ?? toolName as AgentStep);
+              // 콜백 내 stale closure 회피 위해 store에서 직전 단계를 동기 조회.
+              const prevStep = useAgentStore.getState().currentStep;
+              setCurrentStep(nextMonotonicStep(prevStep, toolName));
               break;
             }
             case 'rationale_delta':

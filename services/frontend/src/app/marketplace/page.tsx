@@ -1,44 +1,54 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
 import Skel from '@/components/common/Skel';
 import Icon from '@/components/common/Icon';
-import SkillCard, { type SkillCardActions } from '@/components/marketplace/SkillCard';
+import SkillCard, { type CardSkill, type SkillCardActions } from '@/components/marketplace/SkillCard';
 import { showToast } from '@/stores/toastStore';
 import {
-  listSkills,
-  submitReview,
-  requestPublish,
-  deleteSkill as deleteSkillMock,
-  archiveSkill,
-  restoreSkill,
-  addToWorkflow,
-  type MockScope,
-  type MockSkill,
-} from '@/lib/api/marketplaceMockApi';
+  listPersonalSkills,
+  listMarketplaceSkills,
+  submitSkill,
+  publishSkill,
+  deletePersonalSkill,
+  archivePersonalSkill,
+  restorePersonalSkill,
+  addSkillToWorkflow,
+  type MarketplaceScope,
+} from '@/lib/api/skillApi';
 
-const TABS: { key: MockScope; label: string }[] = [
+type TabKey = 'personal' | 'team' | 'company';
+
+const TABS: { key: TabKey; label: string }[] = [
   { key: 'personal', label: 'Personal' },
   { key: 'team', label: 'Team' },
   { key: 'company', label: 'Company' },
 ];
 
 /** 시안 MARKET_HEADERS — [아이콘, 제목, 부제] */
-const HEADERS: Record<MockScope, [icon: string, title: string, subtitle: string]> = {
+const HEADERS: Record<TabKey, [icon: string, title: string, subtitle: string]> = {
   personal: ['user-cog', '내가 만든 스킬', '초안부터 게시까지, 내 스킬의 상태를 관리하세요.'],
   team: ['users', '동료가 공유한 스킬', '팀에 공유된 스킬을 내 워크플로우에 바로 추가할 수 있습니다.'],
   company: ['building-2', '전사에 공유된 스킬', '회사 전체에 게시된 검증된 스킬 모음입니다.'],
 };
 
-function matchesQuery(skill: MockSkill, q: string): boolean {
+function toErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : '';
+  if (msg.startsWith('401')) return '로그인이 만료되었습니다.';
+  if (msg.startsWith('5')) return '서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+  if (msg === 'Failed to fetch' || msg === 'Load failed') return '네트워크 연결을 확인해 주세요.';
+  return '스킬 목록을 불러올 수 없습니다.';
+}
+
+function matchesQuery(skill: CardSkill, q: string): boolean {
   if (!q) return true;
   const needle = q.toLowerCase();
   return (
     skill.name.toLowerCase().includes(needle) ||
-    skill.desc.toLowerCase().includes(needle) ||
-    skill.tags.some((t) => t[0].toLowerCase().includes(needle))
+    skill.description.toLowerCase().includes(needle) ||
+    skill.tags.some((t) => t.toLowerCase().includes(needle))
   );
 }
 
@@ -52,59 +62,94 @@ function TAB_CLASS(active: boolean): string {
 function MarketplaceContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialScope = (searchParams.get('tab') as MockScope) ?? 'personal';
+  const initialScope = (searchParams.get('tab') as TabKey) ?? 'personal';
 
-  const [scope, setScope] = useState<MockScope>(
+  const [scope, setScope] = useState<TabKey>(
     TABS.some((t) => t.key === initialScope) ? initialScope : 'personal',
   );
-  const [skills, setSkills] = useState<MockSkill[]>([]);
+  const [items, setItems] = useState<CardSkill[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [fetchKey, setFetchKey] = useState(0);
   const [query, setQuery] = useState('');
-
-  const reload = useCallback(
-    (sc: MockScope, withSpinner = false) => {
-      if (withSpinner) setLoading(true);
-      return listSkills(sc)
-        .then(setSkills)
-        .finally(() => setLoading(false));
-    },
-    [],
-  );
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [adopted, setAdopted] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    void reload(scope, true);
-  }, [scope, reload]);
+    setLoading(true);
+    setError(null);
+    const fetcher =
+      scope === 'personal'
+        ? listPersonalSkills()
+        : listMarketplaceSkills(scope as MarketplaceScope);
+    fetcher
+      .then((rows) => setItems(rows as CardSkill[]))
+      .catch((err) => setError(toErrorMessage(err)))
+      .finally(() => setLoading(false));
+  }, [scope, fetchKey]);
 
-  const switchTab = (key: MockScope) => {
+  const switchTab = (key: TabKey) => {
     if (key === scope) return;
     setScope(key);
     setQuery('');
     router.replace(`/marketplace?tab=${key}`);
   };
 
-  /** 라이프사이클 mutation 공통 래퍼 — 목 호출 → 재조회 → 토스트 */
-  const mutate = (fn: (id: string) => Promise<void>, id: string, toast: string) =>
-    fn(id)
-      .then(() => reload(scope))
-      .then(() => showToast(toast));
+  // 전이 공통 래퍼 — 호출 중 busy 잠금 → 성공 시 updater로 로컬 상태 반영 + 토스트.
+  const runAction = useCallback(
+    async (id: string, fn: () => Promise<void>, apply: () => void, toast: string) => {
+      setBusyId(id);
+      try {
+        await fn();
+        apply();
+        showToast(toast);
+      } catch (err) {
+        showToast(toErrorMessage(err));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [],
+  );
+
+  const setState = (id: string, lifecycle_state: CardSkill['lifecycle_state']) =>
+    setItems((prev) => prev.map((s) => (s.skill_id === id ? { ...s, lifecycle_state } : s)));
 
   const actions: SkillCardActions = {
     onEdit: (skill) => {
-      const tags = skill.tags.map((t) => t[0]).join(', ');
-      const qs = new URLSearchParams({ edit: '1', name: skill.name, desc: skill.desc, tags });
+      const qs = new URLSearchParams({
+        edit: '1',
+        name: skill.name,
+        desc: skill.description,
+        tags: skill.tags.join(', '),
+      });
       showToast(`'${skill.name}' 수정 화면으로 이동했습니다.`);
       router.push(`/skills/builder?${qs.toString()}`);
     },
-    onReviewRequest: (id) => void mutate(submitReview, id, '검토를 요청했습니다. 관리자 승인을 기다립니다.'),
-    onPublishRequest: (id) => void mutate(requestPublish, id, '마켓플레이스에 게시했습니다. 이제 전사에 공개됩니다.'),
-    onDelete: (id) => void mutate(deleteSkillMock, id, '스킬을 삭제했습니다.'),
-    onArchive: (id) => void mutate(archiveSkill, id, '스킬을 보관 처리했습니다.'),
-    onRestore: (id) => void mutate(restoreSkill, id, '보관된 스킬을 복원했습니다.'),
-    onAddToWorkflow: (id) => void mutate(addToWorkflow, id, '내 워크플로우에 추가했습니다.'),
+    onSubmitReview: (id) =>
+      void runAction(id, () => submitSkill(id, 'personal'), () => setState(id, 'review'), '검토를 요청했습니다. 관리자 승인을 기다립니다.'),
+    onPublishRequest: (id) =>
+      void runAction(id, () => publishSkill(id, 'personal'), () => setState(id, 'published'), '마켓플레이스에 게시했습니다. 이제 전사에 공개됩니다.'),
+    onDelete: (id) =>
+      void runAction(id, () => deletePersonalSkill(id), () => setItems((prev) => prev.filter((s) => s.skill_id !== id)), '스킬을 삭제했습니다.'),
+    onArchive: (id) =>
+      void runAction(id, () => archivePersonalSkill(id), () => setState(id, 'archived'), '스킬을 보관 처리했습니다.'),
+    onRestore: (id) =>
+      void runAction(id, () => restorePersonalSkill(id), () => setState(id, 'published'), '보관된 스킬을 복원했습니다.'),
+    onAddToWorkflow: (id) =>
+      void runAction(
+        id,
+        () => addSkillToWorkflow(id, scope as MarketplaceScope),
+        () => setAdopted((prev) => new Set(prev).add(id)),
+        '내 워크플로우에 추가했습니다.',
+      ),
   };
 
-  const filtered = skills.filter((s) => matchesQuery(s, query));
+  const filtered = useMemo(() => items.filter((s) => matchesQuery(s, query)), [items, query]);
   const [headerIcon, headerTitle, headerSubtitle] = HEADERS[scope];
+
+  const detailHref = (id: string) =>
+    scope === 'personal' ? `/skills/${id}` : `/skills/marketplace/${id}?scope=${scope}`;
 
   return (
     <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 md:p-6 space-y-5">
@@ -112,12 +157,7 @@ function MarketplaceContent() {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-1.5">
           {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => switchTab(tab.key)}
-              className={TAB_CLASS(tab.key === scope)}
-            >
+            <button key={tab.key} type="button" onClick={() => switchTab(tab.key)} className={TAB_CLASS(tab.key === scope)}>
               {tab.label}
             </button>
           ))}
@@ -147,6 +187,17 @@ function MarketplaceContent() {
             </div>
           ))}
         </div>
+      ) : error ? (
+        <div className="bg-white border border-line-soft rounded-2xl p-8 text-center shadow-sm flex flex-col items-center gap-2">
+          <p className="text-sm font-bold text-danger">{error}</p>
+          <button
+            type="button"
+            onClick={() => setFetchKey((k) => k + 1)}
+            className="text-xs px-3 py-1.5 rounded-lg border border-danger/40 bg-white text-danger font-bold hover:bg-danger-soft"
+          >
+            다시 시도
+          </button>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="bg-white border border-line-soft rounded-2xl p-8 text-center shadow-sm">
           {query ? (
@@ -157,9 +208,7 @@ function MarketplaceContent() {
           ) : (
             <>
               <p className="text-sm font-bold text-ink">등록된 스킬이 없습니다.</p>
-              <p className="text-xs text-ink3 font-bold mt-1">
-                스킬빌더에서 맞춤 자동화 스킬을 디자인해보세요!
-              </p>
+              <p className="text-xs text-ink3 font-bold mt-1">스킬빌더에서 맞춤 자동화 스킬을 디자인해보세요!</p>
               <button
                 type="button"
                 onClick={() => router.push('/skills/builder')}
@@ -191,7 +240,15 @@ function MarketplaceContent() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {filtered.map((skill) => (
-              <SkillCard key={skill.id} skill={skill} actions={actions} />
+              <SkillCard
+                key={skill.skill_id}
+                skill={skill}
+                variant={scope === 'personal' ? 'personal' : 'marketplace'}
+                detailHref={detailHref(skill.skill_id)}
+                actions={actions}
+                adopted={adopted.has(skill.skill_id)}
+                busy={busyId === skill.skill_id}
+              />
             ))}
           </div>
         </div>
