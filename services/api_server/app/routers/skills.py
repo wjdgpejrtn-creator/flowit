@@ -19,39 +19,55 @@ Personal CRUD(REQ-013, 가원 요청): `GET /personal`, `GET/PUT/DELETE /persona
 """
 from __future__ import annotations
 
+import json
+import logging
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
+import httpx
 from common_schemas import PermissionSource
 from common_schemas.enums import RiskLevel
 from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
     CreateDraftSkillUseCase,
     DeletePersonalSkillUseCase,
+    GetMarketplaceSkillDocumentUseCase,
+    GetMarketplaceSkillUseCase,
     GetPersonalSkillUseCase,
+    ListMarketplaceSkillsUseCase,
     ListUserPersonalSkillsUseCase,
     PublishSkillUseCase,
     UpdatePersonalSkillUseCase,
 )
+from skills_marketplace.domain.entities.marketplace_company_skill import MarketplaceCompanySkill
 from skills_marketplace.domain.entities.marketplace_personal_skill import MarketplacePersonalSkill
+from skills_marketplace.domain.entities.marketplace_team_skill import MarketplaceTeamSkill
 from skills_marketplace.domain.value_objects.node_spec_staging import NodeSpecStaging
 from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 from skills_marketplace.domain.value_objects.skill_state import SkillState
 
+from app.dependencies.clients import get_skills_builder_http
 from app.dependencies.permission import get_permission_source
 from app.dependencies.repositories import get_document_repository
 from app.dependencies.use_cases import (
     get_approve_skill_use_case,
     get_create_draft_skill_use_case,
     get_delete_personal_skill_use_case,
+    get_get_marketplace_skill_document_use_case,
+    get_get_marketplace_skill_use_case,
     get_get_personal_skill_use_case,
+    get_list_marketplace_skills_use_case,
     get_list_personal_skills_use_case,
     get_publish_skill_use_case,
     get_update_personal_skill_use_case,
 )
+from app.sse_proxy import SSE_HEADERS, unwrap_agent_sse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/skills", tags=["skills"])
 
@@ -231,6 +247,94 @@ async def create_personal_skill(
     return _to_response(created)
 
 
+# ── 문서→스킬 자동 추출 (REQ-010/013, ADR-0020 Q8 wizard 1차) ──────────────────
+
+
+class ExtractSkillRequest(BaseModel):
+    # 분석 완료된 SOP 문서 id — 본문(blocks)을 LLM에 넣어 SkillNode 초안을 추출한다.
+    source_document_id: UUID
+
+
+@router.post("/extract")
+async def extract_skill_from_document(
+    body: ExtractSkillRequest,
+    permission: PermissionSource = Depends(get_permission_source),
+    doc_repo: DocumentRepositoryPort = Depends(get_document_repository),
+    client: httpx.AsyncClient | None = Depends(get_skills_builder_http),
+) -> StreamingResponse:
+    """SOP 문서 → Skills Builder(extract) → 추출 초안 SSE 스트림 (저장 X, 검토용).
+
+    스킬빌더 위저드 1단계. 문서 소유·분석을 검증한 뒤 skills-builder `/v1/agent/route`
+    (`source_type="sop"`, `step="extract"`)로 **전체 DocumentBlock**을 전달하고, LLM이 추출한
+    SkillNode 초안(name/description/**instructions(SKILL.md 본문)**)을 SSE로 프록시한다.
+    orchestrator(의도 분류)를 우회하는 결정적 추출 경로 — skills-builder 전용 클라이언트 직결.
+
+    프레임: `agent_node`(진행) → `result`(payload.skills 초안 목록) | `error`. 확정·저장은
+    사용자가 폼에서 검토 후 `POST /personal`(instructions 포함)로 수행한다 — 단일 생성 경로 유지.
+    """
+    if client is None:
+        raise HTTPException(
+            status_code=503, detail="Skills Builder unavailable — SKILLS_BUILDER_URL 미설정"
+        )
+
+    # 소유/존재 검증 — doc_parser GET /{id}와 동일한 404/403 패턴 (composition root 책임).
+    document = await doc_repo.get_by_id(body.source_document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"Document {body.source_document_id} not found")
+    if document.user_id != permission.user_id:
+        raise HTTPException(status_code=403, detail="Document belongs to another user")
+    # blocks가 없으면 추출할 본문이 없음(분석 미완료/실패) — 추출 호출 전에 409로 빠르게 안내.
+    if not document.blocks:
+        raise HTTPException(
+            status_code=409,
+            detail="Document has no parsed blocks — 먼저 문서 분석을 완료하세요",
+        )
+
+    # AgentProtocolRequest 봉투(plain dict) — agents._build_agent_payload와 동일 패턴.
+    # 수신 측 skills-builder(Modal)가 AgentProtocolRequest로 검증한다. state는 추출 경로에서
+    # 쓰이지 않지만 스키마상 필수라 최소 형태로 채운다(orchestrator create_session과 동일).
+    session_id = str(uuid4())
+    user_id = str(permission.user_id)
+    proxy_payload = {
+        "session_id": session_id,
+        "user_id": user_id,
+        "personal_memory": [],
+        "payload": {
+            "source_type": "sop",
+            "step": "extract",
+            "document": document.model_dump(mode="json"),
+        },
+        "state": {
+            "session_id": session_id,
+            "user_id": user_id,
+            "messages": [],
+            "turn_count": 0,
+            "mode": "general",
+            "execution_status": "pending",
+            "node_candidates": [],
+        },
+    }
+
+    async def generate():
+        try:
+            # timeout은 클라이언트 default(init_skills_builder_http가 settings.skills_builder_timeout_s로
+            # 설정)에 위임 — per-request 오버라이드를 두면 SKILLS_BUILDER_TIMEOUT_S env가 무력화된다.
+            async with client.stream(
+                "POST", "/v1/agent/route", json=proxy_payload
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    for frame_line in unwrap_agent_sse(line[6:]):
+                        yield frame_line
+        except Exception as exc:
+            logger.error("skills-builder extract 스트리밍 실패: %s", exc)
+            err = {"frame_type": "error", "code": "E_PROXY", "message": str(exc)}
+            yield f"data: {json.dumps(err)}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
 @router.get("/personal", response_model=list[PersonalSkillResponse])
 async def list_personal_skills(
     lifecycle_state: SkillState | None = Query(default=None),
@@ -290,3 +394,115 @@ async def delete_personal_skill(
     """개인 스킬 삭제 — owner + DRAFT only. use case가 GCS SKILL.md → DB row 순으로 정리."""
     await use_case.execute(skill_id=skill_id, actor_user_id=permission.user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── 마켓플레이스 browse (Team/Company 탭) ─────────────────────────────────────
+
+# embedding(768d)·metadata·node_spec_staging(시스템 내부)는 응답에서 제외. node_definition_id는
+# PUBLISHED 스킬이 NodeDefinition을 따라가는 데 필요해 포함. scope는 쿼리한 탭 구분용.
+class MarketplaceSkillResponse(BaseModel):
+    skill_id: UUID
+    scope: SkillScope
+    name: str
+    description: str
+    node_definition_id: UUID | None = None
+    lifecycle_state: SkillState
+    tags: list[str]
+    version: str
+    created_at: datetime
+    updated_at: datetime
+
+
+def _to_marketplace_response(
+    skill: MarketplaceTeamSkill | MarketplaceCompanySkill, scope: SkillScope
+) -> MarketplaceSkillResponse:
+    return MarketplaceSkillResponse(
+        skill_id=skill.skill_id,
+        scope=scope,
+        name=skill.name,
+        description=skill.description,
+        node_definition_id=skill.node_definition_id,
+        lifecycle_state=SkillState(skill.lifecycle_state),
+        tags=list(skill.tags),
+        version=skill.version,
+        created_at=skill.created_at,
+        updated_at=skill.updated_at,
+    )
+
+
+@router.get("/marketplace", response_model=list[MarketplaceSkillResponse])
+async def list_marketplace_skills(
+    scope: SkillScope = Query(..., description="team | company (personal은 GET /personal 사용)"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    permission: PermissionSource = Depends(get_permission_source),
+    use_case: ListMarketplaceSkillsUseCase = Depends(get_list_marketplace_skills_use_case),
+) -> list[MarketplaceSkillResponse]:
+    """마켓플레이스 Team/Company 탭 목록 — 검색어 없이 게시된 스킬을 최신순으로 나열.
+
+    `SearchSkillsUseCase`(embedding 유사도, Composer 후보)와 별개의 browse 경로. company는
+    전사 공개, team은 게시된 팀 스킬 전체(teams 테이블 부재로 팀별 필터는 후속). 인증된 사용자만 접근.
+
+    `lifecycle_state`는 **PUBLISHED로 하드코딩**한다(Query 파라미터로 노출하지 않음). ADR-0020 (b):
+    미검토 DRAFT/REVIEW를 마켓플레이스에 노출하지 않는다 — 클라가 `?lifecycle_state=draft`로
+    미게시 스킬을 열람하는 것을 차단. 비-PUBLISHED 상태 조회는 관리/감사 경로(role 게이트)의 책임이며,
+    port/use case의 `lifecycle_state` 인자는 그 내부 호출용으로 유지된다.
+
+    scope=personal이면 use case→repo가 ValueError → 400으로 매핑(개인 목록은 GET /personal).
+    """
+    if scope == SkillScope.PERSONAL:
+        raise HTTPException(
+            status_code=400, detail="personal scope는 GET /api/v1/skills/personal을 사용하세요"
+        )
+    skills = await use_case.execute(
+        scope=scope, lifecycle_state=SkillState.PUBLISHED, limit=limit, offset=offset
+    )
+    return [_to_marketplace_response(s, scope) for s in skills]
+
+
+@router.get("/marketplace/{skill_id}", response_model=MarketplaceSkillResponse)
+async def get_marketplace_skill(
+    skill_id: UUID,
+    scope: SkillScope = Query(..., description="team | company (personal은 GET /personal/{id} 사용)"),
+    permission: PermissionSource = Depends(get_permission_source),
+    use_case: GetMarketplaceSkillUseCase = Depends(get_get_marketplace_skill_use_case),
+) -> MarketplaceSkillResponse:
+    """마켓플레이스 스킬 단건 상세 — Team/Company 탭 카드 → 상세 페이지.
+
+    목록과 동일하게 **PUBLISHED만** 반환(use case가 미게시/미존재를 동일 404로 가림 — id 직접
+    접근으로 미검토 스킬 메타를 읽는 것 차단). 인증 필수. personal scope는 use case가
+    `ValidationError`→400(개인 스킬은 GET /personal/{id}, owner 게이트).
+    """
+    skill = await use_case.execute(scope=scope, skill_id=skill_id)
+    return _to_marketplace_response(skill, scope)
+
+
+# instructions = SKILL.md markdown 본문(지침서). scripts/templates(선택 자산)는 상세 본문 노출엔
+# 불필요해 제외 — 필요 시 별도 확장. embedding/메타는 단건 GET(위)에서 이미 제공.
+class MarketplaceSkillDocumentResponse(BaseModel):
+    skill_id: UUID
+    name: str
+    description: str
+    instructions: str
+
+
+@router.get("/marketplace/{skill_id}/document", response_model=MarketplaceSkillDocumentResponse)
+async def get_marketplace_skill_document(
+    skill_id: UUID,
+    scope: SkillScope = Query(..., description="team | company"),
+    permission: PermissionSource = Depends(get_permission_source),
+    use_case: GetMarketplaceSkillDocumentUseCase = Depends(get_get_marketplace_skill_document_use_case),
+) -> MarketplaceSkillDocumentResponse:
+    """마켓플레이스 스킬 지침서(SKILL.md) 본문 — 상세 페이지가 메타 조회 후 lazy-load.
+
+    단건 메타 조회와 동일하게 **PUBLISHED만**(use case가 미게시/미존재를 404로 가림). 지침서가
+    GCS에 없으면(수동 생성 스킬 등) 404 → 프론트는 "등록된 지침서 없음"으로 graceful 처리.
+    인증 필수. personal scope는 use case가 ValidationError→400.
+    """
+    document = await use_case.execute(scope=scope, skill_id=skill_id)
+    return MarketplaceSkillDocumentResponse(
+        skill_id=document.skill_id,
+        name=document.name,
+        description=document.description,
+        instructions=document.instructions,
+    )

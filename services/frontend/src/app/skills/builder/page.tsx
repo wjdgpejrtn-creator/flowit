@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
-import { createPersonalSkill } from '@/lib/api/skillApi';
-import type { PersonalSkill, SkillLifecycleState } from '@/lib/api/skillApi';
+import { createPersonalSkill, streamExtractSkillFromDocument } from '@/lib/api/skillApi';
+import type { PersonalSkill, SkillLifecycleState, ExtractedSkillDraft } from '@/lib/api/skillApi';
 import { listDocuments, type DocumentResponse } from '@/lib/api/documentApi';
 import { DOCS_STORAGE_KEY } from '@/lib/storage/keys';
 
@@ -48,6 +48,16 @@ export default function SkillBuilderPage() {
   const [created, setCreated] = useState<PersonalSkill | null>(null);
   const [sourceDocId, setSourceDocId] = useState<string | null>(null);
   const [fromHandoff, setFromHandoff] = useState(false);
+
+  // 문서→스킬 자동 추출(위저드 1단계) 상태. 추출 초안을 폼에 prefill해 사용자가 검토·수정.
+  const [extracting, setExtracting] = useState(false);
+  const [extractStep, setExtractStep] = useState<string | null>(null);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [extractedSkills, setExtractedSkills] = useState<ExtractedSkillDraft[]>([]);
+  const [selectedDraftIdx, setSelectedDraftIdx] = useState<number | null>(null);
+  const extractAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => extractAbortRef.current?.abort(), []);
 
   // 문서→빌더 핸드오프: ?source_document_id=<id> 를 읽어 기반 문서로 표시·전송.
   // 백엔드 source_document_id association 와이어업 완료 — createPersonalSkill 페이로드에 포함한다.
@@ -96,6 +106,67 @@ export default function SkillBuilderPage() {
       setError(err instanceof Error ? err.message : '스킬 생성 실패');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 추출된 초안 1건을 폼에 채운다(검토·수정용). 선택 강조용 인덱스 기록.
+  const applyDraft = (draft: ExtractedSkillDraft, idx: number) => {
+    setName(draft.name);
+    setDescription(draft.description);
+    setInstructions(draft.instructions);
+    setSelectedDraftIdx(idx);
+  };
+
+  // 위저드 1단계 — 기반 문서에서 SkillNode 초안 추출(SSE). 결과를 목록으로 보여주고
+  // 사용자가 1건 선택하면 폼에 prefill. 저장은 폼 제출(handleSubmit)에서 수행.
+  const handleExtract = async () => {
+    if (!sourceDocId || extracting) return;
+    extractAbortRef.current?.abort();
+    const controller = new AbortController();
+    extractAbortRef.current = controller;
+
+    setExtracting(true);
+    setExtractError(null);
+    setExtractStep(null);
+    setExtractedSkills([]);
+    setSelectedDraftIdx(null);
+
+    const STEP_LABELS: Record<string, string> = {
+      'skills_builder.sop.parse_document': '문서 파싱 중…',
+      'skills_builder.sop.llm_extract': 'AI가 스킬을 추출 중…',
+    };
+
+    try {
+      await streamExtractSkillFromDocument(
+        sourceDocId,
+        (frame) => {
+          switch (frame.frame_type) {
+            case 'agent_node': {
+              const node = frame.agent_node_name as string;
+              setExtractStep(STEP_LABELS[node] ?? '처리 중…');
+              break;
+            }
+            case 'result': {
+              const payload = frame.payload as { skills?: ExtractedSkillDraft[] } | undefined;
+              const skills = payload?.skills ?? [];
+              setExtractedSkills(skills);
+              // 1건이면 바로 폼에 적용(편의), 여러 건이면 사용자가 목록에서 선택.
+              if (skills.length === 1) applyDraft(skills[0], 0);
+              break;
+            }
+            case 'error':
+              setExtractError((frame.message as string) ?? '추출 중 오류가 발생했습니다.');
+              break;
+          }
+        },
+        controller.signal,
+      );
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      setExtractError(err instanceof Error ? err.message : '추출 요청 실패');
+    } finally {
+      setExtracting(false);
+      setExtractStep(null);
     }
   };
 
@@ -231,6 +302,70 @@ export default function SkillBuilderPage() {
                       </>
                     )}
                   </p>
+                </div>
+              )}
+
+              {/* 문서→스킬 자동 추출 (REQ-010/013, 위저드 1단계). 핸드오프(?source_document_id=)
+                  진입 시에만 노출 — 추출 초안을 목록으로 보여주고 1건 선택 시 폼 prefill. */}
+              {fromHandoff && (
+                <div className="flex flex-col gap-2 border-[1.5px] border-[var(--color-accent)] rounded-[5px_11px_6px_10px] bg-[var(--color-hl)] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[12px] font-bold text-[var(--color-ink)]">🪄 문서에서 자동 추출 (AI)</span>
+                    {extractedSkills.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => void handleExtract()}
+                        disabled={extracting}
+                        className="text-[11px] text-[var(--color-accent)] underline disabled:opacity-50"
+                      >
+                        다시 추출
+                      </button>
+                    )}
+                  </div>
+
+                  {extractError && (
+                    <div className="text-[11px] text-[var(--color-risk-high)]">⚠ {extractError}</div>
+                  )}
+
+                  {extractedSkills.length === 0 ? (
+                    <>
+                      <p className="text-[11px] text-[var(--color-ink3)] leading-relaxed">
+                        기반 문서를 분석해 스킬 초안(이름·설명·실행 지침)을 자동으로 채워줍니다.
+                      </p>
+                      <Btn type="button" onClick={() => void handleExtract()} disabled={extracting}>
+                        {extracting ? `추출 중… ${extractStep ?? ''}` : '🪄 이 문서에서 스킬 추출'}
+                      </Btn>
+                    </>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <p className="text-[11px] text-[var(--color-ink3)]">
+                        {extractedSkills.length}개의 초안이 추출됐습니다. 하나를 선택하면 아래 폼에 채워집니다.
+                      </p>
+                      <div className="flex flex-col gap-[6px]">
+                        {extractedSkills.map((s, idx) => (
+                          <button
+                            key={`${s.node_type}-${idx}`}
+                            type="button"
+                            onClick={() => applyDraft(s, idx)}
+                            className={[
+                              'text-left border-[1.5px] rounded-[4px_8px_4px_8px] px-3 py-2 transition-colors bg-[var(--color-surface)]',
+                              selectedDraftIdx === idx
+                                ? 'border-[var(--color-accent)]'
+                                : 'border-[var(--color-ink4)] hover:border-[var(--color-ink)]',
+                            ].join(' ')}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-[13px] text-[var(--color-ink)]">{s.name}</span>
+                              {selectedDraftIdx === idx && (
+                                <span className="text-[10px] text-[var(--color-accent)] font-bold">✓ 선택됨</span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-[var(--color-ink3)] mt-[2px]">{s.description}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -107,6 +107,36 @@ class PgMarketplaceSkillRepository(SkillRepository):
         result = await self._session.execute(stmt)
         return [mapper.to_domain(row) for row in result.scalars().all()]
 
+    # ── 마켓플레이스 browse 목록 (Team/Company 탭) ───────────────────────────
+
+    async def list_by_scope(
+        self,
+        scope: SkillScope,
+        lifecycle_state: SkillState | None = SkillState.PUBLISHED,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MarketplaceTeamSkill | MarketplaceCompanySkill]:
+        # team만 상위 승격 마킹(promoted_to_company_id) 보유 — company는 최상위라 없음.
+        if scope == SkillScope.TEAM:
+            model, mapper, promoted_col = (
+                TeamSkillModel, TeamSkillMapper, TeamSkillModel.promoted_to_company_id,
+            )
+        elif scope == SkillScope.COMPANY:
+            model, mapper, promoted_col = CompanySkillModel, CompanySkillMapper, None
+        else:
+            # PERSONAL은 owner 범위 — list_personal_by_user 사용 (Port 계약).
+            raise ValueError(f"list_by_scope는 team/company만 지원합니다 (got {scope})")
+
+        stmt = select(model)
+        if lifecycle_state is not None:
+            stmt = stmt.where(model.lifecycle_state == lifecycle_state.value)
+        if promoted_col is not None:
+            stmt = stmt.where(promoted_col.is_(None))
+        stmt = stmt.order_by(model.updated_at.desc()).limit(limit).offset(offset)
+
+        result = await self._session.execute(stmt)
+        return [mapper.to_domain(row) for row in result.scalars().all()]
+
     # ── personal 미리보기/편집 (REQ-013) ─────────────────────────────────────
 
     async def list_personal_by_user(

@@ -114,6 +114,10 @@ jobs:
         # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
         # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
         run: |
+          # 토큰-env 인증(MODAL_TOKEN_ID/SECRET)만으로는 named profile이 없어
+          # `modal profile current`=default → verify가 항상 실패(5/28 이후 Modal CD 전면 중단 원인).
+          # 토큰으로 '$EXPECTED_MODAL_WORKSPACE' 프로필을 생성·활성화(--verify 기본 ON = 실 워크스페이스 인증).
+          modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "$EXPECTED_MODAL_WORKSPACE" >/dev/null
           ACTUAL=$(modal profile current | tr -d '[:space:]')
           if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
             echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
@@ -147,6 +151,10 @@ jobs:
         # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
         # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
         run: |
+          # 토큰-env 인증(MODAL_TOKEN_ID/SECRET)만으로는 named profile이 없어
+          # `modal profile current`=default → verify가 항상 실패(5/28 이후 Modal CD 전면 중단 원인).
+          # 토큰으로 '$EXPECTED_MODAL_WORKSPACE' 프로필을 생성·활성화(--verify 기본 ON = 실 워크스페이스 인증).
+          modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "$EXPECTED_MODAL_WORKSPACE" >/dev/null
           ACTUAL=$(modal profile current | tr -d '[:space:]')
           if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
             echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
@@ -179,6 +187,10 @@ jobs:
         # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
         # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
         run: |
+          # 토큰-env 인증(MODAL_TOKEN_ID/SECRET)만으로는 named profile이 없어
+          # `modal profile current`=default → verify가 항상 실패(5/28 이후 Modal CD 전면 중단 원인).
+          # 토큰으로 '$EXPECTED_MODAL_WORKSPACE' 프로필을 생성·활성화(--verify 기본 ON = 실 워크스페이스 인증).
+          modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "$EXPECTED_MODAL_WORKSPACE" >/dev/null
           ACTUAL=$(modal profile current | tr -d '[:space:]')
           if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
             echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
@@ -211,6 +223,10 @@ jobs:
         # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
         # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
         run: |
+          # 토큰-env 인증(MODAL_TOKEN_ID/SECRET)만으로는 named profile이 없어
+          # `modal profile current`=default → verify가 항상 실패(5/28 이후 Modal CD 전면 중단 원인).
+          # 토큰으로 '$EXPECTED_MODAL_WORKSPACE' 프로필을 생성·활성화(--verify 기본 ON = 실 워크스페이스 인증).
+          modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "$EXPECTED_MODAL_WORKSPACE" >/dev/null
           ACTUAL=$(modal profile current | tr -d '[:space:]')
           if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
             echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
@@ -244,6 +260,10 @@ jobs:
         # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
         # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
         run: |
+          # 토큰-env 인증(MODAL_TOKEN_ID/SECRET)만으로는 named profile이 없어
+          # `modal profile current`=default → verify가 항상 실패(5/28 이후 Modal CD 전면 중단 원인).
+          # 토큰으로 '$EXPECTED_MODAL_WORKSPACE' 프로필을 생성·활성화(--verify 기본 ON = 실 워크스페이스 인증).
+          modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "$EXPECTED_MODAL_WORKSPACE" >/dev/null
           ACTUAL=$(modal profile current | tr -d '[:space:]')
           if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
             echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"

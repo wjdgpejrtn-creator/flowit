@@ -8,8 +8,10 @@ jest.mock('next/navigation', () => ({
 }));
 
 const mockCreate = jest.fn();
+const mockExtract = jest.fn();
 jest.mock('../../../lib/api/skillApi', () => ({
   createPersonalSkill: (...args: unknown[]) => mockCreate(...args),
+  streamExtractSkillFromDocument: (...args: unknown[]) => mockExtract(...args),
 }));
 
 const mockListDocuments = jest.fn(() => Promise.resolve([] as unknown[]));
@@ -52,6 +54,7 @@ const DOC = {
 
 beforeEach(() => {
   mockCreate.mockReset();
+  mockExtract.mockReset();
   mockPush.mockReset();
   mockListDocuments.mockReset();
   mockListDocuments.mockResolvedValue([]);
@@ -132,5 +135,77 @@ describe('SkillBuilderPage — 문서→빌더 핸드오프 (REQ-010)', () => {
     const payload = mockCreate.mock.calls[0][0] as Record<string, unknown>;
     expect(payload).not.toHaveProperty('document_id');
     expect(payload.source_document_id).toBe('doc-xyz');
+  });
+});
+
+describe('SkillBuilderPage — 문서→스킬 자동 추출 (REQ-010/013 위저드 1단계)', () => {
+  afterEach(() => {
+    window.history.pushState({}, '', '/skills/builder');
+  });
+
+  it('추출 버튼을 누르면 source_document_id 로 추출하고 단일 초안이 폼에 prefill 된다', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/skills/builder?source_document_id=d1');
+    mockListDocuments.mockResolvedValue([DOC]);
+    mockExtract.mockImplementation(
+      async (_docId: string, onFrame: (f: Record<string, unknown>) => void) => {
+        onFrame({
+          frame_type: 'result',
+          payload: {
+            skills: [
+              {
+                node_type: 'send_report',
+                name: '주간 리포트 발송',
+                description: '리포트를 슬랙으로 발송',
+                instructions: '## When to use\n매주 리포트 발송 시.',
+              },
+            ],
+          },
+        });
+      },
+    );
+
+    render(<SkillBuilderPage />);
+    await screen.findByText('기반 문서');
+    await user.click(screen.getByRole('button', { name: /이 문서에서 스킬 추출/ }));
+
+    await waitFor(() => expect(mockExtract).toHaveBeenCalledTimes(1));
+    expect(mockExtract.mock.calls[0][0]).toBe('d1');
+
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText(/주간 리포트 자동화/)).toHaveValue('주간 리포트 발송'),
+    );
+    expect(screen.getByPlaceholderText(/어떤 작업을 자동화/)).toHaveValue('리포트를 슬랙으로 발송');
+  });
+
+  it('추출 결과가 여러 건이면 목록을 보여주고 선택 시 폼에 prefill 된다', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/skills/builder?source_document_id=d1');
+    mockListDocuments.mockResolvedValue([DOC]);
+    mockExtract.mockImplementation(
+      async (_docId: string, onFrame: (f: Record<string, unknown>) => void) => {
+        onFrame({
+          frame_type: 'result',
+          payload: {
+            skills: [
+              { node_type: 'a', name: '스킬 A', description: '설명 A', instructions: '## A' },
+              { node_type: 'b', name: '스킬 B', description: '설명 B', instructions: '## B' },
+            ],
+          },
+        });
+      },
+    );
+
+    render(<SkillBuilderPage />);
+    await screen.findByText('기반 문서');
+    await user.click(screen.getByRole('button', { name: /이 문서에서 스킬 추출/ }));
+
+    await screen.findByText('스킬 A');
+    expect(screen.getByText('스킬 B')).toBeInTheDocument();
+    // 여러 건이면 자동 prefill 하지 않음
+    expect(screen.getByPlaceholderText(/주간 리포트 자동화/)).toHaveValue('');
+
+    await user.click(screen.getByText('스킬 B'));
+    expect(screen.getByPlaceholderText(/주간 리포트 자동화/)).toHaveValue('스킬 B');
   });
 });
