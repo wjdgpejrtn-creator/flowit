@@ -20,6 +20,11 @@ _DEFAULT_TIMEOUT = 90.0
 _MODAL_APP_NAME = "llm-base"
 _MODAL_CLS_NAME = "LLMBase"
 
+# structured 생성은 llm-base 기본 max_tokens(512)로는 부족하다 — SOP 추출은 노드 N개를
+# 각각 긴 instructions(SKILL.md 본문) + inputs/outputs 스키마와 함께 한 JSON으로 내보내므로
+# 512에서 문자열 중간에 잘려 "EOF while parsing a string"(json_invalid)가 난다. 충분히 넉넉히 준다.
+_STRUCTURED_MAX_TOKENS = 4096
+
 
 class ModalLLMAdapter(LLMPort):
     """LLMPort 구현 — Modal llm-base app의 Gemma 4 추론 엔드포인트 호출.
@@ -68,7 +73,7 @@ class ModalLLMAdapter(LLMPort):
         for attempt in range(3):
             try:
                 use_grammar = attempt == 0  # 첫 시도만 json schema grammar 사용
-                kwargs: dict[str, Any] = {"prompt": augmented}
+                kwargs: dict[str, Any] = {"prompt": augmented, "max_tokens": _STRUCTURED_MAX_TOKENS}
                 if use_grammar:
                     kwargs["format"] = "json"
                     kwargs["json_schema"] = schema_json
