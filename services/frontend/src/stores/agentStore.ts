@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { WorkflowExplanation } from '@common/generated';
 
 export type WorkspaceMode = 'wizard' | 'edit' | 'run';
 
@@ -52,8 +53,8 @@ interface AgentStoreState {
   slotQuestion: SlotFillQuestion | null;
   setSlotQuestion: (q: SlotFillQuestion | null) => void;
 
-  readyToExecute: { workflowId: string; message: string } | null;
-  setReadyToExecute: (state: { workflowId: string; message: string } | null) => void;
+  readyToExecute: { workflowId: string; message: string; explanation?: WorkflowExplanation } | null;
+  setReadyToExecute: (state: { workflowId: string; message: string; explanation?: WorkflowExplanation } | null) => void;
 
   sseFrames: string[];
   appendSSEFrame: (frame: string) => void;

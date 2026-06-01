@@ -13,10 +13,11 @@ import { executeWorkflow } from '@/lib/api/workflowApi';
 import { ReactFlow, Background, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getCatalog } from '@/lib/api/nodeApi';
-import type { NodeConfig } from '@common/generated';
+import type { NodeConfig, WorkflowExplanation } from '@common/generated';
 import RiskPill from '@/components/common/RiskPill';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
+import ConfirmCard from '@/components/agent/ConfirmCard';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -446,6 +447,7 @@ function AgentPageContent() {
         setReadyToExecute({
           workflowId: payload.workflow_id as string,
           message: (payload.message as string) ?? '워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.',
+          explanation: payload.explanation as WorkflowExplanation | undefined,
         });
       }
     },
@@ -511,6 +513,7 @@ function AgentPageContent() {
                 setReadyToExecute({
                   workflowId: payload.workflow_id as string,
                   message: (payload.message as string) ?? '워크플로우가 완성됐습니다.',
+                  explanation: payload.explanation as WorkflowExplanation | undefined,
                 });
               }
               const msg = payload?.message;
@@ -697,17 +700,13 @@ function AgentPageContent() {
                     </div>
                   )}
                   {readyToExecute && (
-                    <div className="flex items-end gap-2 justify-start">
-                      <span className="w-[26px] h-[26px] rounded-full bg-[var(--color-agent)] text-white text-[10px] flex items-center justify-center flex-shrink-0 font-bold mb-[1px]">
-                        AI
-                      </span>
-                      <div className="max-w-[72%] px-[11px] py-[8px] text-[13px] leading-relaxed border-[1.5px] bg-[var(--color-surface)] border-[var(--color-ink)] rounded-[8px_12px_12px_4px]">
-                        <p className="mb-[8px]">{readyToExecute.message}</p>
-                        <Btn onClick={handleExecute} disabled={executeLoading} className="text-[12px]">
-                          {executeLoading ? '실행 중…' : '▶ 실행'}
-                        </Btn>
-                      </div>
-                    </div>
+                    <ConfirmCard
+                      message={readyToExecute.message}
+                      explanation={readyToExecute.explanation}
+                      onExecute={handleExecute}
+                      onEdit={() => setMode('edit')}
+                      loading={executeLoading}
+                    />
                   )}
                   <div ref={bottomRef} />
                 </div>

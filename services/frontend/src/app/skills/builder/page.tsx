@@ -8,6 +8,8 @@ import Icon from '@/components/common/Icon';
 import { showToast } from '@/stores/toastStore';
 import {
   createPersonalSkill,
+  selfPublishPersonalSkill,
+  getPersonalSkill,
   streamExtractSkill,
   listSkillTemplates,
 } from '@/lib/api/skillApi';
@@ -16,6 +18,7 @@ import type {
   SkillLifecycleState,
   ExtractedSkillDraft,
   ExtractMaterial,
+  NodeSpecStagingInput,
   SkillTemplate,
 } from '@/lib/api/skillApi';
 import { listDocuments, type DocumentResponse } from '@/lib/api/documentApi';
@@ -65,8 +68,8 @@ const KIND_LABEL: Record<SkillTemplate['kind'], string> = {
 const STEPS = [
   { step: '1', label: '재료 선택', desc: '문서 또는 업종/직무 템플릿' },
   { step: '2', label: '추출 & 검토', desc: 'AI 초안을 검토·편집' },
-  { step: '3', label: '스킬 생성', desc: 'DRAFT 상태로 생성' },
-  { step: '4', label: '검토 & 게시', desc: '승인 후 팀/전사 공유' },
+  { step: '3', label: '검토 & 게시', desc: '게시하면 워크플로우에서 바로 사용' },
+  { step: '4', label: '팀/전사 공유', desc: '승격 요청으로 범위 확장(후속)' },
 ];
 
 const INPUT_CLASS =
@@ -110,20 +113,23 @@ export default function SkillBuilderPage() {
   const [extractError, setExtractError] = useState<string | null>(null);
   const [extractedSkills, setExtractedSkills] = useState<ExtractedSkillDraft[]>([]);
   const [selectedDraftIdx, setSelectedDraftIdx] = useState<number | null>(null);
+  // 선택한 초안의 노드 스펙 — 생성 시 node_spec_staging으로 전송(publish 노드 I/O, #290). 수동 폼이면 undefined.
+  const [selectedStaging, setSelectedStaging] = useState<NodeSpecStagingInput | undefined>(undefined);
   const extractAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => extractAbortRef.current?.abort(), []);
 
-  // 추출된 초안 1건을 폼에 채운다(검토·수정용). 선택 강조용 인덱스 기록.
+  // 추출된 초안 1건을 폼에 채운다(검토·수정용). 선택 강조용 인덱스 + 노드 스펙(staging) 보관.
   const applyDraft = useCallback((draft: ExtractedSkillDraft, idx: number) => {
     setName(draft.name);
     setDescription(draft.description);
     setInstructions(draft.instructions);
+    setSelectedStaging(draft.staging);
     setSelectedDraftIdx(idx);
   }, []);
 
   // 위저드 1단계 — 재료(문서/템플릿)에서 SkillNode 초안 추출(SSE). 결과를 목록으로 보여주고
-  // 사용자가 1건 선택하면 폼에 prefill(단일이면 자동). 저장은 폼 제출(handleSubmit)에서 수행.
+  // 사용자가 1건 선택하면 폼에 prefill(단일이면 자동). 저장은 폼 제출(handleCreate)에서 수행.
   const runExtract = useCallback(
     async (m: Material) => {
       extractAbortRef.current?.abort();
@@ -181,6 +187,7 @@ export default function SkillBuilderPage() {
       setInstructions('');
       setExtractedSkills([]);
       setSelectedDraftIdx(null);
+      setSelectedStaging(undefined);
       void runExtract(m);
     },
     [runExtract],
@@ -251,24 +258,45 @@ export default function SkillBuilderPage() {
     setExtractedSkills([]);
     setExtractError(null);
     setSelectedDraftIdx(null);
+    setSelectedStaging(undefined);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // 생성. publish=true(검토 & 게시)면 personal self-publish 체인(submit→approve→publish, owner 권한)으로
+  // 즉시 PUBLISHED → 워크플로우 노출. publish=false면 DRAFT로만 저장(나중에 마켓플레이스에서 게시).
+  // staging(추출 노드 스펙)을 함께 보내 publish 시 NodeDefinition I/O를 채운다(#290).
+  const handleCreate = async (publish: boolean) => {
     if (!name.trim() || !description.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      const skill = await createPersonalSkill({
+      const draft = await createPersonalSkill({
         name: name.trim(),
         description: description.trim(),
         instructions: instructions.trim() || undefined,
         tags,
         // 템플릿 기반 생성은 source_document_id 없음(전역 seed). 문서 기반만 association.
         source_document_id: material?.kind === 'document' ? material.id : undefined,
+        node_spec_staging: selectedStaging,
       });
-      setCreated(skill);
-      showToast(isEdit ? '변경 사항을 저장했습니다.' : `'${skill.name}' 스킬을 DRAFT로 등록했습니다.`);
+      if (publish) {
+        // self-publish 실패해도 DRAFT는 이미 생성됨 — 에러를 표면화하되 created(draft)는 보여준다
+        // (사용자가 마켓플레이스에서 게시 재개 가능). 성공 시 최신 상태로 재조회해 PUBLISHED 반영.
+        try {
+          await selfPublishPersonalSkill(draft.skill_id);
+          setCreated(await getPersonalSkill(draft.skill_id));
+          showToast('스킬을 게시했습니다. 워크플로우에서 바로 사용할 수 있어요.');
+        } catch (pubErr) {
+          setError(pubErr instanceof Error ? pubErr.message : '게시 처리 실패 — 초안은 저장됨');
+          try {
+            setCreated(await getPersonalSkill(draft.skill_id));
+          } catch {
+            setCreated(draft);
+          }
+        }
+      } else {
+        setCreated(draft);
+        showToast(isEdit ? '변경 사항을 저장했습니다.' : `'${draft.name}' 스킬을 DRAFT로 등록했습니다.`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '스킬 생성 실패');
     } finally {
@@ -278,6 +306,7 @@ export default function SkillBuilderPage() {
 
   const industryTemplates = templates.filter((t) => t.kind === 'industry');
   const functionalTemplates = templates.filter((t) => t.kind === 'functional');
+  const submitDisabled = loading || !name.trim() || !description.trim();
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -456,7 +485,11 @@ export default function SkillBuilderPage() {
                   <div className="flex items-center gap-2">
                     <Icon name="check-circle-2" className="w-6 h-6 text-accent" />
                     <span className="font-bold text-base text-ink">
-                      {isEdit ? '변경 사항이 저장됐습니다!' : '스킬이 생성됐습니다!'}
+                      {created.lifecycle_state === 'published'
+                        ? '스킬이 게시됐습니다!'
+                        : isEdit
+                          ? '변경 사항이 저장됐습니다!'
+                          : '스킬이 생성됐습니다!'}
                     </span>
                     {(() => {
                       const [label, bg, fg] = LIFECYCLE_PILL[created.lifecycle_state];
@@ -518,7 +551,10 @@ export default function SkillBuilderPage() {
                 </div>
               ) : (
                 <form
-                  onSubmit={(e) => void handleSubmit(e)}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void handleCreate(isEdit ? false : true);
+                  }}
                   className="bg-white rounded-2xl p-7 shadow-sm border border-line-soft flex flex-col gap-5"
                 >
                   {/* 선택한 재료 표시 + 다시 선택 (편집 모드에서는 숨김) */}
@@ -695,22 +731,56 @@ export default function SkillBuilderPage() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="submit"
-                      disabled={loading || !name.trim() || !description.trim()}
-                      className="px-5 py-2.5 rounded-xl bg-accent text-white text-xs font-bold shadow-sm hover:bg-accent3 disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {loading ? '생성 중…' : isEdit ? '변경 사항 저장' : '스킬 생성'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => router.push('/marketplace')}
-                      className="px-5 py-2.5 rounded-xl border border-line-soft text-xs font-bold text-ink3 hover:bg-paper"
-                    >
-                      취소
-                    </button>
-                  </div>
+                  {/* 버튼 — 편집모드: 변경 저장 / 신규: 검토&게시 + 초안 저장 */}
+                  {isEdit ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="submit"
+                        disabled={submitDisabled}
+                        className="px-5 py-2.5 rounded-xl bg-accent text-white text-xs font-bold shadow-sm hover:bg-accent3 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {loading ? '처리 중…' : '변경 사항 저장'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => router.push('/marketplace')}
+                        className="px-5 py-2.5 rounded-xl border border-line-soft text-xs font-bold text-ink3 hover:bg-paper"
+                      >
+                        취소
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="submit"
+                          disabled={submitDisabled}
+                          className="px-5 py-2.5 rounded-xl bg-accent text-white text-xs font-bold shadow-sm hover:bg-accent3 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {loading ? '처리 중…' : '검토 & 게시'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={submitDisabled}
+                          onClick={() => void handleCreate(false)}
+                          className="px-5 py-2.5 rounded-xl border border-line-soft text-xs font-bold text-ink hover:bg-paper disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          초안 저장
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => router.push('/marketplace')}
+                          className="px-5 py-2.5 rounded-xl border border-line-soft text-xs font-bold text-ink3 hover:bg-paper"
+                        >
+                          취소
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-ink4 font-bold flex items-center gap-1">
+                        <Icon name="info" className="w-3 h-3" />
+                        검토 & 게시하면 바로 워크플로우에서 사용할 수 있어요. 초안 저장은 나중에 마켓플레이스에서 게시할 수 있어요.
+                      </p>
+                    </div>
+                  )}
                 </form>
               ))}
           </div>
