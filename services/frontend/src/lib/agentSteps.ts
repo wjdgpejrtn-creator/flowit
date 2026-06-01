@@ -18,6 +18,7 @@ export const TOOL_TO_STEP: Record<string, AgentStep> = {
   consultant:        'intent',
   slot_fill:         'intent',
   search_nodes:      'retriever',
+  suggest_skill_select: 'retriever',  // 노드 검색 직후 커스텀 스킬 제안 — 같은 '노드 검색' 단계
   draft_workflow:    'drafter',
   retry_draft:       'drafter',
   validate_workflow: 'validator',
@@ -50,7 +51,9 @@ export function nextMonotonicStep(prev: AgentStep | null, toolName: string): Age
   if (prev === null) return mapped;
   const mi = STEP_ORDER.indexOf(mapped);
   const pi = STEP_ORDER.indexOf(prev);
-  // 매핑 안 되는 단계(mi<0)는 STEP_ORDER 밖 — 가드 없이 그대로 반영.
-  if (mi < 0) return mapped;
+  // 미매핑 노드(mi<0, 예: suggest_skill_select)는 현재 단계를 **유지**한다.
+  // 그대로 반영하면 page.tsx의 `STEP_ORDER.indexOf(step)+1`이 0이 되어 스테퍼가 첫 단계
+  // (보안 검토)로 리셋·역행한다(노드 검색 → 보안 검토 멈춤 버그). 미매핑은 표시 변경 안 함.
+  if (mi < 0) return prev;
   return mi >= pi ? mapped : prev;
 }
