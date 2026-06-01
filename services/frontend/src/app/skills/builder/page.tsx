@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
-import Btn from '@/components/common/Btn';
-import ErrorBanner from '@/components/common/ErrorBanner';
+import Icon from '@/components/common/Icon';
+import { showToast } from '@/stores/toastStore';
 import { createPersonalSkill, streamExtractSkillFromDocument } from '@/lib/api/skillApi';
 import type { PersonalSkill, SkillLifecycleState, ExtractedSkillDraft } from '@/lib/api/skillApi';
 import { listDocuments, type DocumentResponse } from '@/lib/api/documentApi';
@@ -25,16 +25,23 @@ function loadDocs(): DocumentResponse[] {
   }
 }
 
-const LIFECYCLE_COLOR: Record<SkillLifecycleState, string> = {
-  draft:     'var(--color-ink4)',
-  review:    'var(--color-risk-med)',
-  approved:  'var(--color-risk-low)',
-  published: 'var(--color-accent)',
-  archived:  'var(--color-ink4)',
+const LIFECYCLE_PILL: Record<SkillLifecycleState, [string, string, string]> = {
+  draft: ['초안', '#F1ECE4', '#9C8B7B'],
+  review: ['검토중', '#FBE9D8', '#C8860B'],
+  approved: ['승인됨', '#E7F6EF', '#10B981'],
+  published: ['게시됨', '#EAF1FB', '#3B73C4'],
+  archived: ['보관됨', '#F1ECE4', '#A2917F'],
 };
-const LIFECYCLE_LABEL: Record<SkillLifecycleState, string> = {
-  draft: '초안', review: '검토 중', approved: '승인됨', published: '게시됨', archived: '보관됨',
-};
+
+const STEPS = [
+  { step: '1', label: '초안 작성', desc: 'DRAFT 상태로 생성됩니다.' },
+  { step: '2', label: '검토 제출', desc: '마켓플레이스 → 검토 요청' },
+  { step: '3', label: '승인 & 게시', desc: '관리자 승인 후 게시됩니다.' },
+  { step: '4', label: '팀/전사 공유', desc: '승격 요청으로 범위 확장' },
+];
+
+const INPUT_CLASS =
+  'w-full p-2.5 rounded-xl border border-line-soft focus:outline-none focus:border-accent bg-white text-xs font-bold text-ink';
 
 export default function SkillBuilderPage() {
   const router = useRouter();
@@ -49,7 +56,12 @@ export default function SkillBuilderPage() {
   const [sourceDocId, setSourceDocId] = useState<string | null>(null);
   const [fromHandoff, setFromHandoff] = useState(false);
 
-  // 문서→스킬 자동 추출(위저드 1단계) 상태. 추출 초안을 폼에 prefill해 사용자가 검토·수정.
+  // 마켓 '수정' → 편집 모드: ?edit=1&name=&desc=&tags= 로 폼 prefill.
+  const [isEdit, setIsEdit] = useState(false);
+  const [editLabel, setEditLabel] = useState('');
+  const [showTip, setShowTip] = useState(false);
+
+  // 문서→스킬 자동 추출(위저드 1단계) 상태.
   const [extracting, setExtracting] = useState(false);
   const [extractStep, setExtractStep] = useState<string | null>(null);
   const [extractError, setExtractError] = useState<string | null>(null);
@@ -59,13 +71,21 @@ export default function SkillBuilderPage() {
 
   useEffect(() => () => extractAbortRef.current?.abort(), []);
 
-  // 문서→빌더 핸드오프: ?source_document_id=<id> 를 읽어 기반 문서로 표시·전송.
-  // 백엔드 source_document_id association 와이어업 완료 — createPersonalSkill 페이로드에 포함한다.
+  // 쿼리 파싱: source_document_id(핸드오프) / edit(마켓 수정).
   useEffect(() => {
-    const param = new URLSearchParams(window.location.search).get('source_document_id');
-    if (param) {
-      setSourceDocId(param);
+    const sp = new URLSearchParams(window.location.search);
+    const src = sp.get('source_document_id');
+    if (src) {
+      setSourceDocId(src);
       setFromHandoff(true);
+    }
+    if (sp.get('edit') === '1') {
+      setIsEdit(true);
+      const n = sp.get('name') ?? '';
+      setName(n);
+      setDescription(sp.get('desc') ?? '');
+      setTagsInput(sp.get('tags') ?? '');
+      setEditLabel(n);
     }
   }, []);
 
@@ -102,6 +122,7 @@ export default function SkillBuilderPage() {
         source_document_id: sourceDocId ?? undefined,
       });
       setCreated(skill);
+      showToast(isEdit ? '변경 사항을 저장했습니다.' : `'${skill.name}' 스킬을 DRAFT로 등록했습니다.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '스킬 생성 실패');
     } finally {
@@ -109,7 +130,6 @@ export default function SkillBuilderPage() {
     }
   };
 
-  // 추출된 초안 1건을 폼에 채운다(검토·수정용). 선택 강조용 인덱스 기록.
   const applyDraft = (draft: ExtractedSkillDraft, idx: number) => {
     setName(draft.name);
     setDescription(draft.description);
@@ -117,8 +137,6 @@ export default function SkillBuilderPage() {
     setSelectedDraftIdx(idx);
   };
 
-  // 위저드 1단계 — 기반 문서에서 SkillNode 초안 추출(SSE). 결과를 목록으로 보여주고
-  // 사용자가 1건 선택하면 폼에 prefill. 저장은 폼 제출(handleSubmit)에서 수행.
   const handleExtract = async () => {
     if (!sourceDocId || extracting) return;
     extractAbortRef.current?.abort();
@@ -150,7 +168,6 @@ export default function SkillBuilderPage() {
               const payload = frame.payload as { skills?: ExtractedSkillDraft[] } | undefined;
               const skills = payload?.skills ?? [];
               setExtractedSkills(skills);
-              // 1건이면 바로 폼에 적용(편의), 여러 건이면 사용자가 목록에서 선택.
               if (skills.length === 1) applyDraft(skills[0], 0);
               break;
             }
@@ -171,312 +188,354 @@ export default function SkillBuilderPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
+    <div className="min-h-screen flex flex-col">
       <AppBar />
 
-      {/* 헤더 */}
-      <div className="px-6 pt-5 pb-3 border-b-[1.5px] border-[var(--color-ink3)] bg-[var(--color-paper2)] flex items-center justify-between">
+      <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 md:p-6 space-y-4">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-[14px]">스킬빌더</span>
-          </div>
-          <p className="text-[12px] text-[var(--color-ink3)] mt-1">
-            새 스킬을 만들어 마켓플레이스에 등록하세요.
+          <h2 className="text-lg font-bold text-ink">{isEdit ? '스킬 수정' : '스킬빌더'}</h2>
+          <p className="text-xs text-ink3 font-bold">
+            {isEdit
+              ? `'${editLabel}' 스킬의 내용을 수정합니다.`
+              : '새 스킬을 만들어 마켓플레이스에 등록하거나 조직 내에 배포하세요.'}
           </p>
         </div>
-      </div>
 
-      <div className="flex-1 p-6 flex gap-6">
-        {/* 좌: 폼 */}
-        <div className="flex-1 max-w-[560px]">
-          {error && (
-            <div className="mb-4">
-              <ErrorBanner><span>⚠ {error}</span></ErrorBanner>
-            </div>
-          )}
-
-          {created ? (
-            // 생성 완료 상태
-            <div className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-6 flex flex-col gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-[20px]">✓</span>
-                <span className="font-bold text-[15px]">스킬이 생성됐습니다!</span>
-                <span
-                  className="text-[11px] font-semibold px-2 py-[1px] rounded border-[1.5px]"
-                  style={{ color: LIFECYCLE_COLOR[created.lifecycle_state], borderColor: LIFECYCLE_COLOR[created.lifecycle_state] }}
-                >
-                  {LIFECYCLE_LABEL[created.lifecycle_state]}
-                </span>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* 좌: 폼 */}
+          <div className="lg:col-span-9">
+            {error && (
+              <div className="mb-4 px-4 py-3 rounded-xl bg-danger-soft border border-danger/30 text-xs font-bold text-danger flex items-center gap-2">
+                <Icon name="alert-triangle" className="w-4 h-4" />
+                {error}
               </div>
+            )}
 
-              <div className="flex flex-col gap-2 text-[13px]">
-                <div className="flex gap-2">
-                  <span className="text-[var(--color-ink3)] w-20 flex-shrink-0">이름</span>
-                  <span className="font-bold">{created.name}</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="text-[var(--color-ink3)] w-20 flex-shrink-0">설명</span>
-                  <span>{created.description}</span>
-                </div>
-                {created.tags.length > 0 && (
-                  <div className="flex gap-2">
-                    <span className="text-[var(--color-ink3)] w-20 flex-shrink-0">태그</span>
-                    <div className="flex gap-1 flex-wrap">
-                      {created.tags.map((t) => (
-                        <span key={t} className="text-[11px] border border-[var(--color-ink4)] rounded px-1">
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <span className="text-[var(--color-ink3)] w-20 flex-shrink-0">ID</span>
-                  <span className="font-mono text-[11px] text-[var(--color-ink3)]">{created.skill_id}</span>
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <Btn onClick={() => router.push(`/skills/${created.skill_id}`)}>
-                  스킬 보기 →
-                </Btn>
-                <Btn ghost onClick={() => { setCreated(null); setName(''); setDescription(''); setInstructions(''); setTagsInput(''); }}>
-                  새 스킬 만들기
-                </Btn>
-              </div>
-            </div>
-          ) : (
-            // 입력 폼
-            <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
-              {/* 기반 문서 association (REQ-010). 문서→빌더 핸드오프(?source_document_id=)면
-                  read-only 표시, 아니면 선택 가능한 select. 둘 다 sourceDocId 를 통해
-                  createPersonalSkill 페이로드(source_document_id)로 전송된다. */}
-              {fromHandoff ? (
-                <div className="flex flex-col gap-1">
-                  <label className="text-[12px] font-bold text-[var(--color-ink3)]">기반 문서</label>
-                  <div className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-surface)] flex items-center gap-2">
-                    <span>📄</span>
-                    <span className="font-bold truncate" title={sourceDoc?.file_name ?? sourceDocId ?? ''}>
-                      {sourceDoc?.file_name ?? sourceDocId}
-                    </span>
-                    {sourceDoc && (
-                      <span className="text-[11px] text-[var(--color-ink3)] flex-shrink-0">
-                        {fmtSize(sourceDoc.file_size)}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-[var(--color-ink4)] flex items-center gap-1">
-                    <span>ⓘ</span>
-                    이 문서를 기반으로 스킬을 만듭니다. 생성 시 문서 연결이 함께 저장됩니다.
-                  </p>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-1">
-                  <label className="text-[12px] font-bold text-[var(--color-ink3)]">
-                    기반 문서 <span className="text-[var(--color-ink4)] font-normal">(선택)</span>
-                  </label>
-                  <select
-                    value={sourceDocId ?? ''}
-                    onChange={(e) => setSourceDocId(e.target.value || null)}
-                    disabled={docs.length === 0}
-                    className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)] disabled:bg-[var(--color-paper2)] disabled:text-[var(--color-ink4)] disabled:cursor-not-allowed"
-                  >
-                    <option value="">
-                      {docs.length === 0 ? '업로드된 문서가 없습니다' : '문서를 선택하세요 (선택)'}
-                    </option>
-                    {docs.map((doc) => (
-                      <option key={doc.document_id} value={doc.document_id}>
-                        {doc.file_name} · {fmtSize(doc.file_size)}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-[var(--color-ink4)] flex items-center gap-1">
-                    <span>ⓘ</span>
-                    문서를 선택하면 스킬에 기반 문서로 연결됩니다.
-                    {docs.length === 0 && (
-                      <>
-                        {' '}
-                        <Link href="/documents" className="text-[var(--color-accent)] underline">
-                          문서 탭에서 업로드
-                        </Link>
-                      </>
-                    )}
-                  </p>
-                </div>
-              )}
-
-              {/* 문서→스킬 자동 추출 (REQ-010/013, 위저드 1단계). 핸드오프(?source_document_id=)
-                  진입 시에만 노출 — 추출 초안을 목록으로 보여주고 1건 선택 시 폼 prefill. */}
-              {fromHandoff && (
-                <div className="flex flex-col gap-2 border-[1.5px] border-[var(--color-accent)] rounded-[5px_11px_6px_10px] bg-[var(--color-hl)] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[12px] font-bold text-[var(--color-ink)]">🪄 문서에서 자동 추출 (AI)</span>
-                    {extractedSkills.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => void handleExtract()}
-                        disabled={extracting}
-                        className="text-[11px] text-[var(--color-accent)] underline disabled:opacity-50"
+            {created ? (
+              <div className="bg-white rounded-2xl p-7 shadow-sm border border-line-soft flex flex-col gap-4">
+                <div className="flex items-center gap-2">
+                  <Icon name="check-circle-2" className="w-6 h-6 text-accent" />
+                  <span className="font-bold text-base text-ink">
+                    {isEdit ? '변경 사항이 저장됐습니다!' : '스킬이 생성됐습니다!'}
+                  </span>
+                  {(() => {
+                    const [label, bg, fg] = LIFECYCLE_PILL[created.lifecycle_state];
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+                        style={{ background: bg, color: fg }}
                       >
-                        다시 추출
-                      </button>
-                    )}
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: fg }} />
+                        {label}
+                      </span>
+                    );
+                  })()}
+                </div>
+
+                <div className="flex flex-col gap-2 text-xs font-bold">
+                  <div className="flex gap-2">
+                    <span className="text-ink3 w-16 flex-shrink-0">이름</span>
+                    <span className="text-ink">{created.name}</span>
                   </div>
-
-                  {extractError && (
-                    <div className="text-[11px] text-[var(--color-risk-high)]">⚠ {extractError}</div>
-                  )}
-
-                  {extractedSkills.length === 0 ? (
-                    <>
-                      <p className="text-[11px] text-[var(--color-ink3)] leading-relaxed">
-                        기반 문서를 분석해 스킬 초안(이름·설명·실행 지침)을 자동으로 채워줍니다.
-                      </p>
-                      <Btn type="button" onClick={() => void handleExtract()} disabled={extracting}>
-                        {extracting ? `추출 중… ${extractStep ?? ''}` : '🪄 이 문서에서 스킬 추출'}
-                      </Btn>
-                    </>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      <p className="text-[11px] text-[var(--color-ink3)]">
-                        {extractedSkills.length}개의 초안이 추출됐습니다. 하나를 선택하면 아래 폼에 채워집니다.
-                      </p>
-                      <div className="flex flex-col gap-[6px]">
-                        {extractedSkills.map((s, idx) => (
-                          <button
-                            key={`${s.node_type}-${idx}`}
-                            type="button"
-                            onClick={() => applyDraft(s, idx)}
-                            className={[
-                              'text-left border-[1.5px] rounded-[4px_8px_4px_8px] px-3 py-2 transition-colors bg-[var(--color-surface)]',
-                              selectedDraftIdx === idx
-                                ? 'border-[var(--color-accent)]'
-                                : 'border-[var(--color-ink4)] hover:border-[var(--color-ink)]',
-                            ].join(' ')}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-[13px] text-[var(--color-ink)]">{s.name}</span>
-                              {selectedDraftIdx === idx && (
-                                <span className="text-[10px] text-[var(--color-accent)] font-bold">✓ 선택됨</span>
-                              )}
-                            </div>
-                            <div className="text-[11px] text-[var(--color-ink3)] mt-[2px]">{s.description}</div>
-                          </button>
+                  <div className="flex gap-2">
+                    <span className="text-ink3 w-16 flex-shrink-0">설명</span>
+                    <span className="text-ink2">{created.description}</span>
+                  </div>
+                  {created.tags.length > 0 && (
+                    <div className="flex gap-2">
+                      <span className="text-ink3 w-16 flex-shrink-0">태그</span>
+                      <div className="flex gap-1 flex-wrap">
+                        {created.tags.map((t) => (
+                          <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-paper2 text-ink3">
+                            {t}
+                          </span>
                         ))}
                       </div>
                     </div>
                   )}
                 </div>
-              )}
 
-              <div className="flex flex-col gap-1">
-                <label className="text-[12px] font-bold text-[var(--color-ink3)]">
-                  스킬 이름 <span className="text-[var(--color-risk-restricted)]">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="예: 주간 리포트 자동화"
-                  required
-                  className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)]"
-                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/skills/${created.skill_id}`)}
+                    className="px-5 py-2.5 rounded-xl bg-accent text-white text-xs font-bold shadow-sm hover:bg-accent3"
+                  >
+                    스킬 보기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreated(null);
+                      setName('');
+                      setDescription('');
+                      setInstructions('');
+                      setTagsInput('');
+                    }}
+                    className="px-5 py-2.5 rounded-xl border border-line-soft text-xs font-bold text-ink3 hover:bg-paper"
+                  >
+                    새 스킬 만들기
+                  </button>
+                </div>
               </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-[12px] font-bold text-[var(--color-ink3)]">
-                  설명 <span className="text-[var(--color-risk-restricted)]">*</span>
-                </label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="이 스킬이 어떤 작업을 자동화하는지 설명해주세요."
-                  required
-                  rows={3}
-                  className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)] resize-none"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-[12px] font-bold text-[var(--color-ink3)]">
-                  실행 지침 <span className="text-[var(--color-ink4)] font-normal">(선택)</span>
-                </label>
-                <textarea
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="이 스킬을 실행할 때 AI가 따라야 할 상세 지침을 작성하세요."
-                  rows={5}
-                  className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)] resize-none font-mono"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-[12px] font-bold text-[var(--color-ink3)]">
-                  태그 <span className="text-[var(--color-ink4)] font-normal">(쉼표로 구분)</span>
-                </label>
-                <input
-                  type="text"
-                  value={tagsInput}
-                  onChange={(e) => setTagsInput(e.target.value)}
-                  placeholder="예: 리포트, Slack, 자동화"
-                  className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-3 py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)]"
-                />
-                {tags.length > 0 && (
-                  <div className="flex gap-1 flex-wrap mt-1">
-                    {tags.map((t) => (
-                      <span key={t} className="text-[11px] border border-[var(--color-ink4)] rounded px-1 bg-[var(--color-paper2)]">
-                        {t}
+            ) : (
+              <form
+                onSubmit={(e) => void handleSubmit(e)}
+                className="bg-white rounded-2xl p-7 shadow-sm border border-line-soft grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5"
+              >
+                {/* 기반 문서 */}
+                {fromHandoff ? (
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-xs font-bold text-ink">기반 문서</label>
+                    <div className="flex items-center gap-2 p-2.5 rounded-xl border border-line-soft bg-white">
+                      <Icon name="file-text" className="w-4 h-4 text-accent flex-shrink-0" />
+                      <span className="text-xs font-bold text-ink truncate" title={sourceDoc?.file_name ?? sourceDocId ?? ''}>
+                        {sourceDoc?.file_name ?? sourceDocId}
                       </span>
-                    ))}
+                      {sourceDoc && (
+                        <span className="text-[10px] text-ink3 font-bold flex-shrink-0">
+                          {fmtSize(sourceDoc.file_size)}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-ink4 font-bold">
+                      이 문서를 기반으로 스킬을 만듭니다. 생성 시 문서 연결이 함께 저장됩니다.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-ink">
+                      기반 문서 <span className="text-ink4 font-bold">(선택)</span>
+                    </label>
+                    <select
+                      value={sourceDocId ?? ''}
+                      onChange={(e) => setSourceDocId(e.target.value || null)}
+                      disabled={docs.length === 0}
+                      className="w-full p-2.5 rounded-xl border border-line-soft focus:outline-none focus:border-accent bg-paper/30 text-xs font-bold text-ink disabled:text-ink4 disabled:cursor-not-allowed"
+                    >
+                      <option value="">
+                        {docs.length === 0 ? '업로드된 문서가 없습니다' : '문서를 선택하세요 (선택)'}
+                      </option>
+                      {docs.map((doc) => (
+                        <option key={doc.document_id} value={doc.document_id}>
+                          {doc.file_name} · {fmtSize(doc.file_size)}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-ink4 font-bold">
+                      문서를 선택하면 스킬에 기반 문서로 연결됩니다.
+                      {docs.length === 0 && (
+                        <>
+                          {' '}
+                          <Link href="/documents" className="text-accent underline">
+                            문서 탭에서 업로드
+                          </Link>
+                        </>
+                      )}
+                    </p>
                   </div>
                 )}
-              </div>
 
-              <div className="flex gap-2 mt-1">
-                <Btn primary type="submit" disabled={loading || !name.trim() || !description.trim()}>
-                  {loading ? '생성 중…' : '스킬 생성'}
-                </Btn>
-                <Btn ghost type="button" onClick={() => router.push('/marketplace')}>
-                  취소
-                </Btn>
-              </div>
-            </form>
-          )}
-        </div>
+                {/* 스킬 이름 */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-ink">
+                    스킬 이름 <span className="text-accent-coral">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="예: 주간 리포트 자동화"
+                    required
+                    className={INPUT_CLASS}
+                  />
+                </div>
 
-        {/* 우: 가이드 */}
-        <aside className="w-[260px] flex-shrink-0 flex flex-col gap-3 text-[12px] text-[var(--color-ink3)]">
-          <div className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] p-4 bg-[var(--color-surface)]">
-            <div className="font-bold text-[13px] text-[var(--color-ink)] mb-2">스킬 생성 흐름</div>
-            <div className="flex flex-col gap-2">
-              {[
-                { step: '1', label: '초안 작성', desc: 'DRAFT 상태로 생성됩니다.' },
-                { step: '2', label: '검토 제출', desc: '마켓플레이스 → 검토 요청' },
-                { step: '3', label: '승인 & 게시', desc: '관리자 승인 후 게시됩니다.' },
-                { step: '4', label: '팀/전사 공유', desc: '승격 요청으로 범위 확장' },
-              ].map(({ step, label, desc }) => (
-                <div key={step} className="flex items-start gap-2">
-                  <span className="w-[18px] h-[18px] rounded-full border-[1.5px] border-[var(--color-ink)] flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-[1px]">
+                {/* 문서→스킬 자동 추출 (핸드오프 시에만) */}
+                {fromHandoff && (
+                  <div className="md:col-span-2 flex flex-col gap-2 border border-accent-coral/30 rounded-2xl bg-coral-light p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-ink flex items-center gap-1.5">
+                        <Icon name="wand-2" className="w-4 h-4 text-accent-coral" />
+                        문서에서 자동 추출 (AI)
+                      </span>
+                      {extractedSkills.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => void handleExtract()}
+                          disabled={extracting}
+                          className="text-[11px] text-accent font-bold underline disabled:opacity-50"
+                        >
+                          다시 추출
+                        </button>
+                      )}
+                    </div>
+
+                    {extractError && <div className="text-[11px] font-bold text-danger">⚠ {extractError}</div>}
+
+                    {extractedSkills.length === 0 ? (
+                      <>
+                        <p className="text-[11px] text-ink3 font-bold leading-relaxed">
+                          기반 문서를 분석해 스킬 초안(이름·설명·실행 지침)을 자동으로 채워줍니다.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void handleExtract()}
+                          disabled={extracting}
+                          className="px-4 py-2 rounded-xl bg-accent text-white text-xs font-bold shadow-sm hover:bg-accent3 disabled:opacity-60 self-start flex items-center gap-1.5"
+                        >
+                          <Icon name="wand-2" className="w-3.5 h-3.5" />
+                          {extracting ? `추출 중… ${extractStep ?? ''}` : '이 문서에서 스킬 추출'}
+                        </button>
+                      </>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <p className="text-[11px] text-ink3 font-bold">
+                          {extractedSkills.length}개의 초안이 추출됐습니다. 하나를 선택하면 아래 폼에 채워집니다.
+                        </p>
+                        <div className="flex flex-col gap-1.5">
+                          {extractedSkills.map((s, idx) => (
+                            <button
+                              key={`${s.node_type}-${idx}`}
+                              type="button"
+                              onClick={() => applyDraft(s, idx)}
+                              className={[
+                                'text-left rounded-xl px-3 py-2 transition-colors bg-white border',
+                                selectedDraftIdx === idx
+                                  ? 'border-accent'
+                                  : 'border-line-soft hover:border-accent',
+                              ].join(' ')}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-xs text-ink">{s.name}</span>
+                                {selectedDraftIdx === idx && (
+                                  <span className="text-[10px] text-accent font-bold">✓ 선택됨</span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-ink3 font-bold mt-0.5">{s.description}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 설명 */}
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-ink">
+                    설명 <span className="text-accent-coral">*</span>
+                  </label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="이 스킬이 어떤 작업을 자동화하는지 설명해주세요."
+                    required
+                    rows={3}
+                    className={`${INPUT_CLASS} resize-none`}
+                  />
+                </div>
+
+                {/* 실행 지침 + 툴팁 */}
+                <div className="space-y-1 md:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-ink">
+                      실행 지침 <span className="text-ink4 font-bold">(선택)</span>
+                    </label>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowTip((v) => !v)}
+                        aria-label="실행 지침 도움말"
+                        className="text-accent hover:text-accent-coral transition-all flex items-center justify-center"
+                      >
+                        <Icon name="info" className="w-[18px] h-[18px]" />
+                      </button>
+                      {showTip && (
+                        <div className="absolute right-0 bottom-full mb-2.5 w-max whitespace-nowrap bg-coral-light border border-accent-coral/30 rounded-2xl p-4 shadow-lg z-30 animate-fade-in text-left">
+                          <p className="text-sm font-bold text-accent mb-2">💡 Tip</p>
+                          <p className="text-[11px] text-ink2 font-bold leading-relaxed">
+                            실행 지침은 AI 에이전트가 스킬을 실행할 때 참조합니다.
+                          </p>
+                          <p className="text-[11px] text-ink2 font-bold leading-relaxed mt-1.5">
+                            구체적일수록 더 정확한 결과를 얻을 수 있어요.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <textarea
+                    value={instructions}
+                    onChange={(e) => setInstructions(e.target.value)}
+                    placeholder="이 스킬을 실행할 때 AI가 따라야 할 상세 지침을 작성하세요."
+                    rows={4}
+                    className={`${INPUT_CLASS} resize-none font-mono`}
+                  />
+                </div>
+
+                {/* 태그 */}
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-ink">
+                    태그 <span className="text-ink4 font-bold">(쉼표로 구분)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={tagsInput}
+                    onChange={(e) => setTagsInput(e.target.value)}
+                    placeholder="예: 리포트, Slack, 자동화"
+                    className={INPUT_CLASS}
+                  />
+                  {tags.length > 0 && (
+                    <div className="flex gap-1 flex-wrap mt-1">
+                      {tags.map((t) => (
+                        <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-paper2 text-ink3 font-bold">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 버튼 */}
+                <div className="flex items-center space-x-2 pt-1 md:col-span-2">
+                  <button
+                    type="submit"
+                    disabled={loading || !name.trim() || !description.trim()}
+                    className="px-5 py-2.5 rounded-xl bg-accent text-white text-xs font-bold shadow-sm hover:bg-accent3 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {loading ? '생성 중…' : isEdit ? '변경 사항 저장' : '스킬 생성'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/marketplace')}
+                    className="px-5 py-2.5 rounded-xl border border-line-soft text-xs font-bold text-ink3 hover:bg-paper"
+                  >
+                    취소
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* 우: 가이드 */}
+          <aside className="lg:col-span-3 self-start">
+            <h4 className="text-sm font-bold text-ink uppercase tracking-wider mb-5">스킬 생성 흐름</h4>
+            <div className="space-y-6 text-sm">
+              {STEPS.map(({ step, label, desc }) => (
+                <div key={step} className="flex items-start gap-2.5">
+                  <span className="w-7 h-7 rounded-full bg-accent text-white flex items-center justify-center text-xs font-black flex-shrink-0">
                     {step}
                   </span>
                   <div>
-                    <div className="font-bold text-[var(--color-ink)]">{label}</div>
-                    <div>{desc}</div>
+                    <p className="font-bold text-ink">{label}</p>
+                    <p className="text-ink3 font-bold text-xs leading-relaxed mt-0.5">{desc}</p>
                   </div>
                 </div>
               ))}
             </div>
-          </div>
-
-          <div className="border-[1.5px] border-[var(--color-line-soft)] rounded-[5px_11px_6px_10px] p-3 bg-[var(--color-paper2)]">
-            <div className="font-bold text-[12px] text-[var(--color-ink)] mb-1">💡 팁</div>
-            <p className="leading-relaxed">
-              실행 지침은 AI 에이전트가 스킬을 실행할 때 참조합니다.
-              구체적일수록 더 정확한 결과를 얻을 수 있어요.
-            </p>
-          </div>
-        </aside>
-      </div>
+          </aside>
+        </div>
+      </main>
     </div>
   );
 }
