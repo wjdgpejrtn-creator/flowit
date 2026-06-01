@@ -275,3 +275,37 @@ export async function streamExtractSkill(
     reader.releaseLock();
   }
 }
+
+// ── 마켓플레이스 lifecycle — 백엔드 미구현 mock (프론트 명세 SSOT) ────────────────
+//
+// 아래 3개 전이는 현재 실 엔드포인트가 없어 프론트에서 mock으로 동작시킨다(상태 변화는
+// 호출측이 응답을 받아 로컬에 반영). 백엔드는 이 요청/응답 계약·상태전환 규칙을 그대로
+// 구현하면 되며, 구현되면 각 함수 본문을 주석의 apiJson 호출로 교체하면 된다.
+//
+//   archivePersonalSkill : POST /api/v1/skills/{id}/archive  — PUBLISHED → ARCHIVED (owner)
+//   restorePersonalSkill : POST /api/v1/skills/{id}/restore  — ARCHIVED  → PUBLISHED (owner)
+//   addSkillToWorkflow   : POST /api/v1/skills/{id}/adopt    — 게시 스킬을 내 워크플로우에 도입
+//
+// TODO(backend, skills_marketplace REQ-013): 위 3개 라우트 실구현 후 mock 제거.
+
+/** mock 성공 응답(네트워크 지연 흉내). 실 구현 시 apiJson 호출로 대체. */
+function mockLifecycleOk(skillId: string): Promise<void> {
+  if (!skillId) return Promise.reject(new Error('skillId가 필요합니다.'));
+  return new Promise((resolve) => setTimeout(resolve, 200));
+}
+
+/** PUBLISHED → ARCHIVED. TODO(backend): apiJson(`/api/v1/skills/${skillId}/archive`, { method:'POST' }) */
+export async function archivePersonalSkill(skillId: string): Promise<void> {
+  return mockLifecycleOk(skillId);
+}
+
+/** ARCHIVED → PUBLISHED. TODO(backend): apiJson(`/api/v1/skills/${skillId}/restore`, { method:'POST' }) */
+export async function restorePersonalSkill(skillId: string): Promise<void> {
+  return mockLifecycleOk(skillId);
+}
+
+/** 게시 스킬을 내 워크플로우에 도입. TODO(backend): apiJson(`/api/v1/skills/${skillId}/adopt`, { method:'POST', body: JSON.stringify({ scope }) }) */
+export async function addSkillToWorkflow(skillId: string, scope: MarketplaceScope): Promise<void> {
+  void scope;
+  return mockLifecycleOk(skillId);
+}

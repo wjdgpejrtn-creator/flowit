@@ -4,11 +4,23 @@ import userEvent from '@testing-library/user-event';
 jest.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams('tab=personal'),
   usePathname: () => '/marketplace',
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
 }));
 
-const mockListPersonalSkills = jest.fn();
+const mockListPersonal = jest.fn();
+const mockListMarketplace = jest.fn();
+const mockSubmit = jest.fn();
+const mockPublish = jest.fn();
+const mockDelete = jest.fn();
 jest.mock('../../../lib/api/skillApi', () => ({
-  listPersonalSkills: (...args: unknown[]) => mockListPersonalSkills(...args),
+  listPersonalSkills: (...a: unknown[]) => mockListPersonal(...a),
+  listMarketplaceSkills: (...a: unknown[]) => mockListMarketplace(...a),
+  submitSkill: (...a: unknown[]) => mockSubmit(...a),
+  publishSkill: (...a: unknown[]) => mockPublish(...a),
+  deletePersonalSkill: (...a: unknown[]) => mockDelete(...a),
+  archivePersonalSkill: jest.fn(() => Promise.resolve()),
+  restorePersonalSkill: jest.fn(() => Promise.resolve()),
+  addSkillToWorkflow: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock('../../../stores/authStore', () => ({
@@ -21,100 +33,88 @@ jest.mock('../../../hooks/useAuth', () => ({
 
 import MarketplacePage from '../page';
 
-beforeEach(() => mockListPersonalSkills.mockReset());
+function personalSkill(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    skill_id: 'sk-1',
+    owner_user_id: 'u1',
+    name: '주간 리포트 자동화',
+    description: '매주 월요일 OKR 요약 리포트를 자동 생성합니다.',
+    node_definition_id: null,
+    lifecycle_state: 'draft',
+    skill_document_uri: null,
+    workflow_id: null,
+    source_document_id: null,
+    tags: ['리포트', 'OKR'],
+    version: '0.1.0',
+    promoted_to_team_id: null,
+    created_at: '2026-05-20T09:00:00Z',
+    updated_at: '2026-05-25T14:30:00Z',
+    ...over,
+  };
+}
 
-const MOCK_SKILL = {
-  skill_id: '00000000-0000-0000-0000-000000000001',
-  owner_user_id: 'u1',
-  name: '주간 리포트 자동화',
-  description: '매주 월요일 OKR 요약 리포트를 자동 생성합니다.',
-  node_definition_id: null,
-  lifecycle_state: 'draft' as const,
-  skill_document_uri: null,
-  workflow_id: null,
-  tags: ['리포트', 'OKR'],
-  version: '0.1.0',
-  promoted_to_team_id: null,
-  created_at: '2026-05-20T09:00:00Z',
-  updated_at: '2026-05-25T14:30:00Z',
-};
+beforeEach(() => {
+  mockListPersonal.mockReset();
+  mockListMarketplace.mockReset();
+  mockSubmit.mockReset();
+  mockPublish.mockReset();
+  mockDelete.mockReset();
+  mockListPersonal.mockResolvedValue([]);
+  mockListMarketplace.mockResolvedValue([]);
+  mockSubmit.mockResolvedValue(undefined);
+});
 
-describe('MarketplacePage — Personal 탭', () => {
-  it('로딩 중 스켈레톤을 표시한다', () => {
-    mockListPersonalSkills.mockReturnValue(new Promise(() => {}));
+describe('MarketplacePage — 실 API 연동(Flowit)', () => {
+  it('초기 로드 시 스켈레톤을 표시한다', () => {
+    mockListPersonal.mockReturnValue(new Promise(() => {}));
     render(<MarketplacePage />);
-    const skeletons = document.querySelectorAll('.animate-shimmer');
-    expect(skeletons.length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('.animate-shimmer').length).toBeGreaterThan(0);
   });
 
-  it('네트워크 에러 시 메시지와 재시도 버튼을 표시한다', async () => {
-    mockListPersonalSkills.mockRejectedValueOnce(new Error('Failed to fetch'));
+  it('Personal 스킬을 실 listPersonalSkills로 조회해 카드로 렌더링한다', async () => {
+    mockListPersonal.mockResolvedValueOnce([personalSkill()]);
     render(<MarketplacePage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('네트워크 연결을 확인해 주세요.')).toBeInTheDocument();
-    });
-    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
-  });
-
-  it('재시도 버튼 클릭 시 다시 호출한다', async () => {
-    mockListPersonalSkills
-      .mockRejectedValueOnce(new Error('Failed to fetch'))
-      .mockResolvedValueOnce([]);
-    render(<MarketplacePage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('네트워크 연결을 확인해 주세요.')).toBeInTheDocument();
-    });
-
-    await userEvent.click(screen.getByRole('button', { name: '다시 시도' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('등록된 개인 스킬이 없습니다.')).toBeInTheDocument();
-    });
-    expect(mockListPersonalSkills).toHaveBeenCalledTimes(2);
-  });
-
-  it('서버 에러(500) 시 적절한 메시지를 표시한다', async () => {
-    mockListPersonalSkills.mockRejectedValueOnce(new Error('500 Internal Server Error: '));
-    render(<MarketplacePage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.')).toBeInTheDocument();
-    });
-  });
-
-  it('빈 목록이면 안내 메시지를 표시한다', async () => {
-    mockListPersonalSkills.mockResolvedValueOnce([]);
-    render(<MarketplacePage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('등록된 개인 스킬이 없습니다.')).toBeInTheDocument();
-    });
-  });
-
-  it('스킬 카드를 렌더링한다', async () => {
-    mockListPersonalSkills.mockResolvedValueOnce([MOCK_SKILL]);
-    render(<MarketplacePage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('주간 리포트 자동화')).toBeInTheDocument();
-    });
-    expect(screen.getByText('매주 월요일 OKR 요약 리포트를 자동 생성합니다.')).toBeInTheDocument();
-    expect(screen.getByText('리포트')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('주간 리포트 자동화')).toBeInTheDocument());
+    expect(mockListPersonal).toHaveBeenCalled();
     expect(screen.getByText('초안')).toBeInTheDocument();
     expect(screen.getByText('v0.1.0')).toBeInTheDocument();
+    expect(screen.getByText('내가 만든 스킬')).toBeInTheDocument();
   });
 
-  it('스킬 카드가 상세 페이지로 링크된다', async () => {
-    mockListPersonalSkills.mockResolvedValueOnce([MOCK_SKILL]);
+  it('카드 제목이 상세 페이지로 링크된다', async () => {
+    mockListPersonal.mockResolvedValueOnce([personalSkill()]);
     render(<MarketplacePage />);
+    await waitFor(() => screen.getByText('주간 리포트 자동화'));
+    expect(screen.getByText('주간 리포트 자동화').closest('a')).toHaveAttribute('href', '/skills/sk-1');
+  });
 
+  it('네트워크 에러 시 메시지 + 재시도로 다시 조회한다', async () => {
+    mockListPersonal.mockRejectedValueOnce(new Error('Failed to fetch')).mockResolvedValueOnce([]);
+    render(<MarketplacePage />);
+    await waitFor(() => expect(screen.getByText('네트워크 연결을 확인해 주세요.')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    await waitFor(() => expect(screen.getByText('등록된 스킬이 없습니다.')).toBeInTheDocument());
+    expect(mockListPersonal).toHaveBeenCalledTimes(2);
+  });
+
+  it('검색어로 필터링하고, 결과 없으면 안내를 표시한다', async () => {
+    mockListPersonal.mockResolvedValueOnce([personalSkill()]);
+    render(<MarketplacePage />);
+    await waitFor(() => screen.getByText('주간 리포트 자동화'));
+    await userEvent.type(screen.getByLabelText('스킬 검색'), '존재하지않는스킬');
     await waitFor(() => {
-      expect(screen.getByText('주간 리포트 자동화')).toBeInTheDocument();
+      expect(screen.getByText("'존재하지않는스킬' 검색 결과가 없습니다.")).toBeInTheDocument();
     });
+  });
 
-    const card = screen.getByText('주간 리포트 자동화').closest('a');
-    expect(card).toHaveAttribute('href', `/skills/${MOCK_SKILL.skill_id}`);
+  it('초안 스킬 리뷰요청 시 submitSkill 호출 + 검토중으로 전환', async () => {
+    mockListPersonal.mockResolvedValueOnce([personalSkill()]);
+    render(<MarketplacePage />);
+    await waitFor(() => screen.getByText('주간 리포트 자동화'));
+
+    await userEvent.click(screen.getByRole('button', { name: /리뷰요청/ }));
+    await waitFor(() => expect(mockSubmit).toHaveBeenCalledWith('sk-1', 'personal'));
+    await waitFor(() => expect(screen.getByText('검토중')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /검토 대기중/ })).toBeDisabled();
   });
 });
