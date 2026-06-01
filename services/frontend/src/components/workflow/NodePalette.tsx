@@ -5,6 +5,8 @@ import { getCatalog } from '@/lib/api/nodeApi';
 import { RiskLevel } from '@common/generated';
 import type { NodeConfig } from '@common/generated';
 import RiskPill from '@/components/common/RiskPill';
+import Icon from '@/components/common/Icon';
+import { resolveNodeIcon } from '@/lib/nodeIcon';
 
 const PALETTE_MIME = 'application/x-wf-node-config';
 
@@ -28,9 +30,12 @@ export function readPaletteDragPayload(e: React.DragEvent | DragEvent): NodePale
 export default function NodePalette({
   mvpOnly = false,
   catalog: providedCatalog,
+  onPick,
 }: {
   mvpOnly?: boolean;
   catalog?: NodeConfig[] | null;
+  /** 항목 클릭 시 호출 — 드래그&드롭 외에 클릭으로도 노드 추가(시안 addCustomNode) */
+  onPick?: (node: NodeConfig) => void;
 }) {
   const [fetched, setFetched] = useState<NodeConfig[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -88,23 +93,31 @@ export default function NodePalette({
   return (
     <div
       data-testid="node-palette"
-      className="flex flex-col h-full border-r-[1.5px] border-[var(--color-ink)]"
-      style={{ width: 360, background: 'var(--color-surface)' }}
+      className="flex flex-col h-full border-r border-[var(--color-line-soft)]"
+      style={{ width: 320, background: 'var(--color-paper2)' }}
     >
-      <div className="p-2 border-b-[1.5px] border-[var(--color-line-soft)]">
-        <div className="font-bold text-[13px] mb-1">노드 팔레트</div>
-        <input
-          type="search"
-          placeholder="검색 (이름/타입/카테고리)"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="w-full text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
-        />
+      <div className="p-4 border-b border-[var(--color-line-soft)]">
+        <h4 className="text-xs font-bold text-[var(--color-ink)] mb-2 uppercase tracking-wider">
+          노드 팔레트
+        </h4>
+        <div className="relative">
+          <input
+            type="search"
+            placeholder="노드 검색 (이름/타입/카테고리)"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-[var(--color-line-soft)] focus:outline-none focus:border-[var(--color-accent-coral)] bg-white text-[var(--color-ink)] font-bold"
+          />
+          <Icon
+            name="search"
+            className="w-3.5 h-3.5 text-[var(--color-ink3)] absolute left-2.5 top-2.5 pointer-events-none"
+          />
+        </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-2">
+      <div className="flex-1 overflow-auto p-3 space-y-3">
         {error && (
-          <div className="text-[12px] text-[var(--color-status-failed)] mb-2">⚠ {error}</div>
+          <div className="text-[12px] text-[var(--color-status-failed)]">⚠ {error}</div>
         )}
         {!catalog && !error && (
           <div className="text-[12px] text-[var(--color-ink4)] italic">로딩 중…</div>
@@ -113,29 +126,38 @@ export default function NodePalette({
           <div className="text-[12px] text-[var(--color-ink4)] italic">결과 없음</div>
         )}
         {[...grouped.entries()].map(([category, nodes]) => (
-          <div key={category} className="mb-3">
-            <div className="text-[11px] uppercase tracking-wide text-[var(--color-ink3)] mb-1 font-bold">
+          <div key={category} className="space-y-2">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--color-ink3)] font-bold">
               {category}
             </div>
-            <div className="flex flex-col gap-1">
-              {nodes.map((node) => (
-                <div
-                  key={node.node_id}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, node)}
-                  data-testid={`palette-item-${node.node_type}`}
-                  className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_9px_5px_9px] px-2 py-[5px] bg-[var(--color-paper2)] cursor-grab active:cursor-grabbing hover:bg-[var(--color-hl)]"
-                  title={node.description}
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <span title={node.name} className="font-bold text-[12px] truncate">{node.name}</span>
-                    <RiskPill level={node.risk_level} />
+            <div className="flex flex-col gap-2">
+              {nodes.map((node) => {
+                const { icon, color } = resolveNodeIcon(node.node_type, node.category);
+                return (
+                  <div
+                    key={node.node_id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, node)}
+                    onClick={() => onPick?.(node)}
+                    data-testid={`palette-item-${node.node_type}`}
+                    className="p-3 rounded-xl border border-[var(--color-line-soft)] hover:border-[var(--color-accent-coral)] hover:bg-[var(--color-hl)] cursor-grab active:cursor-grabbing transition-all shadow-sm bg-white"
+                    title={node.description}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center space-x-2 min-w-0">
+                        <Icon name={icon} className="w-4 h-4 flex-shrink-0" style={{ color }} />
+                        <span title={node.name} className="text-xs font-bold text-[var(--color-ink)] truncate">
+                          {node.name}
+                        </span>
+                      </div>
+                      <RiskPill level={node.risk_level} />
+                    </div>
+                    <div className="font-mono text-[9px] text-[var(--color-ink3)] truncate mt-1 pl-6">
+                      {node.node_type}
+                    </div>
                   </div>
-                  <div className="font-mono text-[10px] text-[var(--color-ink3)] truncate">
-                    {node.node_type}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}

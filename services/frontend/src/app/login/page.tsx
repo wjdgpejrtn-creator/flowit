@@ -1,15 +1,22 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Icon from '@/components/common/Icon';
 import { showToast } from '@/stores/toastStore';
 import { getAuthorizeUrl } from '@/lib/api/authApi';
+import { consumePendingToast } from '@/lib/pendingToast';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [logoFailed, setLogoFailed] = useState(false);
   const [badgeFailed, setBadgeFailed] = useState(false);
+
+  // 로그아웃 등 전체 이동 후 도착 시 보류 토스트 1회 표시
+  useEffect(() => {
+    const msg = consumePendingToast();
+    if (msg) showToast(msg);
+  }, []);
 
   const handleGoogleLogin = async () => {
     setLoading(true);

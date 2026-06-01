@@ -62,7 +62,10 @@ export default function DashboardPage() {
       return;
     }
     showToast('자동화 설계를 시작합니다...');
-    router.push(`/agent?q=${encodeURIComponent(text)}&autosend=1`);
+    // 시안 submitPrompt: 토스트 후 0.8초 연출 뒤 AI채팅 이동
+    setTimeout(() => {
+      router.push(`/agent?q=${encodeURIComponent(text)}&autosend=1`);
+    }, 800);
   };
 
   const autofill = (prompt: string) => {

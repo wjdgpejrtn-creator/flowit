@@ -10,11 +10,13 @@ import { useAgentStore, WorkspaceMode, ChatMessage } from '@/stores/agentStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession } from '@/lib/api/agentApi';
 import { executeWorkflow } from '@/lib/api/workflowApi';
-import { ReactFlow, Background, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
+import { ReactFlow, Background, BackgroundVariant, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getCatalog } from '@/lib/api/nodeApi';
 import type { NodeConfig, WorkflowExplanation } from '@common/generated';
 import RiskPill from '@/components/common/RiskPill';
+import Icon from '@/components/common/Icon';
+import { showToast } from '@/stores/toastStore';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
@@ -150,7 +152,7 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
 
   return (
     <div
-      className="flex-shrink-0 flex flex-col border-l-[1.5px] border-[var(--color-ink)] overflow-auto"
+      className="flex-shrink-0 flex flex-col border-l border-[var(--color-line-soft)] overflow-auto"
       style={{ width: 300, background: 'var(--color-surface)' }}
     >
       <div className="p-3 border-b-[1.5px] border-[var(--color-line-soft)]">
@@ -201,7 +203,7 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
                 <select
                   value={value}
                   onChange={(e) => updateField(f.name, e.target.value, f.type)}
-                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                  className="text-[12px] px-2 py-1 border border-[var(--color-line-soft)] rounded bg-[var(--color-paper)]"
                 >
                   <option value="">(선택)</option>
                   {f.enumOptions.map((opt) => (
@@ -212,7 +214,7 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
                 <select
                   value={value}
                   onChange={(e) => updateField(f.name, e.target.value, f.type)}
-                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                  className="text-[12px] px-2 py-1 border border-[var(--color-line-soft)] rounded bg-[var(--color-paper)]"
                 >
                   <option value="">(미지정)</option>
                   <option value="true">true</option>
@@ -222,7 +224,7 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
                 <textarea
                   value={value}
                   onChange={(e) => updateDraftField(f.name, e.target.value, f.type)}
-                  className="text-[11px] font-mono px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                  className="text-[11px] font-mono px-2 py-1 border border-[var(--color-line-soft)] rounded bg-[var(--color-paper)]"
                   rows={4}
                   spellCheck={false}
                 />
@@ -232,14 +234,14 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
                   inputMode="decimal"
                   value={value}
                   onChange={(e) => updateDraftField(f.name, e.target.value, f.type)}
-                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                  className="text-[12px] px-2 py-1 border border-[var(--color-line-soft)] rounded bg-[var(--color-paper)]"
                 />
               ) : (
                 <input
                   type="text"
                   value={value}
                   onChange={(e) => updateField(f.name, e.target.value, f.type)}
-                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                  className="text-[12px] px-2 py-1 border border-[var(--color-line-soft)] rounded bg-[var(--color-paper)]"
                 />
               )}
               {fieldErrors[f.name] && (
@@ -264,6 +266,15 @@ function FlowEditor() {
   const [selectedNodeIdForConfig, setSelectedNodeIdForConfig] = useState<string | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
+
+  // 시안 휴지통 존 — 노드 드래그 중 하단에 나타나고, 위에서 드롭하면 삭제
+  const [draggingNode, setDraggingNode] = useState(false);
+  const [trashHover, setTrashHover] = useState(false);
+  const trashRef = useRef<HTMLDivElement>(null);
+  const isOverTrash = (clientX: number, clientY: number) => {
+    const r = trashRef.current?.getBoundingClientRect();
+    return !!r && clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -290,39 +301,88 @@ function FlowEditor() {
     e.dataTransfer.dropEffect = 'copy';
   }, []);
 
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const payload = readPaletteDragPayload(e);
-    if (!payload || !rfInstance) return;
-    const position = rfInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-
-    // input_schema default 값 자동 주입
-    const nodeConfig = catalog?.find((c) => c.node_id === payload.node_id);
-    const initParams: Record<string, unknown> = {};
-    if (nodeConfig?.input_schema) {
-      const schema = nodeConfig.input_schema as { properties?: Record<string, { default?: unknown }> };
-      for (const [key, def] of Object.entries(schema.properties ?? {})) {
-        if (def.default !== undefined) initParams[key] = def.default;
+  // 노드 생성 공통 — 드롭/클릭 양쪽에서 사용. input_schema default 주입 + 추가 토스트(시안 addCustomNode).
+  const addFlowNode = useCallback(
+    (
+      spec: { node_id: string; node_type: string; name: string; risk_level: NodeConfig['risk_level'] },
+      position: { x: number; y: number },
+    ) => {
+      const nodeConfig = catalog?.find((c) => c.node_id === spec.node_id);
+      const initParams: Record<string, unknown> = {};
+      if (nodeConfig?.input_schema) {
+        const schema = nodeConfig.input_schema as { properties?: Record<string, { default?: unknown }> };
+        for (const [key, def] of Object.entries(schema.properties ?? {})) {
+          if (def.default !== undefined) initParams[key] = def.default;
+        }
       }
-    }
-
-    setNodes((nds) => [
-      ...nds,
-      {
-        id: `node-${Date.now()}`,
-        type: 'custom',
-        position,
-        data: {
-          name: payload.name,
-          risk_level: payload.risk_level,
-          node_type: payload.node_type,
-          node_id: payload.node_id,
-          parameters: initParams,
-          onDelete: (nodeId: string) => setNodes((prev) => prev.filter((n) => n.id !== nodeId)),
+      setNodes((nds) => [
+        ...nds,
+        {
+          id: `node-${Date.now()}`,
+          type: 'custom',
+          position,
+          data: {
+            name: spec.name,
+            risk_level: spec.risk_level,
+            node_type: spec.node_type,
+            node_id: spec.node_id,
+            category: nodeConfig?.category,
+            parameters: initParams,
+            onDelete: (nodeId: string) => setNodes((prev) => prev.filter((n) => n.id !== nodeId)),
+          },
         },
-      },
-    ]);
-  }, [rfInstance, catalog, setNodes]);
+      ]);
+      showToast(`'${spec.name}' 노드를 추가했습니다.`);
+    },
+    [catalog, setNodes],
+  );
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const payload = readPaletteDragPayload(e);
+      if (!payload || !rfInstance) return;
+      const position = rfInstance.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      addFlowNode(payload, position);
+    },
+    [rfInstance, addFlowNode],
+  );
+
+  // 시안 addCustomNode: 팔레트 클릭으로도 캔버스 중앙(노드 수만큼 약간 스태거)에 추가
+  const onPalettePick = useCallback(
+    (node: NodeConfig) => {
+      let position = { x: 120, y: 90 };
+      const wrap = wrapperRef.current;
+      if (wrap && rfInstance) {
+        const r = wrap.getBoundingClientRect();
+        position = rfInstance.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+      }
+      const n = nodes.length;
+      position = { x: position.x + ((n * 28) % 140) - 70, y: position.y + ((n * 28) % 140) - 70 };
+      addFlowNode(
+        { node_id: node.node_id, node_type: node.node_type, name: node.name, risk_level: node.risk_level },
+        position,
+      );
+    },
+    [rfInstance, nodes.length, addFlowNode],
+  );
+
+  const onNodeDragStart = useCallback(() => setDraggingNode(true), []);
+  const onNodeDrag = useCallback<NodeMouseHandler>((e) => {
+    setTrashHover(isOverTrash(e.clientX, e.clientY));
+  }, []);
+  const onNodeDragStop = useCallback<NodeMouseHandler>(
+    (e, node) => {
+      if (isOverTrash(e.clientX, e.clientY)) {
+        setNodes((nds) => nds.filter((n) => n.id !== node.id));
+        setEdges((eds) => eds.filter((ed) => ed.source !== node.id && ed.target !== node.id));
+        showToast('노드를 제거했습니다.');
+      }
+      setDraggingNode(false);
+      setTrashHover(false);
+    },
+    [setNodes, setEdges],
+  );
 
   // Bug 2 fix: 더블클릭 → 설정 패널 열기
   const onNodeDoubleClick = useCallback<NodeMouseHandler>((_e, node) => {
@@ -343,9 +403,9 @@ function FlowEditor() {
   return (
     <div className="flex h-full w-full">
       <div className="flex-shrink-0 min-h-0 flex flex-col">
-        <NodePalette catalog={catalog} />
+        <NodePalette catalog={catalog} onPick={onPalettePick} />
       </div>
-      <div ref={wrapperRef} className="flex-1 min-w-0 min-h-0">
+      <div ref={wrapperRef} className="flex-1 min-w-0 min-h-0 relative">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -357,13 +417,38 @@ function FlowEditor() {
           onDrop={onDrop}
           onDragOver={onDragOver}
           onNodeDoubleClick={onNodeDoubleClick}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
           nodeTypes={NODE_TYPES}
           fitView
-          style={{ background: 'var(--color-paper2)' }}
+          style={{ background: 'var(--color-surface)' }}
         >
-          <Background color="var(--color-line-soft)" />
+          <Background variant={BackgroundVariant.Dots} gap={18} size={1.3} color="#D8CBB8" />
           <Controls />
         </ReactFlow>
+
+        {/* 시안 휴지통 존 — 노드 드래그 중 나타나고 위에서 드롭하면 삭제 */}
+        <div
+          ref={trashRef}
+          className="absolute left-1/2 bottom-5 z-30 flex items-center gap-3 px-6 py-3 rounded-2xl border-2 pointer-events-none transition-all"
+          style={{
+            transform: `translateX(-50%) translateY(${draggingNode ? '0' : '12px'})`,
+            opacity: draggingNode ? 1 : 0,
+            background: trashHover ? '#ef4444' : 'rgba(255,255,255,.9)',
+            borderColor: trashHover ? '#ef4444' : 'var(--color-line-soft)',
+            borderStyle: trashHover ? 'solid' : 'dashed',
+            boxShadow: trashHover
+              ? '0 14px 32px -8px rgba(239,68,68,.5)'
+              : '0 4px 12px rgba(70,58,48,.12)',
+            color: trashHover ? '#fff' : 'var(--color-ink4)',
+          }}
+        >
+          <Icon name="trash-2" className="w-[18px] h-[18px]" />
+          <span className="text-[11px] font-semibold whitespace-nowrap tracking-[.02em]">
+            {trashHover ? '놓으면 삭제됩니다' : '삭제하려면 드래그하세요'}
+          </span>
+        </div>
       </div>
       {selectedNode && (
         <FlowNodeConfigPanel
@@ -554,16 +639,16 @@ function AgentPageContent() {
       <div className="flex flex-1 min-h-0">
         {/* ── Session Sidebar ─────────────────────────────────── */}
         <aside
-          className="flex flex-col border-r-[1.5px] border-[var(--color-ink)] bg-[var(--color-sidebar)] flex-shrink-0"
+          className="flex flex-col border-r border-[var(--color-line-soft)] bg-[var(--color-sidebar)] flex-shrink-0"
           style={{ width: 220 }}
         >
-          <div className="px-3 py-[10px] border-b-[1.5px] border-[var(--color-ink)]">
+          <div className="px-3 py-[10px] border-b border-[var(--color-line-soft)]">
             <span className="font-bold text-[13px]">∿ 워크스페이스</span>
           </div>
 
           <div className="flex-1 overflow-auto py-2 flex flex-col gap-[2px] px-2">
             {sessionId ? (
-              <div className="px-[8px] py-[6px] rounded-[4px_8px_4px_8px] text-[12px] border-[1.5px] border-[var(--color-accent)] bg-[var(--color-hl)] text-[var(--color-accent)] font-bold leading-snug">
+              <div className="px-[8px] py-[6px] rounded-lg text-[12px] border-[1.5px] border-[var(--color-accent)] bg-[var(--color-hl)] text-[var(--color-accent)] font-bold leading-snug">
                 💬 현재 대화
                 <div className="font-mono text-[10px] text-[var(--color-ink3)] mt-[2px] font-normal break-all">
                   {sessionId.slice(0, 8)}…
@@ -587,31 +672,35 @@ function AgentPageContent() {
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
 
           {/* Mode toggle bar */}
-          <div className="flex items-center gap-2 px-3 py-2 border-b-[1.5px] border-[var(--color-ink)] bg-[var(--color-surface)] flex-shrink-0">
-            {(['wizard', 'edit', 'run'] as WorkspaceMode[]).map((m) => {
-              const LABELS: Record<WorkspaceMode, string> = {
-                wizard: '💬 대화',
-                edit:   '✏️ 편집',
-                run:    '▶ 실행',
-              };
-              return (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className={[
-                    'px-[10px] py-[3px] text-[12px] font-bold border-[1.5px] rounded-[4px_8px_4px_8px] transition-colors',
-                    mode === m
-                      ? 'bg-[var(--color-ink)] border-[var(--color-ink)] text-[var(--color-surface)]'
-                      : 'bg-transparent border-[var(--color-ink4)] text-[var(--color-ink3)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]',
-                  ].join(' ')}
-                >
-                  {LABELS[m]}
-                </button>
-              );
-            })}
+          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--color-line-soft)] bg-[var(--color-surface)] flex-shrink-0">
+            <div className="flex items-center space-x-1.5">
+              {(['wizard', 'edit', 'run'] as WorkspaceMode[]).map((m) => {
+                const META: Record<WorkspaceMode, { icon: string; label: string }> = {
+                  wizard: { icon: 'message-circle', label: '대화' },
+                  edit:   { icon: 'edit-3', label: '편집' },
+                  run:    { icon: 'play', label: '실행' },
+                };
+                const active = mode === m;
+                return (
+                  <button
+                    key={m}
+                    onClick={() => setMode(m)}
+                    className={[
+                      'px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1',
+                      active
+                        ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                        : 'text-[var(--color-ink3)] hover:text-[var(--color-ink)] hover:bg-[var(--color-paper)]',
+                    ].join(' ')}
+                  >
+                    <Icon name={META[m].icon} className="w-3.5 h-3.5" />
+                    <span>{META[m].label}</span>
+                  </button>
+                );
+              })}
+            </div>
             <div className="flex-1" />
             {readyToExecute && (
-              <span className="text-[12px] text-[var(--color-ink3)] border border-[var(--color-ink4)] px-[8px] py-[2px] rounded whitespace-nowrap font-mono">
+              <span className="text-[12px] text-[var(--color-ink3)] border border-[var(--color-line-soft)] px-[8px] py-[2px] rounded-lg whitespace-nowrap font-mono">
                 {readyToExecute.workflowId.slice(0, 8)}…
               </span>
             )}
@@ -645,10 +734,10 @@ function AgentPageContent() {
                       )}
                       <div
                         className={[
-                          'max-w-[72%] px-[11px] py-[8px] text-[13px] leading-relaxed border-[1.5px]',
+                          'max-w-[72%] px-3.5 py-2.5 text-[13px] font-medium leading-relaxed shadow-sm break-keep',
                           msg.role === 'user'
-                            ? 'bg-[var(--color-hl)] border-[var(--color-accent)] rounded-[12px_8px_4px_12px]'
-                            : 'bg-[var(--color-surface)] border-[var(--color-ink)] rounded-[8px_12px_12px_4px]',
+                            ? 'bg-[var(--color-accent)] text-[#FCF7EF] rounded-2xl rounded-tr-md'
+                            : 'bg-[var(--color-paper2)] border border-[var(--color-line-soft)] text-[var(--color-ink)] rounded-2xl rounded-tl-md',
                         ].join(' ')}
                       >
                         {msg.content}
@@ -660,7 +749,7 @@ function AgentPageContent() {
                       <span className="w-[26px] h-[26px] rounded-full bg-[var(--color-agent)] text-white text-[10px] flex items-center justify-center flex-shrink-0 font-bold mb-[1px]">
                         AI
                       </span>
-                      <div className="max-w-[72%] px-[11px] py-[8px] text-[13px] leading-relaxed border-[1.5px] bg-[var(--color-surface)] border-[var(--color-line-soft)] rounded-[8px_12px_12px_4px] text-[var(--color-ink3)] italic animate-pulse">
+                      <div className="max-w-[72%] px-3.5 py-2.5 text-[13px] leading-relaxed border border-[var(--color-line-soft)] bg-[var(--color-paper2)] rounded-2xl rounded-tl-md text-[var(--color-ink3)] italic animate-pulse">
                         워크플로우를 분석 중입니다… (1~2분 소요)
                       </div>
                     </div>
@@ -678,9 +767,9 @@ function AgentPageContent() {
                 </div>
 
                 {/* Input bar */}
-                <div className="border-t-[1.5px] border-[var(--color-ink)] px-3 py-2 flex gap-2 bg-[var(--color-surface)] flex-shrink-0">
+                <div className="border-t border-[var(--color-line-soft)] px-3 py-2 flex gap-2 bg-[var(--color-surface)] flex-shrink-0">
                   <textarea
-                    className="flex-1 resize-none border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-[10px] py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
+                    className="flex-1 resize-none border border-[var(--color-line-soft)] rounded-lg px-[10px] py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
                     rows={2}
                     placeholder={streaming ? 'AI가 처리 중입니다…' : '워크플로우를 자연어로 설명하세요… (Shift+Enter 줄바꿈)'}
                     value={input}
@@ -701,7 +790,7 @@ function AgentPageContent() {
 
               {/* Right panel */}
               <aside
-                className="flex flex-col border-l-[1.5px] border-[var(--color-ink)] bg-[var(--color-paper2)] overflow-auto flex-shrink-0"
+                className="flex flex-col border-l border-[var(--color-line-soft)] bg-[var(--color-paper2)] overflow-auto flex-shrink-0"
                 style={{ width: 280 }}
               >
                 {/* Agent steps */}
@@ -720,7 +809,7 @@ function AgentPageContent() {
                   <div className="font-bold text-[11px] text-[var(--color-ink3)] uppercase tracking-wider mb-[8px]">
                     AI 판단 근거
                   </div>
-                  <div className="text-[12px] text-[var(--color-ink2)] leading-relaxed bg-[var(--color-surface)] border-[1.5px] border-[var(--color-line-soft)] rounded-[4px_8px_4px_8px] p-[8px] min-h-[64px]">
+                  <div className="text-[12px] text-[var(--color-ink2)] leading-relaxed bg-[var(--color-surface)] border-[1.5px] border-[var(--color-line-soft)] rounded-lg p-[8px] min-h-[64px]">
                     {rationaleText || (
                       <span className="text-[var(--color-ink4)] italic">
                         AI가 분석 중이면 여기에 판단 근거가 표시됩니다.
@@ -737,13 +826,13 @@ function AgentPageContent() {
                     추가 정보 요청
                   </div>
                   {slotQuestion ? (
-                    <div className="border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] p-[10px] bg-[var(--color-surface)]">
+                    <div className="border border-[var(--color-line-soft)] rounded-lg p-[10px] bg-[var(--color-surface)]">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="text-[12px] font-bold">{slotQuestion.question}</span>
                       </div>
                       <input
                         type="text"
-                        className="w-full border-[1.5px] border-[var(--color-ink)] rounded px-[8px] py-[4px] text-[12px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)]"
+                        className="w-full border border-[var(--color-line-soft)] rounded px-[8px] py-[4px] text-[12px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)]"
                         placeholder="답변 입력…"
                       />
                       <div className="mt-2 flex justify-end">
