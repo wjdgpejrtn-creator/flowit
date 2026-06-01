@@ -1,9 +1,11 @@
-"""POST /api/v1/skills/extract — 문서→스킬 추출 SSE 프록시 라우트 테스트 (REQ-010/013).
+"""POST /api/v1/skills/extract + GET /api/v1/skills/templates — 위저드 추출 경로 테스트 (REQ-010/013).
 
 검증축:
 - 가드: client 미설정(503) / 문서 미존재(404) / 타인 문서(403) / blocks 없음(409)
-- happy path: skills-builder 봉투를 unwrap해 frame을 SSE로 재전송 (extract는 저장 X)
+- happy path(문서): skills-builder 봉투를 unwrap해 frame을 SSE로 재전송 (extract는 저장 X)
 - 프록시 페이로드 계약: source_type="sop", step="extract", document 포함
+- default 템플릿: GET /templates 메타 노출 + template_code 추출(seed→SOP 합성, doc_repo 미사용)
+- 재료 배타: source_document_id XOR template_code (둘 다/둘 다 없음 → 422)
 """
 from __future__ import annotations
 
@@ -146,3 +148,55 @@ def test_extract_streams_unwrapped_frames():
     assert sent["payload"]["source_type"] == "sop"
     assert sent["payload"]["step"] == "extract"
     assert "document" in sent["payload"]
+
+
+# ── GET /templates + default(template_code) 추출 경로 ─────────────────────────
+
+
+def test_list_templates_returns_industry_and_functional():
+    app = _make_app()
+    with TestClient(app) as tc:
+        res = tc.get("/api/v1/skills/templates")
+    assert res.status_code == 200
+    body = res.json()
+    codes = {t["code"] for t in body}
+    kinds = {t["kind"] for t in body}
+    # seed 11종(산업 6 + 직무 5) — 대표 코드 + 두 kind 노출 확인
+    assert "ecommerce" in codes
+    assert "marketing" in codes
+    assert kinds == {"industry", "functional"}
+    for t in body:
+        assert t["code"] and t["name"] and t["kind"] in {"industry", "functional"}
+
+
+def test_extract_with_template_code_synthesizes_and_proxies():
+    """template_code → seed를 SOP 문서로 합성 후 sop/extract 프록시. doc_repo는 호출되지 않는다."""
+    envelope = {"frames": [], "next_action": "complete", "state_delta": {}}
+    fake = _FakeSkillsBuilderClient([f"data: {json.dumps(envelope)}"])
+    app = _make_app(client=fake)
+    with TestClient(app) as tc:
+        res = tc.post("/api/v1/skills/extract", json={"template_code": "ecommerce"})
+    assert res.status_code == 200
+    sent = fake.captured["json"]
+    assert sent["payload"]["source_type"] == "sop"
+    assert sent["payload"]["step"] == "extract"
+    # 합성된 DocumentBlock에 SOP 본문 블록이 실려야(문서 경로와 동일 계약)
+    assert sent["payload"]["document"]["blocks"]
+
+
+def test_extract_with_unknown_template_code_404():
+    fake = _FakeSkillsBuilderClient([])
+    app = _make_app(client=fake)
+    with TestClient(app) as tc:
+        res = tc.post("/api/v1/skills/extract", json={"template_code": "does-not-exist"})
+    assert res.status_code == 404
+
+
+def test_extract_requires_exactly_one_source():
+    app = _make_app()
+    with TestClient(app) as tc:
+        # 둘 다 없음 → 422
+        assert tc.post("/api/v1/skills/extract", json={}).status_code == 422
+        # 둘 다 있음 → 422
+        both = {"source_document_id": str(_DOC_ID), "template_code": "ecommerce"}
+        assert tc.post("/api/v1/skills/extract", json=both).status_code == 422

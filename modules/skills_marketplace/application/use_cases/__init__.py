@@ -5,6 +5,7 @@ from .get_marketplace_skill_document_use_case import GetMarketplaceSkillDocument
 from .get_marketplace_skill_use_case import GetMarketplaceSkillUseCase
 from .get_personal_skill_use_case import GetPersonalSkillUseCase
 from .list_marketplace_skills_use_case import ListMarketplaceSkillsUseCase
+from .list_review_queue_use_case import ListReviewQueueUseCase
 from .list_user_personal_skills_use_case import ListUserPersonalSkillsUseCase
 from .promote_to_company_use_case import PromoteToCompanyUseCase
 from .promote_to_team_use_case import PromoteToTeamUseCase
@@ -23,6 +24,7 @@ __all__ = [
     "PublishSkillUseCase",
     "ListUserPersonalSkillsUseCase",
     "ListMarketplaceSkillsUseCase",
+    "ListReviewQueueUseCase",
     "GetMarketplaceSkillUseCase",
     "GetMarketplaceSkillDocumentUseCase",
     "GetPersonalSkillUseCase",
