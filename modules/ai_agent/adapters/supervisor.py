@@ -140,9 +140,9 @@ class LangGraphSupervisor:
                 return
 
             # ── load_memory ───────────────────────────────────────────────
-            node_frame = AgentNodeFrame(agent_node_name="load_memory")
-            all_frames.append(node_frame)
-            yield node_frame
+            # supervisor 라우팅 노드는 사용자 단계 표시 대상 아님 — AgentNodeFrame yield 제외
+            # (composer 노드 이후 늦게 도착 시 프론트 단계 역행 방지)
+            all_frames.append(AgentNodeFrame(agent_node_name="load_memory"))
 
             mem_updates = await self._load_memory_node(state)
             state = {**state, **mem_updates}  # type: ignore[assignment]
@@ -155,9 +155,7 @@ class LangGraphSupervisor:
             state = {**state, **intent_updates}  # type: ignore[assignment]
             intent = state.get("intent")
 
-            node_frame = AgentNodeFrame(agent_node_name="analyze_intent")
-            all_frames.append(node_frame)
-            yield node_frame
+            all_frames.append(AgentNodeFrame(agent_node_name="analyze_intent"))
 
             # ── route ─────────────────────────────────────────────────────
             if intent is None:
