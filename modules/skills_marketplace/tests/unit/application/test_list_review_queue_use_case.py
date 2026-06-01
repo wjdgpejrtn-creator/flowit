@@ -10,6 +10,7 @@ from common_schemas.exceptions import AuthorizationError
 
 from skills_marketplace.application.use_cases import ListReviewQueueUseCase
 from skills_marketplace.domain.entities.marketplace_personal_skill import MarketplacePersonalSkill
+from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 from skills_marketplace.domain.value_objects.skill_state import SkillState
 
 
@@ -50,3 +51,33 @@ async def test_non_admin_rejected(role):
         await use_case.execute(actor_role=role)
 
     repo.list_personal_by_state.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", [SkillScope.TEAM, SkillScope.COMPANY])
+async def test_admin_team_company_queue_uses_list_by_scope(scope):
+    """team/company scope는 승격 요청(REVIEW)을 list_by_scope로 조회 — personal 경로 미사용."""
+    repo = AsyncMock()
+    repo.list_by_scope.return_value = []
+    use_case = ListReviewQueueUseCase(repo=repo)
+
+    await use_case.execute(actor_role="Admin", scope=scope, limit=10, offset=5)
+
+    repo.list_by_scope.assert_awaited_once_with(
+        scope, lifecycle_state=SkillState.REVIEW, limit=10, offset=5
+    )
+    repo.list_personal_by_state.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_personal_scope_uses_list_personal_by_state():
+    """personal(기본) scope는 기존 list_personal_by_state 경로 유지(하위호환)."""
+    repo = AsyncMock()
+    repo.list_personal_by_state.return_value = [_skill()]
+    use_case = ListReviewQueueUseCase(repo=repo)
+
+    result = await use_case.execute(actor_role="Admin", scope=SkillScope.PERSONAL)
+
+    assert len(result) == 1
+    repo.list_personal_by_state.assert_awaited_once_with(SkillState.REVIEW, limit=50, offset=0)
+    repo.list_by_scope.assert_not_called()

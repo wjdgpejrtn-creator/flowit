@@ -49,7 +49,7 @@ describe('DocumentsPage — 카드 그리드 + 업로드 패널 (디자인 SSOT)
     render(<DocumentsPage />);
 
     expect(screen.getByText('2026 Q2 견적_LG.pdf')).toBeInTheDocument();
-    expect(screen.getByText('문서 (1)')).toBeInTheDocument();
+    expect(screen.getByText('문서 보관함')).toBeInTheDocument();
     // 파일타입 태그
     expect(screen.getByText('PDF')).toBeInTheDocument();
   });

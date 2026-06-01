@@ -14,6 +14,8 @@ from skills_marketplace.application.use_cases import (
     ListMarketplaceSkillsUseCase,
     ListReviewQueueUseCase,
     ListUserPersonalSkillsUseCase,
+    PromoteToCompanyUseCase,
+    PromoteToTeamUseCase,
     PublishSkillUseCase,
     SubmitSkillUseCase,
     UpdatePersonalSkillUseCase,
@@ -50,6 +52,20 @@ def get_list_review_queue_use_case(
     repo: SkillRepository = Depends(get_marketplace_skill_repository),
 ) -> ListReviewQueueUseCase:
     return ListReviewQueueUseCase(repo=repo)
+
+
+def get_promote_to_team_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+) -> PromoteToTeamUseCase:
+    """personal → team 승격 (재심사 리셋: 새 team 스킬 DRAFT 생성). 박아름 use case 재사용."""
+    return PromoteToTeamUseCase(repo=repo)
+
+
+def get_promote_to_company_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+) -> PromoteToCompanyUseCase:
+    """team → company 승격 (재심사 리셋: 새 company 스킬 DRAFT 생성). 박아름 use case 재사용."""
+    return PromoteToCompanyUseCase(repo=repo)
 
 
 def get_approve_skill_use_case(
