@@ -226,6 +226,9 @@ class CreatePersonalSkillRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     # REQ-010 문서→빌더 핸드오프: 기반 문서 association. None=직접 진입.
     source_document_id: UUID | None = None
+    # 추출 초안의 노드 스펙(category/입출력/risk/연동). 있으면 publish 시 실제 NodeDefinition I/O가 된다.
+    # None(수동 폼 / 미전달)이면 placeholder(action/빈 스키마/LOW)로 생성 — 기존 동작 유지(하위호환).
+    node_spec_staging: NodeSpecStaging | None = None
 
 
 @router.post("/personal", response_model=PersonalSkillResponse, status_code=status.HTTP_201_CREATED)
@@ -239,11 +242,12 @@ async def create_personal_skill(
 ) -> PersonalSkillResponse:
     """개인 DRAFT 스킬 생성 — 스킬빌더 폼 입구 (REQ-010, 프론트 POST /skills/personal 대응).
 
-    `CreateDraftSkillUseCase`(박아름, ADR-0020 ②e) 재사용. 이 use case는 본래 Skills Builder
-    Agent(REQ-004 ③) 추출 결과용이라 `node_spec_staging`이 필수 입력이다. 수동 폼 생성은 노드
-    스펙이 없어 빈 staging(action/빈 스키마/LOW)을 placeholder로 넣는다 — 실제 스펙은 추후
-    에이전트 추출/publish 단계에서 확정. tags는 create 계약에 없어 생성 직후 update로 반영
-    (owner+DRAFT 보장 — 방금 생성분). 응답은 GetPersonalSkill로 재조회해 일관 직렬화.
+    `CreateDraftSkillUseCase`(박아름, ADR-0020 ②e) 재사용. 이 use case는 `node_spec_staging`이
+    필수 입력이다 — `node_spec_staging`이 요청에 오면(추출 초안의 실 스펙) 그대로 보관하고, 없으면
+    (수동 폼) placeholder(action/빈 스키마/LOW)를 넣는다. 이 staging이 publish 시 NodeDefinition의
+    실제 입출력 스키마가 되므로, 추출 경로는 staging을 실어 보내야 워크플로우 노드 I/O가 채워진다.
+    tags는 create 계약에 없어 생성 직후 update로 반영(owner+DRAFT 보장 — 방금 생성분).
+    응답은 GetPersonalSkill로 재조회해 일관 직렬화.
 
     `source_document_id`(REQ-010 association)가 주어지면 create 전에 문서 존재+소유를 검증한다 —
     DB FK 위반에 맡기면 500이 되고(404/403이 정확), 타인 문서 id가 FK만 통과해 association되는
@@ -261,7 +265,9 @@ async def create_personal_skill(
         owner_user_id=permission.user_id,
         name=body.name,
         description=body.description,
-        node_spec_staging=NodeSpecStaging(
+        # 추출 staging이 오면 그대로(실 I/O), 없으면 placeholder — publish 시 NodeDefinition 스펙이 된다.
+        node_spec_staging=body.node_spec_staging
+        or NodeSpecStaging(
             category="action",
             input_schema={},
             output_schema={},
