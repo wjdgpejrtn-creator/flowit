@@ -12,11 +12,13 @@ const mockListMarketplace = jest.fn();
 const mockSubmit = jest.fn();
 const mockPublish = jest.fn();
 const mockDelete = jest.fn();
+const mockPromote = jest.fn();
 jest.mock('../../../lib/api/skillApi', () => ({
   listPersonalSkills: (...a: unknown[]) => mockListPersonal(...a),
   listMarketplaceSkills: (...a: unknown[]) => mockListMarketplace(...a),
   submitSkill: (...a: unknown[]) => mockSubmit(...a),
   publishSkill: (...a: unknown[]) => mockPublish(...a),
+  promoteSkill: (...a: unknown[]) => mockPromote(...a),
   deletePersonalSkill: (...a: unknown[]) => mockDelete(...a),
   archivePersonalSkill: jest.fn(() => Promise.resolve()),
   restorePersonalSkill: jest.fn(() => Promise.resolve()),
@@ -59,9 +61,11 @@ beforeEach(() => {
   mockSubmit.mockReset();
   mockPublish.mockReset();
   mockDelete.mockReset();
+  mockPromote.mockReset();
   mockListPersonal.mockResolvedValue([]);
   mockListMarketplace.mockResolvedValue([]);
   mockSubmit.mockResolvedValue(undefined);
+  mockPromote.mockResolvedValue(undefined);
 });
 
 describe('MarketplacePage — 실 API 연동(Flowit)', () => {
@@ -116,5 +120,14 @@ describe('MarketplacePage — 실 API 연동(Flowit)', () => {
     await waitFor(() => expect(mockSubmit).toHaveBeenCalledWith('sk-1', 'personal'));
     await waitFor(() => expect(screen.getByText('검토중')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /검토 대기중/ })).toBeDisabled();
+  });
+
+  it('게시된 personal 스킬은 "승격 요청" 버튼으로 promoteSkill(id, "personal") 호출', async () => {
+    mockListPersonal.mockResolvedValueOnce([personalSkill({ lifecycle_state: 'published' })]);
+    render(<MarketplacePage />);
+    await waitFor(() => screen.getByText('주간 리포트 자동화'));
+
+    await userEvent.click(screen.getByRole('button', { name: /승격 요청/ }));
+    await waitFor(() => expect(mockPromote).toHaveBeenCalledWith('sk-1', 'personal'));
   });
 });

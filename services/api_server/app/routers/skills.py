@@ -41,6 +41,8 @@ from skills_marketplace.application.use_cases import (
     ListMarketplaceSkillsUseCase,
     ListReviewQueueUseCase,
     ListUserPersonalSkillsUseCase,
+    PromoteToCompanyUseCase,
+    PromoteToTeamUseCase,
     PublishSkillUseCase,
     SubmitSkillUseCase,
     UpdatePersonalSkillUseCase,
@@ -65,6 +67,8 @@ from app.dependencies.use_cases import (
     get_list_marketplace_skills_use_case,
     get_list_personal_skills_use_case,
     get_list_review_queue_use_case,
+    get_promote_to_company_use_case,
+    get_promote_to_team_use_case,
     get_publish_skill_use_case,
     get_submit_skill_use_case,
     get_update_personal_skill_use_case,
@@ -93,6 +97,11 @@ class PublishSkillRequest(BaseModel):
 
 class SubmitSkillRequest(BaseModel):
     scope: SkillScope
+
+
+class PromoteSkillRequest(BaseModel):
+    # 승격 출발 scope — personal→team, team→company (company는 최상위라 승격 불가).
+    from_scope: SkillScope
 
 
 class LifecycleResponse(BaseModel):
@@ -169,6 +178,51 @@ async def publish_skill(
         actor_department_id=permission.department_id,
     )
     return LifecycleResponse(skill_id=skill_id, scope=body.scope, action="published")
+
+
+@router.post("/{skill_id}/promote", response_model=LifecycleResponse)
+async def promote_skill(
+    skill_id: UUID,
+    body: PromoteSkillRequest,
+    permission: PermissionSource = Depends(get_permission_source),
+    promote_team_use_case: PromoteToTeamUseCase = Depends(get_promote_to_team_use_case),
+    promote_company_use_case: PromoteToCompanyUseCase = Depends(get_promote_to_company_use_case),
+    submit_use_case: SubmitSkillUseCase = Depends(get_submit_skill_use_case),
+    get_personal_use_case: GetPersonalSkillUseCase = Depends(get_get_personal_skill_use_case),
+) -> LifecycleResponse:
+    """승격 요청 — 하위 scope 스킬을 상위 scope로 복제(재심사 리셋) 후 REVIEW로 올린다 (REQ-013).
+
+    - `from_scope=personal` → **team** 승격: 요청자 본인 소유 personal만(`GetPersonalSkillUseCase`로
+      소유/존재 선검증, 타인 스킬 차단 404/403). `PromoteToTeam`이 team_id=요청자 부서(`department_id`)로
+      새 team 스킬을 DRAFT 복제.
+    - `from_scope=team` → **company** 승격: `PromoteToCompany`가 새 company 스킬을 DRAFT 복제.
+      (team 스킬 승격 권한 정책은 후속 — submit/promote 단계 게이트는 #289 follow-up과 동일선상.)
+
+    승격은 상위 scope에 새 스킬을 **DRAFT**로 만든다(게시상태 비승계 — 조장 리뷰 #98). 이어서
+    `SubmitSkillUseCase`로 **REVIEW** 전이해 관리자 리뷰 큐(`GET /review-queue?scope=team|company`)에
+    노출 → 관리자가 `approve` → `publish`로 처리한다. 원본(하위 scope)은 그대로 두고 새 스킬만 심사한다.
+    """
+    if body.from_scope == SkillScope.PERSONAL:
+        # 본인 소유 personal만 승격 — submit과 동일한 owner 게이트(미존재 404 / 비소유 403).
+        await get_personal_use_case.execute(skill_id=skill_id, actor_user_id=permission.user_id)
+        new_skill_id = await promote_team_use_case.execute(
+            personal_skill_id=skill_id, team_id=permission.department_id
+        )
+        target_scope = SkillScope.TEAM
+    elif body.from_scope == SkillScope.TEAM:
+        new_skill_id = await promote_company_use_case.execute(team_skill_id=skill_id)
+        target_scope = SkillScope.COMPANY
+    else:
+        raise HTTPException(status_code=400, detail="company 스킬은 더 승격할 수 없습니다")
+
+    # 승격 결과(DRAFT)를 관리자 리뷰 큐에 노출 — REVIEW로 전이.
+    # promote(save)와 submit(save)은 같은 request-scoped 세션을 공유하고(get_db Depends 캐시),
+    # 커밋은 핸들러 정상 종료 시 1회뿐(repo는 flush만). 따라서 submit이 실패해 라우트가 raise하면
+    # get_db가 rollback해 **promote의 DRAFT도 함께 롤백**된다 — orphan DRAFT/중복 누적 없음(원자적).
+    await submit_use_case.execute(skill_id=new_skill_id, scope=target_scope)
+    return LifecycleResponse(
+        skill_id=new_skill_id, scope=target_scope, action="promotion_requested"
+    )
 
 
 # ── Personal skills CRUD (REQ-013) ───────────────────────────────────────────
@@ -435,21 +489,62 @@ async def list_personal_skills(
     return [_to_response(s) for s in skills]
 
 
-@router.get("/review-queue", response_model=list[PersonalSkillResponse])
+# 리뷰 큐 항목 — personal/team/company 공통 표현(관리자 승인 페이지용). owner_user_id는 personal만
+# (team/company 엔티티엔 없어 None). scope로 어느 탭의 승격 요청인지 구분.
+class ReviewQueueItemResponse(BaseModel):
+    skill_id: UUID
+    scope: SkillScope
+    name: str
+    description: str
+    lifecycle_state: SkillState
+    owner_user_id: UUID | None = None
+    tags: list[str]
+    version: str
+    created_at: datetime
+    updated_at: datetime
+
+
+def _to_review_item(
+    skill: MarketplacePersonalSkill | MarketplaceTeamSkill | MarketplaceCompanySkill,
+    scope: SkillScope,
+) -> ReviewQueueItemResponse:
+    return ReviewQueueItemResponse(
+        skill_id=skill.skill_id,
+        scope=scope,
+        name=skill.name,
+        description=skill.description,
+        lifecycle_state=SkillState(skill.lifecycle_state),
+        owner_user_id=getattr(skill, "owner_user_id", None),
+        tags=list(skill.tags),
+        version=skill.version,
+        created_at=skill.created_at,
+        updated_at=skill.updated_at,
+    )
+
+
+@router.get("/review-queue", response_model=list[ReviewQueueItemResponse])
 async def list_review_queue(
+    scope: SkillScope = Query(
+        default=SkillScope.PERSONAL, description="personal | team | company"
+    ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     permission: PermissionSource = Depends(get_permission_source),
     use_case: ListReviewQueueUseCase = Depends(get_list_review_queue_use_case),
-) -> list[PersonalSkillResponse]:
-    """관리자 리뷰 큐 — REVIEW 상태로 제출된 개인 스킬 전체(소유자 무관) (REQ-013).
+) -> list[ReviewQueueItemResponse]:
+    """관리자 리뷰 큐 — REVIEW 상태로 올라온 스킬을 scope별로 모아 본다 (REQ-013).
 
-    owner가 `POST /{id}/submit`으로 올린 리뷰 요청을 관리자가 모아 보는 경로. 응답에 `owner_user_id`가
-    있어 관리자가 제출자를 식별한다. 인가는 use case가 enforce — **Admin role만** 허용(비-Admin은
-    `AuthorizationError` → 403). 처리는 `POST /{id}/approve` → `POST /{id}/publish`.
+    - `scope=personal`(기본): owner가 `POST /{id}/submit`으로 올린 개인 스킬 리뷰 요청.
+    - `scope=team|company`: 하위 scope에서 `POST /{id}/promote`로 승격 요청(promote→submit)되어
+      REVIEW로 올라온 스킬.
+
+    인가는 use case가 enforce — **Admin role만** 허용(비-Admin은 `AuthorizationError` → 403).
+    관리자는 항목별로 `POST /{id}/approve` → `POST /{id}/publish`(2단계)로 처리한다.
     """
-    skills = await use_case.execute(actor_role=permission.role, limit=limit, offset=offset)
-    return [_to_response(s) for s in skills]
+    skills = await use_case.execute(
+        actor_role=permission.role, scope=scope, limit=limit, offset=offset
+    )
+    return [_to_review_item(s, scope) for s in skills]
 
 
 @router.get("/personal/{skill_id}", response_model=PersonalSkillResponse)
