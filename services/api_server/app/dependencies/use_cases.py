@@ -12,8 +12,10 @@ from skills_marketplace.application.use_cases import (
     GetMarketplaceSkillUseCase,
     GetPersonalSkillUseCase,
     ListMarketplaceSkillsUseCase,
+    ListReviewQueueUseCase,
     ListUserPersonalSkillsUseCase,
     PublishSkillUseCase,
+    SubmitSkillUseCase,
     UpdatePersonalSkillUseCase,
 )
 from skills_marketplace.domain.ports.skill_document_store import SkillDocumentStore
@@ -36,6 +38,18 @@ def get_validate_graph_use_case(
     validator: GraphValidator = Depends(get_graph_validator),
 ) -> ValidateGraphUseCase:
     return ValidateGraphUseCase(validator=validator)
+
+
+def get_submit_skill_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+) -> SubmitSkillUseCase:
+    return SubmitSkillUseCase(repo=repo)
+
+
+def get_list_review_queue_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+) -> ListReviewQueueUseCase:
+    return ListReviewQueueUseCase(repo=repo)
 
 
 def get_approve_skill_use_case(

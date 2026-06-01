@@ -8,6 +8,8 @@ import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
 import {
   createPersonalSkill,
+  selfPublishPersonalSkill,
+  getPersonalSkill,
   streamExtractSkill,
   listSkillTemplates,
 } from '@/lib/api/skillApi';
@@ -16,6 +18,7 @@ import type {
   SkillLifecycleState,
   ExtractedSkillDraft,
   ExtractMaterial,
+  NodeSpecStagingInput,
   SkillTemplate,
 } from '@/lib/api/skillApi';
 import { listDocuments, type DocumentResponse } from '@/lib/api/documentApi';
@@ -100,15 +103,18 @@ export default function SkillBuilderPage() {
   const [extractError, setExtractError] = useState<string | null>(null);
   const [extractedSkills, setExtractedSkills] = useState<ExtractedSkillDraft[]>([]);
   const [selectedDraftIdx, setSelectedDraftIdx] = useState<number | null>(null);
+  // 선택한 초안의 노드 스펙 — 생성 시 node_spec_staging으로 전송(publish 노드 I/O). 수동 폼이면 undefined.
+  const [selectedStaging, setSelectedStaging] = useState<NodeSpecStagingInput | undefined>(undefined);
   const extractAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => extractAbortRef.current?.abort(), []);
 
-  // 추출된 초안 1건을 폼에 채운다(검토·수정용). 선택 강조용 인덱스 기록.
+  // 추출된 초안 1건을 폼에 채운다(검토·수정용). 선택 강조용 인덱스 + 노드 스펙(staging) 보관.
   const applyDraft = useCallback((draft: ExtractedSkillDraft, idx: number) => {
     setName(draft.name);
     setDescription(draft.description);
     setInstructions(draft.instructions);
+    setSelectedStaging(draft.staging);
     setSelectedDraftIdx(idx);
   }, []);
 
@@ -167,6 +173,7 @@ export default function SkillBuilderPage() {
     setInstructions('');
     setExtractedSkills([]);
     setSelectedDraftIdx(null);
+    setSelectedStaging(undefined);
     void runExtract(m);
   }, [runExtract]);
 
@@ -223,28 +230,55 @@ export default function SkillBuilderPage() {
     setExtractedSkills([]);
     setExtractError(null);
     setSelectedDraftIdx(null);
+    setSelectedStaging(undefined);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // 생성. publish=true(검토 & 게시)면 personal self-publish 체인(submit→approve→publish, owner 권한)으로
+  // 즉시 PUBLISHED → 워크플로우 노출. publish=false면 DRAFT로만 저장(나중에 마켓플레이스에서 게시).
+  // staging(추출 노드 스펙)을 함께 보내 publish 시 NodeDefinition I/O를 채운다(#290).
+  const handleCreate = async (publish: boolean) => {
     if (!name.trim() || !description.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      const skill = await createPersonalSkill({
+      const draft = await createPersonalSkill({
         name: name.trim(),
         description: description.trim(),
         instructions: instructions.trim() || undefined,
         tags,
         // 템플릿 기반 생성은 source_document_id 없음(전역 seed). 문서 기반만 association.
         source_document_id: material?.kind === 'document' ? material.id : undefined,
+        node_spec_staging: selectedStaging,
       });
-      setCreated(skill);
+      if (publish) {
+        // self-publish 실패해도 DRAFT는 이미 생성됨 — 에러를 표면화하되 created(draft)는 보여준다
+        // (사용자가 마켓플레이스에서 게시 재개 가능). 성공 시 최신 상태로 재조회해 PUBLISHED 반영.
+        try {
+          await selfPublishPersonalSkill(draft.skill_id);
+          setCreated(await getPersonalSkill(draft.skill_id));
+        } catch (pubErr) {
+          setError(pubErr instanceof Error ? pubErr.message : '게시 처리 실패 — 초안은 저장됨');
+          // 부분 적용(REVIEW/APPROVED)일 수 있으니 실제 서버 상태로 재조회해 표시 정합.
+          // 재조회마저 실패하면 생성 시점 객체(DRAFT)로 폴백.
+          try {
+            setCreated(await getPersonalSkill(draft.skill_id));
+          } catch {
+            setCreated(draft);
+          }
+        }
+      } else {
+        setCreated(draft);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '스킬 생성 실패');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void handleCreate(true);  // 폼 기본 액션 = 검토 & 게시
   };
 
   const industryTemplates = templates.filter((t) => t.kind === 'industry');
@@ -576,12 +610,24 @@ export default function SkillBuilderPage() {
                   )}
                 </div>
 
-                <div className="flex gap-2 mt-1">
+                <div className="flex gap-2 mt-1 items-center">
                   <Btn primary type="submit" disabled={loading || !name.trim() || !description.trim()}>
-                    {loading ? '생성 중…' : '스킬 생성'}
+                    {loading ? '처리 중…' : '검토 & 게시'}
+                  </Btn>
+                  <Btn
+                    ghost
+                    type="button"
+                    disabled={loading || !name.trim() || !description.trim()}
+                    onClick={() => void handleCreate(false)}
+                  >
+                    초안 저장
                   </Btn>
                   <Btn ghost type="button" onClick={() => router.push('/marketplace')}>취소</Btn>
                 </div>
+                <p className="text-[11px] text-[var(--color-ink4)] flex items-center gap-1 -mt-1">
+                  <span>ⓘ</span>
+                  검토 & 게시하면 바로 워크플로우에서 사용할 수 있어요. 초안 저장은 나중에 마켓플레이스에서 게시할 수 있어요.
+                </p>
               </form>
             )
           )}
@@ -595,8 +641,8 @@ export default function SkillBuilderPage() {
               {[
                 { step: '1', label: '재료 선택', desc: '문서 또는 업종/직무 템플릿' },
                 { step: '2', label: '추출 & 검토', desc: 'AI 초안을 검토·편집' },
-                { step: '3', label: '스킬 생성', desc: 'DRAFT 상태로 생성' },
-                { step: '4', label: '검토 & 게시', desc: '승인 후 팀/전사 공유' },
+                { step: '3', label: '검토 & 게시', desc: '게시하면 워크플로우에서 바로 사용' },
+                { step: '4', label: '팀/전사 공유', desc: '승격 요청으로 범위 확장(후속)' },
               ].map(({ step, label, desc }) => (
                 <div key={step} className="flex items-start gap-2">
                   <span className="w-[18px] h-[18px] rounded-full border-[1.5px] border-[var(--color-ink)] flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-[1px]">

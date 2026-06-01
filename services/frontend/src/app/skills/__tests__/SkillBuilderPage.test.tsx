@@ -19,10 +19,14 @@ jest.mock('next/navigation', () => ({
 const mockStreamExtract = jest.fn();
 const mockCreatePersonal = jest.fn();
 const mockListTemplates = jest.fn();
+const mockSelfPublish = jest.fn();
+const mockGetPersonal = jest.fn();
 jest.mock('../../../lib/api/skillApi', () => ({
   streamExtractSkill: (...args: unknown[]) => mockStreamExtract(...args),
   createPersonalSkill: (...args: unknown[]) => mockCreatePersonal(...args),
   listSkillTemplates: (...args: unknown[]) => mockListTemplates(...args),
+  selfPublishPersonalSkill: (...args: unknown[]) => mockSelfPublish(...args),
+  getPersonalSkill: (...args: unknown[]) => mockGetPersonal(...args),
 }));
 
 const mockListDocuments = jest.fn();
@@ -53,8 +57,11 @@ beforeEach(() => {
   mockListTemplates.mockReset();
   mockListDocuments.mockReset();
   mockPush.mockReset();
+  mockSelfPublish.mockReset();
+  mockGetPersonal.mockReset();
   mockListDocuments.mockResolvedValue([]);
   mockListTemplates.mockResolvedValue([]);
+  mockSelfPublish.mockResolvedValue(undefined);
   window.history.pushState({}, '', '/skills/builder');
 });
 
@@ -141,35 +148,59 @@ const CREATED = {
   promoted_to_team_id: null, created_at: '2026-06-01T00:00:00Z', updated_at: '2026-06-01T00:00:00Z',
 };
 
-test('생성: 문서갈래는 source_document_id 전송 / 템플릿갈래는 미전송 (association SSOT)', async () => {
+const STAGING = {
+  category: 'integration',
+  input_schema: { type: 'object', properties: { x: { type: 'string' } } },
+  output_schema: { type: 'object' },
+  risk_level: 'Medium',
+  required_connections: ['slack'],
+  service_type: 'slack',
+};
+
+function _draftFrame(onFrame: (f: Record<string, unknown>) => void) {
+  onFrame({ frame_type: 'result', payload: { skills: [
+    { node_type: 'a', name: '스킬 A', description: 'A 설명', instructions: '## A', staging: STAGING },
+  ] } });
+}
+
+test('검토 & 게시: source_document_id + staging 전송 후 self-publish 체인 실행', async () => {
   mockCreatePersonal.mockResolvedValue(CREATED);
-  mockStreamExtract.mockImplementation(async (_m: unknown, onFrame: (f: Record<string, unknown>) => void) => {
-    onFrame({ frame_type: 'result', payload: { skills: [
-      { node_type: 'a', name: '스킬 A', description: 'A 설명', instructions: '## A' },
-    ] } });
-  });
+  mockGetPersonal.mockResolvedValue({ ...CREATED, lifecycle_state: 'published' });
+  mockStreamExtract.mockImplementation(async (_m: unknown, onFrame: (f: Record<string, unknown>) => void) => _draftFrame(onFrame));
   const user = userEvent.setup();
 
-  // 문서갈래(핸드오프) → 생성 시 source_document_id 전송
   window.history.pushState({}, '', '/skills/builder?source_document_id=doc-7');
-  const { unmount } = render(<SkillBuilderPage />);
+  render(<SkillBuilderPage />);
   await waitFor(() => expect(screen.getByPlaceholderText(/주간 리포트 자동화/)).toHaveValue('스킬 A'));
-  await user.click(screen.getByRole('button', { name: '스킬 생성' }));
-  await waitFor(() => expect(mockCreatePersonal).toHaveBeenCalledTimes(1));
-  expect((mockCreatePersonal.mock.calls[0][0] as Record<string, unknown>).source_document_id).toBe('doc-7');
-  unmount();
+  await user.click(screen.getByRole('button', { name: '검토 & 게시' }));
 
-  // 템플릿갈래 → 생성 시 source_document_id 미전송(undefined)
-  mockCreatePersonal.mockClear();
+  await waitFor(() => expect(mockCreatePersonal).toHaveBeenCalledTimes(1));
+  const payload = mockCreatePersonal.mock.calls[0][0] as Record<string, unknown>;
+  expect(payload.source_document_id).toBe('doc-7');
+  // 추출 초안의 staging이 그대로 전송(publish 노드 I/O)
+  expect((payload.node_spec_staging as Record<string, unknown>).category).toBe('integration');
+  // self-publish 체인 실행 + 게시 결과 재조회
+  await waitFor(() => expect(mockSelfPublish).toHaveBeenCalledWith('sk-1'));
+  expect(mockGetPersonal).toHaveBeenCalledWith('sk-1');
+});
+
+test('초안 저장: create만 호출, self-publish 미실행 / 템플릿갈래는 source_document_id 미전송', async () => {
+  mockCreatePersonal.mockResolvedValue(CREATED);
   mockListTemplates.mockResolvedValue([
     { code: 'ecommerce', name: '이커머스', description: '주문', kind: 'industry' },
   ]);
+  mockStreamExtract.mockImplementation(async (_m: unknown, onFrame: (f: Record<string, unknown>) => void) => _draftFrame(onFrame));
+  const user = userEvent.setup();
+
   window.history.pushState({}, '', '/skills/builder');
   render(<SkillBuilderPage />);
   await user.click(await screen.findByText(/아니요, 직접 만들게요/));
   await user.click(await screen.findByText('이커머스'));
   await waitFor(() => expect(screen.getByPlaceholderText(/주간 리포트 자동화/)).toHaveValue('스킬 A'));
-  await user.click(screen.getByRole('button', { name: '스킬 생성' }));
+  await user.click(screen.getByRole('button', { name: '초안 저장' }));
+
   await waitFor(() => expect(mockCreatePersonal).toHaveBeenCalledTimes(1));
   expect((mockCreatePersonal.mock.calls[0][0] as Record<string, unknown>).source_document_id).toBeUndefined();
+  // 초안 저장은 self-publish 안 함
+  expect(mockSelfPublish).not.toHaveBeenCalled();
 });

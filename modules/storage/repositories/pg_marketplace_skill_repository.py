@@ -154,6 +154,23 @@ class PgMarketplaceSkillRepository(SkillRepository):
         result = await self._session.execute(stmt)
         return [PersonalSkillMapper.to_domain(row) for row in result.scalars().all()]
 
+    async def list_personal_by_state(
+        self,
+        lifecycle_state: SkillState,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MarketplacePersonalSkill]:
+        # owner 필터 없음 — 전체 소유자의 해당 상태 스킬(관리자 리뷰 큐). 인가는 use case(Admin only).
+        stmt = (
+            select(PersonalSkillModel)
+            .where(PersonalSkillModel.lifecycle_state == lifecycle_state.value)
+            .order_by(PersonalSkillModel.updated_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
+        return [PersonalSkillMapper.to_domain(row) for row in result.scalars().all()]
+
     async def delete_personal(self, skill_id: UUID) -> None:
         # 존재하지 않는 skill_id면 행 0건 영향 — 멱등. 인가/lifecycle 검증은 use case 선행.
         await self._session.execute(

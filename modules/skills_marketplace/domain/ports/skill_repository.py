@@ -130,6 +130,21 @@ class SkillRepository(ABC):
         ...
 
     @abstractmethod
+    async def list_personal_by_state(
+        self,
+        lifecycle_state: SkillState,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MarketplacePersonalSkill]:
+        """게시 상태별 **전체 소유자**의 개인 스킬 목록 — 관리자 리뷰 큐용 (REQ-013).
+
+        `list_personal_by_user`(소유자 범위)와 달리 owner 필터가 없다 — 관리자가 REVIEW 상태의
+        리뷰 요청을 소유자 무관하게 모아 보기 위함. 인가(Admin only)는 use case
+        (`ListReviewQueueUseCase`)가 enforce한다. 정렬은 구현(storage)에서 `updated_at DESC`.
+        """
+        ...
+
+    @abstractmethod
     async def delete_personal(self, skill_id: UUID) -> None:
         """개인 스킬 단건 삭제 (DB row). GCS SkillDocument 삭제는 use case가 `SkillDocumentStore`로 별도 수행.
 
