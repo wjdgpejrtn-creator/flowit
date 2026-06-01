@@ -92,6 +92,14 @@ class OrchestratorAgent:
 
         llm = ModalLLMAdapter()
 
+        # 세션별 누적 프레임 캐시 (컨테이너 로컬 메모리, 재연결 복원용).
+        # ⚠ 단일 컨테이너 가정: staging 저부하 환경에서는 사실상 단일 컨테이너로 동작하나
+        # scale-out 시 GET이 다른 컨테이너에 도달하면 빈 프레임 반환(best-effort 복원).
+        # 프로덕션에서는 Redis/GCS 공유 저장소로 교체 필요.
+        self._session_frames: dict[str, list[dict]] = {}
+        # session_id → user_id 매핑 (소유권 검증용)
+        self._session_owner: dict[str, str] = {}
+
         self._graph = LangGraphSupervisor(
             intent_analyzer=IntentAnalyzerService(llm),
             personalization_client=HTTPSubAgentClient(
@@ -118,17 +126,27 @@ class OrchestratorAgent:
 
         @api.post("/v1/agent/route")
         async def route(req: AgentProtocolRequest = Body(...)):
+            session_id = req.session_id
+            self._session_frames[session_id] = []  # 새 요청마다 초기화
+            self._session_owner[session_id] = req.user_id  # 소유권 등록
+
             async def generate():
                 try:
                     async for frame in await self._graph.stream(
                         user_id=req.user_id,
-                        session_id=req.session_id,
+                        session_id=session_id,
                         message=req.payload.get("message", ""),
                         trace_id=req.trace_id,
                         turn_count=req.state.turn_count,
                         round=req.payload.get("round", 1),
                         selected_skill_id=req.payload.get("selected_skill_id"),
                     ):
+                        try:
+                            self._session_frames[session_id].append(
+                                frame.model_dump(mode="json")
+                            )
+                        except Exception:
+                            pass
                         resp = AgentProtocolResponse(
                             frames=[frame],
                             state_delta={},
@@ -157,5 +175,17 @@ class OrchestratorAgent:
                 yield f"data: {done.model_dump_json()}\n\n"
 
             return StreamingResponse(generate(), media_type="text/event-stream")
+
+        @api.get("/v1/agent/sessions/{session_id}/frames")
+        async def get_session_frames(session_id: str, user_id: str = "") -> dict:
+            """저장된 세션 프레임 반환 — 페이지 새로고침·재연결 복원용."""
+            from fastapi import HTTPException
+            owner = self._session_owner.get(session_id)
+            if owner is None:
+                raise HTTPException(status_code=404, detail="session not found")
+            if not user_id or owner != user_id:
+                raise HTTPException(status_code=403, detail="forbidden")
+            frames = self._session_frames.get(session_id, [])
+            return {"frames": frames}
 
         return api

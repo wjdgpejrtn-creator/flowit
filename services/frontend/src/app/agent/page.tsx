@@ -5,8 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import Steps from '@/components/common/Steps';
-import StatusPill from '@/components/common/StatusPill';
-import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/agentStore';
+import RunMode from '@/components/agent/RunMode';
+import { useAgentStore, WorkspaceMode, ChatMessage } from '@/stores/agentStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession } from '@/lib/api/agentApi';
 import { executeWorkflow } from '@/lib/api/workflowApi';
@@ -18,45 +18,9 @@ import RiskPill from '@/components/common/RiskPill';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
+import { STEP_ORDER, STEP_LABELS, nextMonotonicStep } from '@/lib/agentSteps';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
-
-const STEP_ORDER: AgentStep[] = [
-  'security', 'intent', 'retriever', 'drafter', 'validator', 'qa_eval', 'promote',
-];
-
-const TOOL_TO_STEP: Record<string, AgentStep> = {
-  // supervisor 노드
-  load_memory:       'security',
-  analyze_intent:    'intent',
-  // composer fixed DAG 노드
-  compress:          'security',
-  security:          'security',
-  intent:            'intent',
-  consultant:        'intent',
-  slot_fill:         'intent',
-  search_nodes:      'retriever',
-  draft_workflow:    'drafter',
-  retry_draft:       'drafter',
-  validate_workflow: 'validator',
-  qa_evaluator:      'qa_eval',
-  validation_failed: 'validator',
-  qa_failed:         'qa_eval',
-  promote:           'promote',
-  save_workflow:     'promote',
-  confirm_result:    'promote',
-  save_memory:       'promote',
-};
-
-const STEP_LABELS: Record<AgentStep, string> = {
-  security:  '보안 검토',
-  intent:    '의도 분류',
-  retriever: '노드 검색',
-  drafter:   '초안 생성',
-  validator: '그래프 검증',
-  qa_eval:   '품질 평가',
-  promote:   '워크플로우 확정',
-};
 
 const NODE_TYPES = { custom: CustomNode };
 
@@ -413,16 +377,6 @@ function FlowEditor() {
   );
 }
 
-// ─── ExecutionView (run mode — 향후 SSE 실행 상태와 wiring) ────────────────────
-
-function ExecutionView() {
-  return (
-    <div className="flex-1 flex items-center justify-center text-[13px] text-[var(--color-ink4)]">
-      실행 화면은 워크플로우를 먼저 생성한 뒤 ▶ 실행 버튼으로 진입할 수 있습니다.
-    </div>
-  );
-}
-
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 function AgentPageContent() {
@@ -505,7 +459,9 @@ function AgentPageContent() {
               break;
             case 'agent_node': {
               const toolName = frame.agent_node_name as string;
-              setCurrentStep(TOOL_TO_STEP[toolName] ?? toolName as AgentStep);
+              // SSE 콜백은 클로저라 구조분해된 currentStep이 stale될 수 있어 store에서 최신값을 읽는다.
+              const prev = useAgentStore.getState().currentStep;
+              setCurrentStep(nextMonotonicStep(prev, toolName));
               break;
             }
             case 'rationale_delta':
@@ -811,16 +767,8 @@ function AgentPageContent() {
 
           {/* ── Run Mode ────────────────────────────────────────── */}
           {mode === 'run' && (
-            <div className="flex-1 flex flex-col min-h-0">
-              {/* Run header */}
-              <div className="flex items-center gap-[10px] px-3 py-2 border-b-[1.5px] border-[var(--color-ink)] bg-[var(--color-surface)] flex-shrink-0">
-                <span className="font-bold text-[14px]">실행 ▶</span>
-                <StatusPill status="pending" />
-                <div className="flex-1" />
-                <Btn ghost disabled>⏸ 일시정지</Btn>
-                <Btn danger disabled>⏹ 취소</Btn>
-              </div>
-              <ExecutionView />
+            <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-3">
+              <RunMode />
             </div>
           )}
         </div>

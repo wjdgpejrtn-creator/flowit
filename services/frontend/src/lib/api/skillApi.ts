@@ -131,6 +131,44 @@ export async function selfPublishPersonalSkill(skillId: string): Promise<void> {
   }
 }
 
+// 승격 요청 — 하위 scope 스킬을 상위 scope로 복제(재심사 리셋) 후 REVIEW로 올린다.
+// personal → team, team → company. 백엔드가 promote→submit을 한 번에 수행(POST /{id}/promote)하므로
+// 결과 스킬은 관리자 리뷰 큐(GET /review-queue?scope=...)에 나타난다. 원본은 그대로 둔다.
+export async function promoteSkill(
+  skillId: string,
+  fromScope: 'personal' | 'team',
+): Promise<void> {
+  await apiJson(`/api/v1/skills/${skillId}/promote`, {
+    method: 'POST',
+    body: JSON.stringify({ from_scope: fromScope }),
+  });
+}
+
+// 관리자 리뷰 큐 항목 (백엔드 ReviewQueueItemResponse 대응) — personal/team/company 공통.
+// owner_user_id는 personal만(team/company 엔티티엔 없어 null).
+export interface ReviewQueueItem {
+  skill_id: string;
+  scope: SkillScope;
+  name: string;
+  description: string;
+  lifecycle_state: SkillLifecycleState;
+  owner_user_id: string | null;
+  tags: string[];
+  version: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// 관리자 리뷰 큐 — scope별 REVIEW 스킬 목록 (Admin only — 비-Admin은 403). 관리자 승인 페이지가 소비.
+export async function listReviewQueue(
+  scope: SkillScope = 'personal',
+  limit = 50,
+  offset = 0,
+): Promise<ReviewQueueItem[]> {
+  const params = new URLSearchParams({ scope, limit: String(limit), offset: String(offset) });
+  return apiJson<ReviewQueueItem[]>(`/api/v1/skills/review-queue?${params}`);
+}
+
 export async function listPersonalSkills(
   lifecycleState?: SkillLifecycleState,
   limit = 50,
@@ -274,4 +312,38 @@ export async function streamExtractSkill(
   } finally {
     reader.releaseLock();
   }
+}
+
+// ── 마켓플레이스 lifecycle — 백엔드 미구현 mock (프론트 명세 SSOT) ────────────────
+//
+// 아래 3개 전이는 현재 실 엔드포인트가 없어 프론트에서 mock으로 동작시킨다(상태 변화는
+// 호출측이 응답을 받아 로컬에 반영). 백엔드는 이 요청/응답 계약·상태전환 규칙을 그대로
+// 구현하면 되며, 구현되면 각 함수 본문을 주석의 apiJson 호출로 교체하면 된다.
+//
+//   archivePersonalSkill : POST /api/v1/skills/{id}/archive  — PUBLISHED → ARCHIVED (owner)
+//   restorePersonalSkill : POST /api/v1/skills/{id}/restore  — ARCHIVED  → PUBLISHED (owner)
+//   addSkillToWorkflow   : POST /api/v1/skills/{id}/adopt    — 게시 스킬을 내 워크플로우에 도입
+//
+// TODO(backend, skills_marketplace REQ-013): 위 3개 라우트 실구현 후 mock 제거.
+
+/** mock 성공 응답(네트워크 지연 흉내). 실 구현 시 apiJson 호출로 대체. */
+function mockLifecycleOk(skillId: string): Promise<void> {
+  if (!skillId) return Promise.reject(new Error('skillId가 필요합니다.'));
+  return new Promise((resolve) => setTimeout(resolve, 200));
+}
+
+/** PUBLISHED → ARCHIVED. TODO(backend): apiJson(`/api/v1/skills/${skillId}/archive`, { method:'POST' }) */
+export async function archivePersonalSkill(skillId: string): Promise<void> {
+  return mockLifecycleOk(skillId);
+}
+
+/** ARCHIVED → PUBLISHED. TODO(backend): apiJson(`/api/v1/skills/${skillId}/restore`, { method:'POST' }) */
+export async function restorePersonalSkill(skillId: string): Promise<void> {
+  return mockLifecycleOk(skillId);
+}
+
+/** 게시 스킬을 내 워크플로우에 도입. TODO(backend): apiJson(`/api/v1/skills/${skillId}/adopt`, { method:'POST', body: JSON.stringify({ scope }) }) */
+export async function addSkillToWorkflow(skillId: string, scope: MarketplaceScope): Promise<void> {
+  void scope;
+  return mockLifecycleOk(skillId);
 }

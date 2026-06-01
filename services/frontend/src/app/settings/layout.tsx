@@ -1,23 +1,12 @@
 import AppBar from '@/components/common/AppBar';
-import SideNav from '@/components/common/SideNav';
 
-const NAV_ITEMS = [
-  { label: '프로필', href: '/settings' },
-  { label: '통합', href: '/settings/integrations' },
-  { label: '알림', href: '/settings/notifications' },
-  { label: '보안', href: '/settings/security' },
-];
-
+// 설정은 단일 페이지(좌측 패널 내부 전환, 시안 SSOT)로 재설계됨.
+// 레이아웃은 공통 헤더(AppBar)만 제공하고, 화면 구성은 각 페이지가 담당한다.
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
+    <div className="min-h-screen flex flex-col">
       <AppBar />
-      <div className="flex-1 flex min-h-0">
-        <SideNav title="설정" items={NAV_ITEMS} />
-        <div className="flex-1 overflow-auto p-[14px]">
-          {children}
-        </div>
-      </div>
+      {children}
     </div>
   );
 }
