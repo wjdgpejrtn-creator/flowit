@@ -48,6 +48,7 @@ from common_schemas.transport import (
     WorkflowDraftFrame,
 )
 from common_schemas.workflow import NodeConfig, WorkflowSchema
+from common_schemas.workflow_explanation import WorkflowExplanation
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, StateGraph
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
@@ -68,6 +69,7 @@ from ...domain.services.drafter_service import DrafterService
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 from ...domain.services.qa_evaluator_service import QAEvaluatorService
 from ...domain.services.slot_filling_service import SlotFillingService
+from ...domain.services.workflow_explanation_service import WorkflowExplanationService
 from ...domain.services.workflow_layout_service import WorkflowLayoutService
 from ...domain.value_objects.turn_limit import TurnLimit
 
@@ -149,6 +151,8 @@ class _State(TypedDict):
     selected_skill_id: UUID | None          # 2차 라운드에서 사용자가 선택한 스킬 (LLM 노드 바인딩 대상)
     awaiting_skill_selection: bool          # suggest_skill_select가 옵션 emit + 중단했는지 (라우팅용)
     resume_ok: bool                         # 2차 resume에서 GCS 상태 복원 성공 여부 (라우팅용)
+    # 컨펌 게이트 신뢰 매니페스트 (영역 C)
+    workflow_explanation: WorkflowExplanation | None
     offered_skill_ids: list[str]            # 1차에 제시한 옵션 skill_id 집합 (2차 bind 멤버십 검증 — IDOR 차단)
 
 
@@ -177,6 +181,7 @@ class LangGraphOrchestrator:
         execution_engine_url: str | None = None,
         personal_memory_store: PersonalMemoryStore | None = None,
         composer_state_store: ComposerStateStore | None = None,
+        workflow_explanation_svc: WorkflowExplanationService | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -194,6 +199,7 @@ class LangGraphOrchestrator:
         self._execution_engine_url = execution_engine_url or os.getenv("EXECUTION_ENGINE_URL", "")
         self._personal_memory_store = personal_memory_store
         self._composer_state_store = composer_state_store
+        self._workflow_explanation_svc = workflow_explanation_svc or WorkflowExplanationService()
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -276,6 +282,7 @@ class LangGraphOrchestrator:
             "awaiting_skill_selection": False,
             "resume_ok": False,
             "offered_skill_ids": [],
+            "workflow_explanation": None,
         }
 
         try:
@@ -1296,9 +1303,34 @@ class LangGraphOrchestrator:
             ],
         }
 
+    # 14-b. explain_node — WorkflowExplanation 생성 (컨펌 게이트 신뢰 매니페스트)
+    async def _explain_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
+        workflow = state.get("workflow_draft")
+        spec = state.get("draft_spec")
+        if workflow is None or spec is None:
+            return {}
+        try:
+            explanation = self._workflow_explanation_svc.explain(
+                workflow=workflow,
+                spec=spec,
+                node_configs=state.get("node_candidates") or [],
+            )
+        except Exception as exc:
+            _logger.warning("explain_node 실패 (non-fatal): %s", exc)
+            return {}
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "workflow_explanation": explanation,
+            "collected_frames": [
+                PipelineStatusFrame(service_name="explain", status="completed", elapsed_ms=elapsed),
+            ],
+        }
+
     # 15. user_confirm_node — 최종 ResultFrame emit (fixed DAG: 항상 ready_to_execute)
     async def _user_confirm_node(self, state: _State) -> dict:
         workflow_id = state.get("saved_workflow_id")
+        explanation = state.get("workflow_explanation")
         return {
             "collected_frames": [
                 ResultFrame(
@@ -1308,6 +1340,7 @@ class LangGraphOrchestrator:
                         "status": "ready_to_execute",
                         "message": "워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.",
                         "session_id": str(state["session_id"]),
+                        "explanation": explanation.model_dump(mode="json") if explanation else None,
                     },
                 ),
                 ChatMessageFrame(
@@ -1423,6 +1456,7 @@ class LangGraphOrchestrator:
         graph.add_node("qa_failed", self._qa_failed_node)
         graph.add_node("promote", self._promote_node)
         graph.add_node("save_workflow", self._handoff_node)
+        graph.add_node("explain", self._explain_node)
         graph.add_node("confirm_result", self._user_confirm_node)
         graph.add_node("save_memory", self._memory_save_node)
 
@@ -1479,7 +1513,8 @@ class LangGraphOrchestrator:
         graph.add_edge("validation_failed", END)
         graph.add_edge("qa_failed", END)
         graph.add_edge("promote", "save_workflow")
-        graph.add_edge("save_workflow", "confirm_result")
+        graph.add_edge("save_workflow", "explain")
+        graph.add_edge("explain", "confirm_result")
         graph.add_edge("confirm_result", "save_memory")
         graph.add_edge("save_memory", END)
 
