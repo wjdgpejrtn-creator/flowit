@@ -8,7 +8,10 @@ from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
     CreateDraftSkillUseCase,
     DeletePersonalSkillUseCase,
+    GetMarketplaceSkillDocumentUseCase,
+    GetMarketplaceSkillUseCase,
     GetPersonalSkillUseCase,
+    ListMarketplaceSkillsUseCase,
     ListUserPersonalSkillsUseCase,
     PublishSkillUseCase,
     UpdatePersonalSkillUseCase,
@@ -63,6 +66,28 @@ def get_list_personal_skills_use_case(
     repo: SkillRepository = Depends(get_marketplace_skill_repository),
 ) -> ListUserPersonalSkillsUseCase:
     return ListUserPersonalSkillsUseCase(repo=repo)
+
+
+def get_list_marketplace_skills_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+) -> ListMarketplaceSkillsUseCase:
+    """마켓플레이스 Team/Company 탭 browse 목록 (검색어 없는 게시 스킬 나열)."""
+    return ListMarketplaceSkillsUseCase(repo=repo)
+
+
+def get_get_marketplace_skill_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+) -> GetMarketplaceSkillUseCase:
+    """마켓플레이스(team/company) 스킬 단건 조회 — browse 상세 페이지 (PUBLISHED만)."""
+    return GetMarketplaceSkillUseCase(repo=repo)
+
+
+def get_get_marketplace_skill_document_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+    doc_store: SkillDocumentStore = Depends(get_skill_document_store),
+) -> GetMarketplaceSkillDocumentUseCase:
+    """마켓플레이스 스킬 지침서(SKILL.md) 조회 — 상세 페이지 본문 (PUBLISHED만, GCS load)."""
+    return GetMarketplaceSkillDocumentUseCase(repo=repo, doc_store=doc_store)
 
 
 def get_get_personal_skill_use_case(

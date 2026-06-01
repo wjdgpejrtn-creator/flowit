@@ -16,7 +16,8 @@ class User(BaseModel):
     email: str
     name: str
     role: UserRole = "User"
-    department_id: UUID | None = None
+    department_id: UUID | None = None  # authz/소유권 FK (departments). team scope 매칭에 사용.
+    department: str | None = None  # 표시용 부서 라벨(users.department, 레거시 문자열). UI 배지 출력용.
     is_active: bool = True
     created_at: UtcDatetime
     updated_at: UtcDatetime
