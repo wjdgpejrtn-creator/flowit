@@ -260,6 +260,12 @@ class AgentComposer:
                                 next_action="continue",
                             )
                             yield f"data: {resp.model_dump_json()}\n\n"
+
+                        # 그래프 내 WorkflowRepository.save()(flush만 수행, unit-of-work) 등 쓰기를
+                        # 영속화 확정. AsyncSession은 commit 없이 `async with` 종료 시 rollback →
+                        # 워크플로우가 DB에 안 남아 편집(getWorkflow)·실행(execute)이 404.
+                        # (agent-skills-builder와 동일 패턴)
+                        await session.commit()
                 except Exception as exc:
                     err = AgentProtocolResponse(
                         frames=[],
@@ -308,6 +314,8 @@ class AgentComposer:
                         personalization_client=None,  # TODO: PersonalizationClient 주입
                     )
                     diff = await use_case.execute(session_id, user_id, workflow_id)
+                    # 승인 use-case가 워크플로우 상태를 갱신할 경우 영속화 확정 (commit 없으면 rollback).
+                    await session.commit()
             finally:
                 await engine.dispose()
                 await connector.close_async()
