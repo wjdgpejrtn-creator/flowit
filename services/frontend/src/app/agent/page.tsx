@@ -6,7 +6,7 @@ import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import Steps from '@/components/common/Steps';
 import StatusPill from '@/components/common/StatusPill';
-import { useAgentStore, WorkspaceMode, AgentStep, ChatMessage } from '@/stores/agentStore';
+import { useAgentStore, WorkspaceMode, ChatMessage } from '@/stores/agentStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession } from '@/lib/api/agentApi';
 import { executeWorkflow } from '@/lib/api/workflowApi';
@@ -18,45 +18,9 @@ import RiskPill from '@/components/common/RiskPill';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
+import { STEP_ORDER, STEP_LABELS, nextMonotonicStep } from '@/lib/agentSteps';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
-
-const STEP_ORDER: AgentStep[] = [
-  'security', 'intent', 'retriever', 'drafter', 'validator', 'qa_eval', 'promote',
-];
-
-const TOOL_TO_STEP: Record<string, AgentStep> = {
-  // supervisor 노드
-  load_memory:       'security',
-  analyze_intent:    'intent',
-  // composer fixed DAG 노드
-  compress:          'security',
-  security:          'security',
-  intent:            'intent',
-  consultant:        'intent',
-  slot_fill:         'intent',
-  search_nodes:      'retriever',
-  draft_workflow:    'drafter',
-  retry_draft:       'drafter',
-  validate_workflow: 'validator',
-  qa_evaluator:      'qa_eval',
-  validation_failed: 'validator',
-  qa_failed:         'qa_eval',
-  promote:           'promote',
-  save_workflow:     'promote',
-  confirm_result:    'promote',
-  save_memory:       'promote',
-};
-
-const STEP_LABELS: Record<AgentStep, string> = {
-  security:  '보안 검토',
-  intent:    '의도 분류',
-  retriever: '노드 검색',
-  drafter:   '초안 생성',
-  validator: '그래프 검증',
-  qa_eval:   '품질 평가',
-  promote:   '워크플로우 확정',
-};
 
 const NODE_TYPES = { custom: CustomNode };
 
@@ -505,7 +469,9 @@ function AgentPageContent() {
               break;
             case 'agent_node': {
               const toolName = frame.agent_node_name as string;
-              setCurrentStep(TOOL_TO_STEP[toolName] ?? toolName as AgentStep);
+              // SSE 콜백은 클로저라 구조분해된 currentStep이 stale될 수 있어 store에서 최신값을 읽는다.
+              const prev = useAgentStore.getState().currentStep;
+              setCurrentStep(nextMonotonicStep(prev, toolName));
               break;
             }
             case 'rationale_delta':
