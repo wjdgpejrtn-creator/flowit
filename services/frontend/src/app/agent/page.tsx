@@ -504,6 +504,27 @@ function AgentPageContent() {
     return () => { abortRef.current?.abort(); };
   }, []);
 
+  // 테스트 1: 페이지 진입 시 이전 세션 정리.
+  // Zustand 싱글턴은 페이지 이동 후 재진입해도 상태가 남아있으므로
+  // 대시보드 → AI 채팅 재진입 시 빈 대화창으로 시작하도록 초기화.
+  // 단, readyToExecute가 있으면 워크플로우 완성 후 이탈→복귀 흐름이므로 초기화 건너뜀.
+  useEffect(() => {
+    const state = useAgentStore.getState();
+    if (state.readyToExecute) return;
+    const { sessionId: sid, messages: msgs } = state;
+    if (msgs.length > 0) {
+      const title = msgs.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
+      state.addSession({ id: sid || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...msgs] });
+    }
+    state.clearMessages();
+    state.clearRationale();
+    state.setSessionId('');
+    state.setCurrentStep(null);
+    state.setSlotQuestion(null);
+    state.setViewingSession(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 노드 카탈로그 1회 로드 (편집 캔버스 노드 라벨/리스크 표시용).
   useEffect(() => {
     let cancelled = false;
@@ -627,6 +648,28 @@ function AgentPageContent() {
     const text = (overrideText ?? input).trim();
     if (!text || streaming) return;
 
+    // Bug 6/7: setSessionId('')는 다음 렌더에 반영될 뿐, 현재 클로저의 sessionId는 그대로다.
+    // store에서 최신값을 직접 읽어 로컬 변수로 페이로드를 결정한다.
+    // — Bug 6: autosend 경로에서 handleNewChat() 직후 호출 시 store는 이미 ''로 갱신됨
+    // — Bug 7: readyToExecute 상태에서 sid를 ''로 덮어쓰고 store도 동기 갱신
+    let sid = useAgentStore.getState().sessionId;
+    if (readyToExecute) {
+      // 테스트 2: ConfirmCard 표시 중 새 메시지 → 이전 대화를 히스토리에 저장하고 완전히 초기화
+      const { messages: prevMsgs } = useAgentStore.getState();
+      if (prevMsgs.length > 0) {
+        const title = prevMsgs.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
+        useAgentStore.getState().addSession({ id: sid || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...prevMsgs] });
+      }
+      clearMessages();
+      clearRationale();
+      setSessionId('');
+      setReadyToExecute(null);
+      setLoadedWorkflow(null);
+      setCurrentStep(null);
+      setSkillSelection(null);
+      sid = '';
+    }
+
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -640,7 +683,7 @@ function AgentPageContent() {
 
     try {
       await streamCreateSession(
-        { message: text, session_id: sessionId ?? undefined },
+        { message: text, session_id: sid || undefined },
         handleFrame,
         controller.signal,
       );
@@ -691,21 +734,24 @@ function AgentPageContent() {
     const q = searchParams.get('q');
     const autosend = searchParams.get('autosend');
     if (q && autosend === '1' && !autoSentRef.current && !streaming) {
-      autoSentRef.current = true;
+      // Bug 6: 대시보드에서 새 워크플로우 요청으로 진입 시 이전 세션 상태를 초기화.
+      // 초기화 없이 전송하면 기존 메시지·캔버스가 새 대화에 겹쳐 표시된다.
+      handleNewChat();
+      autoSentRef.current = true; // handleNewChat이 false로 리셋하므로 재설정
       setInput(q);
       void handleSend(q);
       router.replace('/agent', { scroll: false });
     }
-    // handleSend는 매 렌더 새로 만들어지므로 의도적으로 dep에서 제외
+    // handleSend/handleNewChat는 매 렌더 새로 만들어지므로 의도적으로 dep에서 제외
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   const stepIndex = currentStep ? STEP_ORDER.indexOf(currentStep) + 1 : 0;
   const handleNewChat = () => {
-    // 현재 세션이 있으면 히스토리에 저장 후 초기화
-    if (sessionId && messages.length > 0) {
+    // 테스트 3: sessionId가 비어있어도 메시지가 있으면 히스토리에 저장
+    if (messages.length > 0) {
       const title = messages.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
-      addSession({ id: sessionId, title, createdAt: Date.now(), messages: [...messages] });
+      addSession({ id: sessionId || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...messages] });
     }
     abortRef.current?.abort();
     clearMessages();
