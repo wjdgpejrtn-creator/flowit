@@ -83,6 +83,8 @@ class PgMarketplaceSkillRepository(SkillRepository):
         limit: int = 10,
         include_promoted: bool = False,
         lifecycle_state: SkillState | None = None,
+        owner_user_id: UUID | None = None,
+        max_distance: float | None = None,
     ) -> list[MarketplacePersonalSkill | MarketplaceTeamSkill | MarketplaceCompanySkill]:
         # scope별 테이블 + 승격 마킹 컬럼 결정. company는 최상위라 promoted_to_* 없음.
         if scope == SkillScope.PERSONAL:
@@ -96,13 +98,25 @@ class PgMarketplaceSkillRepository(SkillRepository):
         else:
             model, mapper, promoted_col = CompanySkillModel, CompanySkillMapper, None
 
+        # PERSONAL 인가: owner 필터 없이 검색하면 타 사용자 개인 스킬이 노출된다(IDOR).
+        # owner 미지정이면 빈 결과로 전체 노출을 원천 차단(Port 계약).
+        if scope == SkillScope.PERSONAL and owner_user_id is None:
+            return []
+
+        distance = model.embedding.cosine_distance(query_embedding)
         stmt = select(model).where(model.embedding.isnot(None))
+        if scope == SkillScope.PERSONAL:
+            stmt = stmt.where(model.owner_user_id == owner_user_id)
         if lifecycle_state is not None:
             stmt = stmt.where(model.lifecycle_state == lifecycle_state.value)
         # include_promoted=False: 상위 scope로 승격된 원본 제외 (승격=복제, 중복 노출 방지)
         if not include_promoted and promoted_col is not None:
             stmt = stmt.where(promoted_col.is_(None))
-        stmt = stmt.order_by(model.embedding.cosine_distance(query_embedding)).limit(limit)
+        # 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 임계 이내만. 무관 스킬이 top-k에 동반
+        # 노출되는 것을 차단(Composer가 SKILL_SEARCH_MAX_DISTANCE로 주입).
+        if max_distance is not None:
+            stmt = stmt.where(distance <= max_distance)
+        stmt = stmt.order_by(distance).limit(limit)
 
         result = await self._session.execute(stmt)
         return [mapper.to_domain(row) for row in result.scalars().all()]

@@ -1,16 +1,45 @@
+from uuid import uuid4
+
 import pytest
 
 from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
+from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 from skills_marketplace.domain.value_objects.skill_state import SkillState
 
 
 class _Repo:
-    def __init__(self):
-        self.captured = {}
+    """search 호출을 스코프별로 기록하고 미리 설정한 결과를 돌려주는 가짜 repo."""
 
-    async def search(self, query_embedding, scope, limit=10, include_promoted=False, lifecycle_state=None):
-        self.captured = dict(scope=scope, limit=limit, lifecycle_state=lifecycle_state)
-        return []
+    def __init__(self, results: dict | None = None):
+        self.captured: dict = {}
+        self.calls: list[dict] = []
+        self._results = results or {}
+
+    async def search(
+        self,
+        query_embedding,
+        scope,
+        limit=10,
+        include_promoted=False,
+        lifecycle_state=None,
+        owner_user_id=None,
+        max_distance=None,
+    ):
+        call = dict(
+            scope=scope,
+            limit=limit,
+            lifecycle_state=lifecycle_state,
+            owner_user_id=owner_user_id,
+            max_distance=max_distance,
+        )
+        self.captured = call
+        self.calls.append(call)
+        return list(self._results.get(scope, []))
+
+
+class _Skill:
+    def __init__(self, skill_id):
+        self.skill_id = skill_id
 
 
 @pytest.mark.asyncio
@@ -29,3 +58,62 @@ async def test_search_lifecycle_override_none_returns_all():
     uc = SearchSkillsUseCase(repo)
     await uc.execute([0.1] * 768, lifecycle_state=None)
     assert repo.captured["lifecycle_state"] is None
+
+
+@pytest.mark.asyncio
+async def test_execute_forwards_owner_and_max_distance():
+    repo = _Repo()
+    uc = SearchSkillsUseCase(repo)
+    uid = uuid4()
+    await uc.execute([0.1] * 768, scope=SkillScope.PERSONAL, owner_user_id=uid, max_distance=0.3)
+    assert repo.captured["owner_user_id"] == uid
+    assert repo.captured["max_distance"] == 0.3
+
+
+@pytest.mark.asyncio
+async def test_execute_accessible_searches_personal_owned_and_company():
+    repo = _Repo()
+    uc = SearchSkillsUseCase(repo)
+    uid = uuid4()
+    await uc.execute_accessible([0.1] * 768, user_id=uid, max_distance=0.3)
+
+    scopes = {c["scope"]: c for c in repo.calls}
+    assert SkillScope.PERSONAL in scopes and SkillScope.COMPANY in scopes
+    # personal은 소유자 인가 필터가 반드시 걸려야 한다 (IDOR 차단)
+    assert scopes[SkillScope.PERSONAL]["owner_user_id"] == uid
+    # company는 전사 범위라 owner 필터 없음
+    assert scopes[SkillScope.COMPANY]["owner_user_id"] is None
+    # 관련성 컷이 두 스코프 모두에 전달
+    assert scopes[SkillScope.PERSONAL]["max_distance"] == 0.3
+    assert scopes[SkillScope.COMPANY]["max_distance"] == 0.3
+
+
+@pytest.mark.asyncio
+async def test_execute_accessible_merges_roundrobin_and_dedups():
+    dup = uuid4()
+    p1, c1 = _Skill(uuid4()), _Skill(uuid4())
+    shared_p, shared_c = _Skill(dup), _Skill(dup)  # 동일 skill_id → 1개만
+    repo = _Repo(results={
+        SkillScope.PERSONAL: [p1, shared_p],
+        SkillScope.COMPANY: [c1, shared_c],
+    })
+    uc = SearchSkillsUseCase(repo)
+    merged = await uc.execute_accessible([0.1] * 768, user_id=uuid4(), limit=5)
+
+    ids = [s.skill_id for s in merged]
+    # 라운드로빈: personal 먼저, 그다음 company
+    assert ids[0] == p1.skill_id
+    assert ids[1] == c1.skill_id
+    # 중복 skill_id는 1회만
+    assert ids.count(dup) == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_accessible_respects_limit():
+    repo = _Repo(results={
+        SkillScope.PERSONAL: [_Skill(uuid4()) for _ in range(5)],
+        SkillScope.COMPANY: [_Skill(uuid4()) for _ in range(5)],
+    })
+    uc = SearchSkillsUseCase(repo)
+    merged = await uc.execute_accessible([0.1] * 768, user_id=uuid4(), limit=3)
+    assert len(merged) == 3

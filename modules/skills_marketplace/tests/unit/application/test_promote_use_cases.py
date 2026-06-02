@@ -41,7 +41,8 @@ class _InMemorySkillRepo:
     async def get_company(self, skill_id):
         return self.company.get(skill_id)
 
-    async def search(self, query_embedding, scope, limit=10, include_promoted=False, lifecycle_state=None):
+    async def search(self, query_embedding, scope, limit=10, include_promoted=False,
+                     lifecycle_state=None, owner_user_id=None, max_distance=None):
         store = {
             SkillScope.PERSONAL: self.personal,
             SkillScope.TEAM: self.team,

@@ -114,7 +114,7 @@ def _build_composer(store, ai_node_id, skill_id):
     skill.description = "문서 요약 도메인 지침서"
     skill.node_definition_id = None
     skill_search = AsyncMock()
-    skill_search.execute = AsyncMock(return_value=[skill])
+    skill_search.execute_accessible = AsyncMock(return_value=[skill])
 
     # drafter → ai 노드를 포함한 워크플로우 (bind 대상)
     drafted = WorkflowSchema(
