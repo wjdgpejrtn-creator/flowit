@@ -1,27 +1,13 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
 import Skel from '@/components/common/Skel';
 import Icon from '@/components/common/Icon';
 import { listWorkflows } from '@/lib/api/workflowApi';
 import { useAuthStore } from '@/stores/authStore';
 import type { WorkflowSchema } from '@common/generated';
-
-const ALL_TABS = [
-  { label: 'My', key: 'my' },
-  { label: 'Team', key: 'team' },
-  { label: 'Public', key: 'public' },
-] as const;
-
-type TabKey = (typeof ALL_TABS)[number]['key'];
-
-function visibleTabs(role: string): (typeof ALL_TABS)[number][] {
-  if (role === 'company_manager' || role === 'Admin') return [...ALL_TABS];
-  if (role === 'team_manager') return ALL_TABS.slice(0, 2);
-  return ALL_TABS.slice(0, 1);
-}
 
 function toErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : '';
@@ -57,10 +43,8 @@ function StatusChip({ isDraft }: { isDraft?: boolean }) {
 
 function WorkflowListContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const { role } = useAuthStore();
-  const tabs = visibleTabs(role);
-  const activeTab = (searchParams.get('tab') as TabKey) ?? 'my';
+  const { userName } = useAuthStore();
+  const displayName = userName || 'gawon.data';
 
   const [workflows, setWorkflows] = useState<WorkflowSchema[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,11 +61,11 @@ function WorkflowListContent() {
       .finally(() => setLoading(false));
   }, [fetchKey]);
 
+  // 시안: 단일 목록 + 검색창 필터만 (Scope 는 행 데이터). 권한별 분리 탭 없음.
   const filtered = useMemo(() => {
-    const byScope = activeTab === 'my' ? workflows : workflows.filter((w) => w.scope === activeTab);
     const q = query.trim().toLowerCase();
-    return q ? byScope.filter((w) => w.name.toLowerCase().includes(q)) : byScope;
-  }, [workflows, activeTab, query]);
+    return q ? workflows.filter((w) => w.name.toLowerCase().includes(q)) : workflows;
+  }, [workflows, query]);
 
   return (
     <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 md:p-6 space-y-4">
@@ -89,27 +73,13 @@ function WorkflowListContent() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center space-x-3">
           <span className="px-3 py-1.5 rounded-xl bg-accent text-white text-xs font-bold">
-            워크플로우
+            {displayName}님의 Workflows
           </span>
           <p className="text-xs text-ink3 font-bold">
             내 워크플로우를 체계적으로 관리하고 자동화를 구성합니다.
           </p>
         </div>
         <div className="flex items-center space-x-2">
-          {tabs.length > 1 &&
-            tabs.map(({ label, key }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => router.replace(`/workflows?tab=${key}`)}
-                className={[
-                  'px-3 py-1.5 rounded-lg text-xs font-bold transition-all',
-                  key === activeTab ? 'bg-accent text-white shadow-sm' : 'text-ink3 hover:text-ink hover:bg-paper2/50',
-                ].join(' ')}
-              >
-                {label}
-              </button>
-            ))}
           <div className="relative">
             <input
               type="text"
@@ -169,10 +139,16 @@ function WorkflowListContent() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="px-4 py-10 text-center">
-            <p className="text-xs font-bold text-ink3">워크플로우가 없습니다.</p>
-            <p className="text-xs text-ink3 font-bold mt-1">
-              상단의 &apos;AI에게 요청&apos;으로 새로운 자동화 흐름을 만들 수 있어요.
-            </p>
+            {query ? (
+              <p className="text-xs font-bold text-ink3">검색 결과가 없습니다.</p>
+            ) : (
+              <>
+                <p className="text-xs font-bold text-ink3">워크플로우가 없습니다.</p>
+                <p className="text-xs text-ink3 font-bold mt-1">
+                  상단의 &apos;AI에게 요청&apos;으로 새로운 자동화 흐름을 만들 수 있어요.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="divide-y divide-line-soft">

@@ -43,9 +43,18 @@ describe('nextMonotonicStep — 단계 단조 증가 가드 (#297 역행 방지)
     expect(step).toBe('drafter');
   });
 
-  it('STEP_ORDER 밖 미매핑 노드는 가드 없이 그대로 반영', () => {
-    // TOOL_TO_STEP에 없는 노드명 → STEP_ORDER에 없으므로 mi<0, 그대로 통과
+  it('STEP_ORDER 밖 미매핑 노드는 현재 단계를 유지한다 (역행/리셋 방지)', () => {
+    // 미매핑 노드를 그대로 반영하면 page.tsx의 indexOf+1=0 → 보안 검토로 리셋되는 버그.
     expect(TOOL_TO_STEP['unknown_node']).toBeUndefined();
-    expect(nextMonotonicStep('retriever', 'unknown_node')).toBe('unknown_node');
+    expect(nextMonotonicStep('retriever', 'unknown_node')).toBe('retriever');
+  });
+
+  it('suggest_skill_select는 노드 검색(retriever) 단계로 매핑 — 보안 검토 역행 버그 회귀 방지', () => {
+    // 실제 함정: 노드 검색 후 suggest_skill_select 프레임이 미매핑이라 스테퍼가 보안 검토로
+    // 역행하고 멈췄다(ground truth: ...search_nodes → suggest_skill_select → skill_selection).
+    expect(TOOL_TO_STEP['suggest_skill_select']).toBe('retriever');
+    expect(nextMonotonicStep('retriever', 'suggest_skill_select')).toBe('retriever');
+    // page.tsx의 stepIndex 계산이 0으로 떨어지지 않음을 보장
+    expect(STEP_ORDER.indexOf(nextMonotonicStep('retriever', 'suggest_skill_select')) + 1).toBe(3);
   });
 });
