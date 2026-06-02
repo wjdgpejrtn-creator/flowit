@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import Icon from '@/components/common/Icon';
 
 interface SideNavItem {
   label: string;
@@ -13,23 +14,22 @@ interface SideNavItem {
 
 interface SideNavProps {
   title: string;
+  /** kebab-case lucide 아이콘 이름 (예: "crown") — 타이틀 좌측에 accent 색으로 표시 */
+  icon?: string;
   items: SideNavItem[];
   activeHref?: string;
 }
 
-export default function SideNav({ title, items, activeHref }: SideNavProps) {
+export default function SideNav({ title, icon, items, activeHref }: SideNavProps) {
   const pathname = usePathname();
   return (
-    <aside
-      className="border-r-[1.5px] border-[var(--color-ink)] bg-[var(--color-surface)] p-3 flex-shrink-0"
-      style={{ width: 180 }}
-    >
-      <div className="font-bold text-[13px]">{title}</div>
-      <div
-        className="my-2"
-        style={{ height: '1.5px', background: 'var(--color-ink3)' }}
-      />
-      <nav className="flex flex-col gap-2 text-[13px]">
+    <aside className="flex-shrink-0 p-4" style={{ width: 220 }}>
+      <div className="flex items-center gap-2 px-2 mb-3">
+        {icon && <Icon name={icon} className="w-4 h-4 text-[var(--color-accent)]" />}
+        <span className="font-bold text-[13px] text-[var(--color-ink)]">{title}</span>
+      </div>
+
+      <nav className="bg-[var(--color-paper2)]/40 rounded-2xl p-3 space-y-1">
         {items.map((item, i) => {
           const isActive = activeHref
             ? item.href === activeHref
@@ -41,10 +41,12 @@ export default function SideNav({ title, items, activeHref }: SideNavProps) {
               {item.badge !== undefined && (
                 <span
                   className={[
-                    'inline-flex items-center px-[5px] py-0 rounded text-[10px] font-bold border-[1.5px]',
+                    'inline-flex items-center rounded px-1.5 text-[10px] font-bold leading-tight',
                     item.badgeVariant === 'live'
-                      ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
-                      : 'border-[var(--color-ink)] bg-[var(--color-ink)] text-[var(--color-paper)]',
+                      ? 'border border-[var(--color-accent-coral)] text-[var(--color-accent-coral)]'
+                      : isActive
+                        ? 'bg-white/25 text-white'
+                        : 'bg-[var(--color-accent)] text-white',
                   ].join(' ')}
                 >
                   {item.badge}
@@ -54,22 +56,22 @@ export default function SideNav({ title, items, activeHref }: SideNavProps) {
           );
 
           const baseClass = [
-            'flex items-center px-2 py-[4px] rounded border-[1.5px] cursor-pointer',
+            'block w-full text-left px-4 py-2.5 rounded-xl text-xs font-bold transition-colors',
             isActive
-              ? 'bg-[var(--color-hl)] border-[var(--color-ink)] font-bold'
-              : 'bg-[var(--color-surface)] border-[var(--color-ink)] hover:bg-[var(--color-paper2)]',
+              ? 'bg-[var(--color-accent)] text-white shadow-sm'
+              : 'text-[var(--color-ink3)] hover:text-[var(--color-ink)] hover:bg-white',
           ].join(' ');
 
           if (item.href) {
             return (
-              <Link key={i} href={item.href} className={`${baseClass} no-underline text-[var(--color-ink)]`}>
+              <Link key={i} href={item.href} className={`${baseClass} no-underline`}>
                 {inner}
               </Link>
             );
           }
 
           return (
-            <button key={i} className={`${baseClass} text-left`} onClick={item.onClick}>
+            <button key={i} type="button" className={baseClass} onClick={item.onClick}>
               {inner}
             </button>
           );
