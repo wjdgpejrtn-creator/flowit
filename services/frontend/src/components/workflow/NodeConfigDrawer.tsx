@@ -126,7 +126,7 @@ export default function NodeConfigDrawer({
     return (
       <div
         data-testid="node-config-drawer"
-        className="border-l-[1.5px] border-[var(--color-ink)] p-3 flex-shrink-0 overflow-auto"
+        className="border-l border-[var(--color-line-soft)] p-3 flex-shrink-0 overflow-auto"
         style={{ width: 320, background: 'var(--color-surface)' }}
       >
         <div className="text-[12px] text-[var(--color-ink4)] italic">
@@ -140,7 +140,7 @@ export default function NodeConfigDrawer({
     return (
       <div
         data-testid="node-config-drawer"
-        className="border-l-[1.5px] border-[var(--color-ink)] p-3 flex-shrink-0 overflow-auto"
+        className="border-l border-[var(--color-line-soft)] p-3 flex-shrink-0 overflow-auto"
         style={{ width: 320, background: 'var(--color-surface)' }}
       >
         <div className="text-[12px] text-[var(--color-status-failed)]">
@@ -173,7 +173,7 @@ export default function NodeConfigDrawer({
   return (
     <div
       data-testid="node-config-drawer"
-      className="border-l-[1.5px] border-[var(--color-ink)] flex-shrink-0 overflow-auto flex flex-col"
+      className="border-l border-[var(--color-line-soft)] flex-shrink-0 overflow-auto flex flex-col"
       style={{ width: 320, background: 'var(--color-surface)' }}
     >
       <div className="p-3 border-b-[1.5px] border-[var(--color-line-soft)]">
@@ -235,7 +235,7 @@ export default function NodeConfigDrawer({
                 <select
                   value={value}
                   onChange={(e) => updateField(f.name, e.target.value, f.type)}
-                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                  className="text-[12px] px-2 py-1 border border-[var(--color-line-soft)] rounded-lg bg-white focus:outline-none focus:border-[var(--color-accent-coral)]"
                 >
                   <option value="">(선택)</option>
                   {f.enumOptions.map((opt) => (
@@ -248,7 +248,7 @@ export default function NodeConfigDrawer({
                 <select
                   value={value === '' ? '' : value}
                   onChange={(e) => updateField(f.name, e.target.value, f.type)}
-                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                  className="text-[12px] px-2 py-1 border border-[var(--color-line-soft)] rounded-lg bg-white focus:outline-none focus:border-[var(--color-accent-coral)]"
                 >
                   <option value="">(미지정)</option>
                   <option value="true">true</option>
@@ -258,7 +258,7 @@ export default function NodeConfigDrawer({
                 <textarea
                   value={value}
                   onChange={(e) => updateField(f.name, e.target.value, f.type)}
-                  className="text-[11px] font-mono px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                  className="text-[11px] font-mono px-2 py-1 border border-[var(--color-line-soft)] rounded-lg bg-white focus:outline-none focus:border-[var(--color-accent-coral)]"
                   rows={4}
                   spellCheck={false}
                   placeholder={f.type === 'array' ? '[]' : '{}'}
@@ -268,7 +268,7 @@ export default function NodeConfigDrawer({
                   type={f.type === 'number' || f.type === 'integer' ? 'number' : 'text'}
                   value={value}
                   onChange={(e) => updateField(f.name, e.target.value, f.type)}
-                  className="text-[12px] px-2 py-1 border-[1.5px] border-[var(--color-ink)] rounded bg-[var(--color-paper)]"
+                  className="text-[12px] px-2 py-1 border border-[var(--color-line-soft)] rounded-lg bg-white focus:outline-none focus:border-[var(--color-accent-coral)]"
                   placeholder={f.default !== undefined ? `기본 ${stringify(f.default, f.type)}` : ''}
                 />
               )}
@@ -280,7 +280,7 @@ export default function NodeConfigDrawer({
         })}
         {missingRequired.length > 0 && (
           <div
-            className="text-[11px] text-[var(--color-status-failed)] border-[1.5px] border-[var(--color-status-failed)] rounded p-2 mt-2"
+            className="text-[11px] text-[var(--color-status-failed)] border border-[var(--color-status-failed)] rounded-lg p-2 mt-2"
             role="alert"
           >
             ⚠ 필수 입력 누락: {missingRequired.map((f) => f.name).join(', ')}
