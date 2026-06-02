@@ -5,13 +5,14 @@ import logging
 from uuid import uuid4
 
 import httpx
+from common_schemas import PermissionSource
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.dependencies.clients import get_orchestrator_http
 from app.dependencies.permission import get_permission_source
-from common_schemas import PermissionSource
+from app.sse_proxy import SSE_HEADERS, unwrap_agent_sse
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,9 @@ ai_sessions_router = APIRouter(prefix="/api/v1/ai/sessions", tags=["agents"])
 # AgentProtocolResponse(frames, state_delta, next_action)는 common_schemas.agent_protocol에 정의.
 # 여기서는 raw dict으로 다루는 프록시라 import 없이 envelope.get("frames") 로만 접근.
 _PROXY_TIMEOUT = 290.0  # Cloud Run 기본 request timeout 300s 이내로 보수적으로 설정
+
+# SSE 표준 헤더(SSE_HEADERS) + 봉투 언래핑(unwrap_agent_sse)은 app.sse_proxy에 단일 정의 —
+# skills 추출 라우터와 공유 (Google LB gzip 차단 헤더 SSOT).
 
 
 class SessionRequest(BaseModel):
@@ -36,12 +40,24 @@ def _orchestrator_or_503(client: httpx.AsyncClient | None) -> httpx.AsyncClient:
     return client
 
 
-def _build_agent_payload(session_id: str, user_id: str, message: str) -> dict:
+def _build_agent_payload(
+    session_id: str,
+    user_id: str,
+    message: str,
+    round: int = 1,
+    selected_skill_id: str | None = None,
+    field_name: str | None = None,
+) -> dict:
+    payload: dict = {"message": message, "round": round}
+    if selected_skill_id:
+        payload["selected_skill_id"] = selected_skill_id
+    if field_name:
+        payload["field_name"] = field_name
     return {
         "session_id": session_id,
         "user_id": user_id,
         "personal_memory": [],
-        "payload": {"message": message},
+        "payload": payload,
         "state": {
             "session_id": session_id,
             "user_id": user_id,
@@ -52,16 +68,6 @@ def _build_agent_payload(session_id: str, user_id: str, message: str) -> dict:
             "node_candidates": [],
         },
     }
-
-
-def _unwrap_sse(raw: str):
-    """AgentProtocolResponse(common_schemas.agent_protocol) 봉투에서 frame을 꺼내 SSE 라인으로 변환."""
-    try:
-        envelope = json.loads(raw)
-    except json.JSONDecodeError:
-        return
-    for frame in envelope.get("frames", []):
-        yield f"data: {json.dumps(frame, ensure_ascii=False)}\n\n"
 
 
 @agents_router.post("/sessions")
@@ -87,24 +93,54 @@ async def create_session(
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
                         continue
-                    for frame_line in _unwrap_sse(line[6:]):
+                    for frame_line in unwrap_agent_sse(line[6:]):
                         yield frame_line
         except Exception as exc:
             logger.error("agent-composer 스트리밍 실패: %s", exc)
             err = {"frame_type": "error", "code": "E_PROXY", "message": str(exc)}
             yield f"data: {json.dumps(err)}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
-@agents_router.post("/sessions/{session_id}/slot", status_code=204)
+@agents_router.post("/sessions/{session_id}/slot")
 async def send_slot_answer(
     session_id: str,
     body: dict = Body(...),
     permission: PermissionSource = Depends(get_permission_source),
-) -> None:
-    """슬롯 필링 답변 수신 — TODO: agent-composer 슬롯 API 연동 후속 PR에서 처리."""
-    logger.info("slot answer received for session %s: %s", session_id, body)
+    client: httpx.AsyncClient | None = Depends(get_orchestrator_http),
+) -> StreamingResponse:
+    """스킬 선택(two-shot 2차) 답변을 받아 orchestrator로 round=2 스트림을 트리거한다 (REQ-013).
+
+    1차 `SkillSelectionFrame`을 받은 프론트가 옵션 선택 후 `{skill_id, field_name}`로 호출.
+    동일 session_id로 GCS 영속 상태를 복원해 draft→bind_skill→…을 이어 SSE로 프록시한다.
+    `skill_id` 미지정(건너뛰기)이면 selected_skill_id=None으로 진행(바인딩 no-op).
+    """
+    orchestrator = _orchestrator_or_503(client)
+    user_id = str(permission.user_id)
+    selected_skill_id = body.get("skill_id") or body.get("selected_skill_id")
+    field_name = body.get("field_name", "skill_selection")
+    payload = _build_agent_payload(
+        session_id, user_id, message="",
+        round=2, selected_skill_id=selected_skill_id, field_name=field_name,
+    )
+
+    async def generate():
+        try:
+            async with orchestrator.stream(
+                "POST", "/v1/agent/route", json=payload, timeout=_PROXY_TIMEOUT
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    for frame_line in unwrap_agent_sse(line[6:]):
+                        yield frame_line
+        except Exception as exc:
+            logger.error("slot 답변 스트리밍 실패: %s", exc)
+            err = {"frame_type": "error", "code": "E_PROXY", "message": str(exc)}
+            yield f"data: {json.dumps(err)}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @ai_sessions_router.get("/{session_id}/stream")
@@ -134,4 +170,4 @@ async def stream_session_frames(
             err = {"frame_type": "error", "code": "E_FRAMES", "message": str(exc)}
             yield f"data: {json.dumps(err)}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)

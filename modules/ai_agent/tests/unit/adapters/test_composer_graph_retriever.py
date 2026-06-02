@@ -123,7 +123,7 @@ class TestRetrieverNodeSkillSearch:
         embedder.embed = AsyncMock(return_value=[0.1] * 768)
 
         skill_search = AsyncMock()
-        skill_search.execute = AsyncMock(return_value=[self._make_skill(skill_node_id)])
+        skill_search.execute_accessible = AsyncMock(return_value=[self._make_skill(skill_node_id)])
 
         node_registry = AsyncMock(spec=NodeRegistry)
         node_registry.search = AsyncMock(return_value=[_node_config(name="slack_trigger")])
@@ -159,7 +159,7 @@ class TestRetrieverNodeSkillSearch:
         embedder.embed = AsyncMock(return_value=[0.1] * 768)
 
         skill_search = AsyncMock()
-        skill_search.execute = AsyncMock(return_value=[self._make_skill(shared_id)])
+        skill_search.execute_accessible = AsyncMock(return_value=[self._make_skill(shared_id)])
 
         node_registry = AsyncMock(spec=NodeRegistry)
         node_registry.search = AsyncMock(return_value=[base_node])
@@ -203,5 +203,5 @@ class TestRetrieverNodeSkillSearch:
         skill_search = AsyncMock()
         oc = _build_orchestrator(embedder=None, skill_search=skill_search)
         result = await oc._retriever_node(_make_state())
-        skill_search.execute.assert_not_called()
+        skill_search.execute_accessible.assert_not_called()
         assert len(result["node_candidates"]) == 1

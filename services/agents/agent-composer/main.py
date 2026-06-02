@@ -17,8 +17,18 @@ Secrets:
 import os
 
 import modal
-from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+
+# fastapi는 modal.Image 안에만 install됨. GitHub Actions runner의 `modal deploy`
+# CLI가 본 module을 import할 때는 미설치 → ModuleNotFoundError.
+# 모든 fastapi 호출(FastAPI/Body/HTTPException/StreamingResponse)은
+# @modal.asgi_app() fastapi(self) 메서드 안에서만 evaluate되므로
+# (Python lazy method body), runner에서는 stub=None으로 충분.
+try:
+    from fastapi import Body, FastAPI, HTTPException
+    from fastapi.responses import StreamingResponse
+except ModuleNotFoundError:
+    Body = FastAPI = HTTPException = None  # type: ignore[misc,assignment]
+    StreamingResponse = None  # type: ignore[misc,assignment]
 
 gcp_secret = modal.Secret.from_name("cloudsql-iam-sa")
 
@@ -66,7 +76,7 @@ class AgentComposer:
         import os
         import tempfile
         from pathlib import Path
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from services.common.gcp_secrets import load_secrets_to_env
 
@@ -95,36 +105,16 @@ class AgentComposer:
                 "gcs-personal-bucket secret 미등록 — personal memory 비활성: %s", exc
             )
 
-        # Connector를 getconn() 안에서 lazy 초기화 + 명시적 loop 바인딩
-        # storage/orm/session_factory.py 동일 패턴 — ConnectorLoopError 해결
-        self._connector = None
-
-        async def getconn():
-            import asyncio
-            from google.cloud.sql.connector import Connector, IPTypes
-            if self._connector is None:
-                self._connector = Connector(loop=asyncio.get_running_loop())
-            return await self._connector.connect_async(
-                os.environ["CLOUD_SQL_INSTANCE"],
-                "asyncpg",
-                user=os.environ["DB_IAM_USER"],
-                db=os.environ["DB_NAME"],
-                enable_iam_auth=True,
-                ip_type=IPTypes.PUBLIC,
-            )
-
-        self._engine = create_async_engine(
-            "postgresql+asyncpg://",
-            async_creator=getconn,
-            pool_pre_ping=True,
-        )
-        self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
+        # 엔진/커넥터는 요청마다 생성 (_create_session 참조) — boot()에서 생성 안 함.
+        # @modal.concurrent ASGI 환경에서 boot() 루프와 요청 루프가 달라 loop mismatch hang
+        # 발생. worker(document_tasks)의 NullPool per-request 패턴으로 해결.
 
         # 어댑터 + 서비스 wiring
         from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
         from ai_agent.adapters.memory.gcs_session_frame_store import GCSSessionFrameStore
         from ai_agent.adapters.memory.gcs_workflow_draft_store import GCSWorkflowDraftStore
+        from ai_agent.adapters.memory.gcs_composer_state_store import GCSComposerStateStore
         from ai_agent.adapters.memory.gcs_memory_store import GCSMemoryStore
         from ai_agent.adapters.node_registry_adapter import NodeRegistryAdapter
         from ai_agent.adapters.langgraph.composer_graph import LangGraphOrchestrator
@@ -142,22 +132,23 @@ class AgentComposer:
 
         llm = ModalLLMAdapter()
         embedder = ModalEmbeddingAdapter()
+        self._llm = llm
+        self._embedder = embedder
 
         self._node_repo_cls = PgNodeDefinitionRepository
         self._workflow_repo_cls = PgWorkflowRepository
         self._skill_repo_cls = PgMarketplaceSkillRepository
         self._search_skills_use_case_cls = SearchSkillsUseCase
-        self._embedder = embedder
         self._node_registry_cls = NodeRegistryAdapter
         self._graph_validator_cls = GraphValidator
         self._intent_analyzer = IntentAnalyzerService(llm)
         self._drafter = DrafterService(llm)
         self._qa_evaluator = QAEvaluatorService(llm)
         self._slot_filler = SlotFillingService()
-        self._llm = llm
         self._orchestrator_cls = LangGraphOrchestrator
         self._session_frame_store = GCSSessionFrameStore()
         self._workflow_draft_store = GCSWorkflowDraftStore()
+        self._composer_state_store = GCSComposerStateStore()  # two-shot 1차 상태 영속 (REQ-013)
         self._personal_memory_store = GCSMemoryStore()
         self._diff_service = WorkflowDiffService()
         self._execution_engine_url = os.getenv("EXECUTION_ENGINE_URL", "")
@@ -166,15 +157,42 @@ class AgentComposer:
 
     @modal.exit()
     def shutdown(self) -> None:
-        import asyncio
-        if getattr(self, "_engine", None):
-            asyncio.run(self._engine.dispose())
-        if getattr(self, "_connector", None):
-            asyncio.run(self._connector.close_async())
+        pass  # 엔진/커넥터는 요청마다 dispose — 여기서 할 일 없음
+
+    async def _create_session(self):
+        """요청마다 fresh connector + NullPool engine 생성 (worker 검증 패턴).
+
+        boot() 루프와 요청 루프 불일치(loop mismatch)를 피하기 위해
+        per-request로 생성하고 요청 종료 시 dispose한다.
+        """
+        import os
+        from google.cloud.sql.connector import create_async_connector, IPTypes
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        from sqlalchemy.pool import NullPool
+
+        connector = await create_async_connector()
+
+        async def getconn():
+            return await connector.connect_async(
+                os.environ["CLOUD_SQL_INSTANCE"],
+                "asyncpg",
+                user=os.environ["DB_IAM_USER"],
+                db=os.environ["DB_NAME"],
+                enable_iam_auth=True,
+                ip_type=IPTypes.PUBLIC,
+            )
+
+        engine = create_async_engine(
+            "postgresql+asyncpg://",
+            async_creator=getconn,
+            poolclass=NullPool,
+        )
+        return connector, engine, async_sessionmaker(engine, expire_on_commit=False)
 
     @modal.asgi_app()
     def fastapi(self):
         from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
+        from common_schemas.transport import ErrorFrame, ResultFrame
 
         api = FastAPI(title="agent-composer", version="1.0")
 
@@ -183,8 +201,9 @@ class AgentComposer:
             import logging
             from sqlalchemy import text
             logger = logging.getLogger(__name__)
+            connector, engine, _ = await self._create_session()
             try:
-                async with self._engine.connect() as conn:
+                async with engine.connect() as conn:
                     await conn.execute(text("SELECT 1"))
             except Exception as exc:
                 logger.warning("db unreachable: %s", repr(exc))
@@ -192,13 +211,19 @@ class AgentComposer:
                     status_code=503,
                     detail={"db": "unreachable"},
                 )
+            finally:
+                await engine.dispose()
+                await connector.close_async()
             return {"status": "ok", "db": "iam-connected"}
 
         @api.post("/v1/agent/route")
         async def route(req: AgentProtocolRequest = Body(...)):
             async def generate():
+                connector = None
+                engine = None
                 try:
-                    async with self._session_factory() as session:
+                    connector, engine, session_factory = await self._create_session()
+                    async with session_factory() as session:
                         node_repo = self._node_repo_cls(session)
                         workflow_repo = self._workflow_repo_cls(session)
                         skill_repo = self._skill_repo_cls(session)
@@ -220,39 +245,52 @@ class AgentComposer:
                             personal_memory_store=self._personal_memory_store,
                             skill_search=skill_search,
                             embedder=self._embedder,
+                            composer_state_store=self._composer_state_store,
                         )
                         async for frame in await graph.stream(
                             user_id=req.user_id,
                             session_id=req.session_id,
                             message=req.payload.get("message", ""),
                             personal_memory=list(req.personal_memory),
+                            round=req.payload.get("round", 1),
+                            selected_skill_id=req.payload.get("selected_skill_id"),
                         ):
+                            # 워크플로우 id를 클라이언트에 노출하기 직전에 그래프의 save()(flush만,
+                            # unit-of-work)를 commit으로 확정한다. ResultFrame(payload.workflow_id)을
+                            # yield한 뒤에야 commit하면(루프 종료 후 commit) — 그 사이 explain/save_memory/
+                            # 세션프레임 GCS 저장이 commit을 수 초 지연시켜 — 프론트의 즉시 GET이
+                            # commit을 앞질러 404(E-WF-001)가 난다(read-after-write 레이스). round-1/2 공통.
+                            if isinstance(frame, ResultFrame) and frame.payload.get("workflow_id"):
+                                await session.commit()
                             resp = AgentProtocolResponse(
                                 frames=[frame],
                                 state_delta={},
                                 next_action="continue",
                             )
                             yield f"data: {resp.model_dump_json()}\n\n"
+
+                        # 루프 종료 후 안전 commit — ResultFrame이 없던 경로(에러/clarify)나 잔여
+                        # 쓰기를 확정. 위에서 이미 commit됐으면 pending 없는 no-op.
+                        # AsyncSession은 commit 없이 `async with` 종료 시 rollback이므로 필수.
+                        await session.commit()
                 except Exception as exc:
+                    # ErrorFrame을 frames에 실어 전파한다. 과거엔 frames=[] + state_delta만 담아
+                    # orchestrator _relay_stream이 resp.frames만 relay → state_delta 에러가 통째로
+                    # 삼켜져 보이지 않았다(워크플로우 저장 예외가 은폐되던 원인).
                     err = AgentProtocolResponse(
-                        frames=[],
+                        frames=[ErrorFrame(code="E_COMPOSER", message=str(exc))],
                         state_delta={"error": str(exc)},
                         next_action="error",
                     )
                     yield f"data: {err.model_dump_json()}\n\n"
-                    done = AgentProtocolResponse(
-                        frames=[],
-                        state_delta={},
-                        next_action="complete",
-                    )
-                    yield f"data: {done.model_dump_json()}\n\n"
+                    yield f"data: {AgentProtocolResponse(frames=[], state_delta={}, next_action='complete').model_dump_json()}\n\n"
                     return
-                done = AgentProtocolResponse(
-                    frames=[],
-                    state_delta={},
-                    next_action="complete",
-                )
-                yield f"data: {done.model_dump_json()}\n\n"
+                finally:
+                    if engine:
+                        await engine.dispose()
+                    if connector:
+                        await connector.close_async()
+                yield f"data: {AgentProtocolResponse(frames=[], state_delta={}, next_action='complete').model_dump_json()}\n\n"
 
             return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -275,15 +313,22 @@ class AgentComposer:
             except (KeyError, ValueError) as exc:
                 raise HTTPException(status_code=422, detail=f"잘못된 파라미터: {exc}") from exc
 
-            async with self._session_factory() as session:
-                workflow_repo = self._workflow_repo_cls(session)
-                use_case = ApproveWorkflowUseCase(
-                    workflow_draft_store=self._workflow_draft_store,
-                    workflow_repo=workflow_repo,
-                    diff_service=self._diff_service,
-                    personalization_client=None,  # TODO: PersonalizationClient 주입
-                )
-                diff = await use_case.execute(session_id, user_id, workflow_id)
+            connector, engine, session_factory = await self._create_session()
+            try:
+                async with session_factory() as session:
+                    workflow_repo = self._workflow_repo_cls(session)
+                    use_case = ApproveWorkflowUseCase(
+                        workflow_draft_store=self._workflow_draft_store,
+                        workflow_repo=workflow_repo,
+                        diff_service=self._diff_service,
+                        personalization_client=None,  # TODO: PersonalizationClient 주입
+                    )
+                    diff = await use_case.execute(session_id, user_id, workflow_id)
+                    # 승인 use-case가 워크플로우 상태를 갱신할 경우 영속화 확정 (commit 없으면 rollback).
+                    await session.commit()
+            finally:
+                await engine.dispose()
+                await connector.close_async()
 
             if diff is None:
                 return {"status": "no_draft", "diff": None}

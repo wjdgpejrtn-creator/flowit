@@ -118,6 +118,8 @@ import {
 | `AgentChatPage` | `app/agent/page.tsx` | 에이전트 대화 인터페이스 |
 | `DocumentsPage` | `app/documents/page.tsx` | 문서 목록/업로드 |
 | `DocumentDetailPage` | `app/documents/[id]/page.tsx` | 문서 상세 + 분석 결과 |
+| `SkillBuilderPage` | `app/skills/builder/page.tsx` | 스킬빌더 — 개인 스킬 생성 폼 (기반 문서 선택은 백엔드 연동 예정) |
+| `MarketplacePage` | `app/marketplace/page.tsx` | 스킬 마켓플레이스 목록/탐색 |
 | `DashboardPage` | `app/page.tsx` | 대시보드 메인 |
 | `LoginPage` | `app/login/page.tsx` | OAuth2 로그인 |
 
@@ -173,6 +175,7 @@ import {
 | `workflowApi` | `lib/api/workflowApi.ts` | /workflows 엔드포인트 호출 함수 |
 | `agentApi` | `lib/api/agentApi.ts` | /agents 엔드포인트 호출 함수 |
 | `documentApi` | `lib/api/documentApi.ts` | /documents 엔드포인트 호출 함수 |
+| `skillApi` | `lib/api/skillApi.ts` | /skills 엔드포인트 호출 함수 (개인 스킬 CRUD) |
 | `authApi` | `lib/api/authApi.ts` | /auth 엔드포인트 호출 함수 |
 
 ### 2.7 State Management

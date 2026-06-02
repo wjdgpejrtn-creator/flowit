@@ -20,6 +20,11 @@ _DEFAULT_TIMEOUT = 90.0
 _MODAL_APP_NAME = "llm-base"
 _MODAL_CLS_NAME = "LLMBase"
 
+# structured 생성은 llm-base 기본 max_tokens(512)로는 부족하다 — SOP 추출은 노드 N개를
+# 각각 긴 instructions(SKILL.md 본문) + inputs/outputs 스키마와 함께 한 JSON으로 내보내므로
+# 512에서 문자열 중간에 잘려 "EOF while parsing a string"(json_invalid)가 난다. 충분히 넉넉히 준다.
+_STRUCTURED_MAX_TOKENS = 4096
+
 
 class ModalLLMAdapter(LLMPort):
     """LLMPort 구현 — Modal llm-base app의 Gemma 4 추론 엔드포인트 호출.
@@ -60,22 +65,41 @@ class ModalLLMAdapter(LLMPort):
             "설명이나 마크다운 없이 JSON만 출력하세요:\n"
             f"{json.dumps(schema_json, ensure_ascii=False)}"
         )
-        result: dict[str, Any] = await self._modal_instance().generate.remote.aio(
-            prompt=augmented,
-            format="json",
-            json_schema=schema_json,
+
+        # Modal 취소/오류 sentinel — prefix 매칭으로 false-positive 방지
+        _CANCEL_PREFIXES = ("cancelled", "Function call")
+        last_exc: Exception | None = None
+
+        for attempt in range(3):
+            try:
+                use_grammar = attempt == 0  # 첫 시도만 json schema grammar 사용
+                kwargs: dict[str, Any] = {"prompt": augmented, "max_tokens": _STRUCTURED_MAX_TOKENS}
+                if use_grammar:
+                    kwargs["format"] = "json"
+                    kwargs["json_schema"] = schema_json
+
+                result: dict[str, Any] = await self._modal_instance().generate.remote.aio(**kwargs)
+                raw: str = result.get("generated_text", "").strip()
+
+                # 빈 응답 or Modal 취소 sentinel(prefix) → 재시도
+                if not raw or any(raw.startswith(m) for m in _CANCEL_PREFIXES):
+                    last_exc = ExecutionError(
+                        f"LLM 비정상 응답(시도 {attempt + 1}): {raw[:120]}", code="E_LLM_CANCEL"
+                    )
+                    continue
+
+                # 마크다운 코드 펜스 제거
+                raw = re.sub(r"^```(?:json)?\s*\n?", "", raw)
+                raw = re.sub(r"\n?```\s*$", "", raw)
+                return schema.model_validate_json(raw.strip())
+
+            except Exception as exc:
+                last_exc = exc
+                continue
+
+        raise ExecutionError(
+            f"LLM structured 생성 3회 실패: {last_exc}", code="E_LLM_EMPTY"
         )
-        raw: str = result["generated_text"]
-        if not raw.strip():
-            # grammar constraint가 빈 응답 반환 시 — 프롬프트 지시만으로 재시도
-            result = await self._modal_instance().generate.remote.aio(prompt=augmented)
-            raw = result["generated_text"]
-        if not raw.strip():
-            raise ExecutionError("LLM 빈 응답 — grammar+재시도 모두 실패", code="E_LLM_EMPTY")
-        # 마크다운 코드 펜스 제거
-        raw = re.sub(r"^```(?:json)?\s*\n?", "", raw.strip())
-        raw = re.sub(r"\n?```\s*$", "", raw)
-        return schema.model_validate_json(raw.strip())
 
     async def aclose(self) -> None:
         await self._client.aclose()

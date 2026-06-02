@@ -97,6 +97,34 @@ async def test_create_draft_saves_skill_document_and_sets_returned_uri():
 
 
 @pytest.mark.asyncio
+async def test_create_draft_persists_source_document_id():
+    # REQ-010 문서→빌더 핸드오프: 기반 문서 ID를 association 으로 보관
+    repo = _Repo()
+    doc_id = uuid4()
+    skill_id = await CreateDraftSkillUseCase(repo).execute(
+        owner_user_id=uuid4(),
+        name="문서 기반 스킬",
+        description="업로드한 명세서 기반",
+        node_spec_staging=_staging(),
+        source_document_id=doc_id,
+    )
+    assert repo.personal[skill_id].source_document_id == doc_id
+
+
+@pytest.mark.asyncio
+async def test_create_draft_source_document_id_defaults_none():
+    # 미지정 시 association 없음 (직접 진입/seed 경로)
+    repo = _Repo()
+    skill_id = await CreateDraftSkillUseCase(repo).execute(
+        owner_user_id=uuid4(),
+        name="요약 스킬",
+        description="문서 요약",
+        node_spec_staging=_staging(),
+    )
+    assert repo.personal[skill_id].source_document_id is None
+
+
+@pytest.mark.asyncio
 async def test_create_draft_no_doc_store_skips_document_save():
     # doc_store 미주입 시 기존 동작 유지 — 문서 저장 없이 DRAFT만 생성 (seed/하위호환 경로)
     repo = _Repo()

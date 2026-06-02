@@ -34,6 +34,27 @@ class PgExecutionRepository:
             raise NotFoundError(f"Execution not found: {execution_id}", code="E-EXEC-001")
         return ExecutionMapper.to_domain(model)
 
+    async def get_latest_by_workflow_id(
+        self, workflow_id: UUID, user_id: UUID
+    ) -> ExecutionRow | None:
+        """워크플로우 + 사용자 기준 가장 최근 execution 1건. 없으면 None.
+
+        `/workflows/{id}` 상세 화면에서 워크플로우 정의 + 마지막 실행 상태를 함께
+        보여주기 위한 조회. user_id로 같이 filter — 다른 사용자 실행 노출 방지.
+        """
+        stmt = (
+            select(ExecutionModel)
+            .where(ExecutionModel.workflow_id == workflow_id)
+            .where(ExecutionModel.user_id == user_id)
+            .order_by(ExecutionModel.started_at.desc())
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if model is None:
+            return None
+        return ExecutionMapper.to_domain(model)
+
     async def get_node_states_summary(self, execution_id: UUID) -> dict[str, int]:
         """node_execution_states(017)에서 status별 카운트 집계.
 

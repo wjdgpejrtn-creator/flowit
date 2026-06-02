@@ -30,6 +30,14 @@ RUN pip install --no-cache-dir -e /app/modules/auth
 COPY modules/storage /app/modules/storage
 RUN pip install --no-cache-dir -e /app/modules/storage
 
+# doc_parser — REQ-006/009: analyze_document_task가 ParsingPipeline(7종 파서)로 문서를
+# 파싱하고, PgDocumentRepository도 doc_parser.domain.ports를 import한다. nodes_graph와 동일
+# flat layout — pip install -e는 파서 의존성(pymupdf/pdfplumber/python-docx/openpyxl/
+# python-pptx/pyhwp+beautifulsoup4/lxml/markdown-it-py) 설치용, 패키지 import는 아래
+# PYTHONPATH /app/modules로 해결. (2026-05-29 worker analyze ModuleNotFound(doc_parser) 사고)
+COPY modules/doc_parser /app/modules/doc_parser
+RUN pip install --no-cache-dir -e /app/modules/doc_parser
+
 # execution_engine 본 패키지 + 의존성 (celery, redis, sqlalchemy, pg8000)
 COPY services/execution_engine /app/services/execution_engine
 RUN pip install --no-cache-dir -e /app/services/execution_engine[worker]

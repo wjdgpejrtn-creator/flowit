@@ -173,12 +173,16 @@ class MeResponse(PermissionSource):
     """`/auth/me` 응답 — 인가 컨텍스트(PermissionSource) + 사용자 프로필(email/name).
 
     PermissionSource를 상속해 모든 authz 필드를 그대로 노출하고 프로필 필드만 추가한다.
-    email/name은 인가가 아니라 표시용이므로 공유 PermissionSource에는 싣지 않고 본 응답에서만
-    합성한다 (프론트 useAuth가 userName 등에 사용).
+    email/name/department는 인가가 아니라 표시용이므로 공유 PermissionSource에는 싣지 않고 본
+    응답에서만 합성한다 (프론트 useAuth가 userName/부서 배지 등에 사용).
+
+    department는 표시용 부서 라벨(users.department 문자열) — authz는 department_id(UUID)가
+    담당하고, 본 필드는 AppBar 배지가 사람이 읽는 부서명을 보여주는 용도. NULL일 수 있음.
     """
 
     email: str
     name: str
+    department: str | None = None
 
 
 @router.get("/me", response_model=MeResponse)
@@ -186,7 +190,9 @@ async def me(
     permission: PermissionSource = Depends(get_permission_source),
     user: User = Depends(get_current_user),
 ) -> MeResponse:
-    return MeResponse(**permission.model_dump(), email=user.email, name=user.name)
+    return MeResponse(
+        **permission.model_dump(), email=user.email, name=user.name, department=user.department
+    )
 
 
 class GrantRoleRequest(BaseModel):

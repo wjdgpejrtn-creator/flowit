@@ -33,7 +33,16 @@ class ErrorCode(str, Enum):
     E_DUPLICATE_ID = "E_DUPLICATE_ID"
     E_PERMISSION_DENIED = "E_PERMISSION_DENIED"
     E_MISSING_CONNECTION = "E_MISSING_CONNECTION"
+    E_MISSING_REQUIRED_PARAMETER = "E_MISSING_REQUIRED_PARAMETER"
     E_INVALID_TRIGGER = "E_INVALID_TRIGGER"
+
+
+class AnalysisStatus(str, Enum):
+    """문서 분석 비동기 태스크 상태 — Celery worker가 갱신, api_server가 노출."""
+    PENDING = "pending"      # 업로드 직후 — analyze 미요청
+    RUNNING = "running"      # Celery 태스크 시작
+    COMPLETED = "completed"  # blocks 저장 완료
+    FAILED = "failed"        # 파싱 실패 — analysis_error 참조
 
 
 class IntentType(str, Enum):
@@ -42,3 +51,8 @@ class IntentType(str, Enum):
     REFINE = "refine"
     PROPOSE = "propose"
     BUILD_SKILL = "build_skill"
+    # fast-path intents — composer 호출 없이 즉시 처리
+    CHITCHAT = "chitchat"
+    INFO_QUESTION = "info_question"
+    CONTROL = "control"
+    WORKFLOW_EXECUTE = "workflow_execute"

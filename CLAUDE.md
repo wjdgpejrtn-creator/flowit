@@ -149,6 +149,7 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 | ai_agent | skills_marketplace의 `domain/value_objects` | `from skills_marketplace.domain.value_objects import NodeSpecStaging` (Skills Builder가 `CreateDraftSkillUseCase` 입력 계약 VO 생성 시 — ADR-0020 ③-a wizard, PR #151) |
 | execution_engine | toolset의 `application/use_cases` | `from toolset.application.use_cases import ExecuteToolUseCase` |
 | execution_engine | nodes_graph의 `domain/services` | `from nodes_graph.domain.services import GraphValidator` |
+| execution_engine | skills_marketplace의 `domain/ports` | `from skills_marketplace.domain.ports import SkillDocumentStore` (CatalogNodeExecutor가 LLM 노드 실행 시 바인딩 SkillDocument 지침서를 `load()`해 system 프롬프트에 주입 — REQ-013 런타임 주입, 구현체 `GcsSkillDocumentStore`는 container에서 주입) |
 
 ### 절대 금지 import 패턴
 

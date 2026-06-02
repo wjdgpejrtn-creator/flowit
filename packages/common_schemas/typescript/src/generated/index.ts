@@ -11,6 +11,13 @@ export enum AgentMode {
   SKILL_BUILDER = "skill_builder",
 }
 
+export enum AnalysisStatus {
+  PENDING = "pending",
+  RUNNING = "running",
+  COMPLETED = "completed",
+  FAILED = "failed",
+}
+
 export enum ErrorCode {
   E_NODE_TYPE_MISMATCH = "E_NODE_TYPE_MISMATCH",
   E_CYCLE_DETECTED = "E_CYCLE_DETECTED",
@@ -18,6 +25,7 @@ export enum ErrorCode {
   E_DUPLICATE_ID = "E_DUPLICATE_ID",
   E_PERMISSION_DENIED = "E_PERMISSION_DENIED",
   E_MISSING_CONNECTION = "E_MISSING_CONNECTION",
+  E_MISSING_REQUIRED_PARAMETER = "E_MISSING_REQUIRED_PARAMETER",
   E_INVALID_TRIGGER = "E_INVALID_TRIGGER",
 }
 
@@ -36,6 +44,10 @@ export enum IntentType {
   REFINE = "refine",
   PROPOSE = "propose",
   BUILD_SKILL = "build_skill",
+  CHITCHAT = "chitchat",
+  INFO_QUESTION = "info_question",
+  CONTROL = "control",
+  WORKFLOW_EXECUTE = "workflow_execute",
 }
 
 export enum RiskLevel {
@@ -101,6 +113,7 @@ export interface NodeInstance {
   node_id: string;
   parameters: Record<string, unknown>;
   credential_id?: string | null;
+  skill_id?: string | null;
   position: Position;
 }
 
@@ -176,6 +189,22 @@ export interface SlotFillQuestionFrame {
   field_name: string;
 }
 
+export interface SkillOption {
+  skill_id: string;
+  name: string;
+  description: string;
+  document_preview?: string | null;
+  node_definition_id?: string | null;
+}
+
+export interface SkillSelectionFrame {
+  frame_type: "skill_selection";
+  field_name: string;
+  prompt: string;
+  options: Array<SkillOption>;
+  allow_skip: boolean;
+}
+
 export interface DraftSpecDeltaFrame {
   frame_type: "draft_spec_delta";
   delta: Record<string, unknown>;
@@ -227,7 +256,7 @@ export interface ChatMessageFrame {
 }
 
 export interface AgentProtocolResponse {
-  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame>;
+  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | SkillSelectionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame>;
   state_delta: Record<string, unknown>;
   next_action: "continue" | "complete" | "error";
 }
@@ -244,6 +273,12 @@ export interface AnalysisResult {
   prompt_version: string;
   template_type: string;
   few_shot_count: number;
+}
+
+export interface AnalyzeDispatchResponse {
+  document_id: string;
+  task_id: string;
+  action: string;
 }
 
 export interface BBox {
@@ -318,6 +353,16 @@ export interface ParserMeta {
   parse_duration_ms?: number | null;
 }
 
+export interface ParseCoverage {
+  total_pages: number;
+  parsed_pages: number;
+  text_blocks: number;
+  table_blocks: number;
+  vision_blocks: number;
+  failed_blocks: number;
+  warnings: Array<string>;
+}
+
 export interface DocumentBlock {
   document_id: string;
   workflow_id?: string | null;
@@ -327,6 +372,37 @@ export interface DocumentBlock {
   blocks: Array<ContentBlock>;
   vision_block_count: number;
   failed_block_count: number;
+  analysis_status: AnalysisStatus;
+  analysis_error?: string | null;
+  analyzed_at?: string | null;
+  coverage?: ParseCoverage | null;
+}
+
+export interface DocumentBlocksResponse {
+  document_id: string;
+  blocks: Array<ContentBlock>;
+  analysis_status: AnalysisStatus;
+  analysis_error?: string | null;
+  analyzed_at?: string | null;
+  coverage?: ParseCoverage | null;
+}
+
+export interface DocumentDownloadResponse {
+  document_id: string;
+  download_url: string;
+  expires_in: number;
+}
+
+export interface DocumentResponse {
+  document_id: string;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  gcs_uri: string;
+  is_analyzed: boolean;
+  analysis_status: AnalysisStatus;
+  analysis_error?: string | null;
+  analyzed_at?: string | null;
 }
 
 export interface EvaluationResult {
@@ -334,6 +410,13 @@ export interface EvaluationResult {
   pass_flag: boolean;
   reason: string;
   feedback: string;
+}
+
+export interface ExplanationStep {
+  order: number;
+  node_name: string;
+  description: string;
+  risk_level: RiskLevel;
 }
 
 export interface HandoffPayload {
@@ -377,14 +460,10 @@ export interface NodeExecutionState {
   last_error?: string | null;
 }
 
-export interface ParseCoverage {
-  total_pages: number;
-  parsed_pages: number;
-  text_blocks: number;
-  table_blocks: number;
-  vision_blocks: number;
-  failed_blocks: number;
-  warnings: Array<string>;
+export interface PermissionItem {
+  connection: string;
+  node_name: string;
+  risk_level: RiskLevel;
 }
 
 export interface PermissionSource {
@@ -457,4 +536,12 @@ export interface ValidationErrorResponse {
   errors: Array<ValidationErrorItem>;
 }
 
-export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame;
+export interface WorkflowExplanation {
+  intent_restatement: string;
+  summary: string;
+  steps: Array<ExplanationStep>;
+  permissions: Array<PermissionItem>;
+  assumptions: Array<string>;
+}
+
+export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | SkillSelectionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame;

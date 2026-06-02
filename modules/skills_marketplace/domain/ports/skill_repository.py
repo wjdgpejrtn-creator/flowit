@@ -60,6 +60,8 @@ class SkillRepository(ABC):
         limit: int = 10,
         include_promoted: bool = False,
         lifecycle_state: SkillState | None = None,
+        owner_user_id: UUID | None = None,
+        max_distance: float | None = None,
     ) -> list[MarketplacePersonalSkill | MarketplaceTeamSkill | MarketplaceCompanySkill]:
         """하이브리드 검색 — scope 범위 내 embedding 유사도 top-k.
 
@@ -73,6 +75,39 @@ class SkillRepository(ABC):
         lifecycle_state(ADR-0020 (b)): 지정 시 해당 게시 상태만 반환(예: PUBLISHED). None이면
         전체 상태. Composer 노드 후보 검색은 PUBLISHED만 보도록 SearchSkillsUseCase가 PUBLISHED를
         전달한다(미검토 DRAFT/REVIEW 오염 방지). 실제 WHERE 필터는 storage 구현 시 적용.
+
+        owner_user_id(scope=PERSONAL 필수 인가): 개인 스킬은 소유자 범위라 owner 필터 없이 검색하면
+        타 사용자 개인 스킬이 노출된다(IDOR). PERSONAL scope에서 owner_user_id가 None이면 구현체는
+        빈 결과를 반환한다(전체 노출 금지). PERSONAL 외 scope에서는 무시된다.
+
+        max_distance(관련성 컷): 코사인 거리(0=동일, 2=정반대) 상한. 지정 시 임계 이내 후보만 반환
+        — 무관한 스킬이 top-k에 딸려 나오는 것을 차단(Composer가 SKILL_SEARCH_MAX_DISTANCE로 주입).
+        None이면 거리 필터 없이 top-k.
+        """
+        ...
+
+    @abstractmethod
+    async def list_by_scope(
+        self,
+        scope: SkillScope,
+        lifecycle_state: SkillState | None = SkillState.PUBLISHED,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MarketplaceTeamSkill | MarketplaceCompanySkill]:
+        """마켓플레이스 탐색(browse) 목록 — scope(team/company) 게시 스킬을 쿼리 없이 나열.
+
+        `search`(embedding 코사인 유사도)와 별개. 마켓플레이스 UI의 Team/Company 탭은 검색어
+        없이 게시된 스킬 전체를 최신순으로 보여주므로 embedding이 필요 없다 — 본 메서드가 그 경로.
+
+        scope=PERSONAL은 본 메서드 대상 아님(개인 스킬은 owner 범위라 `list_personal_by_user`
+        사용) — 구현체는 PERSONAL이 오면 ValueError를 던진다.
+
+        lifecycle_state 기본 PUBLISHED(ADR-0020 (b)): 미검토 DRAFT/REVIEW를 마켓플레이스에 노출하지
+        않는다. None이면 전체 상태(관리/디버그).
+
+        승격 완료 원본(team의 `promoted_to_company_id` 존재)은 제외 — 승격=복제이므로 상위 scope에
+        같은 스킬이 이미 존재해 중복 노출 방지(`search`의 include_promoted=False 정책과 동일).
+        company는 최상위라 승격 마킹 컬럼이 없어 해당 필터 없음. 정렬은 구현에서 `updated_at DESC`.
         """
         ...
 
@@ -101,6 +136,21 @@ class SkillRepository(ABC):
         `lifecycle_state` 지정 시 해당 게시 상태만(예: DRAFT). None이면 전체.
         `limit`/`offset` 페이지네이션. 정렬은 구현(storage)에서 `updated_at DESC` 권장.
         승격 완료분(`promoted_to_team_id`) 포함 여부는 소유자 본인 목록이므로 필터하지 않는다.
+        """
+        ...
+
+    @abstractmethod
+    async def list_personal_by_state(
+        self,
+        lifecycle_state: SkillState,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MarketplacePersonalSkill]:
+        """게시 상태별 **전체 소유자**의 개인 스킬 목록 — 관리자 리뷰 큐용 (REQ-013).
+
+        `list_personal_by_user`(소유자 범위)와 달리 owner 필터가 없다 — 관리자가 REVIEW 상태의
+        리뷰 요청을 소유자 무관하게 모아 보기 위함. 인가(Admin only)는 use case
+        (`ListReviewQueueUseCase`)가 enforce한다. 정렬은 구현(storage)에서 `updated_at DESC`.
         """
         ...
 

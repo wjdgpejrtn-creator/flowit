@@ -19,12 +19,20 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from celery import Celery
-from common_schemas import DocumentBlock, FileMeta, PermissionSource
+from common_schemas import (
+    AnalysisStatus,
+    AnalyzeDispatchResponse,
+    DocumentBlock,
+    DocumentBlocksResponse,
+    DocumentDownloadResponse,
+    DocumentResponse,
+    FileMeta,
+    PermissionSource,
+)
 from common_schemas.broker_tasks import QUEUE_DEFAULT, TASK_ANALYZE_DOCUMENT
 from common_schemas.exceptions import NotFoundError
 from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
 from storage.domain.ports.object_storage_port import ObjectStoragePort
 
 from app.dependencies.celery_client import get_celery
@@ -46,6 +54,11 @@ _READ_CHUNK = 1 * 1024 * 1024  # 1MB chunks — limit 검사 단위
 def _gcs_key(document_id: UUID, filename: str) -> str:
     """`documents/{id}/{filename}` — worker도 동일 함수로 다운로드 키 계산해야 정합."""
     return f"{_KEY_PREFIX}/{document_id}/{filename}"
+
+
+def _gcs_uri(document_id: UUID, filename: str) -> str:
+    """`gs://documents/{id}/{filename}` — 응답용 GCS URI. 키 패턴 drift 방지로 단일화."""
+    return f"gs://{_gcs_key(document_id, filename)}"
 
 
 async def _read_capped(file: UploadFile) -> bytes:
@@ -74,35 +87,6 @@ async def _read_capped(file: UploadFile) -> bytes:
     return bytes(buf)
 
 
-class DocumentResponse(BaseModel):
-    """업로드/조회 공통 응답. blocks/parser_meta는 큰 페이로드라 의도적으로 제외 —
-    분석 결과 조회는 별도 엔드포인트(추후 PR)에서 chunks/quality_log와 함께 제공.
-
-    `created_at`은 현재 응답에서 제외(self-review MED #4) — `DocumentMapper.to_domain`이
-    ORM `created_at`을 도메인 엔티티(`DocumentBlock`)로 매핑하지 않아 GET 호출 시
-    매번 `datetime.now()`로 갱신되면 클라 캐시/eTag/diff가 깨진다. 정식 노출은
-    `DocumentBlock.created_at` 필드 추가(common_schemas 변경) + mapper 갱신 후 — Phase C.
-    """
-
-    document_id: UUID
-    file_name: str
-    mime_type: str
-    file_size: int
-    gcs_uri: str
-    is_analyzed: bool  # blocks 비어있으면 False — analyze 미수행 / 진행 중
-
-
-class AnalyzeDispatchResponse(BaseModel):
-    document_id: UUID
-    task_id: str
-    action: str
-
-
-class DocumentDownloadResponse(BaseModel):
-    document_id: UUID
-    download_url: str
-    expires_in: int
-
 
 def _to_response(document: DocumentBlock, gcs_uri: str) -> DocumentResponse:
     return DocumentResponse(
@@ -111,7 +95,10 @@ def _to_response(document: DocumentBlock, gcs_uri: str) -> DocumentResponse:
         mime_type=document.file_meta.mime_type,
         file_size=document.file_meta.file_size,
         gcs_uri=gcs_uri,
-        is_analyzed=len(document.blocks) > 0,
+        is_analyzed=document.analysis_status == AnalysisStatus.COMPLETED,
+        analysis_status=document.analysis_status,
+        analysis_error=document.analysis_error,
+        analyzed_at=document.analyzed_at,
     )
 
 
@@ -157,6 +144,23 @@ async def upload_document(
     return _to_response(document.model_copy(update={"document_id": saved_id}), gcs_uri)
 
 
+@router.get("", response_model=list[DocumentResponse])
+async def list_documents(
+    permission: PermissionSource = Depends(get_permission_source),
+    repo: DocumentRepositoryPort = Depends(get_document_repository),
+) -> list[DocumentResponse]:
+    """현재 사용자 소유 문서 목록 조회 (최신순).
+
+    localStorage SSOT 대체 (#219) — 디바이스 간 동기화 + 다중 사용자 privacy 확보.
+    인가: `DocumentRepositoryPort.list_by_owner(permission.user_id)`로 owner 본인 문서만.
+    """
+    documents = await repo.list_by_owner(permission.user_id)
+    return [
+        _to_response(doc, _gcs_uri(doc.document_id, doc.file_meta.file_name))
+        for doc in documents
+    ]
+
+
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: UUID,
@@ -169,7 +173,7 @@ async def get_document(
         raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
     if document.user_id != permission.user_id:
         raise HTTPException(status_code=403, detail="Document belongs to another user")
-    gcs_uri = f"gs://{_KEY_PREFIX}/{document_id}/{document.file_meta.file_name}"
+    gcs_uri = _gcs_uri(document_id, document.file_meta.file_name)
     return _to_response(document, gcs_uri)
 
 
@@ -192,6 +196,33 @@ async def get_document_download_url(
     key = _gcs_key(document_id, document.file_meta.file_name)
     url = await object_storage.presign(key, ttl=ttl)
     return DocumentDownloadResponse(document_id=document_id, download_url=url, expires_in=ttl)
+
+
+@router.get("/{document_id}/blocks", response_model=DocumentBlocksResponse)
+async def get_document_blocks(
+    document_id: UUID,
+    permission: PermissionSource = Depends(get_permission_source),
+    repo: DocumentRepositoryPort = Depends(get_document_repository),
+) -> DocumentBlocksResponse:
+    """파싱 결과 본문 — owner만. 메타(`GET /{id}`)와 분리된 read path.
+
+    분석 완료(`analysis_status="completed"`) 후 1회 fetch 가정. 진행중/실패 상태에서도
+    호출 가능(blocks는 빈 배열 또는 이전 분석 잔존). 프론트엔드 폴링이 status를 보고
+    `completed` 시 본 endpoint 호출.
+    """
+    document = await repo.get_by_id(document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    if document.user_id != permission.user_id:
+        raise HTTPException(status_code=403, detail="Document belongs to another user")
+    return DocumentBlocksResponse(
+        document_id=document_id,
+        blocks=document.blocks,
+        analysis_status=document.analysis_status,
+        analysis_error=document.analysis_error,
+        analyzed_at=document.analyzed_at,
+        coverage=document.coverage,
+    )
 
 
 @router.post("/{document_id}/analyze", response_model=AnalyzeDispatchResponse, status_code=202)

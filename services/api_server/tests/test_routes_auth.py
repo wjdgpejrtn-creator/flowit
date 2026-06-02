@@ -179,6 +179,7 @@ def _authenticated_repos(user_id, dept_id, session_hash: str):
             name="Alice",
             role="Admin",
             department_id=dept_id,
+            department="FlowIt-001",
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -237,9 +238,11 @@ def test_me_returns_permission_source_for_authenticated_user(app) -> None:
     assert body["department_id"] == str(dept_id)
     assert body["risk_ceiling"] == "Restricted"  # Admin
     assert "Public" in body["granted_scopes"]
-    # MeResponse = PermissionSource 필드 + 프로필(email/name) — 프론트 useAuth userName 연결용
+    # MeResponse = PermissionSource 필드 + 프로필(email/name/department) — 프론트 useAuth 연결용
     assert body["email"] == "alice@example.com"
     assert body["name"] == "Alice"
+    # department = 표시용 부서 라벨(AppBar 배지). authz는 department_id(UUID)가 담당.
+    assert body["department"] == "FlowIt-001"
 
     app.dependency_overrides.clear()
 

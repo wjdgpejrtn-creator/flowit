@@ -42,3 +42,4 @@
 | 0019 | [Vision Pipeline 도입 — fitz(PyMuPDF) + Gemma4 + 인터리빙 패턴](./adr/ADR-0019-vision-pipeline-fitz-gemma4-interleaving.md) | Accepted | 2026-05-21 |
 | 0020 | [Skills Builder 산출물 게시 lifecycle 게이트 + scope별 진입 (Option B)](./adr/ADR-0020-skills-builder-publish-lifecycle-gate.md) | Accepted | 2026-05-21 |
 | 0021 | [프론트엔드 인증 — OAuth backend-callback + 단일 출처 토폴로지](./adr/ADR-0021-frontend-auth-single-origin-topology.md) | Accepted | 2026-05-22 |
+| 0022 | [CI/CD WIF 신규 셋업 (dedicated SA) — 옵션 B 재사용 폐기](./adr/ADR-0022-cicd-wif-dedicated-sa-setup.md) | Accepted | 2026-05-29 |
