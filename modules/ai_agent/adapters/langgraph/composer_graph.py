@@ -79,9 +79,11 @@ _QA_MAX_RETRY = 3
 _MAX_AGENT_ITERATIONS = 15  # 무한 루프 방지
 
 # 스킬 검색 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 상한. 이 거리 밖 후보는 제외해
-# 무관한 스킬이 옵션/노드 후보에 딸려 나오는 것을 막는다. 공격적 기본값(sim≈0.70),
+# 무관한 스킬이 옵션/노드 후보에 딸려 나오는 것을 막는다.
+# 기본값 0.50: staging 실측(BGE-M3, 한국어 짧은 텍스트) 기준 — 관련 스킬은 0.35~0.49,
+# 무관 쿼리는 0.64+에 분포해 0.50이 둘을 가른다(0.30은 거의 동일어도 컷해 과도했음).
 # 데이터 축적 후 SKILL_SEARCH_MAX_DISTANCE env로 무재배포 튜닝.
-_SKILL_SEARCH_MAX_DISTANCE = float(os.getenv("SKILL_SEARCH_MAX_DISTANCE", "0.30"))
+_SKILL_SEARCH_MAX_DISTANCE = float(os.getenv("SKILL_SEARCH_MAX_DISTANCE", "0.50"))
 
 class _NextAction(BaseModel):
     """LLM 에이전트가 다음에 실행할 툴을 선택하는 스키마."""

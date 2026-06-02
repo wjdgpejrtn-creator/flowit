@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import Depends
 from nodes_graph.application.use_cases.validate_graph_use_case import ValidateGraphUseCase
 from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRepository
@@ -78,7 +80,14 @@ def get_publish_skill_use_case(
     repo: SkillRepository = Depends(get_marketplace_skill_repository),
     node_def_repo: NodeDefinitionRepository = Depends(get_node_definition_repository),
 ) -> PublishSkillUseCase:
-    return PublishSkillUseCase(repo=repo, node_def_repo=node_def_repo)
+    # EMBEDDING_BASE_URL 설정 시에만 embedder 주입 — 게시 시 임베딩 누락 스킬을 백필해
+    # Composer 검색/NodeDefinition 카탈로그에 노출(미설정이면 None → 기존 동작 유지, 하위호환).
+    embedder = None
+    if os.getenv("EMBEDDING_BASE_URL"):
+        from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
+
+        embedder = ModalEmbeddingAdapter()
+    return PublishSkillUseCase(repo=repo, node_def_repo=node_def_repo, embedder=embedder)
 
 
 # ── personal skills CRUD (REQ-013, 가원 요청) ─────────────────────────────────
