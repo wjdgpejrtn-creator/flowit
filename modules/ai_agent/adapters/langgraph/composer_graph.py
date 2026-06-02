@@ -78,6 +78,11 @@ _logger = logging.getLogger(__name__)
 _QA_MAX_RETRY = 3
 _MAX_AGENT_ITERATIONS = 15  # 무한 루프 방지
 
+# 스킬 검색 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 상한. 이 거리 밖 후보는 제외해
+# 무관한 스킬이 옵션/노드 후보에 딸려 나오는 것을 막는다. 공격적 기본값(sim≈0.70),
+# 데이터 축적 후 SKILL_SEARCH_MAX_DISTANCE env로 무재배포 튜닝.
+_SKILL_SEARCH_MAX_DISTANCE = float(os.getenv("SKILL_SEARCH_MAX_DISTANCE", "0.30"))
+
 class _NextAction(BaseModel):
     """LLM 에이전트가 다음에 실행할 툴을 선택하는 스키마."""
 
@@ -668,14 +673,16 @@ class LangGraphOrchestrator:
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
 
-        # 커스텀 스킬 검색 — embedder + skill_search 모두 주입된 경우에만
+        # 커스텀 스킬 검색 — embedder + skill_search 모두 주입된 경우에만.
+        # 접근 가능 스코프(개인 본인 + 전사)를 관련성 컷과 함께 병합 검색(회사만 보던 한계 보완).
         if self._embedder is not None and self._skill_search is not None:
             try:
                 query_embedding = await self._embedder.embed(query)
-                skill_results = await self._skill_search.execute(
+                skill_results = await self._skill_search.execute_accessible(
                     query_embedding=query_embedding,
-                    scope=SkillScope.COMPANY,
+                    user_id=state["user_id"],
                     limit=10,
+                    max_distance=_SKILL_SEARCH_MAX_DISTANCE,
                 )
                 existing_ids = {c.node_id for c in candidates}
                 for skill in skill_results:
@@ -795,10 +802,12 @@ class LangGraphOrchestrator:
         query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
         try:
             query_embedding = await self._embedder.embed(query)
-            skill_results = await self._skill_search.execute(
+            # 접근 가능 스코프(개인 본인 + 전사) 병합 + 관련성 컷 — 무관 스킬 옵션 노출 차단.
+            skill_results = await self._skill_search.execute_accessible(
                 query_embedding=query_embedding,
-                scope=SkillScope.COMPANY,
+                user_id=state["user_id"],
                 limit=5,
+                max_distance=_SKILL_SEARCH_MAX_DISTANCE,
             )
         except Exception as exc:
             _logger.warning("suggest_skill_select 검색 실패 (one-shot 폴백): %s", exc)
