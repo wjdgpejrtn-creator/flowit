@@ -473,6 +473,8 @@ function AgentPageContent() {
   const {
     mode, setMode,
     sessionId, setSessionId,
+    sessions, addSession,
+    viewingSession, setViewingSession,
     messages, addMessage, clearMessages,
     rationaleText, appendRationale, clearRationale,
     slotQuestion, setSlotQuestion,
@@ -700,6 +702,11 @@ function AgentPageContent() {
 
   const stepIndex = currentStep ? STEP_ORDER.indexOf(currentStep) + 1 : 0;
   const handleNewChat = () => {
+    // 현재 세션이 있으면 히스토리에 저장 후 초기화
+    if (sessionId && messages.length > 0) {
+      const title = messages.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
+      addSession({ id: sessionId, title, createdAt: Date.now(), messages: [...messages] });
+    }
     abortRef.current?.abort();
     clearMessages();
     clearRationale();
@@ -709,6 +716,7 @@ function AgentPageContent() {
     setReadyToExecute(null);
     setSkillSelection(null);
     setLoadedWorkflow(null);
+    setViewingSession(null);
     autoSentRef.current = false;
     setMode('wizard');
   };
@@ -728,17 +736,54 @@ function AgentPageContent() {
           </div>
 
           <div className="flex-1 overflow-auto py-2 flex flex-col gap-[2px] px-2">
+            {/* 현재 대화 */}
             {sessionId ? (
-              <div className="px-[8px] py-[6px] rounded-lg text-[12px] border-[1.5px] border-[var(--color-accent)] bg-[var(--color-hl)] text-[var(--color-accent)] font-bold leading-snug">
+              <button
+                type="button"
+                onClick={() => setViewingSession(null)}
+                className={[
+                  'w-full text-left px-[8px] py-[6px] rounded-lg text-[12px] border-[1.5px] leading-snug',
+                  !viewingSession
+                    ? 'border-[var(--color-accent)] bg-[var(--color-hl)] text-[var(--color-accent)] font-bold'
+                    : 'border-[var(--color-line-soft)] text-[var(--color-ink3)] hover:bg-[var(--color-paper)]',
+                ].join(' ')}
+              >
                 💬 현재 대화
-                <div className="font-mono text-[10px] text-[var(--color-ink3)] mt-[2px] font-normal break-all">
+                <div className="font-mono text-[10px] mt-[2px] font-normal break-all opacity-60">
                   {sessionId.slice(0, 8)}…
                 </div>
-              </div>
+              </button>
             ) : (
               <p className="px-[8px] py-[10px] text-[11px] text-[var(--color-ink4)] italic leading-snug">
                 새 대화를 시작하세요.
               </p>
+            )}
+
+            {/* 이전 대화 목록 */}
+            {sessions.length > 0 && (
+              <>
+                <div className="px-[8px] pt-3 pb-1 text-[10px] font-bold text-[var(--color-ink4)] uppercase tracking-wider">
+                  이전 대화
+                </div>
+                {sessions.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setViewingSession(s)}
+                    className={[
+                      'w-full text-left px-[8px] py-[6px] rounded-lg text-[12px] border-[1.5px] leading-snug truncate',
+                      viewingSession?.id === s.id
+                        ? 'border-[var(--color-accent)] bg-[var(--color-hl)] text-[var(--color-accent)] font-bold'
+                        : 'border-transparent text-[var(--color-ink3)] hover:bg-[var(--color-paper)] hover:border-[var(--color-line-soft)]',
+                    ].join(' ')}
+                  >
+                    📋 {s.title}{s.title.length >= 28 ? '…' : ''}
+                    <div className="text-[10px] mt-[2px] opacity-50 font-normal">
+                      {new Date(s.createdAt).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+                    </div>
+                  </button>
+                ))}
+              </>
             )}
           </div>
 
@@ -793,9 +838,25 @@ function AgentPageContent() {
 
               {/* Chat area */}
               <div className="flex-1 flex flex-col min-w-0 min-h-0">
+                {/* 이전 대화 보기 배너 */}
+                {viewingSession && (
+                  <div className="flex items-center justify-between px-4 py-2 bg-[var(--color-hl)] border-b border-[var(--color-accent)] flex-shrink-0">
+                    <span className="text-[12px] text-[var(--color-accent)] font-bold">
+                      📋 이전 대화 보는 중 — {viewingSession.title}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setViewingSession(null)}
+                      className="text-[11px] text-[var(--color-accent)] underline hover:opacity-70"
+                    >
+                      현재 대화로 돌아가기
+                    </button>
+                  </div>
+                )}
+
                 {/* Message list */}
                 <div className="flex-1 overflow-auto px-4 py-3 flex flex-col gap-3">
-                  {messages.length === 0 && !streaming && (
+                  {(viewingSession ? viewingSession.messages : messages).length === 0 && !streaming && (
                     <div className="flex-1 flex items-center justify-center text-center px-6">
                       <div className="text-[13px] text-[var(--color-ink4)] leading-relaxed max-w-[420px]">
                         만들고 싶은 워크플로우를 자연어로 설명해주세요.<br />
@@ -803,7 +864,7 @@ function AgentPageContent() {
                       </div>
                     </div>
                   )}
-                  {messages.map((msg: ChatMessage) => (
+                  {(viewingSession ? viewingSession.messages : messages).map((msg: ChatMessage) => (
                     <div
                       key={msg.id}
                       className={['flex items-end gap-2', msg.role === 'user' ? 'justify-end' : 'justify-start'].join(' ')}
@@ -881,9 +942,13 @@ function AgentPageContent() {
                   <textarea
                     className="flex-1 resize-none border border-[var(--color-line-soft)] rounded-lg px-[10px] py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
                     rows={2}
-                    placeholder={streaming ? 'AI가 처리 중입니다…' : '워크플로우를 자연어로 설명하세요… (Shift+Enter 줄바꿈)'}
+                    placeholder={
+                      viewingSession ? '이전 대화 보기 중 — 입력하려면 현재 대화로 돌아가세요'
+                      : streaming ? 'AI가 처리 중입니다…'
+                      : '워크플로우를 자연어로 설명하세요… (Shift+Enter 줄바꿈)'
+                    }
                     value={input}
-                    disabled={streaming}
+                    disabled={streaming || !!viewingSession}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
@@ -892,7 +957,7 @@ function AgentPageContent() {
                       }
                     }}
                   />
-                  <Btn onClick={() => void handleSend()} disabled={streaming} className="self-end">
+                  <Btn onClick={() => void handleSend()} disabled={streaming || !!viewingSession} className="self-end">
                     {streaming ? '처리 중…' : '전송 ↑'}
                   </Btn>
                 </div>
