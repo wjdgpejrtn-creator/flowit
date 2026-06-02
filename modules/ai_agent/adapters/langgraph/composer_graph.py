@@ -78,6 +78,13 @@ _logger = logging.getLogger(__name__)
 _QA_MAX_RETRY = 3
 _MAX_AGENT_ITERATIONS = 15  # 무한 루프 방지
 
+# 스킬 검색 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 상한. 이 거리 밖 후보는 제외해
+# 무관한 스킬이 옵션/노드 후보에 딸려 나오는 것을 막는다.
+# 기본값 0.50: staging 실측(BGE-M3, 한국어 짧은 텍스트) 기준 — 관련 스킬은 0.35~0.49,
+# 무관 쿼리는 0.64+에 분포해 0.50이 둘을 가른다(0.30은 거의 동일어도 컷해 과도했음).
+# 데이터 축적 후 SKILL_SEARCH_MAX_DISTANCE env로 무재배포 튜닝.
+_SKILL_SEARCH_MAX_DISTANCE = float(os.getenv("SKILL_SEARCH_MAX_DISTANCE", "0.50"))
+
 class _NextAction(BaseModel):
     """LLM 에이전트가 다음에 실행할 툴을 선택하는 스키마."""
 
@@ -668,14 +675,16 @@ class LangGraphOrchestrator:
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
 
-        # 커스텀 스킬 검색 — embedder + skill_search 모두 주입된 경우에만
+        # 커스텀 스킬 검색 — embedder + skill_search 모두 주입된 경우에만.
+        # 접근 가능 스코프(개인 본인 + 전사)를 관련성 컷과 함께 병합 검색(회사만 보던 한계 보완).
         if self._embedder is not None and self._skill_search is not None:
             try:
                 query_embedding = await self._embedder.embed(query)
-                skill_results = await self._skill_search.execute(
+                skill_results = await self._skill_search.execute_accessible(
                     query_embedding=query_embedding,
-                    scope=SkillScope.COMPANY,
+                    user_id=state["user_id"],
                     limit=10,
+                    max_distance=_SKILL_SEARCH_MAX_DISTANCE,
                 )
                 existing_ids = {c.node_id for c in candidates}
                 for skill in skill_results:
@@ -795,10 +804,12 @@ class LangGraphOrchestrator:
         query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
         try:
             query_embedding = await self._embedder.embed(query)
-            skill_results = await self._skill_search.execute(
+            # 접근 가능 스코프(개인 본인 + 전사) 병합 + 관련성 컷 — 무관 스킬 옵션 노출 차단.
+            skill_results = await self._skill_search.execute_accessible(
                 query_embedding=query_embedding,
-                scope=SkillScope.COMPANY,
+                user_id=state["user_id"],
                 limit=5,
+                max_distance=_SKILL_SEARCH_MAX_DISTANCE,
             )
         except Exception as exc:
             _logger.warning("suggest_skill_select 검색 실패 (one-shot 폴백): %s", exc)
@@ -1149,29 +1160,6 @@ class LangGraphOrchestrator:
     async def _execute_node(self, state: _State) -> dict:
         t0 = time.monotonic()
 
-        # HITL 게이트 — role==user 마지막 메시지에서 명시적 실행 요청 + 부정문 없을 때만 통과
-        _EXEC_KEYWORDS = ("실행", "execute", "run", "실행해", "실행해줘", "실행시켜", "돌려줘", "start", "launch")
-        _NEGATION_TOKENS = ("하지 마", "하지마", "말고", "안 해", "안해", "취소", "no", "don't", "stop", "말아줘")
-        user_msgs = [m for m in state["messages"] if m.get("role") == "user"]
-        user_message = (user_msgs[-1].get("content", "") if user_msgs else "").lower()
-        has_exec = any(kw in user_message for kw in _EXEC_KEYWORDS)
-        has_negation = any(neg in user_message for neg in _NEGATION_TOKENS)
-        if not has_exec or has_negation:
-            workflow_id_str = str(state["saved_workflow_id"]) if state.get("saved_workflow_id") else None
-            return {
-                "agent_done": True,
-                "collected_frames": [
-                    ResultFrame(
-                        intent="propose",
-                        payload={
-                            "workflow_id": workflow_id_str,
-                            "status": "ready_to_execute",
-                            "message": "워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.",
-                        },
-                    )
-                ],
-            }
-
         workflow_id = state.get("saved_workflow_id")
         if not workflow_id:
             return {
@@ -1330,6 +1318,25 @@ class LangGraphOrchestrator:
     # 15. user_confirm_node — 최종 ResultFrame emit (fixed DAG: 항상 ready_to_execute)
     async def _user_confirm_node(self, state: _State) -> dict:
         workflow_id = state.get("saved_workflow_id")
+        execution_result = state.get("execution_result")
+
+        if execution_result is not None:
+            return {
+                "collected_frames": [
+                    ResultFrame(
+                        intent="execution_review",
+                        payload={
+                            "workflow_id": str(workflow_id) if workflow_id else None,
+                            "execution_id": state.get("execution_id"),
+                            "execution_status": execution_result.get("status"),
+                            "output_quality_score": state.get("output_quality_score", 0.0),
+                            "output_quality_feedback": state.get("output_quality_feedback", ""),
+                            "session_id": str(state["session_id"]),
+                        },
+                    ),
+                ]
+            }
+
         explanation = state.get("workflow_explanation")
         return {
             "collected_frames": [

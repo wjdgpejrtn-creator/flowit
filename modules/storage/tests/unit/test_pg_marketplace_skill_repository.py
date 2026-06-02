@@ -42,10 +42,42 @@ def _sql(session: _CapturingSession) -> str:
 @pytest.mark.asyncio
 async def test_search_personal_excludes_promoted_by_default():
     session = _CapturingSession()
-    await PgMarketplaceSkillRepository(session).search([0.0] * 768, SkillScope.PERSONAL)
+    await PgMarketplaceSkillRepository(session).search(
+        [0.0] * 768, SkillScope.PERSONAL, owner_user_id=uuid4()
+    )
     sql = _sql(session)
     assert "FROM personal_skills" in sql
     assert "promoted_to_team_id IS NULL" in sql
+    # PERSONAL 검색은 소유자 인가 필터가 반드시 걸린다 (IDOR 차단)
+    assert "owner_user_id =" in sql
+
+
+@pytest.mark.asyncio
+async def test_search_personal_without_owner_returns_empty_no_query():
+    # owner 미지정 PERSONAL = 빈 결과 + SQL 미실행 (전체 개인 스킬 노출 원천 차단)
+    session = _CapturingSession()
+    result = await PgMarketplaceSkillRepository(session).search([0.0] * 768, SkillScope.PERSONAL)
+    assert result == []
+    assert session.stmt is None
+
+
+@pytest.mark.asyncio
+async def test_search_max_distance_adds_threshold_filter():
+    session = _CapturingSession()
+    await PgMarketplaceSkillRepository(session).search(
+        [0.0] * 768, SkillScope.COMPANY, max_distance=0.3
+    )
+    sql = _sql(session)
+    # 코사인 거리 연산(<=>)이 WHERE(임계)와 ORDER BY 양쪽에 등장 → 2회
+    assert sql.count("<=>") == 2
+
+
+@pytest.mark.asyncio
+async def test_search_no_max_distance_no_threshold_filter():
+    session = _CapturingSession()
+    await PgMarketplaceSkillRepository(session).search([0.0] * 768, SkillScope.COMPANY)
+    # 임계 미지정 → 거리 연산은 ORDER BY에만 1회
+    assert _sql(session).count("<=>") == 1
 
 
 @pytest.mark.asyncio
@@ -72,7 +104,7 @@ async def test_search_company_has_no_promoted_filter():
 async def test_search_include_promoted_drops_filter():
     session = _CapturingSession()
     await PgMarketplaceSkillRepository(session).search(
-        [0.0] * 768, SkillScope.PERSONAL, include_promoted=True
+        [0.0] * 768, SkillScope.PERSONAL, include_promoted=True, owner_user_id=uuid4()
     )
     assert "promoted_to_team_id IS NULL" not in _sql(session)
 

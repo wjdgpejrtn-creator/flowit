@@ -192,6 +192,7 @@ class AgentComposer:
     @modal.asgi_app()
     def fastapi(self):
         from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
+        from common_schemas.transport import ErrorFrame, ResultFrame
 
         api = FastAPI(title="agent-composer", version="1.0")
 
@@ -254,15 +255,30 @@ class AgentComposer:
                             round=req.payload.get("round", 1),
                             selected_skill_id=req.payload.get("selected_skill_id"),
                         ):
+                            # 워크플로우 id를 클라이언트에 노출하기 직전에 그래프의 save()(flush만,
+                            # unit-of-work)를 commit으로 확정한다. ResultFrame(payload.workflow_id)을
+                            # yield한 뒤에야 commit하면(루프 종료 후 commit) — 그 사이 explain/save_memory/
+                            # 세션프레임 GCS 저장이 commit을 수 초 지연시켜 — 프론트의 즉시 GET이
+                            # commit을 앞질러 404(E-WF-001)가 난다(read-after-write 레이스). round-1/2 공통.
+                            if isinstance(frame, ResultFrame) and frame.payload.get("workflow_id"):
+                                await session.commit()
                             resp = AgentProtocolResponse(
                                 frames=[frame],
                                 state_delta={},
                                 next_action="continue",
                             )
                             yield f"data: {resp.model_dump_json()}\n\n"
+
+                        # 루프 종료 후 안전 commit — ResultFrame이 없던 경로(에러/clarify)나 잔여
+                        # 쓰기를 확정. 위에서 이미 commit됐으면 pending 없는 no-op.
+                        # AsyncSession은 commit 없이 `async with` 종료 시 rollback이므로 필수.
+                        await session.commit()
                 except Exception as exc:
+                    # ErrorFrame을 frames에 실어 전파한다. 과거엔 frames=[] + state_delta만 담아
+                    # orchestrator _relay_stream이 resp.frames만 relay → state_delta 에러가 통째로
+                    # 삼켜져 보이지 않았다(워크플로우 저장 예외가 은폐되던 원인).
                     err = AgentProtocolResponse(
-                        frames=[],
+                        frames=[ErrorFrame(code="E_COMPOSER", message=str(exc))],
                         state_delta={"error": str(exc)},
                         next_action="error",
                     )
@@ -308,6 +324,8 @@ class AgentComposer:
                         personalization_client=None,  # TODO: PersonalizationClient 주입
                     )
                     diff = await use_case.execute(session_id, user_id, workflow_id)
+                    # 승인 use-case가 워크플로우 상태를 갱신할 경우 영속화 확정 (commit 없으면 rollback).
+                    await session.commit()
             finally:
                 await engine.dispose()
                 await connector.close_async()

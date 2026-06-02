@@ -60,6 +60,8 @@ class SkillRepository(ABC):
         limit: int = 10,
         include_promoted: bool = False,
         lifecycle_state: SkillState | None = None,
+        owner_user_id: UUID | None = None,
+        max_distance: float | None = None,
     ) -> list[MarketplacePersonalSkill | MarketplaceTeamSkill | MarketplaceCompanySkill]:
         """하이브리드 검색 — scope 범위 내 embedding 유사도 top-k.
 
@@ -73,6 +75,14 @@ class SkillRepository(ABC):
         lifecycle_state(ADR-0020 (b)): 지정 시 해당 게시 상태만 반환(예: PUBLISHED). None이면
         전체 상태. Composer 노드 후보 검색은 PUBLISHED만 보도록 SearchSkillsUseCase가 PUBLISHED를
         전달한다(미검토 DRAFT/REVIEW 오염 방지). 실제 WHERE 필터는 storage 구현 시 적용.
+
+        owner_user_id(scope=PERSONAL 필수 인가): 개인 스킬은 소유자 범위라 owner 필터 없이 검색하면
+        타 사용자 개인 스킬이 노출된다(IDOR). PERSONAL scope에서 owner_user_id가 None이면 구현체는
+        빈 결과를 반환한다(전체 노출 금지). PERSONAL 외 scope에서는 무시된다.
+
+        max_distance(관련성 컷): 코사인 거리(0=동일, 2=정반대) 상한. 지정 시 임계 이내 후보만 반환
+        — 무관한 스킬이 top-k에 딸려 나오는 것을 차단(Composer가 SKILL_SEARCH_MAX_DISTANCE로 주입).
+        None이면 거리 필터 없이 top-k.
         """
         ...
 

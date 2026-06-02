@@ -368,6 +368,9 @@ module "api_server" {
     # orchestrator가 sub-agent 라우팅에 쓰는 동일 `skills-builder-url` secret 재사용 — 값 일원화.
     # 미설정 시 라우트가 503으로 graceful degrade(api_server boot는 안 깨짐).
     SKILLS_BUILDER_URL = { secret_id = "skills-builder-url", version = "latest" }
+    # 스킬 게시(PublishSkillUseCase) 시 임베딩 누락 백필용 BGE-M3 endpoint(llm-base). 동일
+    # `embedding-base-url` secret 재사용. 미설정 시 embedder 미주입 → 기존 동작(임베딩 누락) 유지.
+    EMBEDDING_BASE_URL = { secret_id = "embedding-base-url", version = "latest" }
   }
 
   labels = merge(local.common_labels, { role = "api-server" })

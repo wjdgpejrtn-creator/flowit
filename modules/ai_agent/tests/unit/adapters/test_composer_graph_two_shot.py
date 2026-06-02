@@ -137,7 +137,7 @@ class TestSuggestSkillSelect:
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1] * 768)
         skill_search = AsyncMock()
-        skill_search.execute = AsyncMock(return_value=[_skill(name="요약가"), _skill(name="번역가")])
+        skill_search.execute_accessible = AsyncMock(return_value=[_skill(name="요약가"), _skill(name="번역가")])
         store = AsyncMock()
 
         oc = _build_orchestrator(embedder=embedder, skill_search=skill_search, composer_state_store=store)
@@ -170,7 +170,7 @@ class TestSuggestSkillSelect:
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1] * 768)
         skill_search = AsyncMock()
-        skill_search.execute = AsyncMock(return_value=[])
+        skill_search.execute_accessible = AsyncMock(return_value=[])
         oc = _build_orchestrator(embedder=embedder, skill_search=skill_search, composer_state_store=AsyncMock())
         result = await oc._suggest_skill_select_node(_state())
         assert result["awaiting_skill_selection"] is False
@@ -180,7 +180,7 @@ class TestSuggestSkillSelect:
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1] * 768)
         skill_search = AsyncMock()
-        skill_search.execute = AsyncMock(return_value=[_skill()])
+        skill_search.execute_accessible = AsyncMock(return_value=[_skill()])
         oc = _build_orchestrator(embedder=embedder, skill_search=skill_search, composer_state_store=None)
         result = await oc._suggest_skill_select_node(_state())
         assert result["awaiting_skill_selection"] is False
@@ -200,7 +200,7 @@ class TestSuggestSkillSelect:
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1] * 768)
         skill_search = AsyncMock()
-        skill_search.execute = AsyncMock(return_value=[_skill(node_definition_id=None)])
+        skill_search.execute_accessible = AsyncMock(return_value=[_skill(node_definition_id=None)])
         oc = _build_orchestrator(embedder=embedder, skill_search=skill_search, composer_state_store=AsyncMock())
         result = await oc._suggest_skill_select_node(_state())
         assert result["awaiting_skill_selection"] is True
@@ -411,7 +411,7 @@ class TestEndToEndStream:
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1] * 768)
         skill_search = AsyncMock()
-        skill_search.execute = AsyncMock(return_value=[_skill(name="요약가")])
+        skill_search.execute_accessible = AsyncMock(return_value=[_skill(name="요약가")])
         store = AsyncMock()
 
         oc = LangGraphOrchestrator(

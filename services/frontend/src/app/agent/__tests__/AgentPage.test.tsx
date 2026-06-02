@@ -26,7 +26,7 @@ const mockStreamCreateSession = jest.fn().mockImplementation(
 jest.mock('../../../lib/api/agentApi', () => ({
   streamCreateSession: (...args: unknown[]) => mockStreamCreateSession(...args),
   getStreamUrl: (id: string) => `/api/v1/ai/sessions/${id}/stream`,
-  sendSlotAnswer: jest.fn(),
+  streamSlotAnswer: jest.fn(),
 }));
 
 jest.mock('../../../hooks/useSSEStream', () => ({
@@ -35,6 +35,7 @@ jest.mock('../../../hooks/useSSEStream', () => ({
 
 jest.mock('../../../lib/api/workflowApi', () => ({
   executeWorkflow: jest.fn(),
+  getWorkflow: jest.fn(() => Promise.resolve(null)),
 }));
 
 jest.mock('../../../stores/authStore', () => ({
