@@ -28,6 +28,7 @@ export interface AgentSession {
   id: string;
   title: string;
   createdAt: number;
+  messages: ChatMessage[];
 }
 
 interface AgentStoreState {
@@ -38,6 +39,9 @@ interface AgentStoreState {
   sessions: AgentSession[];
   setSessionId: (id: string) => void;
   addSession: (session: AgentSession) => void;
+
+  viewingSession: AgentSession | null;
+  setViewingSession: (session: AgentSession | null) => void;
 
   messages: ChatMessage[];
   addMessage: (msg: ChatMessage) => void;
@@ -69,6 +73,9 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   setSessionId: (id) => set({ sessionId: id }),
   addSession: (session) =>
     set((s) => ({ sessions: [session, ...s.sessions] })),
+
+  viewingSession: null,
+  setViewingSession: (session) => set({ viewingSession: session }),
 
   messages: [],
   addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),

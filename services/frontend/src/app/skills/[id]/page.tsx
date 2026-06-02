@@ -7,11 +7,14 @@ import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import Skel from '@/components/common/Skel';
 import ErrorBanner from '@/components/common/ErrorBanner';
+import MarkdownView from '@/components/common/MarkdownView';
 import {
   getPersonalSkill,
+  getPersonalSkillDocument,
   updatePersonalSkill,
   deletePersonalSkill,
   type PersonalSkill,
+  type PersonalSkillDocument,
   type SkillLifecycleState,
 } from '@/lib/api/skillApi';
 
@@ -71,11 +74,18 @@ export default function SkillDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // 지침서(SKILL.md) — 메타와 별개로 lazy-load. 404는 "지침서 없음"(에러 아님)으로 구분.
+  const [doc, setDoc] = useState<PersonalSkillDocument | null>(null);
+  const [docLoading, setDocLoading] = useState(true);
+  const [docMissing, setDocMissing] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
+
   // 편집 상태
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editTags, setEditTags] = useState('');
+  const [editInstructions, setEditInstructions] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -95,6 +105,18 @@ export default function SkillDetailPage() {
       })
       .catch((err) => setError(toErrorMessage(err)))
       .finally(() => setLoading(false));
+
+    setDocLoading(true);
+    setDocMissing(false);
+    setDocError(null);
+    getPersonalSkillDocument(id)
+      .then(setDoc)
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : '';
+        if (msg.startsWith('404')) setDocMissing(true);
+        else setDocError(toErrorMessage(err));
+      })
+      .finally(() => setDocLoading(false));
   }, [id]);
 
   useEffect(() => {
@@ -108,6 +130,7 @@ export default function SkillDetailPage() {
     setEditName(skill.name);
     setEditDesc(skill.description);
     setEditTags(skill.tags.join(', '));
+    setEditInstructions(doc?.instructions ?? '');
     setSaveError(null);
     setEditing(true);
   };
@@ -126,16 +149,34 @@ export default function SkillDetailPage() {
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean);
+
+      // instructions는 변경된 경우에만 전송 — 불필요한 GCS 재저장/빈 문서 생성 방지.
+      const origInstr = doc?.instructions ?? '';
+      const instructionsChanged = editInstructions !== origInstr;
+
       const updated = await updatePersonalSkill(skill.skill_id, {
         name: editName,
         description: editDesc,
         tags,
+        ...(instructionsChanged ? { instructions: editInstructions } : {}),
       });
       setSkill(updated);
+
+      // 본문이 바뀌었으면 우측 패널에 즉시 반영(재조회 없이).
+      if (instructionsChanged) {
+        setDoc({
+          skill_id: updated.skill_id,
+          name: updated.name,
+          description: updated.description,
+          instructions: editInstructions,
+        });
+        setDocMissing(false);
+        setDocError(null);
+      }
       setEditing(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
-      if (msg.startsWith('400')) setSaveError('DRAFT 상태의 스킬만 수정할 수 있습니다.');
+      if (msg.startsWith('400')) setSaveError('입력값을 확인해 주세요. (이름·설명은 비울 수 없습니다)');
       else setSaveError('저장에 실패했습니다. 다시 시도해 주세요.');
     } finally {
       setSaving(false);
@@ -199,109 +240,139 @@ export default function SkillDetailPage() {
         </div>
       )}
 
-      {/* Content */}
+      {/* Content — 좌(메타/폼) + 우(지침서) 2단 */}
       {!loading && !error && skill && (
-        <div className="p-[14px] flex flex-col gap-3 max-w-[640px]">
-          {/* Save error */}
+        <div className="p-[14px] flex flex-col gap-3">
           {saveError && (
             <ErrorBanner small>
               <span>{saveError}</span>
             </ErrorBanner>
           )}
 
-          <div className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[14px] flex flex-col">
-            {editing ? (
-              /* ── 편집 폼 ── */
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className="text-[12px] text-[var(--color-ink3)]">이름</label>
-                  <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="border-[1.5px] border-[var(--color-ink)] rounded px-2 py-[4px] text-[13px] bg-[var(--color-paper)] outline-none focus:border-[var(--color-accent)]"
-                  />
+          <div className="flex flex-col lg:flex-row gap-3 items-start">
+            {/* 좌측 — 메타데이터 / 편집 폼 */}
+            <div className="w-full lg:w-[560px] lg:flex-shrink-0 border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[14px] flex flex-col">
+              {editing ? (
+                /* ── 편집 폼 (메타) ── */
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[12px] text-[var(--color-ink3)]">이름</label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="border-[1.5px] border-[var(--color-ink)] rounded px-2 py-[4px] text-[13px] bg-[var(--color-paper)] outline-none focus:border-[var(--color-accent)]"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[12px] text-[var(--color-ink3)]">설명</label>
+                    <textarea
+                      value={editDesc}
+                      onChange={(e) => setEditDesc(e.target.value)}
+                      rows={4}
+                      className="border-[1.5px] border-[var(--color-ink)] rounded px-2 py-[4px] text-[13px] bg-[var(--color-paper)] outline-none focus:border-[var(--color-accent)] resize-y"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[12px] text-[var(--color-ink3)]">태그 (쉼표 구분, 비우면 전체 삭제)</label>
+                    <input
+                      type="text"
+                      value={editTags}
+                      onChange={(e) => setEditTags(e.target.value)}
+                      placeholder="예: 리포트, AI, 자동화"
+                      className="border-[1.5px] border-[var(--color-ink)] rounded px-2 py-[4px] text-[13px] bg-[var(--color-paper)] outline-none focus:border-[var(--color-accent)]"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <Btn primary onClick={handleSave} disabled={saving || !editName.trim()}>
+                      {saving ? '저장 중…' : '저장'}
+                    </Btn>
+                    <Btn ghost onClick={handleCancelEdit} disabled={saving}>
+                      취소
+                    </Btn>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-[12px] text-[var(--color-ink3)]">설명</label>
-                  <textarea
-                    value={editDesc}
-                    onChange={(e) => setEditDesc(e.target.value)}
-                    rows={4}
-                    className="border-[1.5px] border-[var(--color-ink)] rounded px-2 py-[4px] text-[13px] bg-[var(--color-paper)] outline-none focus:border-[var(--color-accent)] resize-y"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-[12px] text-[var(--color-ink3)]">태그 (쉼표 구분, 비우면 전체 삭제)</label>
-                  <input
-                    type="text"
-                    value={editTags}
-                    onChange={(e) => setEditTags(e.target.value)}
-                    placeholder="예: 리포트, AI, 자동화"
-                    className="border-[1.5px] border-[var(--color-ink)] rounded px-2 py-[4px] text-[13px] bg-[var(--color-paper)] outline-none focus:border-[var(--color-accent)]"
-                  />
-                </div>
-                <div className="flex items-center gap-2 pt-1">
-                  <Btn primary onClick={handleSave} disabled={saving}>
-                    {saving ? '저장 중…' : '저장'}
-                  </Btn>
-                  <Btn ghost onClick={handleCancelEdit} disabled={saving}>
-                    취소
-                  </Btn>
-                </div>
-              </div>
-            ) : (
-              /* ── 읽기 모드 ── */
-              <div className="flex flex-col">
-                <Field label="이름">{skill.name}</Field>
-                <Field label="설명">
-                  <span className="whitespace-pre-wrap">{skill.description || '-'}</span>
-                </Field>
-                <Field label="태그">
-                  {skill.tags.length > 0 ? (
-                    <span className="flex flex-wrap gap-1">
-                      {skill.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="text-[11px] border border-[var(--color-ink4)] rounded px-[6px] py-0 text-[var(--color-ink3)]"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </span>
-                  ) : (
-                    '-'
-                  )}
-                </Field>
-                <Field label="상태">
-                  <LifecyclePill state={skill.lifecycle_state} />
-                </Field>
-                <Field label="버전">v{skill.version}</Field>
-                <Field label="생성일">{new Date(skill.created_at).toLocaleString('ko-KR')}</Field>
-                <Field label="수정일">{new Date(skill.updated_at).toLocaleString('ko-KR')}</Field>
-                {skill.workflow_id && <Field label="워크플로우 ID">{skill.workflow_id}</Field>}
-                {skill.node_definition_id && <Field label="노드 ID">{skill.node_definition_id}</Field>}
+              ) : (
+                /* ── 읽기 모드 ── */
+                <div className="flex flex-col">
+                  <Field label="이름">{skill.name}</Field>
+                  <Field label="설명">
+                    <span className="whitespace-pre-wrap">{skill.description || '-'}</span>
+                  </Field>
+                  <Field label="태그">
+                    {skill.tags.length > 0 ? (
+                      <span className="flex flex-wrap gap-1">
+                        {skill.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="text-[11px] border border-[var(--color-ink4)] rounded px-[6px] py-0 text-[var(--color-ink3)]"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      '-'
+                    )}
+                  </Field>
+                  <Field label="상태">
+                    <LifecyclePill state={skill.lifecycle_state} />
+                  </Field>
+                  <Field label="버전">v{skill.version}</Field>
+                  <Field label="생성일">{new Date(skill.created_at).toLocaleString('ko-KR')}</Field>
+                  <Field label="수정일">{new Date(skill.updated_at).toLocaleString('ko-KR')}</Field>
+                  {skill.workflow_id && <Field label="워크플로우 ID">{skill.workflow_id}</Field>}
+                  {skill.node_definition_id && <Field label="노드 ID">{skill.node_definition_id}</Field>}
 
-                {/* 액션 버튼 — DRAFT만 */}
-                {isDraft && (
+                  {/* 액션 — 수정은 owner면 상태 무관(게시 스킬도), 삭제는 DRAFT만 */}
                   <div className="flex items-center gap-2 pt-3">
                     <Btn primary onClick={handleStartEdit}>수정</Btn>
-                    {confirmDelete ? (
-                      <>
-                        <Btn danger onClick={handleDelete} disabled={deleting}>
-                          {deleting ? '삭제 중…' : '정말 삭제'}
-                        </Btn>
-                        <Btn ghost onClick={() => setConfirmDelete(false)} disabled={deleting}>
-                          취소
-                        </Btn>
-                      </>
-                    ) : (
-                      <Btn danger onClick={() => setConfirmDelete(true)}>삭제</Btn>
-                    )}
+                    {isDraft &&
+                      (confirmDelete ? (
+                        <>
+                          <Btn danger onClick={handleDelete} disabled={deleting}>
+                            {deleting ? '삭제 중…' : '정말 삭제'}
+                          </Btn>
+                          <Btn ghost onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                            취소
+                          </Btn>
+                        </>
+                      ) : (
+                        <Btn danger onClick={() => setConfirmDelete(true)}>삭제</Btn>
+                      ))}
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
+
+            {/* 우측 — 지침서(SKILL.md) 본문 / 편집 textarea */}
+            <div className="w-full lg:flex-1 lg:min-w-0 border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[14px] flex flex-col gap-2">
+              <div className="text-[13px] font-bold text-[var(--color-ink)]">지침서</div>
+              {editing ? (
+                <textarea
+                  value={editInstructions}
+                  onChange={(e) => setEditInstructions(e.target.value)}
+                  placeholder="# 지침서 (Markdown)&#10;스킬의 상세 동작을 마크다운으로 작성하세요."
+                  className="w-full min-h-[420px] border-[1.5px] border-[var(--color-ink)] rounded px-2 py-[8px] text-[12px] font-mono leading-[1.6] bg-[var(--color-paper)] outline-none focus:border-[var(--color-accent)] resize-y"
+                />
+              ) : docLoading ? (
+                <div className="flex flex-col gap-2">
+                  <Skel className="h-[14px] w-full" />
+                  <Skel className="h-[14px] w-[90%]" />
+                  <Skel className="h-[14px] w-[70%]" />
+                </div>
+              ) : docError ? (
+                <span className="text-[13px] text-red-600">{docError}</span>
+              ) : docMissing || !doc ? (
+                <span className="text-[13px] text-[var(--color-ink3)]">
+                  등록된 지침서가 없습니다. &lsquo;수정&rsquo;에서 작성할 수 있습니다.
+                </span>
+              ) : doc.instructions ? (
+                <MarkdownView source={doc.instructions} />
+              ) : (
+                <span className="text-[13px] text-[var(--color-ink3)]">(빈 지침서)</span>
+              )}
+            </div>
           </div>
         </div>
       )}

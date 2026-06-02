@@ -73,6 +73,17 @@ export interface UpdatePersonalSkillRequest {
   name?: string;
   description?: string;
   tags?: string[];
+  // 지침서(SKILL.md) 본문 — 주어지면 백엔드가 GCS에 재저장(ADR-0017). 미전달 시 본문 미변경.
+  instructions?: string;
+}
+
+// 개인 스킬 지침서(SKILL.md) 본문 — 상세 페이지가 메타 조회 후 lazy-load (백엔드
+// PersonalSkillDocumentResponse 대응). 마켓플레이스 document와 동형이나 owner 게이트(상태 무관).
+export interface PersonalSkillDocument {
+  skill_id: string;
+  name: string;
+  description: string;
+  instructions: string;
 }
 
 export async function createPersonalSkill(
@@ -213,6 +224,12 @@ export async function getMarketplaceSkillDocument(
 
 export async function getPersonalSkill(skillId: string): Promise<PersonalSkill> {
   return apiJson<PersonalSkill>(`/api/v1/skills/personal/${skillId}`);
+}
+
+// 개인 스킬 지침서(SKILL.md) 본문 — owner 전용, lifecycle 무관(미게시 DRAFT도 미리보기/편집 가능).
+// GCS에 본문이 없으면 404 → 호출측이 "지침서 없음"으로 graceful 처리.
+export async function getPersonalSkillDocument(skillId: string): Promise<PersonalSkillDocument> {
+  return apiJson<PersonalSkillDocument>(`/api/v1/skills/personal/${skillId}/document`);
 }
 
 export async function updatePersonalSkill(
