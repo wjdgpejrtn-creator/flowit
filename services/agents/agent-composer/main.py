@@ -192,6 +192,7 @@ class AgentComposer:
     @modal.asgi_app()
     def fastapi(self):
         from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
+        from common_schemas.transport import ErrorFrame
 
         api = FastAPI(title="agent-composer", version="1.0")
 
@@ -267,8 +268,11 @@ class AgentComposer:
                         # (agent-skills-builder와 동일 패턴)
                         await session.commit()
                 except Exception as exc:
+                    # ErrorFrame을 frames에 실어 전파한다. 과거엔 frames=[] + state_delta만 담아
+                    # orchestrator _relay_stream이 resp.frames만 relay → state_delta 에러가 통째로
+                    # 삼켜져 보이지 않았다(워크플로우 저장 예외가 은폐되던 원인).
                     err = AgentProtocolResponse(
-                        frames=[],
+                        frames=[ErrorFrame(code="E_COMPOSER", message=str(exc))],
                         state_delta={"error": str(exc)},
                         next_action="error",
                     )
