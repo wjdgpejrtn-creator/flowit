@@ -6,6 +6,7 @@ import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
 import Skel from '@/components/common/Skel';
 import ErrorBanner from '@/components/common/ErrorBanner';
+import MarkdownView from '@/components/common/MarkdownView';
 import {
   getMarketplaceSkill,
   getMarketplaceSkillDocument,
@@ -154,8 +155,8 @@ function MarketplaceSkillDetailContent() {
       )}
 
       {!loading && !error && skill && (
-        <div className="p-[14px] flex flex-col gap-3 max-w-[640px]">
-          <div className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[14px] flex flex-col">
+        <div className="p-[14px] flex flex-col lg:flex-row gap-3 items-start">
+          <div className="w-full lg:w-[560px] lg:flex-shrink-0 border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[14px] flex flex-col">
             <Field label="이름">{skill.name}</Field>
             <Field label="설명">
               <span className="whitespace-pre-wrap">{skill.description || '-'}</span>
@@ -186,8 +187,8 @@ function MarketplaceSkillDetailContent() {
             {skill.node_definition_id && <Field label="노드 ID">{skill.node_definition_id}</Field>}
           </div>
 
-          {/* 지침서(SKILL.md) 본문 */}
-          <div className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[14px] flex flex-col gap-2">
+          {/* 지침서(SKILL.md) 본문 — 우측 패널 */}
+          <div className="w-full lg:flex-1 lg:min-w-0 border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-[14px] flex flex-col gap-2">
             <div className="text-[13px] font-bold text-[var(--color-ink)]">지침서</div>
             {docLoading ? (
               <div className="flex flex-col gap-2">
@@ -199,10 +200,10 @@ function MarketplaceSkillDetailContent() {
               <span className="text-[13px] text-red-600">{docError}</span>
             ) : docMissing || !doc ? (
               <span className="text-[13px] text-[var(--color-ink3)]">등록된 지침서가 없습니다.</span>
+            ) : doc.instructions ? (
+              <MarkdownView source={doc.instructions} />
             ) : (
-              <pre className="text-[12px] text-[var(--color-ink)] whitespace-pre-wrap break-words font-mono leading-[1.5] bg-[var(--color-paper)] border border-[var(--color-line-soft)] rounded p-[10px] max-h-[480px] overflow-auto">
-                {doc.instructions || '(빈 지침서)'}
-              </pre>
+              <span className="text-[13px] text-[var(--color-ink3)]">(빈 지침서)</span>
             )}
           </div>
         </div>

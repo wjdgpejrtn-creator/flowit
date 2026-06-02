@@ -12,6 +12,7 @@ from skills_marketplace.application.use_cases import (
     DeletePersonalSkillUseCase,
     GetMarketplaceSkillDocumentUseCase,
     GetMarketplaceSkillUseCase,
+    GetPersonalSkillDocumentUseCase,
     GetPersonalSkillUseCase,
     ListMarketplaceSkillsUseCase,
     ListReviewQueueUseCase,
@@ -135,10 +136,20 @@ def get_get_personal_skill_use_case(
     return GetPersonalSkillUseCase(repo=repo)
 
 
+def get_get_personal_skill_document_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+    doc_store: SkillDocumentStore = Depends(get_skill_document_store),
+) -> GetPersonalSkillDocumentUseCase:
+    """개인 스킬 지침서(SKILL.md) 조회 — 상세 페이지 본문 (owner only, 상태 무관, GCS load)."""
+    return GetPersonalSkillDocumentUseCase(repo=repo, doc_store=doc_store)
+
+
 def get_update_personal_skill_use_case(
     repo: SkillRepository = Depends(get_marketplace_skill_repository),
+    doc_store: SkillDocumentStore = Depends(get_skill_document_store),
 ) -> UpdatePersonalSkillUseCase:
-    return UpdatePersonalSkillUseCase(repo=repo)
+    """개인 스킬 수정 — doc_store는 instructions(SKILL.md) 본문 재저장용(ADR-0017)."""
+    return UpdatePersonalSkillUseCase(repo=repo, doc_store=doc_store)
 
 
 def get_delete_personal_skill_use_case(

@@ -1,16 +1,19 @@
 """ListUserPersonalSkills / UpdatePersonalSkill / DeletePersonalSkill 유스케이스 단위 테스트.
 
-personal skills 미리보기/편집 UI 백엔드 (REQ-013, 가원 요청). 인가(owner) + lifecycle(DRAFT) +
-GCS 정리(삭제 시 doc_store.delete) 경계를 mock repo/doc_store로 검증.
+personal skills 미리보기/편집 UI 백엔드 (REQ-013). 인가(owner) + lifecycle(Delete만 DRAFT, Update는
+상태 무관 — 2026-06-02 게시 스킬 편집 허용) + GCS(Update 시 instructions 재저장 / Delete 시 정리)
+경계를 mock repo/doc_store로 검증.
 """
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from common_schemas import SkillDocument
 from common_schemas.exceptions import AuthorizationError, NotFoundError, ValidationError
 
 from skills_marketplace.application.use_cases import (
     DeletePersonalSkillUseCase,
+    GetPersonalSkillDocumentUseCase,
     GetPersonalSkillUseCase,
     ListUserPersonalSkillsUseCase,
     UpdatePersonalSkillUseCase,
@@ -44,8 +47,10 @@ class _InMemorySkillRepo:
 class _SpyDocStore:
     def __init__(self) -> None:
         self.deleted: list[UUID] = []
+        self.saved: list[tuple[UUID, object]] = []
 
     async def save(self, skill_id, document):
+        self.saved.append((skill_id, document))
         return f"gs://bucket/skills/{skill_id}/SKILL.md"
 
     async def load(self, skill_id):
@@ -163,13 +168,50 @@ async def test_update_not_found():
 
 
 @pytest.mark.asyncio
-async def test_update_non_draft_rejected():
+async def test_update_allows_published():
+    """게시(PUBLISHED) 스킬도 owner면 수정 가능 — 2026-06-02 DRAFT-only 제약 해제."""
     repo = _InMemorySkillRepo()
     me, sid = uuid4(), uuid4()
-    await repo.save_personal(_personal(sid, me, SkillState.PUBLISHED))
+    await repo.save_personal(_personal(sid, me, SkillState.PUBLISHED, name="원래"))
 
-    with pytest.raises(ValidationError):
-        await UpdatePersonalSkillUseCase(repo).execute(sid, me, name="수정시도")
+    updated = await UpdatePersonalSkillUseCase(repo).execute(sid, me, name="게시후수정")
+
+    assert updated.name == "게시후수정"
+    assert SkillState(updated.lifecycle_state) == SkillState.PUBLISHED  # 상태는 그대로
+
+
+@pytest.mark.asyncio
+async def test_update_instructions_resaves_document():
+    """instructions가 오고 doc_store가 있으면 SkillDocument를 GCS에 재저장하고 URI를 메타에 반영."""
+    repo = _InMemorySkillRepo()
+    doc = _SpyDocStore()
+    me, sid = uuid4(), uuid4()
+    await repo.save_personal(_personal(sid, me, name="문서스킬"))
+
+    updated = await UpdatePersonalSkillUseCase(repo, doc).execute(
+        sid, me, description="새설명", instructions="# 새 지침서\n본문"
+    )
+
+    assert len(doc.saved) == 1
+    saved_id, saved_doc = doc.saved[0]
+    assert saved_id == sid
+    assert saved_doc.instructions == "# 새 지침서\n본문"
+    assert saved_doc.description == "새설명"  # 이번 수정의 최종값을 문서에도 반영
+    assert updated.skill_document_uri == f"gs://bucket/skills/{sid}/SKILL.md"
+
+
+@pytest.mark.asyncio
+async def test_update_instructions_without_doc_store_skips_save():
+    """doc_store 미주입이면 본문 저장은 건너뛰고 메타만 갱신(크래시 없음)."""
+    repo = _InMemorySkillRepo()
+    me, sid = uuid4(), uuid4()
+    await repo.save_personal(_personal(sid, me, name="원래"))
+
+    updated = await UpdatePersonalSkillUseCase(repo).execute(
+        sid, me, name="새이름", instructions="# 본문"
+    )
+
+    assert updated.name == "새이름"  # 메타는 갱신됨
 
 
 @pytest.mark.asyncio
@@ -300,10 +342,71 @@ async def test_get_not_found():
 @pytest.mark.asyncio
 async def test_get_returns_any_lifecycle_state():
     """Get은 lifecycle 제약 없음 — DRAFT 외 상태(PUBLISHED 등)도 owner면 조회 가능.
-    Update/Delete만 DRAFT-only 제약 (편집 가능 조건 ≠ 조회 가능 조건)."""
+    Delete만 DRAFT-only 제약 (편집 가능 조건 ≠ 조회 가능 조건)."""
     repo = _InMemorySkillRepo()
     me, sid = uuid4(), uuid4()
     await repo.save_personal(_personal(sid, me, SkillState.PUBLISHED))
 
     skill = await GetPersonalSkillUseCase(repo).execute(sid, me)
     assert SkillState(skill.lifecycle_state) == SkillState.PUBLISHED
+
+
+# ── Get document (지침서 본문) ─────────────────────────────────────────────────
+
+
+class _DocStoreWithDoc:
+    """load가 항상 주어진 SkillDocument를 반환하는 doc_store(본문 조회 성공 경로용)."""
+
+    def __init__(self, document: SkillDocument | None) -> None:
+        self._document = document
+
+    async def save(self, skill_id, document):
+        return f"gs://bucket/skills/{skill_id}/SKILL.md"
+
+    async def load(self, skill_id):
+        return self._document
+
+    async def delete(self, skill_id):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_get_document_returns_for_owner():
+    repo = _InMemorySkillRepo()
+    me, sid = uuid4(), uuid4()
+    await repo.save_personal(_personal(sid, me, SkillState.PUBLISHED, name="문서스킬"))
+    document = SkillDocument(skill_id=sid, name="문서스킬", description="설명", instructions="# 본문")
+
+    result = await GetPersonalSkillDocumentUseCase(repo, _DocStoreWithDoc(document)).execute(sid, me)
+
+    assert result.instructions == "# 본문"
+    assert result.skill_id == sid
+
+
+@pytest.mark.asyncio
+async def test_get_document_rejects_non_owner():
+    repo = _InMemorySkillRepo()
+    sid = uuid4()
+    await repo.save_personal(_personal(sid, uuid4()))  # owner = 타인
+    document = SkillDocument(skill_id=sid, name="x", description="y", instructions="z")
+
+    with pytest.raises(AuthorizationError):
+        await GetPersonalSkillDocumentUseCase(repo, _DocStoreWithDoc(document)).execute(sid, uuid4())
+
+
+@pytest.mark.asyncio
+async def test_get_document_skill_not_found():
+    repo = _InMemorySkillRepo()
+    with pytest.raises(NotFoundError):
+        await GetPersonalSkillDocumentUseCase(repo, _DocStoreWithDoc(None)).execute(uuid4(), uuid4())
+
+
+@pytest.mark.asyncio
+async def test_get_document_no_document_in_gcs():
+    """스킬은 있으나 GCS에 SKILL.md가 없으면(load None) NotFoundError → 프론트 graceful."""
+    repo = _InMemorySkillRepo()
+    me, sid = uuid4(), uuid4()
+    await repo.save_personal(_personal(sid, me))
+
+    with pytest.raises(NotFoundError):
+        await GetPersonalSkillDocumentUseCase(repo, _DocStoreWithDoc(None)).execute(sid, me)

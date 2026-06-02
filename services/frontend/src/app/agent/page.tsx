@@ -473,6 +473,8 @@ function AgentPageContent() {
   const {
     mode, setMode,
     sessionId, setSessionId,
+    sessions, addSession,
+    viewingSession, setViewingSession,
     messages, addMessage, clearMessages,
     rationaleText, appendRationale, clearRationale,
     slotQuestion, setSlotQuestion,
@@ -500,6 +502,27 @@ function AgentPageContent() {
 
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
+  }, []);
+
+  // 테스트 1: 페이지 진입 시 이전 세션 정리.
+  // Zustand 싱글턴은 페이지 이동 후 재진입해도 상태가 남아있으므로
+  // 대시보드 → AI 채팅 재진입 시 빈 대화창으로 시작하도록 초기화.
+  // 단, readyToExecute가 있으면 워크플로우 완성 후 이탈→복귀 흐름이므로 초기화 건너뜀.
+  useEffect(() => {
+    const state = useAgentStore.getState();
+    if (state.readyToExecute) return;
+    const { sessionId: sid, messages: msgs } = state;
+    if (msgs.length > 0) {
+      const title = msgs.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
+      state.addSession({ id: sid || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...msgs] });
+    }
+    state.clearMessages();
+    state.clearRationale();
+    state.setSessionId('');
+    state.setCurrentStep(null);
+    state.setSlotQuestion(null);
+    state.setViewingSession(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 노드 카탈로그 1회 로드 (편집 캔버스 노드 라벨/리스크 표시용).
@@ -625,6 +648,28 @@ function AgentPageContent() {
     const text = (overrideText ?? input).trim();
     if (!text || streaming) return;
 
+    // Bug 6/7: setSessionId('')는 다음 렌더에 반영될 뿐, 현재 클로저의 sessionId는 그대로다.
+    // store에서 최신값을 직접 읽어 로컬 변수로 페이로드를 결정한다.
+    // — Bug 6: autosend 경로에서 handleNewChat() 직후 호출 시 store는 이미 ''로 갱신됨
+    // — Bug 7: readyToExecute 상태에서 sid를 ''로 덮어쓰고 store도 동기 갱신
+    let sid = useAgentStore.getState().sessionId;
+    if (readyToExecute) {
+      // 테스트 2: ConfirmCard 표시 중 새 메시지 → 이전 대화를 히스토리에 저장하고 완전히 초기화
+      const { messages: prevMsgs } = useAgentStore.getState();
+      if (prevMsgs.length > 0) {
+        const title = prevMsgs.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
+        useAgentStore.getState().addSession({ id: sid || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...prevMsgs] });
+      }
+      clearMessages();
+      clearRationale();
+      setSessionId('');
+      setReadyToExecute(null);
+      setLoadedWorkflow(null);
+      setCurrentStep(null);
+      setSkillSelection(null);
+      sid = '';
+    }
+
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -638,7 +683,7 @@ function AgentPageContent() {
 
     try {
       await streamCreateSession(
-        { message: text, session_id: sessionId ?? undefined },
+        { message: text, session_id: sid || undefined },
         handleFrame,
         controller.signal,
       );
@@ -689,17 +734,25 @@ function AgentPageContent() {
     const q = searchParams.get('q');
     const autosend = searchParams.get('autosend');
     if (q && autosend === '1' && !autoSentRef.current && !streaming) {
-      autoSentRef.current = true;
+      // Bug 6: 대시보드에서 새 워크플로우 요청으로 진입 시 이전 세션 상태를 초기화.
+      // 초기화 없이 전송하면 기존 메시지·캔버스가 새 대화에 겹쳐 표시된다.
+      handleNewChat();
+      autoSentRef.current = true; // handleNewChat이 false로 리셋하므로 재설정
       setInput(q);
       void handleSend(q);
       router.replace('/agent', { scroll: false });
     }
-    // handleSend는 매 렌더 새로 만들어지므로 의도적으로 dep에서 제외
+    // handleSend/handleNewChat는 매 렌더 새로 만들어지므로 의도적으로 dep에서 제외
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   const stepIndex = currentStep ? STEP_ORDER.indexOf(currentStep) + 1 : 0;
   const handleNewChat = () => {
+    // 테스트 3: sessionId가 비어있어도 메시지가 있으면 히스토리에 저장
+    if (messages.length > 0) {
+      const title = messages.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
+      addSession({ id: sessionId || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...messages] });
+    }
     abortRef.current?.abort();
     clearMessages();
     clearRationale();
@@ -709,6 +762,7 @@ function AgentPageContent() {
     setReadyToExecute(null);
     setSkillSelection(null);
     setLoadedWorkflow(null);
+    setViewingSession(null);
     autoSentRef.current = false;
     setMode('wizard');
   };
@@ -728,17 +782,54 @@ function AgentPageContent() {
           </div>
 
           <div className="flex-1 overflow-auto py-2 flex flex-col gap-[2px] px-2">
+            {/* 현재 대화 */}
             {sessionId ? (
-              <div className="px-[8px] py-[6px] rounded-lg text-[12px] border-[1.5px] border-[var(--color-accent)] bg-[var(--color-hl)] text-[var(--color-accent)] font-bold leading-snug">
+              <button
+                type="button"
+                onClick={() => setViewingSession(null)}
+                className={[
+                  'w-full text-left px-[8px] py-[6px] rounded-lg text-[12px] border-[1.5px] leading-snug',
+                  !viewingSession
+                    ? 'border-[var(--color-accent)] bg-[var(--color-hl)] text-[var(--color-accent)] font-bold'
+                    : 'border-[var(--color-line-soft)] text-[var(--color-ink3)] hover:bg-[var(--color-paper)]',
+                ].join(' ')}
+              >
                 💬 현재 대화
-                <div className="font-mono text-[10px] text-[var(--color-ink3)] mt-[2px] font-normal break-all">
+                <div className="font-mono text-[10px] mt-[2px] font-normal break-all opacity-60">
                   {sessionId.slice(0, 8)}…
                 </div>
-              </div>
+              </button>
             ) : (
               <p className="px-[8px] py-[10px] text-[11px] text-[var(--color-ink4)] italic leading-snug">
                 새 대화를 시작하세요.
               </p>
+            )}
+
+            {/* 이전 대화 목록 */}
+            {sessions.length > 0 && (
+              <>
+                <div className="px-[8px] pt-3 pb-1 text-[10px] font-bold text-[var(--color-ink4)] uppercase tracking-wider">
+                  이전 대화
+                </div>
+                {sessions.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setViewingSession(s)}
+                    className={[
+                      'w-full text-left px-[8px] py-[6px] rounded-lg text-[12px] border-[1.5px] leading-snug truncate',
+                      viewingSession?.id === s.id
+                        ? 'border-[var(--color-accent)] bg-[var(--color-hl)] text-[var(--color-accent)] font-bold'
+                        : 'border-transparent text-[var(--color-ink3)] hover:bg-[var(--color-paper)] hover:border-[var(--color-line-soft)]',
+                    ].join(' ')}
+                  >
+                    📋 {s.title}{s.title.length >= 28 ? '…' : ''}
+                    <div className="text-[10px] mt-[2px] opacity-50 font-normal">
+                      {new Date(s.createdAt).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+                    </div>
+                  </button>
+                ))}
+              </>
             )}
           </div>
 
@@ -793,9 +884,25 @@ function AgentPageContent() {
 
               {/* Chat area */}
               <div className="flex-1 flex flex-col min-w-0 min-h-0">
+                {/* 이전 대화 보기 배너 */}
+                {viewingSession && (
+                  <div className="flex items-center justify-between px-4 py-2 bg-[var(--color-hl)] border-b border-[var(--color-accent)] flex-shrink-0">
+                    <span className="text-[12px] text-[var(--color-accent)] font-bold">
+                      📋 이전 대화 보는 중 — {viewingSession.title}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setViewingSession(null)}
+                      className="text-[11px] text-[var(--color-accent)] underline hover:opacity-70"
+                    >
+                      현재 대화로 돌아가기
+                    </button>
+                  </div>
+                )}
+
                 {/* Message list */}
                 <div className="flex-1 overflow-auto px-4 py-3 flex flex-col gap-3">
-                  {messages.length === 0 && !streaming && (
+                  {(viewingSession ? viewingSession.messages : messages).length === 0 && !streaming && (
                     <div className="flex-1 flex items-center justify-center text-center px-6">
                       <div className="text-[13px] text-[var(--color-ink4)] leading-relaxed max-w-[420px]">
                         만들고 싶은 워크플로우를 자연어로 설명해주세요.<br />
@@ -803,7 +910,7 @@ function AgentPageContent() {
                       </div>
                     </div>
                   )}
-                  {messages.map((msg: ChatMessage) => (
+                  {(viewingSession ? viewingSession.messages : messages).map((msg: ChatMessage) => (
                     <div
                       key={msg.id}
                       className={['flex items-end gap-2', msg.role === 'user' ? 'justify-end' : 'justify-start'].join(' ')}
@@ -881,9 +988,13 @@ function AgentPageContent() {
                   <textarea
                     className="flex-1 resize-none border border-[var(--color-line-soft)] rounded-lg px-[10px] py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
                     rows={2}
-                    placeholder={streaming ? 'AI가 처리 중입니다…' : '워크플로우를 자연어로 설명하세요… (Shift+Enter 줄바꿈)'}
+                    placeholder={
+                      viewingSession ? '이전 대화 보기 중 — 입력하려면 현재 대화로 돌아가세요'
+                      : streaming ? 'AI가 처리 중입니다…'
+                      : '워크플로우를 자연어로 설명하세요… (Shift+Enter 줄바꿈)'
+                    }
                     value={input}
-                    disabled={streaming}
+                    disabled={streaming || !!viewingSession}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
@@ -892,7 +1003,7 @@ function AgentPageContent() {
                       }
                     }}
                   />
-                  <Btn onClick={() => void handleSend()} disabled={streaming} className="self-end">
+                  <Btn onClick={() => void handleSend()} disabled={streaming || !!viewingSession} className="self-end">
                     {streaming ? '처리 중…' : '전송 ↑'}
                   </Btn>
                 </div>
