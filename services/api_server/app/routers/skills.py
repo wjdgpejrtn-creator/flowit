@@ -37,6 +37,7 @@ from skills_marketplace.application.use_cases import (
     DeletePersonalSkillUseCase,
     GetMarketplaceSkillDocumentUseCase,
     GetMarketplaceSkillUseCase,
+    GetPersonalSkillDocumentUseCase,
     GetPersonalSkillUseCase,
     ListMarketplaceSkillsUseCase,
     ListReviewQueueUseCase,
@@ -63,6 +64,7 @@ from app.dependencies.use_cases import (
     get_delete_personal_skill_use_case,
     get_get_marketplace_skill_document_use_case,
     get_get_marketplace_skill_use_case,
+    get_get_personal_skill_document_use_case,
     get_get_personal_skill_use_case,
     get_list_marketplace_skills_use_case,
     get_list_personal_skills_use_case,
@@ -267,10 +269,12 @@ def _to_response(skill: MarketplacePersonalSkill) -> PersonalSkillResponse:
 
 
 class UpdatePersonalSkillRequest(BaseModel):
-    # 셋 다 Optional — 부분 수정. tags=[]는 "전체 비움"으로 해석(use case 정책과 일관).
+    # 넷 다 Optional — 부분 수정. tags=[]는 "전체 비움"으로 해석(use case 정책과 일관).
+    # instructions = 지침서 SKILL.md 본문 — 주어지면 GCS에 재저장(ADR-0017 이중 저장).
     name: str | None = None
     description: str | None = None
     tags: list[str] | None = None
+    instructions: str | None = None
 
 
 class CreatePersonalSkillRequest(BaseModel):
@@ -565,15 +569,48 @@ async def update_personal_skill(
     permission: PermissionSource = Depends(get_permission_source),
     use_case: UpdatePersonalSkillUseCase = Depends(get_update_personal_skill_use_case),
 ) -> PersonalSkillResponse:
-    """개인 스킬 메타 수정 — owner + DRAFT only. 변경 없으면 use case가 현재 스킬 반환."""
+    """개인 스킬 수정 — owner only(상태 무관, 게시 스킬도 수정 가능). 변경 없으면 현재 스킬 반환.
+
+    `name`/`description`/`tags`(메타) + `instructions`(SKILL.md 본문)를 부분 수정한다. instructions가
+    오면 use case가 GCS에 SKILL.md를 재저장한다(ADR-0017). ⚠️ 검색 임베딩은 재계산하지 않는다(후속).
+    """
     updated = await use_case.execute(
         skill_id=skill_id,
         actor_user_id=permission.user_id,
         name=body.name,
         description=body.description,
         tags=body.tags,
+        instructions=body.instructions,
     )
     return _to_response(updated)
+
+
+# instructions = SKILL.md markdown 본문(지침서). 마켓플레이스 응답과 동형 — personal 상세 본문 노출용.
+class PersonalSkillDocumentResponse(BaseModel):
+    skill_id: UUID
+    name: str
+    description: str
+    instructions: str
+
+
+@router.get("/personal/{skill_id}/document", response_model=PersonalSkillDocumentResponse)
+async def get_personal_skill_document(
+    skill_id: UUID,
+    permission: PermissionSource = Depends(get_permission_source),
+    use_case: GetPersonalSkillDocumentUseCase = Depends(get_get_personal_skill_document_use_case),
+) -> PersonalSkillDocumentResponse:
+    """개인 스킬 지침서(SKILL.md) 본문 — 상세 페이지가 메타 조회 후 lazy-load.
+
+    owner 게이트만 적용(use case) — owner는 미게시 DRAFT 본문도 미리보기/편집할 수 있다(마켓플레이스
+    document와 달리 lifecycle 무관). 지침서가 GCS에 없으면(수동 생성 등) 404 → 프론트 graceful 처리.
+    """
+    document = await use_case.execute(skill_id=skill_id, actor_user_id=permission.user_id)
+    return PersonalSkillDocumentResponse(
+        skill_id=document.skill_id,
+        name=document.name,
+        description=document.description,
+        instructions=document.instructions,
+    )
 
 
 @router.delete("/personal/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)

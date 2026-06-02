@@ -3,6 +3,7 @@ from .create_draft_skill_use_case import CreateDraftSkillUseCase
 from .delete_personal_skill_use_case import DeletePersonalSkillUseCase
 from .get_marketplace_skill_document_use_case import GetMarketplaceSkillDocumentUseCase
 from .get_marketplace_skill_use_case import GetMarketplaceSkillUseCase
+from .get_personal_skill_document_use_case import GetPersonalSkillDocumentUseCase
 from .get_personal_skill_use_case import GetPersonalSkillUseCase
 from .list_marketplace_skills_use_case import ListMarketplaceSkillsUseCase
 from .list_review_queue_use_case import ListReviewQueueUseCase
@@ -28,6 +29,7 @@ __all__ = [
     "GetMarketplaceSkillUseCase",
     "GetMarketplaceSkillDocumentUseCase",
     "GetPersonalSkillUseCase",
+    "GetPersonalSkillDocumentUseCase",
     "UpdatePersonalSkillUseCase",
     "DeletePersonalSkillUseCase",
 ]
