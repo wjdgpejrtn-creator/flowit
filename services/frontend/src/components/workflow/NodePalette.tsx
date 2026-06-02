@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { getCatalog } from '@/lib/api/nodeApi';
 import { RiskLevel } from '@common/generated';
 import type { NodeConfig } from '@common/generated';
-import RiskPill from '@/components/common/RiskPill';
 import Icon from '@/components/common/Icon';
 import { resolveNodeIcon } from '@/lib/nodeIcon';
 
@@ -143,17 +142,11 @@ export default function NodePalette({
                     className="p-3 rounded-xl border border-[var(--color-line-soft)] hover:border-[var(--color-accent-coral)] hover:bg-[var(--color-hl)] cursor-grab active:cursor-grabbing transition-all shadow-sm bg-white"
                     title={node.description}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center space-x-2 min-w-0">
-                        <Icon name={icon} className="w-4 h-4 flex-shrink-0" style={{ color }} />
-                        <span title={node.name} className="text-xs font-bold text-[var(--color-ink)] truncate">
-                          {node.name}
-                        </span>
-                      </div>
-                      <RiskPill level={node.risk_level} />
-                    </div>
-                    <div className="font-mono text-[9px] text-[var(--color-ink3)] truncate mt-1 pl-6">
-                      {node.node_type}
+                    <div className="flex items-center space-x-2 min-w-0">
+                      <Icon name={icon} className="w-4 h-4 flex-shrink-0" style={{ color }} />
+                      <span title={node.name} className="text-xs font-bold text-[var(--color-ink)] truncate">
+                        {node.name}
+                      </span>
                     </div>
                   </div>
                 );
