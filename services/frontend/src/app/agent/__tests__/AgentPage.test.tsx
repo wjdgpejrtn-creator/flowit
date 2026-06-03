@@ -345,4 +345,35 @@ describe('AgentPage — handleSend SSE 연동', () => {
       expect(call[2]).toBeInstanceOf(AbortSignal);
     });
   });
+
+  it('컨펌(readyToExecute) 상태에서 후속 메시지는 같은 세션을 이어간다 (refine, 새 채팅 X)', async () => {
+    mockStreamCreateSession
+      .mockImplementationOnce(async (_req: unknown, onFrame: (f: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'session', session_id: 'sid-1' });
+        onFrame({ frame_type: 'result', intent: 'propose', payload: { status: 'ready_to_execute', workflow_id: 'wf-1', message: '완성' } });
+      })
+      .mockImplementationOnce(() => Promise.resolve());
+
+    render(<AgentPage />);
+    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    await userEvent.type(textarea, '슬랙 알림 워크플로우');
+    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await waitFor(() => expect(useAgentStore.getState().readyToExecute).not.toBeNull());
+
+    // refine 후속 — 같은 세션 이어가야(이전엔 새 세션으로 리셋되는 버그)
+    await userEvent.type(textarea, 'url을 바꿔줘');
+    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+
+    await waitFor(() => {
+      expect(mockStreamCreateSession).toHaveBeenLastCalledWith(
+        { message: 'url을 바꿔줘', session_id: 'sid-1' },  // 같은 session_id
+        expect.any(Function),
+        expect.any(AbortSignal),
+      );
+    });
+    expect(useAgentStore.getState().sessions).toHaveLength(0);  // 새 세션 아카이브 안 함
+    const contents = useAgentStore.getState().messages.map((m) => m.content);
+    expect(contents).toContain('슬랙 알림 워크플로우');
+    expect(contents).toContain('url을 바꿔줘');
+  });
 });

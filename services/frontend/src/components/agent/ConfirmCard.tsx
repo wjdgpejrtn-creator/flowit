@@ -15,7 +15,7 @@ interface ConfirmCardProps {
   explanation?: WorkflowExplanation;
   /** AI가 자동으로 채운(또는 채웠을) 입력값 — loadedWorkflow × 카탈로그 input_schema로 프론트 계산 */
   filledParams?: FilledNode[];
-  onExecute: () => void;
+  onSave: () => void;
   onEdit: () => void;
   loading?: boolean;
 }
@@ -34,7 +34,7 @@ function _isStrong(level: RiskLevel): boolean {
  * 의도 재진술 / 단계 / 권한 매니페스트 / 가정을 보여주고, 틀리면 편집으로 유도한다.
  * explanation이 없으면(레거시 result 프레임) 기존 단순 메시지로 fallback.
  */
-export default function ConfirmCard({ message, explanation, filledParams, onExecute, onEdit, loading = false }: ConfirmCardProps) {
+export default function ConfirmCard({ message, explanation, filledParams, onSave, onEdit, loading = false }: ConfirmCardProps) {
   const [showAssumptions, setShowAssumptions] = useState(false);
   const filled = filledParams ?? [];
   const reviewN = reviewCount(filled);
@@ -177,10 +177,10 @@ export default function ConfirmCard({ message, explanation, filledParams, onExec
           </>
         )}
 
-        {/* ⑤ 액션 — 실행 + 원클릭 교정 */}
+        {/* ⑤ 액션 — 저장 + 원클릭 교정 */}
         <div className="flex items-center gap-2 pt-[2px]">
-          <Btn onClick={onExecute} disabled={loading} className="text-[12px]">
-            {loading ? '실행 중…' : '▶ 실행'}
+          <Btn onClick={onSave} disabled={loading} className="text-[12px]">
+            {loading ? '저장 중…' : '💾 저장'}
           </Btn>
           <Btn ghost onClick={onEdit} disabled={loading} className="text-[12px]">
             ✏️ 편집

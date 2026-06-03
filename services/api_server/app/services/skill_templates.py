@@ -110,11 +110,26 @@ def _find_seed_file(template_code: str) -> tuple[Path, TemplateKind] | None:
     return None
 
 
+def _format_fields(properties: dict) -> str:
+    """property dict → '이름: 설명' 나열. seed에 description이 있으면 함께 실어 extract LLM이
+    재생성하는 스킬의 input/output 필드에도 같은 설명·예시를 반영하도록 힌트를 준다(전체 스키마
+    dump는 노이즈라 description만 추림). description 없는 필드는 이름만 노출.
+    """
+    if not properties:
+        return "없음"
+    parts: list[str] = []
+    for name, spec in properties.items():
+        desc = spec.get("description") if isinstance(spec, dict) else None
+        parts.append(f"{name}: {desc}" if desc else name)
+    return "; ".join(parts)
+
+
 def _node_to_sop_markdown(node: dict) -> str:
     """skill_node 1건 → 사람이 읽는 SOP 단락(markdown). LLM이 이 텍스트에서 SkillNode를 재추출한다.
 
-    입력/출력은 JSON Schema의 property 이름만 풀어 노드의 작업 의도를 드러낸다(전체 스키마 dump는
-    노이즈라 제외 — extract LLM이 어차피 스키마를 재생성).
+    입력/출력은 JSON Schema property의 이름 + description(있으면)을 풀어 노드의 작업 의도와
+    각 필드가 무슨 값인지를 드러낸다(전체 스키마 dump는 노이즈라 제외 — extract LLM이 스키마를
+    재생성하되, seed description을 힌트로 받아 필드 설명·예시를 일관되게 채운다).
     """
     inputs = node.get("inputs", {}).get("properties", {})
     outputs = node.get("outputs", {}).get("properties", {})
@@ -125,8 +140,8 @@ def _node_to_sop_markdown(node: dict) -> str:
         f"- 작업 유형: {node.get('category', '-')}",
         f"- 위험도: {node.get('risk_level', '-')}",
         f"- 필요 연동: {', '.join(connections) if connections else '없음'}",
-        f"- 입력: {', '.join(inputs) if inputs else '없음'}",
-        f"- 출력: {', '.join(outputs) if outputs else '없음'}",
+        f"- 입력: {_format_fields(inputs)}",
+        f"- 출력: {_format_fields(outputs)}",
     ]
     return "\n".join(lines)
 

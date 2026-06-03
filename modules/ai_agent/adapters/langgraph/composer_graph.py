@@ -1356,6 +1356,64 @@ class LangGraphOrchestrator:
             ],
         }
 
+    @staticmethod
+    def _build_qa_checklist(state: _State) -> str:
+        """QA 통과 후 ConfirmCard 직전에 채팅창에 표시할 AI 검증 완료 보고서."""
+        intent = state.get("intent") or "알 수 없음"
+        entities = state.get("intent_analyzed_entities") or {}
+        candidates = state.get("node_candidates") or []
+        workflow = state.get("workflow_draft")
+        qa_score = state.get("qa_score", 0.0)
+        qa_feedback = state.get("qa_feedback", "")
+        spec = state.get("draft_spec")
+
+        intent_labels: dict[str, str] = {
+            "draft": "새 워크플로우 생성",
+            "refine": "워크플로우 수정",
+            "clarify": "추가 정보 요청",
+        }
+        intent_label = intent_labels.get(str(intent), str(intent))
+        entity_text = (
+            ", ".join(f"{k}: {v}" for k, v in list(entities.items())[:5])
+            if entities else "없음"
+        )
+
+        final_nodes = workflow.nodes if workflow else []
+        final_connections = workflow.connections if workflow else []
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        selected_types = ", ".join(
+            type_by_id.get(n.node_id, "알 수 없음") for n in final_nodes[:5]
+        )
+        if len(final_nodes) > 5:
+            selected_types += f" 외 {len(final_nodes) - 5}개"
+
+        intent_text = spec.natural_language_intent[:80] if spec else "없음"
+
+        lines = [
+            "📋 **AI 검증 완료 보고서**",
+            "",
+            "**① 의도 분석** ✅",
+            f"- 요청 유형: {intent_label}",
+            f"- 요청 내용: {intent_text}",
+            f"- 추출된 정보: {entity_text}",
+            "",
+            "**② 노드 선출** ✅",
+            f"- 후보 {len(candidates)}개 검색 완료",
+            f"- 최종 선정: {len(final_nodes)}개 노드 ({selected_types or '없음'})",
+            "",
+            "**③ 워크플로우 작성** ✅",
+            f"- 노드 {len(final_nodes)}개, 연결 {len(final_connections)}개",
+            "- DAG 구조 검증 완료 (사이클 없음, 고립 노드 없음)",
+            "",
+            f"**④ QA 품질 평가 통과** ✅ (점수: {qa_score:.1f}/10)",
+            "- 완성도: 사용자 의도가 노드로 완전히 표현됐는지 검증",
+            "- 안전성: 위험 노드 정당성 및 권한 적정성 검증",
+        ]
+        if qa_feedback:
+            lines.append(f"- 평가 의견: {qa_feedback}")
+
+        return "\n".join(lines)
+
     # 15. user_confirm_node — 최종 ResultFrame emit (fixed DAG: 항상 ready_to_execute)
     async def _user_confirm_node(self, state: _State) -> dict:
         workflow_id = state.get("saved_workflow_id")
@@ -1379,8 +1437,10 @@ class LangGraphOrchestrator:
             }
 
         explanation = state.get("workflow_explanation")
+        qa_checklist = self._build_qa_checklist(state)
         return {
             "collected_frames": [
+                ChatMessageFrame(role="assistant", content=qa_checklist),
                 ResultFrame(
                     intent="propose",
                     payload={
@@ -1390,10 +1450,6 @@ class LangGraphOrchestrator:
                         "session_id": str(state["session_id"]),
                         "explanation": explanation.model_dump(mode="json") if explanation else None,
                     },
-                ),
-                ChatMessageFrame(
-                    role="assistant",
-                    content="워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.",
                 ),
             ]
         }
