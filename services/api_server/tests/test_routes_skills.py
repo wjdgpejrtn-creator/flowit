@@ -18,13 +18,14 @@ from app.dependencies.use_cases import (
     get_approve_skill_use_case,
     get_create_draft_skill_use_case,
     get_delete_personal_skill_use_case,
+    get_get_personal_skill_document_use_case,
     get_get_personal_skill_use_case,
     get_list_personal_skills_use_case,
     get_publish_skill_use_case,
     get_update_personal_skill_use_case,
 )
 from app.main import create_app
-from common_schemas import PermissionSource
+from common_schemas import PermissionSource, SkillDocument
 from common_schemas.enums import RiskLevel
 from common_schemas.exceptions import AuthorizationError, NotFoundError, ValidationError
 from fastapi.testclient import TestClient
@@ -360,12 +361,41 @@ def test_update_personal_skill_partial_body(app) -> None:
         name="새 이름",
         description=None,
         tags=["a", "b"],
+        instructions=None,
     )
     app.dependency_overrides.clear()
 
 
-def test_update_personal_skill_lifecycle_validation_maps_400(app) -> None:
-    """non-DRAFT 수정 시도 → use case가 ValidationError → 400."""
+def test_update_personal_skill_passes_instructions(app) -> None:
+    """instructions(SKILL.md 본문)가 body에 오면 use case로 전달 — GCS 재저장 트리거(ADR-0017)."""
+    sid = uuid4()
+    updated = _personal_skill(sid, _REVIEWER_ID, name="문서스킬")
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(return_value=updated)
+    app.dependency_overrides[get_update_personal_skill_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.put(
+        f"/api/v1/skills/personal/{sid}",
+        json={"description": "새 설명", "instructions": "# 새 지침서\n본문"},
+        headers=_headers(),
+    )
+
+    assert resp.status_code == 200
+    use_case.execute.assert_awaited_once_with(
+        skill_id=sid,
+        actor_user_id=_REVIEWER_ID,
+        name=None,
+        description="새 설명",
+        tags=None,
+        instructions="# 새 지침서\n본문",
+    )
+    app.dependency_overrides.clear()
+
+
+def test_update_personal_skill_validation_maps_400(app) -> None:
+    """use case ValidationError(예: 빈 name) → 400. (게시 스킬 수정은 더 이상 거부 대상 아님)"""
     use_case = MagicMock()
     use_case.execute = AsyncMock(side_effect=ValidationError("not draft"))
     app.dependency_overrides[get_update_personal_skill_use_case] = lambda: use_case
@@ -413,8 +443,59 @@ def test_personal_routes_require_bearer(app) -> None:
     sid = uuid4()
     assert client.get("/api/v1/skills/personal").status_code == 401
     assert client.get(f"/api/v1/skills/personal/{sid}").status_code == 401
+    assert client.get(f"/api/v1/skills/personal/{sid}/document").status_code == 401
     assert client.put(f"/api/v1/skills/personal/{sid}", json={}).status_code == 401
     assert client.delete(f"/api/v1/skills/personal/{sid}").status_code == 401
+
+
+# ── Personal document (지침서 본문 lazy-load) ─────────────────────────────────
+
+
+def test_get_personal_skill_document_returns_instructions(app) -> None:
+    """GET /personal/{id}/document → owner 게이트 통과 시 SKILL.md 본문(instructions) 반환."""
+    sid = uuid4()
+    document = SkillDocument(
+        skill_id=sid, name="문서스킬", description="설명", instructions="# 지침서\n본문"
+    )
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(return_value=document)
+    app.dependency_overrides[get_get_personal_skill_document_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/skills/personal/{sid}/document", headers=_headers())
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["instructions"] == "# 지침서\n본문"
+    assert body["skill_id"] == str(sid)
+    use_case.execute.assert_awaited_once_with(skill_id=sid, actor_user_id=_REVIEWER_ID)
+    app.dependency_overrides.clear()
+
+
+def test_get_personal_skill_document_missing_maps_404(app) -> None:
+    """GCS에 지침서 없음(use case NotFoundError) → 404 → 프론트 graceful '지침서 없음'."""
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(side_effect=NotFoundError("no document"))
+    app.dependency_overrides[get_get_personal_skill_document_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/skills/personal/{uuid4()}/document", headers=_headers())
+    assert resp.status_code == 404
+    app.dependency_overrides.clear()
+
+
+def test_get_personal_skill_document_non_owner_maps_403(app) -> None:
+    use_case = MagicMock()
+    use_case.execute = AsyncMock(side_effect=AuthorizationError("not owner"))
+    app.dependency_overrides[get_get_personal_skill_document_use_case] = lambda: use_case
+    _override_permission(app)
+
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/skills/personal/{uuid4()}/document", headers=_headers())
+    assert resp.status_code == 403
+    app.dependency_overrides.clear()
 
 
 # ── Personal create (REQ-010, 스킬빌더 폼 입구) ───────────────────────────────

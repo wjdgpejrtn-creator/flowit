@@ -229,12 +229,6 @@ export default function DashboardPage() {
           </div>
         </div>
       </main>
-
-      <footer className="bg-white border-t border-line-soft py-6 px-6 mt-12 text-center text-xs text-ink3 font-bold">
-        <p className="text-[10px] text-ink3 leading-relaxed">
-          © 2026 Flowit Corp. 모든 자동화 프로세스는 실시간으로 격리 분석 처리됩니다.
-        </p>
-      </footer>
     </div>
   );
 }

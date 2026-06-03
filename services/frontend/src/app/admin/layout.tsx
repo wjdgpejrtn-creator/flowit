@@ -16,8 +16,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
       <AppBar />
       <div className="flex-1 flex min-h-0">
-        <SideNav title="👑 거버넌스" items={NAV_ITEMS} />
-        <div className="flex-1 overflow-auto p-[14px]">
+        <SideNav title="거버넌스" icon="crown" items={NAV_ITEMS} />
+        <div className="flex-1 overflow-auto p-4 md:p-6">
           {children}
         </div>
       </div>

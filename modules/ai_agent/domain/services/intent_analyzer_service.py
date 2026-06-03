@@ -9,6 +9,7 @@ from common_schemas.enums import IntentType
 from common_schemas.exceptions import ExecutionError
 
 from ..ports.llm_port import LLMPort
+from ..value_objects.route_plan import RECIPE_SKILL_THEN_COMPOSE
 
 # ── 키워드 기반 fast classifier ──────────────────────────────────────────────
 # 정규식 매칭 ~90% → LLM fallback ~10%
@@ -43,6 +44,43 @@ _DRAFT_RE = re.compile(
     r"(만들어|생성|워크플로우|자동화|자동\s*으로|매주|매일|스케줄|알림|보내줘|보내|알려줘|처리해줘?|해줘)",
     re.IGNORECASE,
 )
+
+
+# ── 복합 의도(레시피) 분류 ───────────────────────────────────────────────────
+# 한 발화에 스킬 생성 + 그 스킬로 워크플로우 작성이 모두 담긴 경우 → skill_then_compose.
+# 보수적: 세 신호(스킬 빌드 / compose 대상 / 순차 연결어)가 모두 있어야 복합으로 본다.
+# 애매하면 단일 의도로 폴백 (오탐 시 사용자 흐름이 더 어색해지므로).
+_SKILL_SIGNAL_RE = re.compile(r"(스킬|skill)\s*(을|를)?\s*(만들|만든|빌드|build|등록|생성)", re.IGNORECASE)
+_COMPOSE_SIGNAL_RE = re.compile(r"(워크플로우|workflow|자동화|automation|플로우)", re.IGNORECASE)
+_CHAIN_CONNECTIVE_RE = re.compile(
+    r"(만들어서|만들고|만든\s*뒤|만든\s*다음|등록하고|등록해서|해서|그걸로|그\s*스킬로|이용해서?|사용해서?|로\s*만들|연결)",
+    re.IGNORECASE,
+)
+
+
+def _is_skill_then_compose(message: str) -> bool:
+    """스킬 빌드 → 워크플로우 작성 복합 발화 여부 (세 신호 동시 충족)."""
+    return bool(
+        _SKILL_SIGNAL_RE.search(message)
+        and _COMPOSE_SIGNAL_RE.search(message)
+        and _CHAIN_CONNECTIVE_RE.search(message)
+    )
+
+
+def classify_recipe(message: str, intent: IntentType | None) -> str | None:
+    """라우팅 레시피 키 산출 (순수 함수, LLM 무관).
+
+    단일 의도는 ``intent.value``를 그대로 키로 쓰고, 화이트리스트 복합 발화만
+    별도 키를 반환한다. 미분류(intent None & 복합 아님)는 None → general_chat.
+
+    supervisor 루프가 이 키로 ``make_plan``을 호출한다. 단일 의도는 1-스텝
+    레시피라 승격 전 1-홉 동작과 동일하다 (회귀 안전).
+    """
+    if _is_skill_then_compose(message):
+        return RECIPE_SKILL_THEN_COMPOSE
+    if intent is None:
+        return None
+    return intent.value
 
 
 def _fast_classify(message: str) -> IntentType | None:

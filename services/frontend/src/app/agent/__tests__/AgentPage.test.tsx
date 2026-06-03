@@ -224,18 +224,34 @@ describe('AgentPage — handleSend SSE 연동', () => {
     });
   });
 
-  it('기존 sessionId가 있으면 요청에 포함한다', async () => {
-    useAgentStore.setState({ sessionId: 'existing-sid' });
+  it('session frame 수신 후 후속 메시지에 sessionId가 포함된다', async () => {
+    // 첫 번째 전송: session frame 수신 → sessionId 설정
+    mockStreamCreateSession
+      .mockImplementationOnce(
+        async (_req: unknown, onFrame: (frame: Record<string, unknown>) => void) => {
+          onFrame({ frame_type: 'session', session_id: 'server-sid', langgraph_thread_id: 'tid-1' });
+        },
+      )
+      .mockImplementationOnce(() => Promise.resolve());
 
     render(<AgentPage />);
 
     const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+
+    await userEvent.type(textarea, '첫 메시지');
+    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().sessionId).toBe('server-sid');
+    });
+
     await userEvent.type(textarea, '후속 메시지');
     await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
 
     await waitFor(() => {
-      expect(mockStreamCreateSession).toHaveBeenCalledWith(
-        { message: '후속 메시지', session_id: 'existing-sid' },
+      expect(mockStreamCreateSession).toHaveBeenCalledTimes(2);
+      expect(mockStreamCreateSession).toHaveBeenLastCalledWith(
+        { message: '후속 메시지', session_id: 'server-sid' },
         expect.any(Function),
         expect.any(AbortSignal),
       );
