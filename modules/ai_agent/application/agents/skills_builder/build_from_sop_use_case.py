@@ -330,8 +330,11 @@ class BuildFromSOPUseCase:
             "  - description: 노드 동작 설명 (한 문장)\n"
             f"  - category: 다음 중 하나 — {sorted(_ALLOWED_CATEGORIES)}\n"
             "  - risk_level: 'Low' / 'Medium' / 'High' / 'Restricted'\n"
-            "  - inputs: JSON Schema (type=object + properties)\n"
-            "  - outputs: JSON Schema\n"
+            "  - inputs: JSON Schema (type=object + properties). **각 property는 반드시 `description`을 포함** — "
+            "비전문가도 무슨 값을 넣어야 할지 알 수 있도록 한 줄 설명 + 구체적인 예시(예: ...)를 넣는다. "
+            "특히 외부에서 발급되는 ID·토큰처럼 값을 추정하기 어려운 필드는 '어디서 얻는지'까지 적는다. "
+            "선택지가 정해져 있으면 enum, 기본값이 있으면 default도 명시한다\n"
+            "  - outputs: JSON Schema. 각 property에 무엇이 나오는지 `description`을 넣는다\n"
             "  - required_connections: list[str] (e.g. ['slack', 'google'])\n"
             "  - service_type: str | null (e.g. 'slack', 'google_workspace')\n"
             "  - instructions: 이 스킬의 SKILL.md 지침서 본문 (markdown 문자열). 사용자가 대화 중 읽고 "
@@ -357,15 +360,15 @@ class BuildFromSOPUseCase:
                         "inputs": {
                             "type": "object",
                             "properties": {
-                                "refund_id": {"type": "string"},
-                                "amount": {"type": "number"},
-                                "channel": {"type": "string"},
+                                "refund_id": {"type": "string", "description": "환불 요청 건의 ID. 예: RF-10293"},
+                                "amount": {"type": "number", "description": "환불 금액(원). 예: 35000"},
+                                "channel": {"type": "string", "description": "Slack 채널. 예: '#cs-refund'"},
                             },
                             "required": ["refund_id", "amount"],
                         },
                         "outputs": {
                             "type": "object",
-                            "properties": {"message_ts": {"type": "string"}},
+                            "properties": {"message_ts": {"type": "string", "description": "메시지 타임스탬프"}},
                         },
                         "required_connections": ["slack"],
                         "service_type": "slack",
@@ -386,15 +389,15 @@ class BuildFromSOPUseCase:
                         "inputs": {
                             "type": "object",
                             "properties": {
-                                "amount": {"type": "number"},
-                                "threshold": {"type": "number", "default": 50000},
+                                "amount": {"type": "number", "description": "판단 대상 환불 금액(원). 예: 35000"},
+                                "threshold": {"type": "number", "default": 50000, "description": "분기 기준 금액(원)"},
                             },
                             "required": ["amount"],
                         },
                         "outputs": {
                             "type": "object",
                             "properties": {
-                                "requires_approval": {"type": "boolean"},
+                                "requires_approval": {"type": "boolean", "description": "승인 대기 필요 여부"},
                             },
                         },
                         "required_connections": [],
