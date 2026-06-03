@@ -9,7 +9,7 @@ import RunMode from '@/components/agent/RunMode';
 import { useAgentStore, WorkspaceMode, ChatMessage, AgentSession } from '@/stores/agentStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession, streamSlotAnswer } from '@/lib/api/agentApi';
-import { executeWorkflow, getWorkflow } from '@/lib/api/workflowApi';
+import { getWorkflow } from '@/lib/api/workflowApi';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import WorkflowEditPane from '@/components/workflow/WorkflowEditPane';
 import { ReactFlow, Background, BackgroundVariant, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
@@ -485,7 +485,6 @@ function AgentPageContent() {
   } = useAgentStore();
 
   const [input, setInput] = useState('');
-  const [executeLoading, setExecuteLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   // two-shot 스킬 선택 카드 (skill_selection 프레임 수신 시 표시, REQ-013)
   const [skillSelection, setSkillSelection] = useState<{
@@ -566,19 +565,10 @@ function AgentPageContent() {
     },
   });
 
-  const handleExecute = async () => {
+  const handleSave = () => {
     if (!readyToExecute) return;
-    setExecuteLoading(true);
-    try {
-      await executeWorkflow(readyToExecute.workflowId);
-      setReadyToExecute(null);
-      setMode('run');
-    } catch (err) {
-      // 실패 시 run 모드로 전환하지 않고 버튼 유지 + 원인을 사용자에게 노출(과거: silent).
-      showToast(`실행 실패: ${err instanceof Error ? err.message : '워크플로우를 실행할 수 없습니다'}`);
-    } finally {
-      setExecuteLoading(false);
-    }
+    setReadyToExecute(null);
+    showToast('워크플로우가 확인됐습니다.');
   };
 
   useEffect(() => {
@@ -983,9 +973,8 @@ function AgentPageContent() {
                       message={readyToExecute.message}
                       explanation={readyToExecute.explanation}
                       filledParams={filledParams}
-                      onExecute={handleExecute}
+                      onSave={handleSave}
                       onEdit={() => setMode('edit')}
-                      loading={executeLoading}
                     />
                   )}
                   {skillSelection && !streaming && (
