@@ -4,6 +4,7 @@ import type { WorkflowExplanation } from '@common/generated';
 export type WorkspaceMode = 'wizard' | 'edit' | 'run';
 
 export type AgentStep =
+  | 'skill'      // 복합(skill_then_compose) 흐름의 선두 단계 — 스킬 빌드 홉
   | 'security'
   | 'intent'
   | 'retriever'
@@ -50,6 +51,11 @@ interface AgentStoreState {
   currentStep: AgentStep | null;
   setCurrentStep: (step: AgentStep | null) => void;
 
+  // 복합(skill_then_compose) 흐름 여부 — true면 단계 표시에 '스킬 생성' 선두 단계를 노출한다.
+  // skill 단계 진입 시 set, 새 턴(handleSend/handleNewChat)에서만 reset (라운드2 resume은 유지).
+  compositeFlow: boolean;
+  setCompositeFlow: (v: boolean) => void;
+
   rationaleText: string;
   appendRationale: (delta: string) => void;
   clearRationale: () => void;
@@ -83,6 +89,9 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
 
   currentStep: null,
   setCurrentStep: (step) => set({ currentStep: step }),
+
+  compositeFlow: false,
+  setCompositeFlow: (v) => set({ compositeFlow: v }),
 
   rationaleText: '',
   appendRationale: (delta) =>

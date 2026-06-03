@@ -2,14 +2,22 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-
-from common_schemas import DraftSpec, NodeConfig
+from common_schemas import DraftSpec, Edge, NodeConfig, NodeInstance, Position, WorkflowSchema
 from common_schemas.agent import SlotFillingState
 from common_schemas.enums import RiskLevel
 from common_schemas.exceptions import ExecutionError
 
 from ai_agent.domain.ports import LLMPort
-from ai_agent.domain.services.drafter_service import DrafterService, _DraftResponse, _EdgeDraft, _NodeDraft
+from ai_agent.domain.services.drafter_service import (
+    _EDIT_SYSTEM_PROMPT,
+    DrafterService,
+    _DraftResponse,
+    _EdgeDraft,
+    _EditEdgeDraft,
+    _EditNodeDraft,
+    _EditResponse,
+    _NodeDraft,
+)
 
 
 def _node_config(node_type: str) -> NodeConfig:
@@ -115,3 +123,135 @@ class TestDrafterServiceBuild:
 
         assert len(schema.connections) == 2
         assert schema.is_draft is True
+
+
+def _prior_workflow(cfg_a: NodeConfig, cfg_b: NodeConfig) -> WorkflowSchema:
+    ia, ib = uuid4(), uuid4()
+    return WorkflowSchema(
+        workflow_id=uuid4(),
+        name="Prior WF",
+        scope="private",
+        is_draft=False,
+        owner_user_id=uuid4(),
+        nodes=[
+            NodeInstance(
+                instance_id=ia, node_id=cfg_a.node_id,
+                parameters={"url": "https://old.com"}, position=Position(x=0, y=0),
+            ),
+            NodeInstance(
+                instance_id=ib, node_id=cfg_b.node_id,
+                parameters={"channel": "#general"}, position=Position(x=1, y=0),
+            ),
+        ],
+        connections=[Edge(from_instance_id=ia, to_instance_id=ib, from_handle="output", to_handle="input")],
+    )
+
+
+class TestDrafterServiceRefine:
+    """대화형 refine — prior_workflow ref 기반 편집 경로 (C)."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    @pytest.mark.asyncio
+    async def test_prior_workflow_uses_ref_based_edit_prompt(self):
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        llm = _mock_llm(_EditResponse(
+            name="W",
+            nodes=[_EditNodeDraft(ref="n0", node_type="http"), _EditNodeDraft(ref="n1", node_type="slack")],
+            connections=[_EditEdgeDraft(from_ref="n0", to_ref="n1")],
+        ))
+        svc = DrafterService(llm)
+        result = await svc.draft(_spec(), [cfg_a, cfg_b], self.owner_id, prior_workflow=prior)
+        prompt, schema = llm.generate_structured.call_args.args[0], llm.generate_structured.call_args.args[1]
+        assert schema is _EditResponse                  # 편집 경로 = ref 기반 응답 스키마
+        assert _EDIT_SYSTEM_PROMPT in prompt
+        assert "CURRENT WORKFLOW" in prompt
+        assert "https://old.com" in prompt              # 기존 파라미터 보존 컨텍스트
+        assert '"ref": "n0"' in prompt
+        assert len(result.nodes) == 2
+
+    @pytest.mark.asyncio
+    async def test_no_prior_means_fresh_draft_response(self):
+        cfg_a = _node_config("http")
+        llm = _mock_llm(_DraftResponse(name="W", nodes=[_NodeDraft(node_type="http")], connections=[]))
+        svc = DrafterService(llm)
+        await svc.draft(_spec(), [cfg_a], self.owner_id)  # prior 없음 = fresh
+        prompt, schema = llm.generate_structured.call_args.args[0], llm.generate_structured.call_args.args[1]
+        assert schema is _DraftResponse
+        assert "CURRENT WORKFLOW" not in prompt
+
+    def test_serialize_for_edit_assigns_refs_and_maps_connections(self):
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        out = DrafterService._serialize_for_edit(prior, [cfg_a, cfg_b])
+        assert out is not None
+        assert [n["ref"] for n in out["nodes"]] == ["n0", "n1"]
+        assert [n["node_type"] for n in out["nodes"]] == ["http", "slack"]
+        assert out["nodes"][0]["parameters"]["url"] == "https://old.com"
+        assert out["connections"][0]["from_ref"] == "n0"
+        assert out["connections"][0]["to_ref"] == "n1"
+
+    def test_serialize_returns_none_when_node_type_missing(self):
+        # 후보에 slack 없음 → slack node_id 역매핑 불가 → None(fresh 폴백 신호)
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        assert DrafterService._serialize_for_edit(prior, [cfg_a]) is None
+
+    @pytest.mark.asyncio
+    async def test_unmappable_prior_falls_back_to_fresh(self):
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        llm = _mock_llm(_DraftResponse(name="W", nodes=[_NodeDraft(node_type="http")], connections=[]))
+        svc = DrafterService(llm)
+        # 후보에 slack 빠짐 → 편집 컨텍스트 생략하고 fresh로 진행(기존 노드 유실 방지)
+        await svc.draft(_spec(), [cfg_a], self.owner_id, prior_workflow=prior)
+        assert llm.generate_structured.call_args.args[1] is _DraftResponse  # fresh 스키마
+
+    def test_duplicate_node_type_preserved_via_refs(self):
+        # 동일 node_type 노드 2개도 ref로 구분 → 직렬화/빌드 모두 모호하지 않다(LOW~MED 해소).
+        cfg = _node_config("http")
+        ia, ib = uuid4(), uuid4()
+        prior = WorkflowSchema(
+            workflow_id=uuid4(), name="dup", scope="private", is_draft=False, owner_user_id=uuid4(),
+            nodes=[
+                NodeInstance(
+                    instance_id=ia, node_id=cfg.node_id,
+                    parameters={"url": "https://a.com"}, position=Position(x=0, y=0),
+                ),
+                NodeInstance(
+                    instance_id=ib, node_id=cfg.node_id,
+                    parameters={"url": "https://b.com"}, position=Position(x=1, y=0),
+                ),
+            ],
+            connections=[],
+        )
+        out = DrafterService._serialize_for_edit(prior, [cfg])
+        assert out is not None and [n["ref"] for n in out["nodes"]] == ["n0", "n1"]  # 직렬화 OK
+
+        svc = DrafterService(AsyncMock(spec=LLMPort))
+        built = svc._build_from_edit(
+            _EditResponse(nodes=[
+                _EditNodeDraft(ref="n0", node_type="http", parameters={"url": "https://a.com"}),
+                _EditNodeDraft(ref="n1", node_type="http", parameters={"url": "https://b2.com"}),
+            ]),
+            [cfg],
+            self.owner_id,
+        )
+        assert len(built.nodes) == 2  # 중복 node_type이 raise 없이 2개 인스턴스로 빌드됨
+        assert {n.parameters["url"] for n in built.nodes} == {"https://a.com", "https://b2.com"}
+
+    def test_build_from_edit_rejects_duplicate_ref(self):
+        cfg = _node_config("http")
+        svc = DrafterService(AsyncMock(spec=LLMPort))
+        with pytest.raises(ExecutionError) as exc:
+            svc._build_from_edit(
+                _EditResponse(nodes=[
+                    _EditNodeDraft(ref="n0", node_type="http"),
+                    _EditNodeDraft(ref="n0", node_type="http"),
+                ]),
+                [cfg],
+                self.owner_id,
+            )
+        assert exc.value.code == "E_DUPLICATE_REF"

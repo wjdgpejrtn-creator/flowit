@@ -5,10 +5,9 @@ import logging
 from typing import Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel
-
 from common_schemas import DraftSpec, Edge, NodeConfig, NodeInstance, Position, WorkflowSchema
 from common_schemas.exceptions import ExecutionError
+from pydantic import BaseModel
 
 from ..ports.llm_port import LLMPort
 
@@ -35,6 +34,23 @@ Fill in `parameters` for each node using:
 3. Use an empty string "" only for optional fields the user did not specify that have no default.
 """
 
+# refine(대화형 수정) 전용 — 이전 워크플로우를 주고 "지시한 부분만" 고치게 한다.
+# 노드 정체성을 node_type이 아니라 **안정적 ref**로 잡는다: 같은 node_type 노드가 둘 이상
+# 있어도 ref로 구분되어 보존·편집이 모호하지 않다(node_type 키 방식의 중복 한계 해소).
+_EDIT_SYSTEM_PROMPT = """You are EDITING an existing workflow. You are given CURRENT WORKFLOW whose
+nodes each carry a stable "ref". Output a JSON object matching this schema:
+{
+  "name": "<string>",
+  "scope": "private",
+  "is_draft": true,
+  "nodes": [{"ref": "<keep the SAME ref to preserve a node; use a new ref for an added node>",
+             "node_type": "<type from the candidate list>", "parameters": {"<k>": "<v>"}, "x": 0, "y": 0}],
+  "connections": [{"from_ref": "<ref>", "to_ref": "<ref>", "from_handle": "output", "to_handle": "input"}]
+}
+Apply ONLY the change requested in the DraftSpec intent. Preserve every OTHER node's ref, node_type,
+and parameters EXACTLY, and keep unchanged connections. node_type must come from the candidate list.
+The SAME node_type may appear multiple times — each is a distinct node identified by its ref."""
+
 
 # LLM 응답 전용 — common_schemas.WorkflowSchema의 owner_user_id/workflow_id 제외 부분집합.
 # WorkflowSchema 필드 추가 시 이 모델도 확인 필요 (silent drift 방지).
@@ -60,11 +76,45 @@ class _DraftResponse(BaseModel):
     connections: list[_EdgeDraft] = []
 
 
+# refine 편집 응답 전용 — node_type이 아니라 ref로 노드 정체성을 잡는다(중복 node_type 허용).
+class _EditNodeDraft(BaseModel):
+    ref: str
+    node_type: str
+    parameters: dict[str, Any] = {}
+    x: float = 0.0
+    y: float = 0.0
+
+
+class _EditEdgeDraft(BaseModel):
+    from_ref: str
+    to_ref: str
+    from_handle: str = "output"
+    to_handle: str = "input"
+
+
+class _EditResponse(BaseModel):
+    name: str = "Untitled Workflow"
+    scope: str = "private"
+    is_draft: bool = True
+    nodes: list[_EditNodeDraft] = []
+    connections: list[_EditEdgeDraft] = []
+
+
 class DrafterService:
     def __init__(self, llm: LLMPort) -> None:
         self._llm = llm
 
-    async def draft(self, spec: DraftSpec, candidates: list[NodeConfig], owner_user_id: UUID) -> WorkflowSchema:
+    async def draft(
+        self,
+        spec: DraftSpec,
+        candidates: list[NodeConfig],
+        owner_user_id: UUID,
+        prior_workflow: WorkflowSchema | None = None,
+    ) -> WorkflowSchema:
+        """워크플로우 초안 생성. ``prior_workflow``가 주어지면(대화형 refine) 처음부터
+        재생성하지 않고 그 워크플로우를 편집 컨텍스트로 주어 지시한 부분만 수정한다.
+        직렬화 불가(후보에 없는 node_type 포함) 시엔 안전하게 fresh draft로 폴백한다.
+        """
         catalog = [
             {
                 "node_type": n.node_type,
@@ -74,16 +124,129 @@ class DrafterService:
             }
             for n in candidates
         ]
-        prompt = (
-            _SYSTEM_PROMPT
-            + f"\nDraftSpec: {json.dumps({'intent': spec.natural_language_intent, 'entities': spec.discovered_entities}, ensure_ascii=False)}"
-            + f"\nAvailable nodes: {json.dumps(catalog, ensure_ascii=False)}"
+        spec_json = json.dumps(
+            {"intent": spec.natural_language_intent, "entities": spec.discovered_entities},
+            ensure_ascii=False,
         )
+        catalog_json = json.dumps(catalog, ensure_ascii=False)
+        # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
+        # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
+        if prior_workflow is not None:
+            current = self._serialize_for_edit(prior_workflow, candidates)
+            if current is not None:
+                edit_prompt = (
+                    _EDIT_SYSTEM_PROMPT
+                    + f"\nDraftSpec: {spec_json}"
+                    + f"\nAvailable nodes: {catalog_json}"
+                    + f"\nCURRENT WORKFLOW: {json.dumps(current, ensure_ascii=False)}"
+                )
+                try:
+                    edit_resp = await self._llm.generate_structured(edit_prompt, _EditResponse)
+                except Exception as e:
+                    raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
+                return self._build_from_edit(edit_resp, candidates, owner_user_id)
+
+        prompt = _SYSTEM_PROMPT + f"\nDraftSpec: {spec_json}" + f"\nAvailable nodes: {catalog_json}"
         try:
             draft_resp = await self._llm.generate_structured(prompt, _DraftResponse)
         except Exception as e:
             raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
         return self._build(draft_resp, candidates, owner_user_id)
+
+    @staticmethod
+    def _serialize_for_edit(
+        workflow: WorkflowSchema, candidates: list[NodeConfig]
+    ) -> dict[str, Any] | None:
+        """이전 워크플로우를 LLM 편집용 **ref 기반** JSON으로 직렬화.
+
+        각 노드에 안정적 ref(n0, n1, …)를 부여해 node_type이 중복돼도 정체성이 모호하지
+        않게 한다. NodeInstance는 node_id만 가지므로 candidates로 node_type을 역매핑하며,
+        한 노드라도 후보에 없으면 None을 반환해 호출부가 fresh draft로 폴백하게 한다(부분
+        컨텍스트로 기존 노드를 잃는 것보다 안전).
+        """
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        ref_by_instance: dict[UUID, str] = {}
+        nodes: list[dict[str, Any]] = []
+        for i, n in enumerate(workflow.nodes):
+            node_type = type_by_id.get(n.node_id)
+            if node_type is None:
+                return None
+            ref = f"n{i}"
+            ref_by_instance[n.instance_id] = ref
+            nodes.append({"ref": ref, "node_type": node_type, "parameters": n.parameters})
+        connections: list[dict[str, str]] = []
+        for edge in workflow.connections:
+            from_ref = ref_by_instance.get(edge.from_instance_id)
+            to_ref = ref_by_instance.get(edge.to_instance_id)
+            if from_ref and to_ref:
+                connections.append({
+                    "from_ref": from_ref,
+                    "to_ref": to_ref,
+                    "from_handle": edge.from_handle,
+                    "to_handle": edge.to_handle,
+                })
+        return {"name": workflow.name, "nodes": nodes, "connections": connections}
+
+    def _build_from_edit(
+        self, draft: _EditResponse, candidates: list[NodeConfig], owner_user_id: UUID
+    ) -> WorkflowSchema:
+        """ref 기반 편집 응답 → WorkflowSchema. node_type 대신 ref가 노드 정체성이라 동일
+        node_type 다중 노드를 허용한다(중복 ref만 거부)."""
+        try:
+            node_map = {n.node_type: n for n in candidates}
+            nodes: list[NodeInstance] = []
+            ref_to_instance: dict[str, UUID] = {}
+            for raw in draft.nodes:
+                nc = node_map.get(raw.node_type)
+                if nc is None:
+                    raise ExecutionError(
+                        f"후보 목록에 없는 node_type: {raw.node_type}",
+                        code="E_UNKNOWN_NODE_TYPE",
+                    )
+                if raw.ref in ref_to_instance:
+                    raise ExecutionError(f"ref 중복 사용 불가: {raw.ref}", code="E_DUPLICATE_REF")
+                instance_id = uuid4()
+                ref_to_instance[raw.ref] = instance_id
+                nodes.append(
+                    NodeInstance(
+                        instance_id=instance_id,
+                        node_id=nc.node_id,
+                        parameters=raw.parameters,
+                        position=Position(x=raw.x, y=raw.y),
+                    )
+                )
+
+            connections: list[Edge] = []
+            for edge in draft.connections:
+                from_id = ref_to_instance.get(edge.from_ref)
+                to_id = ref_to_instance.get(edge.to_ref)
+                if from_id is None or to_id is None:
+                    _logger.warning(
+                        "엣지 건너뜀 — 알 수 없는 ref: %s → %s", edge.from_ref, edge.to_ref
+                    )
+                    continue
+                connections.append(
+                    Edge(
+                        from_instance_id=from_id,
+                        to_instance_id=to_id,
+                        from_handle=edge.from_handle,
+                        to_handle=edge.to_handle,
+                    )
+                )
+
+            return WorkflowSchema(
+                workflow_id=uuid4(),
+                name=draft.name,
+                scope=draft.scope,
+                is_draft=True,
+                nodes=nodes,
+                connections=connections,
+                owner_user_id=owner_user_id,
+            )
+        except ExecutionError:
+            raise
+        except Exception as e:
+            raise ExecutionError(f"WorkflowSchema 빌드 실패: {e}", code="E_DRAFT_PARSE")
 
     def _build(self, draft: _DraftResponse, candidates: list[NodeConfig], owner_user_id: UUID) -> WorkflowSchema:
         try:

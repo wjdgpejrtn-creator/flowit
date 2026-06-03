@@ -11,7 +11,7 @@ import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession, streamSlotAnswer } from '@/lib/api/agentApi';
 import { executeWorkflow, getWorkflow } from '@/lib/api/workflowApi';
 import { useWorkflowStore } from '@/stores/workflowStore';
-import WorkflowCanvas from '@/components/workflow/WorkflowCanvas';
+import WorkflowEditPane from '@/components/workflow/WorkflowEditPane';
 import { ReactFlow, Background, BackgroundVariant, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getCatalog } from '@/lib/api/nodeApi';
@@ -22,7 +22,8 @@ import { showToast } from '@/stores/toastStore';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
-import { STEP_ORDER, STEP_LABELS, nextMonotonicStep } from '@/lib/agentSteps';
+import { nextMonotonicStep, stepIndexFor, displayLabels } from '@/lib/agentSteps';
+import { computeFilledParams } from '@/lib/filledParams';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -479,6 +480,7 @@ function AgentPageContent() {
     rationaleText, appendRationale, clearRationale,
     slotQuestion, setSlotQuestion,
     currentStep, setCurrentStep,
+    compositeFlow, setCompositeFlow,
     readyToExecute, setReadyToExecute,
   } = useAgentStore();
 
@@ -495,7 +497,7 @@ function AgentPageContent() {
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
 
-  // 완성된 워크플로우를 편집 캔버스에 로드 — useWorkflowStore(WorkflowCanvas가 읽음).
+  // 완성된 워크플로우를 편집 캔버스에 로드 — useWorkflowStore(WorkflowEditPane이 읽음).
   const setLoadedWorkflow = useWorkflowStore((s) => s.setWorkflow);
   const loadedWorkflow = useWorkflowStore((s) => s.workflow);
   const [editCatalog, setEditCatalog] = useState<NodeConfig[] | null>(null);
@@ -520,6 +522,7 @@ function AgentPageContent() {
     state.clearRationale();
     state.setSessionId('');
     state.setCurrentStep(null);
+    state.setCompositeFlow(false);
     state.setSlotQuestion(null);
     state.setViewingSession(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -588,7 +591,11 @@ function AgentPageContent() {
         const toolName = frame.agent_node_name as string;
         // SSE 콜백은 클로저라 구조분해된 currentStep이 stale될 수 있어 store에서 최신값을 읽는다.
         const prev = useAgentStore.getState().currentStep;
-        setCurrentStep(nextMonotonicStep(prev, toolName));
+        const next = nextMonotonicStep(prev, toolName);
+        // 복합(skill_then_compose) 흐름 — 스킬 빌드 단계 진입 시 '스킬 생성' 선두 단계를 노출.
+        // 한 번 켜지면 이후 컴포저 파이프라인 동안에도 유지(단계가 done으로 남도록), 리셋은 새 턴에서만.
+        if (next === 'skill') setCompositeFlow(true);
+        setCurrentStep(next);
         break;
       }
       case 'rationale_delta':
@@ -678,6 +685,7 @@ function AgentPageContent() {
     setInput('');
     setStreaming(true);
     setCurrentStep(null);
+    setCompositeFlow(false);  // 새 턴 — 복합 흐름 플래그 리셋 (라운드2 resume은 별도 경로라 미리셋)
     setSkillSelection(null);
     clearRationale();
 
@@ -707,6 +715,17 @@ function AgentPageContent() {
       ? (skillSelection?.options.find((o) => o.skill_id === skillId)?.name ?? '선택한 스킬')
       : '건너뛰기';
     addMessage({ id: `sk${Date.now()}`, role: 'user', content: `스킬: ${chosen}`, timestamp: Date.now() });
+    // round2 resume은 백엔드가 "작성을 시작할게요" 진행 안내를 침묵 처리(composer 노드만 재개)한다.
+    // 빈 단계처럼 보이지 않도록 프론트가 이어가기 안내를 즉시 표시한다(composer/resume/bind_skill
+    // 프레임이 도착해 스테퍼가 노드 검색→초안 생성으로 전진하기까지의 공백 보완).
+    addMessage({
+      id: `ack${Date.now()}`,
+      role: 'agent',
+      content: skillId
+        ? '선택하신 스킬을 적용해 워크플로우 작성을 이어갈게요.'
+        : '스킬 없이 워크플로우 작성을 이어갈게요.',
+      timestamp: Date.now(),
+    });
     setSkillSelection(null);
     setStreaming(true);
 
@@ -746,7 +765,10 @@ function AgentPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const stepIndex = currentStep ? STEP_ORDER.indexOf(currentStep) + 1 : 0;
+  const stepIndex = stepIndexFor(currentStep, compositeFlow);
+  // 컨펌 게이트 "실행 전 확인할 입력값" — AI가 자동으로 채운 노드 파라미터를 노드 안 들어가도
+  // 보이게. loadedWorkflow(저장본)×editCatalog(input_schema)로 프론트 계산(백엔드 변경 0).
+  const filledParams = computeFilledParams(loadedWorkflow, editCatalog);
   const handleNewChat = () => {
     // 테스트 3: sessionId가 비어있어도 메시지가 있으면 히스토리에 저장
     if (messages.length > 0) {
@@ -758,6 +780,7 @@ function AgentPageContent() {
     clearRationale();
     setSessionId('');
     setCurrentStep(null);
+    setCompositeFlow(false);
     setSlotQuestion(null);
     setReadyToExecute(null);
     setSkillSelection(null);
@@ -946,6 +969,7 @@ function AgentPageContent() {
                     <ConfirmCard
                       message={readyToExecute.message}
                       explanation={readyToExecute.explanation}
+                      filledParams={filledParams}
                       onExecute={handleExecute}
                       onEdit={() => setMode('edit')}
                       loading={executeLoading}
@@ -1020,7 +1044,7 @@ function AgentPageContent() {
                     AI 처리 단계
                   </div>
                   <Steps
-                    items={STEP_ORDER.map((s) => STEP_LABELS[s])}
+                    items={displayLabels(compositeFlow)}
                     current={stepIndex}
                   />
                 </div>
@@ -1069,11 +1093,12 @@ function AgentPageContent() {
           )}
 
           {/* ── Edit Mode ───────────────────────────────────────── */}
-          {/* 완성된 워크플로우가 로드돼 있으면 store 기반 캔버스로 표시(adapter 렌더), */}
-          {/* 아니면 빈 빌더(FlowEditor)로 처음부터 작성. */}
+          {/* 완성된 워크플로우(AI 초안)는 WorkflowEditPane으로 — 파라미터 폼(NodeConfigDrawer)
+              + 저장(updateWorkflow) + 검증 + 필수누락 시 실행 차단까지 풀 편집. 컨펌 게이트의
+              "확인 필요 입력값"을 여기서 바로 고치고 저장·실행. 아니면 빈 빌더(FlowEditor). */}
           {mode === 'edit' && (
             <div className="flex-1 min-h-0 flex">
-              {loadedWorkflow ? <WorkflowCanvas catalog={editCatalog} /> : <FlowEditor />}
+              {loadedWorkflow ? <WorkflowEditPane onExecuted={() => setMode('run')} /> : <FlowEditor />}
             </div>
           )}
 
