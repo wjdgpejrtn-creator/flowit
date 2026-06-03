@@ -53,7 +53,7 @@ def _override_orchestrator(app, *, body: bytes = b"data: {\"frames\": []}\n\n") 
 
 
 def _bearer_token() -> str:
-    """AuthMiddleware 통과용 dummy JWT (env_minimum의 빈 JWT_SECRET_KEY)."""
+    """AuthMiddleware 통과용 dummy JWT (env_minimum의 JWT_SECRET_KEY와 동일 시크릿으로 서명)."""
     now = datetime.now(UTC)
     return pyjwt.encode(
         {
@@ -63,7 +63,7 @@ def _bearer_token() -> str:
             "exp": now + timedelta(seconds=3600),
             "iat": now,
         },
-        "",
+        "test-jwt-secret-key-min-32-bytes",
         algorithm="HS256",
     )
 

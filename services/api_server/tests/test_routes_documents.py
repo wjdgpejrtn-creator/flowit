@@ -55,7 +55,7 @@ def _bearer_token() -> str:
             "exp": now + timedelta(seconds=3600),
             "iat": now,
         },
-        "",
+        "test-jwt-secret-key-min-32-bytes",
         algorithm="HS256",
     )
 
