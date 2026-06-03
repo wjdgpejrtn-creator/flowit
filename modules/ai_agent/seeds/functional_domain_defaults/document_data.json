@@ -12,9 +12,9 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "document_url": {"type": "string", "format": "uri"},
-          "language_hints": {"type": "array", "items": {"type": "string"}, "default": ["ko", "en"]},
-          "include_bbox": {"type": "boolean", "default": true}
+          "document_url": {"type": "string", "format": "uri", "description": "OCR할 이미지/스캔 PDF 파일의 URL. 공개 URL 또는 시스템이 접근 가능한 저장소 경로. 예: 'https://storage.example.com/scan.pdf'"},
+          "language_hints": {"type": "array", "items": {"type": "string"}, "default": ["ko", "en"], "description": "인식 정확도를 높이기 위한 예상 언어 코드 목록(ISO 639-1). 기본 [\"ko\",\"en\"]. 예: [\"ko\",\"ja\"]"},
+          "include_bbox": {"type": "boolean", "default": true, "description": "각 텍스트의 위치 좌표(bounding box)를 결과에 포함할지 여부(기본 true)"}
         },
         "required": ["document_url"]
       },
@@ -39,9 +39,9 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "pdf_url": {"type": "string", "format": "uri"},
-          "form_template_id": {"type": "string"},
-          "fields_to_extract": {"type": "array", "items": {"type": "string"}}
+          "pdf_url": {"type": "string", "format": "uri", "description": "필드를 추출할 양식 PDF 파일의 URL. 예: 'https://storage.example.com/contract.pdf'"},
+          "form_template_id": {"type": "string", "description": "양식 종류를 식별하는 템플릿 ID. 어떤 양식(계약서·신청서 등)인지 미리 등록해 둔 템플릿의 식별자입니다. 등록된 템플릿이 없으면 fields_to_extract로 직접 필드를 지정하세요. 예: TMPL-nda-v2"},
+          "fields_to_extract": {"type": "array", "items": {"type": "string"}, "description": "(선택) 추출할 필드 이름 목록. 템플릿이 없거나 일부만 뽑고 싶을 때 지정. 예: [\"계약자명\", \"계약일\", \"금액\"]"}
         },
         "required": ["pdf_url", "form_template_id"]
       },
@@ -65,10 +65,10 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "document_text": {"type": "string"},
-          "max_summary_length": {"type": "integer", "default": 500, "minimum": 100, "maximum": 5000},
-          "extract_key_points": {"type": "boolean", "default": true},
-          "model": {"type": "string", "default": "claude-haiku-4-5-20251001"}
+          "document_text": {"type": "string", "description": "요약할 문서의 원문 텍스트 전체"},
+          "max_summary_length": {"type": "integer", "default": 500, "minimum": 100, "maximum": 5000, "description": "요약문 최대 길이(글자 수, 100~5000). 기본 500"},
+          "extract_key_points": {"type": "boolean", "default": true, "description": "요약과 별도로 핵심 포인트 목록을 함께 뽑을지 여부(기본 true)"},
+          "model": {"type": "string", "default": "claude-haiku-4-5-20251001", "description": "요약에 쓸 LLM 모델. 기본 claude-haiku-4-5-20251001"}
         },
         "required": ["document_text"]
       },
@@ -92,11 +92,11 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "source_text": {"type": "string"},
-          "source_lang": {"type": "string", "default": "auto"},
-          "target_lang": {"type": "string"},
-          "preserve_formatting": {"type": "boolean", "default": true},
-          "model": {"type": "string", "default": "claude-haiku-4-5-20251001"}
+          "source_text": {"type": "string", "description": "번역할 원문 텍스트"},
+          "source_lang": {"type": "string", "default": "auto", "description": "원문 언어 코드(ISO 639-1). 기본 'auto'(자동 감지). 예: 'ko'"},
+          "target_lang": {"type": "string", "description": "번역할 목표 언어 코드(ISO 639-1). 예: 'en'(영어), 'ja'(일본어)"},
+          "preserve_formatting": {"type": "boolean", "default": true, "description": "줄바꿈·마크다운 등 원문 서식을 유지할지 여부(기본 true)"},
+          "model": {"type": "string", "default": "claude-haiku-4-5-20251001", "description": "번역에 쓸 LLM 모델. 기본 claude-haiku-4-5-20251001"}
         },
         "required": ["source_text", "target_lang"]
       },
@@ -120,11 +120,11 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "document_url": {"type": "string", "format": "uri"},
-          "category_hint": {"type": ["string", "null"]},
-          "retention_policy": {"type": "string", "enum": ["1y", "3y", "5y", "7y", "permanent"]},
-          "drive_folder_id": {"type": "string"},
-          "auto_tags": {"type": "array", "items": {"type": "string"}}
+          "document_url": {"type": "string", "format": "uri", "description": "보관할 문서 파일의 URL. 예: 'https://storage.example.com/report.pdf'"},
+          "category_hint": {"type": ["string", "null"], "description": "(선택) 문서 분류 힌트. 자동 분류를 돕는 카테고리 단서이며, 미지정 시 AI가 자동 판단. 예: '계약서'"},
+          "retention_policy": {"type": "string", "enum": ["1y", "3y", "5y", "7y", "permanent"], "description": "보관 기간 정책. 1y/3y/5y/7y(해당 연수) 또는 permanent(영구). 기간 만료 후 폐기 대상이 됩니다"},
+          "drive_folder_id": {"type": "string", "description": "문서를 저장할 Google Drive 폴더 ID. 드라이브에서 폴더를 열었을 때 주소창 .../folders/ 뒤의 문자열입니다. 예: 1A2b3C4d5E6f"},
+          "auto_tags": {"type": "array", "items": {"type": "string"}, "description": "(선택) 추가로 붙일 태그 목록. 검색 인덱스에 함께 등록됩니다. 예: [\"2026\", \"재무\"]"}
         },
         "required": ["document_url", "retention_policy", "drive_folder_id"]
       },

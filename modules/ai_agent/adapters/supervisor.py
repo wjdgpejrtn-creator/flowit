@@ -23,6 +23,7 @@ from uuid import UUID, uuid4
 from common_schemas.agent import AgentState, MemoryEntry
 from common_schemas.agent_protocol import AgentProtocolRequest
 from common_schemas.enums import AgentMode, ExecutionStatus
+from common_schemas.handoff import HandoffPayload
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
@@ -38,12 +39,22 @@ from ..domain.entities.session_ref import SessionRef
 from ..domain.ports.llm_port import LLMPort
 from ..domain.ports.session_frame_store import SessionFrameStore
 from ..domain.ports.sub_agent_client import SubAgentClient
-from ..domain.services.intent_analyzer_service import IntentAnalyzerService
+from ..domain.services.intent_analyzer_service import IntentAnalyzerService, classify_recipe
+from ..domain.services.supervisor_router import MAX_HOPS, make_plan, recovery_target, route
+from ..domain.value_objects.route_plan import RoutePlan, RouteTarget
+
+# two-shot 2차 resume 전용 plan 라벨 (intent 미분류, 단일 composer 스텝).
+_RESUME_RECIPE = "__two_shot_resume__"
 
 _logger = logging.getLogger(__name__)
 
-_FAST_INTENTS = {"chitchat", "info_question", "control", "workflow_execute"}
-_COMPOSER_INTENTS = {"draft", "refine", "clarify"}
+# 단일 의도는 1-스텝 레시피라 라우팅 분기는 RECIPES(supervisor_router)로 이관.
+# 복합 의도(skill_then_compose)는 P3에서 intent 분류기가 키를 산출하면 자동 활성.
+_COMPOSER_TARGETS = {RouteTarget.COMPOSER, RouteTarget.SKILLS}  # relay 후 update_memory 필요
+
+# relay 래퍼가 생성하는 실패 코드. 이 외 ErrorFrame은 서브에이전트 자체 에러로 보고
+# result_review 경로(composer 보정)로 라우팅한다 (설계서 §6).
+_RELAY_FAIL_CODES = {"E_RELAY", "E_RELAY_LIMIT"}
 
 
 class _State(TypedDict):
@@ -54,6 +65,7 @@ class _State(TypedDict):
     turn_count: int
     personal_memory: list[MemoryEntry]
     intent: str | None
+    recipe_key: str | None  # 라우팅 키 (단일 의도=intent값 / 복합=화이트리스트 키)
     intent_analyzed_entities: dict[str, Any]
     error: str | None
     # two-shot HITL relay passthrough (REQ-013)
@@ -117,6 +129,7 @@ class LangGraphSupervisor:
             "turn_count": turn_count,
             "personal_memory": [],
             "intent": None,
+            "recipe_key": None,
             "intent_analyzed_entities": {},
             "error": None,
             "round": round,
@@ -126,96 +139,111 @@ class LangGraphSupervisor:
         all_frames: list[AnySSEFrame] = []
 
         try:
-            # ── two-shot 2차 (REQ-013) — intent 재분석 없이 곧장 composer 재개 relay ──
             if round == 2:
-                node_frame = AgentNodeFrame(agent_node_name="composer")
-                all_frames.append(node_frame)
-                yield node_frame
-                async for frame in self._relay_stream(state, self._composer, AgentMode.WIZARD):
-                    all_frames.append(frame)
-                    yield frame
-                await self._update_memory_node(state)
-                if self._session_frame_store:
-                    await self._save_session_frames(session_id, user_id, message, all_frames)
-                return
-
-            # ── load_memory ───────────────────────────────────────────────
-            # supervisor 라우팅 노드는 사용자 단계 표시 대상 아님 — AgentNodeFrame yield 제외
-            # (composer 노드 이후 늦게 도착 시 프론트 단계 역행 방지)
-            all_frames.append(AgentNodeFrame(agent_node_name="load_memory"))
-
-            mem_updates = await self._load_memory_node(state)
-            state = {**state, **mem_updates}  # type: ignore[assignment]
-            for frame in mem_updates.get("collected_frames", []):
-                all_frames.append(frame)
-                yield frame
-
-            # ── analyze_intent ────────────────────────────────────────────
-            intent_updates = await self._intent_node(state)
-            state = {**state, **intent_updates}  # type: ignore[assignment]
-            intent = state.get("intent")
-
-            all_frames.append(AgentNodeFrame(agent_node_name="analyze_intent"))
-
-            # ── route ─────────────────────────────────────────────────────
-            if intent is None:
-                chat_updates = await self._general_chat_node(state)
-                for frame in chat_updates.get("collected_frames", []):
-                    all_frames.append(frame)
-                    yield frame
-
-            elif intent in _FAST_INTENTS:
-                node_frame = AgentNodeFrame(agent_node_name=intent)
-                all_frames.append(node_frame)
-                yield node_frame
-                updates = await self._fast_response_node(state, intent)
-                for frame in updates.get("collected_frames", []):
-                    all_frames.append(frame)
-                    yield frame
-
-            elif intent == "propose":
-                node_frame = AgentNodeFrame(agent_node_name="finalize")
-                all_frames.append(node_frame)
-                yield node_frame
-                updates = await self._finalize_node(state)
-                for frame in updates.get("collected_frames", []):
-                    all_frames.append(frame)
-                    yield frame
-
-            elif intent == "build_skill":
-                node_frame = AgentNodeFrame(agent_node_name="build_skill")
-                all_frames.append(node_frame)
-                yield node_frame
-                transition = ChatMessageFrame(
-                    role="assistant",
-                    content="스킬 빌드를 시작할게요. 잠시만 기다려 주세요.",
-                )
-                all_frames.append(transition)
-                yield transition
-                async for frame in self._relay_stream(state, self._skills, AgentMode.SKILL_BUILDER):
-                    all_frames.append(frame)
-                    yield frame
-                await self._update_memory_node(state)
-
-            elif intent in _COMPOSER_INTENTS:
-                node_frame = AgentNodeFrame(agent_node_name="composer")
-                all_frames.append(node_frame)
-                yield node_frame
-                # transition을 relay 호출 전에 즉시 yield — 사용자 즉시 progress 인지
-                transition = ChatMessageFrame(
-                    role="assistant",
-                    content="요청하신 워크플로우 작성을 시작할게요. 잠시만 기다려 주세요.",
-                )
-                all_frames.append(transition)
-                yield transition
-                # composer frame 수신 즉시 outer stream으로 pass-through
-                async for frame in self._relay_stream(state, self._composer, AgentMode.WIZARD):
-                    all_frames.append(frame)
-                    yield frame
-                await self._update_memory_node(state)
-
+                # ── two-shot 2차 resume (REQ-013) ──────────────────────────
+                # intent 재분석/load_memory 없이 composer 스텝부터 재개. 별도 가로채기
+                # 대신 단일 스텝 plan으로 동일 루프를 태운다 (설계서 §7). resume 플래그가
+                # transition 안내를 억제해 기존 동작(AgentNodeFrame만, 안내 없음)을 보존.
+                plan = RoutePlan(recipe_key=_RESUME_RECIPE, steps=[RouteTarget.COMPOSER])
+                intent = None
+                resume = True
             else:
-                _logger.warning("supervisor: 알 수 없는 intent=%s → 종료", intent)
+                # ── load_memory ───────────────────────────────────────────
+                # supervisor 라우팅 노드는 사용자 단계 표시 대상 아님 — AgentNodeFrame yield 제외
+                # (composer 노드 이후 늦게 도착 시 프론트 단계 역행 방지)
+                all_frames.append(AgentNodeFrame(agent_node_name="load_memory"))
+
+                mem_updates = await self._load_memory_node(state)
+                state = {**state, **mem_updates}  # type: ignore[assignment]
+                for frame in mem_updates.get("collected_frames", []):
+                    all_frames.append(frame)
+                    yield frame
+
+                # ── analyze_intent ────────────────────────────────────────
+                intent_updates = await self._intent_node(state)
+                state = {**state, **intent_updates}  # type: ignore[assignment]
+                intent = state.get("intent")
+
+                all_frames.append(AgentNodeFrame(agent_node_name="analyze_intent"))
+
+                # 라우팅은 recipe_key(복합 포함)로, 노드 동작 표시는 intent로 분리.
+                plan = make_plan(state.get("recipe_key"))
+                resume = False
+
+            # ── supervisor 제어 루프 ───────────────────────────────────────
+            # intent → 레시피(forward 스텝 큐). 단일 의도는 1-스텝이라 동작은
+            # 기존 1-홉 디스패처와 동일. 복합 레시피(skill_then_compose)는 한
+            # 루프에서 여러 hop을 순차 디스패치한다 (state-mediated, 설계서 §2·§5).
+            #
+            # 복구 경로(설계서 §6): relay 실패를 recovery_target(순수 함수)로 판정한다.
+            #   · 연결 실패(E_RELAY, content 0) → 첫 ErrorFrame 억제 후 동일 target 재시도
+            #   · E_RELAY_LIMIT / content 후 실패 → 이미 노출됨 → 즉시 포기
+            #   · 서브에이전트 자체 ErrorFrame → result_review → composer 보정 1회
+            # 3중 무한루프 방어: MAX_HOPS(전체 홉) · retry_count(MAX_RETRIES) · review_inserted.
+            # plan/intent/resume은 위 round 분기에서 이미 셋업됨 (round==2=단일 composer resume).
+            relayed = False
+            retry_count = 0       # 동일 target 연결 재시도 누적 (recovery_mode)
+            review_inserted = False  # result_review composer 보정 1회 가드
+            hops = 0
+            while hops < MAX_HOPS:
+                target = route(plan)
+                if target is RouteTarget.DONE:
+                    break
+                # 재시도 홉은 transition(AgentNodeFrame/안내)을 다시 내지 않는다 (중복 방지).
+                is_retry = retry_count > 0
+                outcome: dict[str, Any] = {}
+                async for frame in self._dispatch(
+                    target, state, intent, outcome, is_retry=is_retry, resume=resume
+                ):
+                    all_frames.append(frame)
+                    yield frame
+                resume = False  # resume 억제는 재개 첫 홉에만 적용
+                if target in _COMPOSER_TARGETS:
+                    relayed = True
+                hops += 1
+
+                if not outcome.get("failed"):
+                    # state-mediated 핸드오프(§5): SKILLS가 산출한 selected_skill_id를
+                    # state에 누적 → 다음 COMPOSER 홉 relay가 read (직접 통신 없음).
+                    sid = (outcome.get("state_delta") or {}).get("selected_skill_id")
+                    if sid:
+                        state = {**state, "selected_skill_id": sid}  # type: ignore[assignment]
+                    retry_count = 0
+                    plan.advance()
+                    continue
+
+                # ── 실패 처리 — recovery_target로 결정 ──
+                held = outcome.get("suppressed_error")
+                if held is not None:
+                    # content 0 E_RELAY — 억제됨 → recovery_mode 재시도 후보
+                    handoff = self._make_handoff("recovery_mode", outcome)
+                    if recovery_target(plan, handoff, retry_count) is None:
+                        all_frames.append(held)  # 포기 — 억제했던 에러 노출
+                        yield held
+                        break
+                    retry_count += 1
+                    continue  # advance 안 함 → 동일 target 재시도
+                # 에러는 이미 노출된 상태
+                if outcome.get("error_code") in _RELAY_FAIL_CODES:
+                    break  # E_RELAY_LIMIT / content 후 E_RELAY — 즉시 포기
+                # 서브에이전트 자체 ErrorFrame → result_review → composer 보정 (1회)
+                if review_inserted:
+                    break
+                handoff = self._make_handoff("result_review", outcome)
+                rt = recovery_target(plan, handoff, retry_count)
+                if rt is None:
+                    break
+                plan.advance()       # 실패한 스텝 통과
+                plan.insert(rt)      # 그 자리에 composer 보정 삽입
+                review_inserted = True
+                retry_count = 0
+                continue
+            else:
+                _logger.warning("supervisor: 홉 상한(%d) 도달 — 루프 강제 종료", MAX_HOPS)
+
+            # ── update_memory (relay가 있었던 경우만) ──────────────────────
+            if relayed:
+                await self._update_memory_node(state)
 
         except Exception as exc:
             err_frame = ErrorFrame(code="E_SUPERVISOR", message=str(exc))
@@ -224,6 +252,73 @@ class LangGraphSupervisor:
 
         if self._session_frame_store:
             await self._save_session_frames(session_id, user_id, message, all_frames)
+
+    # ------------------------------------------------------------------ dispatch
+
+    async def _dispatch(
+        self,
+        target: RouteTarget,
+        state: _State,
+        intent: str | None,
+        outcome: dict[str, Any],
+        is_retry: bool = False,
+        resume: bool = False,
+    ) -> AsyncGenerator[AnySSEFrame, None]:
+        """한 홉의 target을 디스패치 — 산출 프레임을 모두 yield (호출부가 append+yield).
+
+        load_memory/update_memory는 루프 북엔드(호출부)에서 처리하므로 여기 없다.
+        프레임 시퀀스는 승격 전 1-홉 디스패처와 동일하게 보존한다.
+
+        relay target(COMPOSER/SKILLS)의 실패는 ``outcome``(가변 dict)에 기록한다 —
+        ``failed``/``error_code``/``suppressed_error``. 로컬 노드는 자체 try/except로
+        항상 프레임을 내므로 실패를 기록하지 않는다. ``is_retry``면 transition
+        (AgentNodeFrame/안내 메시지)을 생략해 재시도 시 중복 노출을 막는다.
+        ``resume``(two-shot 2차)면 AgentNodeFrame은 내되 안내 메시지만 생략한다 —
+        사용자는 1차에 이미 진행 안내를 받았으므로 재개 시 침묵 복귀가 옳다.
+        """
+        if target is RouteTarget.GENERAL_CHAT:
+            updates = await self._general_chat_node(state)
+            for frame in updates.get("collected_frames", []):
+                yield frame
+
+        elif target is RouteTarget.FAST_RESPONSE:
+            # AgentNodeFrame 이름은 구체 intent(chitchat/control/…) — 프론트 단계 표시 보존
+            yield AgentNodeFrame(agent_node_name=intent or "fast_response")
+            updates = await self._fast_response_node(state, intent or "")
+            for frame in updates.get("collected_frames", []):
+                yield frame
+
+        elif target is RouteTarget.FINALIZE:
+            yield AgentNodeFrame(agent_node_name="finalize")
+            updates = await self._finalize_node(state)
+            for frame in updates.get("collected_frames", []):
+                yield frame
+
+        elif target is RouteTarget.SKILLS:
+            if not is_retry:
+                yield AgentNodeFrame(agent_node_name="build_skill")
+                if not resume:
+                    # transition을 relay 호출 전에 즉시 yield — 사용자 즉시 progress 인지
+                    yield ChatMessageFrame(
+                        role="assistant",
+                        content="스킬 빌드를 시작할게요. 잠시만 기다려 주세요.",
+                    )
+            async for frame in self._relay_monitored(state, self._skills, AgentMode.SKILL_BUILDER, outcome):
+                yield frame
+
+        elif target is RouteTarget.COMPOSER:
+            if not is_retry:
+                yield AgentNodeFrame(agent_node_name="composer")
+                if not resume:
+                    yield ChatMessageFrame(
+                        role="assistant",
+                        content="요청하신 워크플로우 작성을 시작할게요. 잠시만 기다려 주세요.",
+                    )
+            async for frame in self._relay_monitored(state, self._composer, AgentMode.WIZARD, outcome):
+                yield frame
+
+        else:
+            _logger.warning("supervisor: 디스패치 불가 target=%s → 무시", target)
 
     # ------------------------------------------------------------------ relay
 
@@ -234,8 +329,13 @@ class LangGraphSupervisor:
         state: _State,
         client: SubAgentClient,
         mode: AgentMode,
+        state_delta_sink: dict[str, Any] | None = None,
     ) -> AsyncGenerator[AnySSEFrame, None]:
-        """composer/skills frame을 수신 즉시 outer stream으로 pass-through."""
+        """composer/skills frame을 수신 즉시 outer stream으로 pass-through.
+
+        ``state_delta_sink``가 주어지면 서브에이전트가 반환한 state_delta를 누적해
+        호출부가 state-mediated 핸드오프(예: selected_skill_id)를 읽게 한다 (§5).
+        """
         agent_state = AgentState(
             session_id=state["session_id"],
             user_id=state["user_id"],
@@ -264,6 +364,8 @@ class LangGraphSupervisor:
         try:
             count = 0
             async for resp in client.send(req):
+                if state_delta_sink is not None and resp.state_delta:
+                    state_delta_sink.update(resp.state_delta)
                 for frame in resp.frames:
                     count += 1
                     if count > self._MAX_RELAY_FRAMES:
@@ -274,6 +376,51 @@ class LangGraphSupervisor:
                     break
         except Exception as exc:
             yield ErrorFrame(code="E_RELAY", message=str(exc))
+
+    async def _relay_monitored(
+        self,
+        state: _State,
+        client: SubAgentClient,
+        mode: AgentMode,
+        outcome: dict[str, Any],
+    ) -> AsyncGenerator[AnySSEFrame, None]:
+        """``_relay_stream`` 위 실패 감지 래퍼 (복구 루프 입력, 설계서 §6).
+
+        ErrorFrame을 만나면 ``outcome``에 실패를 기록한다. 단 **content 0 상태의
+        E_RELAY**(사전 연결 실패)는 yield를 보류(``suppressed_error``)해, 호출부가
+        재시도로 무에러 결과를 대체하거나 포기 시에만 노출하도록 한다. content가
+        이미 나간 뒤의 실패나 서브에이전트 자체 ErrorFrame은 그대로 노출한다.
+        """
+        content = 0
+        sink = outcome.setdefault("state_delta", {})
+        async for frame in self._relay_stream(state, client, mode, state_delta_sink=sink):
+            if isinstance(frame, ErrorFrame):
+                outcome["failed"] = True
+                outcome["error_code"] = frame.code
+                outcome["error_message"] = frame.message
+                if frame.code == "E_RELAY" and content == 0:
+                    # 사전 연결 실패 — 보류해 재시도 시 대체 가능
+                    outcome["suppressed_error"] = frame
+                    return
+                yield frame  # E_RELAY_LIMIT / content 후 실패 / 서브에이전트 자체 에러
+                return
+            content += 1
+            yield frame
+        outcome["content_count"] = content
+
+    @staticmethod
+    def _make_handoff(handoff_type: str, outcome: dict[str, Any]) -> HandoffPayload:
+        """실패 outcome → 복구 핸드오프 계약 (recovery_target 입력)."""
+        code = outcome.get("error_code")
+        msg = outcome.get("error_message")
+        return HandoffPayload(
+            handoff_type=handoff_type,  # type: ignore[arg-type]
+            direction="reverse",
+            error_codes=[code] if code else [],
+            error_messages=[msg] if msg else [],
+            state_data={},
+            correlation_id=uuid4(),
+        )
 
     # ------------------------------------------------------------------ nodes
 
@@ -317,12 +464,15 @@ class LangGraphSupervisor:
                 [{"role": "user", "content": state["message"]}], context={}
             )
         except Exception as exc:
-            return {"intent": "clarify", "error": f"intent 분석 실패: {exc}"}
-        if result is None:
-            return {"intent": None, "intent_analyzed_entities": {}}
+            return {"intent": "clarify", "recipe_key": "clarify", "error": f"intent 분석 실패: {exc}"}
+        intent = result.intent if result is not None else None
+        # intent = 노드 동작용(fast_response 분기·단계 표시), recipe_key = 라우팅용.
+        # 복합 발화(skill_then_compose)는 base intent(BUILD_SKILL)와 별도 키를 가진다.
+        recipe_key = classify_recipe(state["message"], intent)
         return {
-            "intent": result.intent,
-            "intent_analyzed_entities": result.analyzed_entities,
+            "intent": intent,
+            "recipe_key": recipe_key,
+            "intent_analyzed_entities": result.analyzed_entities if result is not None else {},
         }
 
     async def _fast_response_node(self, state: _State, intent: str) -> dict:

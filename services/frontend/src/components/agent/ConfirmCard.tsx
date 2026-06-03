@@ -5,13 +5,17 @@ import type { WorkflowExplanation } from '@common/generated';
 import { RiskLevel } from '@common/generated';
 import Btn from '@/components/common/Btn';
 import RiskPill from '@/components/common/RiskPill';
+import type { FilledNode } from '@/lib/filledParams';
+import { reviewCount } from '@/lib/filledParams';
 
 interface ConfirmCardProps {
   /** explanation 없는 레거시 응답 시 보여줄 기본 메시지 */
   message: string;
   /** 컨펌 게이트 신뢰 매니페스트 (영역 C composer _explain_node가 채움). 없으면 graceful fallback */
   explanation?: WorkflowExplanation;
-  onExecute: () => void;
+  /** AI가 자동으로 채운(또는 채웠을) 입력값 — loadedWorkflow × 카탈로그 input_schema로 프론트 계산 */
+  filledParams?: FilledNode[];
+  onSave: () => void;
   onEdit: () => void;
   loading?: boolean;
 }
@@ -30,8 +34,15 @@ function _isStrong(level: RiskLevel): boolean {
  * 의도 재진술 / 단계 / 권한 매니페스트 / 가정을 보여주고, 틀리면 편집으로 유도한다.
  * explanation이 없으면(레거시 result 프레임) 기존 단순 메시지로 fallback.
  */
-export default function ConfirmCard({ message, explanation, onExecute, onEdit, loading = false }: ConfirmCardProps) {
+export default function ConfirmCard({ message, explanation, filledParams, onSave, onEdit, loading = false }: ConfirmCardProps) {
   const [showAssumptions, setShowAssumptions] = useState(false);
+  const filled = filledParams ?? [];
+  const reviewN = reviewCount(filled);
+  // filledParams는 워크플로우 로드 후 비동기로 채워지므로 lazy init은 못 쓴다.
+  // override=null이면 "확인 필요 항목 있으면 펼침"을 reactive하게 따르고, 사용자가
+  // 토글하면 그 선택을 고정한다.
+  const [filledOverride, setFilledOverride] = useState<boolean | null>(null);
+  const showFilled = filledOverride ?? reviewN > 0;
 
   return (
     <div className="flex items-end gap-2 justify-start">
@@ -96,7 +107,55 @@ export default function ConfirmCard({ message, explanation, onExecute, onEdit, l
               </div>
             )}
 
-            {/* ④ 가정·기본값 — 접을 수 있음 */}
+            {/* ④ 실행 전 확인할 입력값 — AI가 자동으로 채운(또는 채웠을) 값 (프론트 계산) */}
+            {filled.length > 0 && (
+              <div className="border-[1.5px] border-[var(--color-line-soft)] rounded-[8px_4px_8px_4px] p-[8px] bg-[var(--color-paper2)]">
+                <button
+                  type="button"
+                  onClick={() => setFilledOverride(!showFilled)}
+                  className="w-full flex items-center gap-[6px] text-left"
+                >
+                  <span className="font-bold text-[11px] text-[var(--color-ink3)] uppercase tracking-wider">실행 전 확인할 입력값</span>
+                  {reviewN > 0 && (
+                    <span className="text-[10px] font-bold text-[var(--color-danger,#c0392b)] bg-[var(--color-hl)] rounded px-[5px] py-[1px]">
+                      확인 필요 {reviewN}
+                    </span>
+                  )}
+                  <span className="ml-auto text-[11px] text-[var(--color-ink3)]">{showFilled ? '▾' : '▸'}</span>
+                </button>
+                {showFilled && (
+                  <>
+                    <p className="text-[11px] text-[var(--color-ink3)] mt-[4px] mb-[6px]">
+                      별도로 말씀하지 않은 항목은 AI가 자동으로 채웠어요. 다르면 편집에서 수정하세요.
+                    </p>
+                    <div className="flex flex-col gap-[6px]">
+                      {filled.map((node) => (
+                        <div key={node.nodeName}>
+                          <div className="text-[12px] font-semibold text-[var(--color-ink2)]">{node.nodeName}</div>
+                          <ul className="mt-[2px] flex flex-col gap-[2px]">
+                            {node.fields.map((f) => (
+                              <li key={f.name} className="flex items-baseline gap-[6px] text-[12px]">
+                                <span className="font-mono text-[11px] text-[var(--color-ink3)] flex-shrink-0">{f.name}</span>
+                                <span className="text-[var(--color-ink3)]">=</span>
+                                <span className="font-mono text-[11px] text-[var(--color-ink2)] break-all min-w-0">{f.value}</span>
+                                {f.tag === 'review' && (
+                                  <span className="ml-auto flex-shrink-0 text-[10px] font-bold text-[var(--color-danger,#c0392b)]">⚠ 확인 필요</span>
+                                )}
+                                {f.tag === 'default' && (
+                                  <span className="ml-auto flex-shrink-0 text-[10px] text-[var(--color-ink4)]">기본값</span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* ⑤ 가정·기본값 — 접을 수 있음 */}
             {explanation.assumptions.length > 0 && (
               <div>
                 <button
@@ -118,10 +177,10 @@ export default function ConfirmCard({ message, explanation, onExecute, onEdit, l
           </>
         )}
 
-        {/* ⑤ 액션 — 실행 + 원클릭 교정 */}
+        {/* ⑤ 액션 — 저장 + 원클릭 교정 */}
         <div className="flex items-center gap-2 pt-[2px]">
-          <Btn onClick={onExecute} disabled={loading} className="text-[12px]">
-            {loading ? '실행 중…' : '▶ 실행'}
+          <Btn onClick={onSave} disabled={loading} className="text-[12px]">
+            {loading ? '저장 중…' : '💾 저장'}
           </Btn>
           <Btn ghost onClick={onEdit} disabled={loading} className="text-[12px]">
             ✏️ 편집

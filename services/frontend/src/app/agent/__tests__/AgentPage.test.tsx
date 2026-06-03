@@ -66,6 +66,7 @@ beforeEach(() => {
     sessions: [],
     messages: [],
     currentStep: null,
+    compositeFlow: false,
     rationaleText: '',
     slotQuestion: null,
     readyToExecute: null,
@@ -139,6 +140,29 @@ describe('AgentPage — handleSend SSE 연동', () => {
     await waitFor(() => {
       expect(useAgentStore.getState().currentStep).toBe('intent');
     });
+  });
+
+  it('복합 흐름(build_skill) 수신 시 compositeFlow가 켜지고 "스킬 생성" 단계가 표시된다', async () => {
+    mockStreamCreateSession.mockImplementation(
+      async (_req: unknown, onFrame: (frame: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'session', session_id: 'sid-1' });
+        onFrame({ frame_type: 'agent_node', agent_node_name: 'build_skill' });
+        onFrame({ frame_type: 'agent_node', agent_node_name: 'composer' });   // 홉 마커 — 유지
+        onFrame({ frame_type: 'agent_node', agent_node_name: 'security' });   // 컴포저 진입 — 전진
+      },
+    );
+
+    render(<AgentPage />);
+    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    await userEvent.type(textarea, '스킬 만들어서 워크플로우 만들어줘');
+    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().compositeFlow).toBe(true);
+      expect(useAgentStore.getState().currentStep).toBe('security');
+    });
+    // 선두 '스킬 생성' 단계가 단계 표시에 노출된다 (비복합이면 안 보임)
+    expect(screen.getByText('스킬 생성')).toBeInTheDocument();
   });
 
   it('result frame의 ready_to_execute 시 실행 버튼이 표시된다', async () => {
@@ -320,5 +344,36 @@ describe('AgentPage — handleSend SSE 연동', () => {
       const call = mockStreamCreateSession.mock.calls[0];
       expect(call[2]).toBeInstanceOf(AbortSignal);
     });
+  });
+
+  it('컨펌(readyToExecute) 상태에서 후속 메시지는 같은 세션을 이어간다 (refine, 새 채팅 X)', async () => {
+    mockStreamCreateSession
+      .mockImplementationOnce(async (_req: unknown, onFrame: (f: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'session', session_id: 'sid-1' });
+        onFrame({ frame_type: 'result', intent: 'propose', payload: { status: 'ready_to_execute', workflow_id: 'wf-1', message: '완성' } });
+      })
+      .mockImplementationOnce(() => Promise.resolve());
+
+    render(<AgentPage />);
+    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    await userEvent.type(textarea, '슬랙 알림 워크플로우');
+    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await waitFor(() => expect(useAgentStore.getState().readyToExecute).not.toBeNull());
+
+    // refine 후속 — 같은 세션 이어가야(이전엔 새 세션으로 리셋되는 버그)
+    await userEvent.type(textarea, 'url을 바꿔줘');
+    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+
+    await waitFor(() => {
+      expect(mockStreamCreateSession).toHaveBeenLastCalledWith(
+        { message: 'url을 바꿔줘', session_id: 'sid-1' },  // 같은 session_id
+        expect.any(Function),
+        expect.any(AbortSignal),
+      );
+    });
+    expect(useAgentStore.getState().sessions).toHaveLength(0);  // 새 세션 아카이브 안 함
+    const contents = useAgentStore.getState().messages.map((m) => m.content);
+    expect(contents).toContain('슬랙 알림 워크플로우');
+    expect(contents).toContain('url을 바꿔줘');
   });
 });

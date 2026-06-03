@@ -3,11 +3,19 @@ import type { AgentStep } from '@/stores/agentStore';
 // 컨펌 게이트 파이프라인 단계 표시 — agent_node 프레임 ↔ 사용자 표시 단계 매핑/순서.
 // page.tsx에서 분리(순수 로직 단위 테스트 가능).
 
+// 컴포저 파이프라인 단계(비복합 흐름의 기본 표시 순서).
 export const STEP_ORDER: AgentStep[] = [
   'security', 'intent', 'retriever', 'drafter', 'validator', 'qa_eval', 'promote',
 ];
 
+// 단조증가 가드/인덱스 계산의 기준 순서. 복합(skill_then_compose) 흐름의 선두
+// 단계 'skill'은 컴포저 파이프라인보다 **항상 앞**(index 0)이라, 스킬 빌드 홉
+// 이후 시작되는 컴포저 파이프라인(security…) 단계가 역행하지 않는다.
+const GUARD_ORDER: AgentStep[] = ['skill', ...STEP_ORDER];
+
 export const TOOL_TO_STEP: Record<string, AgentStep> = {
+  // 복합 흐름 1홉 — 스킬 빌드 (supervisor build_skill 마커 + skills_builder.* 릴레이는 prefix로 매핑)
+  build_skill:       'skill',
   // supervisor 노드
   load_memory:       'security',
   analyze_intent:    'intent',
@@ -19,6 +27,9 @@ export const TOOL_TO_STEP: Record<string, AgentStep> = {
   slot_fill:         'intent',
   search_nodes:      'retriever',
   suggest_skill_select: 'retriever',  // 노드 검색 직후 커스텀 스킬 제안 — 같은 '노드 검색' 단계
+  // two-shot 2차 resume 경로 — 진행 안내 메시지가 침묵 처리되므로 단계로 피드백을 준다.
+  resume:            'retriever',      // GCS 상태(노드 검색 결과) 복원
+  bind_skill:        'drafter',        // 선택 스킬 지침서 바인딩 → 재초안 진입
   draft_workflow:    'drafter',
   retry_draft:       'drafter',
   validate_workflow: 'validator',
@@ -32,6 +43,7 @@ export const TOOL_TO_STEP: Record<string, AgentStep> = {
 };
 
 export const STEP_LABELS: Record<AgentStep, string> = {
+  skill:     '스킬 생성',
   security:  '보안 검토',
   intent:    '의도 분류',
   retriever: '노드 검색',
@@ -41,19 +53,42 @@ export const STEP_LABELS: Record<AgentStep, string> = {
   promote:   '워크플로우 확정',
 };
 
-// agent_node 프레임 → 표시 단계. STEP_ORDER 기준 **단조 증가만** 허용한다.
+// agent_node 프레임 이름 → 표시 단계. 매핑 없으면 null(현재 단계 유지).
+// skills_builder.* 릴레이 프레임(동적 이름: skills_builder.upsert.X 등)은 모두 'skill' 단계.
+export function toStep(toolName: string): AgentStep | null {
+  if (toolName in TOOL_TO_STEP) return TOOL_TO_STEP[toolName];
+  if (toolName.startsWith('skills_builder.')) return 'skill';
+  return null;
+}
+
+// agent_node 프레임 → 표시 단계. GUARD_ORDER 기준 **단조 증가만** 허용한다.
 // supervisor↔composer 2-앱 핸드오프에서 SSE relay 순서가 뒤섞여(이슈 #297)
 // 앞 단계 프레임(예: supervisor load_memory→security)이 뒤 단계(search_nodes→retriever)
 // 이후 늦게 도착해도, 표시는 역행하지 않고 전진만 한다. 역행이면 prev 유지.
 // 정당한 재방문(retry_draft→drafter, validation_failed→validator)은 같은 인덱스라 무해.
-export function nextMonotonicStep(prev: AgentStep | null, toolName: string): AgentStep {
-  const mapped = TOOL_TO_STEP[toolName] ?? (toolName as AgentStep);
+// 복합 흐름의 'skill'은 항상 index 0이라 이후 컴포저 단계가 역행하지 않는다.
+// 미매핑 노드(composer 홉 마커 등)와 복구 silent 재시도의 재방출(security→…)도
+// 역행 차단 대상이라 깜빡임 없이 표시가 유지된다.
+export function nextMonotonicStep(prev: AgentStep | null, toolName: string): AgentStep | null {
+  const mapped = toStep(toolName);
+  // 미매핑 노드(composer/finalize 등 홉 마커)는 현재 단계를 **유지**한다.
+  // 그대로 반영하면 page.tsx의 인덱스 계산이 0이 되어 스테퍼가 첫 단계로 리셋·역행한다.
+  if (mapped === null) return prev;
   if (prev === null) return mapped;
-  const mi = STEP_ORDER.indexOf(mapped);
-  const pi = STEP_ORDER.indexOf(prev);
-  // 미매핑 노드(mi<0, 예: suggest_skill_select)는 현재 단계를 **유지**한다.
-  // 그대로 반영하면 page.tsx의 `STEP_ORDER.indexOf(step)+1`이 0이 되어 스테퍼가 첫 단계
-  // (보안 검토)로 리셋·역행한다(노드 검색 → 보안 검토 멈춤 버그). 미매핑은 표시 변경 안 함.
-  if (mi < 0) return prev;
+  const mi = GUARD_ORDER.indexOf(mapped);
+  const pi = GUARD_ORDER.indexOf(prev);
   return mi >= pi ? mapped : prev;
+}
+
+// 표시용 1-base 인덱스. 복합 흐름이면 'skill' 선두 단계를 포함한 순서 기준.
+export function stepIndexFor(step: AgentStep | null, composite: boolean): number {
+  if (!step) return 0;
+  const order = composite ? GUARD_ORDER : STEP_ORDER;
+  return order.indexOf(step) + 1;
+}
+
+// 표시할 단계 라벨 목록. 복합 흐름이면 '스킬 생성' 선두 단계를 포함한다.
+export function displayLabels(composite: boolean): string[] {
+  const order = composite ? GUARD_ORDER : STEP_ORDER;
+  return order.map((s) => STEP_LABELS[s]);
 }

@@ -4,6 +4,7 @@ import type { WorkflowExplanation } from '@common/generated';
 export type WorkspaceMode = 'wizard' | 'edit' | 'run';
 
 export type AgentStep =
+  | 'skill'      // 복합(skill_then_compose) 흐름의 선두 단계 — 스킬 빌드 홉
   | 'security'
   | 'intent'
   | 'retriever'
@@ -29,6 +30,12 @@ export interface AgentSession {
   title: string;
   createdAt: number;
   messages: ChatMessage[];
+  // 전체 상태 스냅샷 — 이전 대화로 돌아갈 때 워크플로우/ConfirmCard/판단근거까지 복원.
+  // 구버전 아카이브(미저장) 호환 위해 전부 optional.
+  readyToExecute?: { workflowId: string; message: string; explanation?: WorkflowExplanation } | null;
+  rationaleText?: string;
+  currentStep?: AgentStep | null;
+  compositeFlow?: boolean;
 }
 
 interface AgentStoreState {
@@ -39,6 +46,8 @@ interface AgentStoreState {
   sessions: AgentSession[];
   setSessionId: (id: string) => void;
   addSession: (session: AgentSession) => void;
+  // 아카이브된 세션을 active로 복원(전체 상태). 목록에서 제거하고 store top-level에 적재.
+  restoreSession: (session: AgentSession) => void;
 
   viewingSession: AgentSession | null;
   setViewingSession: (session: AgentSession | null) => void;
@@ -49,6 +58,11 @@ interface AgentStoreState {
 
   currentStep: AgentStep | null;
   setCurrentStep: (step: AgentStep | null) => void;
+
+  // 복합(skill_then_compose) 흐름 여부 — true면 단계 표시에 '스킬 생성' 선두 단계를 노출한다.
+  // skill 단계 진입 시 set, 새 턴(handleSend/handleNewChat)에서만 reset (라운드2 resume은 유지).
+  compositeFlow: boolean;
+  setCompositeFlow: (v: boolean) => void;
 
   rationaleText: string;
   appendRationale: (delta: string) => void;
@@ -72,7 +86,22 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   sessions: [],
   setSessionId: (id) => set({ sessionId: id }),
   addSession: (session) =>
-    set((s) => ({ sessions: [session, ...s.sessions] })),
+    // 같은 id는 갱신(아카이브 idempotent — 세션 전환 왕복 시 중복 누적 방지).
+    set((s) => ({ sessions: [session, ...s.sessions.filter((x) => x.id !== session.id)] })),
+
+  restoreSession: (session) =>
+    set((s) => ({
+      // local-* id는 서버 세션이 아니므로 sessionId 비움(워크플로우는 readyToExecute로 실행 가능).
+      sessionId: session.id.startsWith('local-') ? '' : session.id,
+      messages: [...session.messages],
+      readyToExecute: session.readyToExecute ?? null,
+      rationaleText: session.rationaleText ?? '',
+      currentStep: session.currentStep ?? null,
+      compositeFlow: session.compositeFlow ?? false,
+      slotQuestion: null,
+      viewingSession: null,
+      sessions: s.sessions.filter((x) => x.id !== session.id),  // active로 승격 → 목록에서 제거
+    })),
 
   viewingSession: null,
   setViewingSession: (session) => set({ viewingSession: session }),
@@ -83,6 +112,9 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
 
   currentStep: null,
   setCurrentStep: (step) => set({ currentStep: step }),
+
+  compositeFlow: false,
+  setCompositeFlow: (v) => set({ compositeFlow: v }),
 
   rationaleText: '',
   appendRationale: (delta) =>
