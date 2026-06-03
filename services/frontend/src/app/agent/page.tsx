@@ -11,7 +11,7 @@ import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession, streamSlotAnswer } from '@/lib/api/agentApi';
 import { executeWorkflow, getWorkflow } from '@/lib/api/workflowApi';
 import { useWorkflowStore } from '@/stores/workflowStore';
-import WorkflowCanvas from '@/components/workflow/WorkflowCanvas';
+import WorkflowEditPane from '@/components/workflow/WorkflowEditPane';
 import { ReactFlow, Background, BackgroundVariant, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getCatalog } from '@/lib/api/nodeApi';
@@ -23,6 +23,7 @@ import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodeP
 import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
 import { nextMonotonicStep, stepIndexFor, displayLabels } from '@/lib/agentSteps';
+import { computeFilledParams } from '@/lib/filledParams';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -496,7 +497,7 @@ function AgentPageContent() {
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
 
-  // 완성된 워크플로우를 편집 캔버스에 로드 — useWorkflowStore(WorkflowCanvas가 읽음).
+  // 완성된 워크플로우를 편집 캔버스에 로드 — useWorkflowStore(WorkflowEditPane이 읽음).
   const setLoadedWorkflow = useWorkflowStore((s) => s.setWorkflow);
   const loadedWorkflow = useWorkflowStore((s) => s.workflow);
   const [editCatalog, setEditCatalog] = useState<NodeConfig[] | null>(null);
@@ -765,6 +766,9 @@ function AgentPageContent() {
   }, [searchParams]);
 
   const stepIndex = stepIndexFor(currentStep, compositeFlow);
+  // 컨펌 게이트 "실행 전 확인할 입력값" — AI가 자동으로 채운 노드 파라미터를 노드 안 들어가도
+  // 보이게. loadedWorkflow(저장본)×editCatalog(input_schema)로 프론트 계산(백엔드 변경 0).
+  const filledParams = computeFilledParams(loadedWorkflow, editCatalog);
   const handleNewChat = () => {
     // 테스트 3: sessionId가 비어있어도 메시지가 있으면 히스토리에 저장
     if (messages.length > 0) {
@@ -965,6 +969,7 @@ function AgentPageContent() {
                     <ConfirmCard
                       message={readyToExecute.message}
                       explanation={readyToExecute.explanation}
+                      filledParams={filledParams}
                       onExecute={handleExecute}
                       onEdit={() => setMode('edit')}
                       loading={executeLoading}
@@ -1088,11 +1093,12 @@ function AgentPageContent() {
           )}
 
           {/* ── Edit Mode ───────────────────────────────────────── */}
-          {/* 완성된 워크플로우가 로드돼 있으면 store 기반 캔버스로 표시(adapter 렌더), */}
-          {/* 아니면 빈 빌더(FlowEditor)로 처음부터 작성. */}
+          {/* 완성된 워크플로우(AI 초안)는 WorkflowEditPane으로 — 파라미터 폼(NodeConfigDrawer)
+              + 저장(updateWorkflow) + 검증 + 필수누락 시 실행 차단까지 풀 편집. 컨펌 게이트의
+              "확인 필요 입력값"을 여기서 바로 고치고 저장·실행. 아니면 빈 빌더(FlowEditor). */}
           {mode === 'edit' && (
             <div className="flex-1 min-h-0 flex">
-              {loadedWorkflow ? <WorkflowCanvas catalog={editCatalog} /> : <FlowEditor />}
+              {loadedWorkflow ? <WorkflowEditPane onExecuted={() => setMode('run')} /> : <FlowEditor />}
             </div>
           )}
 
