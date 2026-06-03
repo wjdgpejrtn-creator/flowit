@@ -21,8 +21,6 @@ import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, TypedDict
-
-from pydantic import BaseModel
 from uuid import UUID, uuid4
 
 import httpx
@@ -53,6 +51,7 @@ from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, StateGraph
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.services.graph_validator import GraphValidator
+from pydantic import BaseModel
 from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
 from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 
@@ -60,8 +59,8 @@ from ...domain.entities.memory_file import MemoryFile, MemoryFileRef
 from ...domain.entities.session_ref import SessionRef
 from ...domain.ports.composer_state_store import ComposerStateStore
 from ...domain.ports.llm_port import LLMPort
-from ...domain.ports.personal_memory_store import PersonalMemoryStore
 from ...domain.ports.node_registry import NodeRegistry
+from ...domain.ports.personal_memory_store import PersonalMemoryStore
 from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.workflow_draft_store import WorkflowDraftStore
 from ...domain.ports.workflow_repository import WorkflowRepository
@@ -990,26 +989,68 @@ class LangGraphOrchestrator:
         spec = state["draft_spec"]
         if spec is None:
             return {"error": "DraftSpec 없음"}
+        candidates = state["node_candidates"]
+        # refine(대화형 수정) — 이전 워크플로우를 불러와 "지시한 부분만" 고친다(처음부터 재생성 X).
+        # 로드/조회 실패는 fresh draft로 폴백(non-fatal). search 후보에 없는 기존 노드는
+        # NodeRegistry.get_schema로 복원해 합쳐야 drafter가 그 노드를 직렬화·보존할 수 있다.
+        prior_workflow: WorkflowSchema | None = None
+        if state.get("intent") == "refine" and self._workflow_draft_store is not None:
+            try:
+                prior_workflow = await self._workflow_draft_store.load_draft(state["session_id"])
+            except Exception as exc:
+                _logger.warning("refine: 이전 워크플로우 로드 실패 (fresh로 진행): %s", exc)
+                prior_workflow = None
+            if prior_workflow is not None:
+                candidates = await self._augment_candidates_with_prior(candidates, prior_workflow)
         try:
-            workflow = await self._drafter.draft(spec, state["node_candidates"], owner_user_id=state["user_id"])
+            workflow = await self._drafter.draft(
+                spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow
+            )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:
             return {"error": f"drafter 실패: {exc}"}
         elapsed = int((time.monotonic() - t0) * 1000)
         nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
         connections_data = [c.model_dump(mode="json") for c in workflow.connections]
-        # NodeInstance엔 node_type 없음(NodeConfig 필드) — node_candidates로 매핑해 요약 (REQ-004 버그 fix)
-        type_by_id = {c.node_id: c.node_type for c in state.get("node_candidates") or []}
+        # NodeInstance엔 node_type 없음(NodeConfig 필드) — candidates로 매핑해 요약 (REQ-004 버그 fix)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
         node_summary = ", ".join(type_by_id.get(n.node_id, str(n.node_id)) for n in workflow.nodes)
+        verb = "수정" if prior_workflow is not None else "작성"
+        draft_summary = (
+            f"✏️ 워크플로우 초안 {verb} 완료 — 노드 {len(workflow.nodes)}개 "
+            f"({node_summary}), 연결 {len(workflow.connections)}개"
+        )
         return {
             "workflow_draft": workflow,
             "collected_frames": [
-                RationaleDeltaFrame(delta=f"✏️ 워크플로우 초안 작성 완료 — 노드 {len(workflow.nodes)}개 ({node_summary}), 연결 {len(workflow.connections)}개"),
+                RationaleDeltaFrame(delta=draft_summary),
                 DraftSpecDeltaFrame(delta={"attempt": state["qa_attempts"] + 1}),
                 WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
                 PipelineStatusFrame(service_name="drafter", status="completed", elapsed_ms=elapsed),
             ],
         }
+
+    async def _augment_candidates_with_prior(
+        self, candidates: list[NodeConfig], prior: WorkflowSchema
+    ) -> list[NodeConfig]:
+        """refine 시 search 후보에 이전 워크플로우 노드의 NodeConfig를 합친다(node_id dedup).
+
+        refine 메시지("url 바꿔줘")로 검색한 후보엔 기존 노드가 없을 수 있어, 그대로면
+        drafter가 기존 노드를 직렬화 못 해 fresh로 폴백한다. get_schema로 복원해 보존을 보장.
+        """
+        existing_ids = {c.node_id for c in candidates}
+        merged = list(candidates)
+        for node in prior.nodes:
+            if node.node_id in existing_ids:
+                continue
+            try:
+                cfg = await self._node_registry.get_schema(node.node_id)
+            except Exception as exc:
+                _logger.warning("refine: 노드 스키마 조회 실패 node_id=%s: %s", node.node_id, exc)
+                continue
+            merged.append(cfg)
+            existing_ids.add(node.node_id)
+        return merged
 
     # 8. validator_node — 그래프 구조 검증 + RiskLevel 강제
     async def _validator_node(self, state: _State) -> dict:
@@ -1315,6 +1356,64 @@ class LangGraphOrchestrator:
             ],
         }
 
+    @staticmethod
+    def _build_qa_checklist(state: _State) -> str:
+        """QA 통과 후 ConfirmCard 직전에 채팅창에 표시할 AI 검증 완료 보고서."""
+        intent = state.get("intent") or "알 수 없음"
+        entities = state.get("intent_analyzed_entities") or {}
+        candidates = state.get("node_candidates") or []
+        workflow = state.get("workflow_draft")
+        qa_score = state.get("qa_score", 0.0)
+        qa_feedback = state.get("qa_feedback", "")
+        spec = state.get("draft_spec")
+
+        intent_labels: dict[str, str] = {
+            "draft": "새 워크플로우 생성",
+            "refine": "워크플로우 수정",
+            "clarify": "추가 정보 요청",
+        }
+        intent_label = intent_labels.get(str(intent), str(intent))
+        entity_text = (
+            ", ".join(f"{k}: {v}" for k, v in list(entities.items())[:5])
+            if entities else "없음"
+        )
+
+        final_nodes = workflow.nodes if workflow else []
+        final_connections = workflow.connections if workflow else []
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        selected_types = ", ".join(
+            type_by_id.get(n.node_id, "알 수 없음") for n in final_nodes[:5]
+        )
+        if len(final_nodes) > 5:
+            selected_types += f" 외 {len(final_nodes) - 5}개"
+
+        intent_text = spec.natural_language_intent[:80] if spec else "없음"
+
+        lines = [
+            "📋 **AI 검증 완료 보고서**",
+            "",
+            "**① 의도 분석** ✅",
+            f"- 요청 유형: {intent_label}",
+            f"- 요청 내용: {intent_text}",
+            f"- 추출된 정보: {entity_text}",
+            "",
+            "**② 노드 선출** ✅",
+            f"- 후보 {len(candidates)}개 검색 완료",
+            f"- 최종 선정: {len(final_nodes)}개 노드 ({selected_types or '없음'})",
+            "",
+            "**③ 워크플로우 작성** ✅",
+            f"- 노드 {len(final_nodes)}개, 연결 {len(final_connections)}개",
+            "- DAG 구조 검증 완료 (사이클 없음, 고립 노드 없음)",
+            "",
+            f"**④ QA 품질 평가 통과** ✅ (점수: {qa_score:.1f}/10)",
+            "- 완성도: 사용자 의도가 노드로 완전히 표현됐는지 검증",
+            "- 안전성: 위험 노드 정당성 및 권한 적정성 검증",
+        ]
+        if qa_feedback:
+            lines.append(f"- 평가 의견: {qa_feedback}")
+
+        return "\n".join(lines)
+
     # 15. user_confirm_node — 최종 ResultFrame emit (fixed DAG: 항상 ready_to_execute)
     async def _user_confirm_node(self, state: _State) -> dict:
         workflow_id = state.get("saved_workflow_id")
@@ -1338,8 +1437,10 @@ class LangGraphOrchestrator:
             }
 
         explanation = state.get("workflow_explanation")
+        qa_checklist = self._build_qa_checklist(state)
         return {
             "collected_frames": [
+                ChatMessageFrame(role="assistant", content=qa_checklist),
                 ResultFrame(
                     intent="propose",
                     payload={
@@ -1349,10 +1450,6 @@ class LangGraphOrchestrator:
                         "session_id": str(state["session_id"]),
                         "explanation": explanation.model_dump(mode="json") if explanation else None,
                     },
-                ),
-                ChatMessageFrame(
-                    role="assistant",
-                    content="워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.",
                 ),
             ]
         }

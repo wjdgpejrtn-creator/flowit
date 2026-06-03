@@ -6,12 +6,12 @@ import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import Steps from '@/components/common/Steps';
 import RunMode from '@/components/agent/RunMode';
-import { useAgentStore, WorkspaceMode, ChatMessage } from '@/stores/agentStore';
+import { useAgentStore, WorkspaceMode, ChatMessage, AgentSession } from '@/stores/agentStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession, streamSlotAnswer } from '@/lib/api/agentApi';
-import { executeWorkflow, getWorkflow } from '@/lib/api/workflowApi';
+import { getWorkflow } from '@/lib/api/workflowApi';
 import { useWorkflowStore } from '@/stores/workflowStore';
-import WorkflowCanvas from '@/components/workflow/WorkflowCanvas';
+import WorkflowEditPane from '@/components/workflow/WorkflowEditPane';
 import { ReactFlow, Background, BackgroundVariant, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getCatalog } from '@/lib/api/nodeApi';
@@ -22,7 +22,8 @@ import { showToast } from '@/stores/toastStore';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
-import { STEP_ORDER, STEP_LABELS, nextMonotonicStep } from '@/lib/agentSteps';
+import { nextMonotonicStep, stepIndexFor, displayLabels } from '@/lib/agentSteps';
+import { computeFilledParams } from '@/lib/filledParams';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -473,17 +474,17 @@ function AgentPageContent() {
   const {
     mode, setMode,
     sessionId, setSessionId,
-    sessions, addSession,
+    sessions, addSession, restoreSession,
     viewingSession, setViewingSession,
     messages, addMessage, clearMessages,
     rationaleText, appendRationale, clearRationale,
     slotQuestion, setSlotQuestion,
     currentStep, setCurrentStep,
+    compositeFlow, setCompositeFlow,
     readyToExecute, setReadyToExecute,
   } = useAgentStore();
 
   const [input, setInput] = useState('');
-  const [executeLoading, setExecuteLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   // two-shot 스킬 선택 카드 (skill_selection 프레임 수신 시 표시, REQ-013)
   const [skillSelection, setSkillSelection] = useState<{
@@ -495,7 +496,7 @@ function AgentPageContent() {
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
 
-  // 완성된 워크플로우를 편집 캔버스에 로드 — useWorkflowStore(WorkflowCanvas가 읽음).
+  // 완성된 워크플로우를 편집 캔버스에 로드 — useWorkflowStore(WorkflowEditPane이 읽음).
   const setLoadedWorkflow = useWorkflowStore((s) => s.setWorkflow);
   const loadedWorkflow = useWorkflowStore((s) => s.workflow);
   const [editCatalog, setEditCatalog] = useState<NodeConfig[] | null>(null);
@@ -514,12 +515,17 @@ function AgentPageContent() {
     const { sessionId: sid, messages: msgs } = state;
     if (msgs.length > 0) {
       const title = msgs.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
-      state.addSession({ id: sid || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...msgs] });
+      state.addSession({
+        id: sid || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...msgs],
+        readyToExecute: state.readyToExecute, rationaleText: state.rationaleText,
+        currentStep: state.currentStep, compositeFlow: state.compositeFlow,
+      });
     }
     state.clearMessages();
     state.clearRationale();
     state.setSessionId('');
     state.setCurrentStep(null);
+    state.setCompositeFlow(false);
     state.setSlotQuestion(null);
     state.setViewingSession(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -559,19 +565,10 @@ function AgentPageContent() {
     },
   });
 
-  const handleExecute = async () => {
+  const handleSave = () => {
     if (!readyToExecute) return;
-    setExecuteLoading(true);
-    try {
-      await executeWorkflow(readyToExecute.workflowId);
-      setReadyToExecute(null);
-      setMode('run');
-    } catch (err) {
-      // 실패 시 run 모드로 전환하지 않고 버튼 유지 + 원인을 사용자에게 노출(과거: silent).
-      showToast(`실행 실패: ${err instanceof Error ? err.message : '워크플로우를 실행할 수 없습니다'}`);
-    } finally {
-      setExecuteLoading(false);
-    }
+    setReadyToExecute(null);
+    showToast('워크플로우가 확인됐습니다.');
   };
 
   useEffect(() => {
@@ -588,7 +585,11 @@ function AgentPageContent() {
         const toolName = frame.agent_node_name as string;
         // SSE 콜백은 클로저라 구조분해된 currentStep이 stale될 수 있어 store에서 최신값을 읽는다.
         const prev = useAgentStore.getState().currentStep;
-        setCurrentStep(nextMonotonicStep(prev, toolName));
+        const next = nextMonotonicStep(prev, toolName);
+        // 복합(skill_then_compose) 흐름 — 스킬 빌드 단계 진입 시 '스킬 생성' 선두 단계를 노출.
+        // 한 번 켜지면 이후 컴포저 파이프라인 동안에도 유지(단계가 done으로 남도록), 리셋은 새 턴에서만.
+        if (next === 'skill') setCompositeFlow(true);
+        setCurrentStep(next);
         break;
       }
       case 'rationale_delta':
@@ -652,22 +653,16 @@ function AgentPageContent() {
     // store에서 최신값을 직접 읽어 로컬 변수로 페이로드를 결정한다.
     // — Bug 6: autosend 경로에서 handleNewChat() 직후 호출 시 store는 이미 ''로 갱신됨
     // — Bug 7: readyToExecute 상태에서 sid를 ''로 덮어쓰고 store도 동기 갱신
-    let sid = useAgentStore.getState().sessionId;
+    const sid = useAgentStore.getState().sessionId;
     if (readyToExecute) {
-      // 테스트 2: ConfirmCard 표시 중 새 메시지 → 이전 대화를 히스토리에 저장하고 완전히 초기화
-      const { messages: prevMsgs } = useAgentStore.getState();
-      if (prevMsgs.length > 0) {
-        const title = prevMsgs.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
-        useAgentStore.getState().addSession({ id: sid || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...prevMsgs] });
-      }
-      clearMessages();
-      clearRationale();
-      setSessionId('');
+      // 컨펌(완성) 상태에서 후속 메시지 = **같은 세션 이어가기**(대화형 refine 가능).
+      // 이전엔 새 세션으로 리셋해 refine 메시지가 새 채팅으로 떨어져 composer가 이전
+      // 워크플로우를 못 불러왔다(같은 session_id라야 draft_store.load_draft 가능). 완전히
+      // 새 워크플로우를 시작하려면 "새 대화" 버튼(handleNewChat)을 쓴다.
+      // readyToExecute/loadedWorkflow만 해제(스트리밍 중 ConfirmCard 숨김) — 새 결과가
+      // 오면 다시 채워진다. session_id·messages는 보존해 대화 맥락을 잇는다.
       setReadyToExecute(null);
       setLoadedWorkflow(null);
-      setCurrentStep(null);
-      setSkillSelection(null);
-      sid = '';
     }
 
     abortRef.current?.abort();
@@ -678,6 +673,7 @@ function AgentPageContent() {
     setInput('');
     setStreaming(true);
     setCurrentStep(null);
+    setCompositeFlow(false);  // 새 턴 — 복합 흐름 플래그 리셋 (라운드2 resume은 별도 경로라 미리셋)
     setSkillSelection(null);
     clearRationale();
 
@@ -707,6 +703,17 @@ function AgentPageContent() {
       ? (skillSelection?.options.find((o) => o.skill_id === skillId)?.name ?? '선택한 스킬')
       : '건너뛰기';
     addMessage({ id: `sk${Date.now()}`, role: 'user', content: `스킬: ${chosen}`, timestamp: Date.now() });
+    // round2 resume은 백엔드가 "작성을 시작할게요" 진행 안내를 침묵 처리(composer 노드만 재개)한다.
+    // 빈 단계처럼 보이지 않도록 프론트가 이어가기 안내를 즉시 표시한다(composer/resume/bind_skill
+    // 프레임이 도착해 스테퍼가 노드 검색→초안 생성으로 전진하기까지의 공백 보완).
+    addMessage({
+      id: `ack${Date.now()}`,
+      role: 'agent',
+      content: skillId
+        ? '선택하신 스킬을 적용해 워크플로우 작성을 이어갈게요.'
+        : '스킬 없이 워크플로우 작성을 이어갈게요.',
+      timestamp: Date.now(),
+    });
     setSkillSelection(null);
     setStreaming(true);
 
@@ -746,18 +753,37 @@ function AgentPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const stepIndex = currentStep ? STEP_ORDER.indexOf(currentStep) + 1 : 0;
+  const stepIndex = stepIndexFor(currentStep, compositeFlow);
+  // 컨펌 게이트 "실행 전 확인할 입력값" — AI가 자동으로 채운 노드 파라미터를 노드 안 들어가도
+  // 보이게. loadedWorkflow(저장본)×editCatalog(input_schema)로 프론트 계산(백엔드 변경 0).
+  const filledParams = computeFilledParams(loadedWorkflow, editCatalog);
+  // 현재 active 대화를 전체 상태 스냅샷으로 아카이브(복원 가능하게). 내용 없으면 no-op.
+  const archiveCurrent = () => {
+    const s = useAgentStore.getState();
+    if (s.messages.length === 0) return;
+    const title = s.messages.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
+    s.addSession({
+      id: s.sessionId || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...s.messages],
+      readyToExecute: s.readyToExecute, rationaleText: s.rationaleText,
+      currentStep: s.currentStep, compositeFlow: s.compositeFlow,
+    });
+  };
+  // 이전 대화 클릭 → 현재 보존 후 그 세션을 active로 복원(워크플로우/ConfirmCard/판단근거 포함).
+  const handleOpenSession = (s: AgentSession) => {
+    if (s.id === sessionId) { setViewingSession(null); return; }
+    archiveCurrent();
+    restoreSession(s);
+    setMode('wizard');
+  };
   const handleNewChat = () => {
-    // 테스트 3: sessionId가 비어있어도 메시지가 있으면 히스토리에 저장
-    if (messages.length > 0) {
-      const title = messages.find((m) => m.role === 'user')?.content?.slice(0, 28) ?? '대화';
-      addSession({ id: sessionId || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...messages] });
-    }
+    // 테스트 3: sessionId가 비어있어도 메시지가 있으면 히스토리에 저장(전체 스냅샷)
+    archiveCurrent();
     abortRef.current?.abort();
     clearMessages();
     clearRationale();
     setSessionId('');
     setCurrentStep(null);
+    setCompositeFlow(false);
     setSlotQuestion(null);
     setReadyToExecute(null);
     setSkillSelection(null);
@@ -815,7 +841,7 @@ function AgentPageContent() {
                   <button
                     key={s.id}
                     type="button"
-                    onClick={() => setViewingSession(s)}
+                    onClick={() => handleOpenSession(s)}
                     className={[
                       'w-full text-left px-[8px] py-[6px] rounded-lg text-[12px] border-[1.5px] leading-snug truncate',
                       viewingSession?.id === s.id
@@ -946,9 +972,9 @@ function AgentPageContent() {
                     <ConfirmCard
                       message={readyToExecute.message}
                       explanation={readyToExecute.explanation}
-                      onExecute={handleExecute}
+                      filledParams={filledParams}
+                      onSave={handleSave}
                       onEdit={() => setMode('edit')}
-                      loading={executeLoading}
                     />
                   )}
                   {skillSelection && !streaming && (
@@ -1020,7 +1046,7 @@ function AgentPageContent() {
                     AI 처리 단계
                   </div>
                   <Steps
-                    items={STEP_ORDER.map((s) => STEP_LABELS[s])}
+                    items={displayLabels(compositeFlow)}
                     current={stepIndex}
                   />
                 </div>
@@ -1069,11 +1095,12 @@ function AgentPageContent() {
           )}
 
           {/* ── Edit Mode ───────────────────────────────────────── */}
-          {/* 완성된 워크플로우가 로드돼 있으면 store 기반 캔버스로 표시(adapter 렌더), */}
-          {/* 아니면 빈 빌더(FlowEditor)로 처음부터 작성. */}
+          {/* 완성된 워크플로우(AI 초안)는 WorkflowEditPane으로 — 파라미터 폼(NodeConfigDrawer)
+              + 저장(updateWorkflow) + 검증 + 필수누락 시 실행 차단까지 풀 편집. 컨펌 게이트의
+              "확인 필요 입력값"을 여기서 바로 고치고 저장·실행. 아니면 빈 빌더(FlowEditor). */}
           {mode === 'edit' && (
             <div className="flex-1 min-h-0 flex">
-              {loadedWorkflow ? <WorkflowCanvas catalog={editCatalog} /> : <FlowEditor />}
+              {loadedWorkflow ? <WorkflowEditPane onExecuted={() => setMode('run')} /> : <FlowEditor />}
             </div>
           )}
 

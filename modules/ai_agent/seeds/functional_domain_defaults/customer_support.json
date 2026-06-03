@@ -12,14 +12,14 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "source": {"type": "string", "enum": ["email", "chat", "webform", "phone"]},
-          "customer_id": {"type": "string"},
-          "customer_email": {"type": "string", "format": "email"},
-          "subject": {"type": "string"},
-          "content": {"type": "string"},
-          "priority": {"type": "string", "enum": ["low", "medium", "high", "urgent"], "default": "medium"},
-          "ticket_system_url": {"type": "string", "format": "uri"},
-          "manager_channel": {"type": "string"}
+          "source": {"type": "string", "enum": ["email", "chat", "webform", "phone"], "description": "문의가 들어온 경로. email·chat·webform(웹 문의폼)·phone 중 선택"},
+          "customer_id": {"type": "string", "description": "문의한 고객의 ID. CRM/고객 시스템의 고객 식별자이며, 모르면 customer_email로 대체 식별합니다. 예: CUST-5521"},
+          "customer_email": {"type": "string", "format": "email", "description": "(선택) 고객 이메일. customer_id가 없을 때 식별·회신용. 예: 'kim@example.com'"},
+          "subject": {"type": "string", "description": "문의 제목. 예: '결제가 두 번 청구되었습니다'"},
+          "content": {"type": "string", "description": "문의 본문 내용 전체"},
+          "priority": {"type": "string", "enum": ["low", "medium", "high", "urgent"], "default": "medium", "description": "처리 우선순위. low·medium(기본)·high·urgent 중 선택"},
+          "ticket_system_url": {"type": "string", "format": "uri", "description": "(선택) 티켓을 등록할 외부 티켓 시스템의 URL. 예: 'https://company.zendesk.com'"},
+          "manager_channel": {"type": "string", "description": "(선택) 접수 알림을 보낼 매니저 Slack 채널명/채널 ID. 예: '#cs-inbox'"}
         },
         "required": ["source", "customer_id", "subject", "content"]
       },
@@ -44,11 +44,11 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "customer_question": {"type": "string"},
-          "session_id": {"type": "string"},
-          "kb_url": {"type": "string", "format": "uri"},
-          "confidence_threshold": {"type": "number", "default": 0.75, "minimum": 0, "maximum": 1},
-          "escalation_channel": {"type": "string"}
+          "customer_question": {"type": "string", "description": "AI 챗봇이 답할 고객의 질문 내용"},
+          "session_id": {"type": "string", "description": "대화 세션을 식별하는 ID. 같은 대화의 이어진 메시지를 묶는 값으로, 보통 채팅 위젯이 자동 발급합니다. 예: sess-9f3a"},
+          "kb_url": {"type": "string", "format": "uri", "description": "(선택) AI가 참고할 지식베이스(도움말 문서) URL. 예: 'https://help.example.com'"},
+          "confidence_threshold": {"type": "number", "default": 0.75, "minimum": 0, "maximum": 1, "description": "휴먼 상담원 에스컬레이션 기준 신뢰도(0~1). AI 답변 신뢰도가 이 값보다 낮으면 사람에게 넘깁니다. 기본 0.75"},
+          "escalation_channel": {"type": "string", "description": "(선택) 에스컬레이션 시 알림을 보낼 Slack 채널명/채널 ID. 예: '#cs-escalation'"}
         },
         "required": ["customer_question", "session_id"]
       },
@@ -73,12 +73,12 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "ticket_id": {"type": "string"},
-          "customer_email": {"type": "string", "format": "email"},
-          "agent_id": {"type": "string"},
-          "resolved_at": {"type": "string", "format": "date-time"},
-          "delay_minutes": {"type": "integer", "default": 30, "minimum": 1},
-          "survey_url": {"type": "string", "format": "uri"}
+          "ticket_id": {"type": "string", "description": "설문을 보낼 응대 티켓의 ID. VOC 접수 시 발급된 ticket_id를 그대로 사용합니다. 예: TCK-10293"},
+          "customer_email": {"type": "string", "format": "email", "description": "설문 메일을 받을 고객 이메일. 예: 'kim@example.com'"},
+          "agent_id": {"type": "string", "description": "(선택) 응대한 상담원의 ID. 상담원별 만족도 집계용. 예: AGT-12"},
+          "resolved_at": {"type": "string", "format": "date-time", "description": "응대 완료 시각(ISO 8601). 이 시점 기준으로 delay_minutes 후 설문을 발송합니다. 예: '2026-06-03T10:30:00+09:00'"},
+          "delay_minutes": {"type": "integer", "default": 30, "minimum": 1, "description": "응대 완료 후 설문 발송까지 대기 시간(분). 기본 30분"},
+          "survey_url": {"type": "string", "format": "uri", "description": "고객이 응답할 CSAT 설문 페이지 URL. 예: 'https://survey.example.com/csat'"}
         },
         "required": ["ticket_id", "customer_email", "resolved_at", "survey_url"]
       },
@@ -101,10 +101,10 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "query": {"type": "string"},
-          "kb_collection": {"type": "string"},
-          "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
-          "model": {"type": "string", "default": "claude-sonnet-4-6"}
+          "query": {"type": "string", "description": "지식베이스에서 검색할 질문/키워드"},
+          "kb_collection": {"type": "string", "description": "검색 대상 지식베이스(문서 모음)의 이름. 운영자가 미리 구성해 둔 KB 컬렉션 식별자입니다. 예: 'product-help-ko'"},
+          "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20, "description": "검색해 가져올 관련 문서 개수(1~20). 기본 5"},
+          "model": {"type": "string", "default": "claude-sonnet-4-6", "description": "답변 초안 생성에 쓸 LLM 모델. 기본 claude-sonnet-4-6"}
         },
         "required": ["query", "kb_collection"]
       },
@@ -128,11 +128,11 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "ticket_id": {"type": "string"},
-          "sla_deadline": {"type": "string", "format": "date-time"},
-          "minutes_before_breach": {"type": "integer", "default": 30, "minimum": 0},
-          "assignee_slack_id": {"type": "string"},
-          "manager_channel": {"type": "string"}
+          "ticket_id": {"type": "string", "description": "SLA를 감시할 티켓의 ID. VOC 접수 시 발급된 ticket_id를 사용합니다. 예: TCK-10293"},
+          "sla_deadline": {"type": "string", "format": "date-time", "description": "이 티켓의 응답 마감 기한(ISO 8601). 예: '2026-06-03T18:00:00+09:00'"},
+          "minutes_before_breach": {"type": "integer", "default": 30, "minimum": 0, "description": "마감 몇 분 전에 임박 알림을 보낼지(분). 기본 30분. 0이면 위반 시점에만 알림"},
+          "assignee_slack_id": {"type": "string", "description": "(선택) 담당자에게 DM할 Slack 사용자 ID. Slack 프로필의 멤버 ID(U로 시작)입니다. 예: U012ABC"},
+          "manager_channel": {"type": "string", "description": "(선택) 매니저 알림용 Slack 채널명/채널 ID. 예: '#cs-sla'"}
         },
         "required": ["ticket_id", "sla_deadline"]
       },
