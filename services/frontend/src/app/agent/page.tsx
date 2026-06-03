@@ -22,7 +22,7 @@ import { showToast } from '@/stores/toastStore';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
-import { STEP_ORDER, STEP_LABELS, nextMonotonicStep } from '@/lib/agentSteps';
+import { nextMonotonicStep, stepIndexFor, displayLabels } from '@/lib/agentSteps';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -479,6 +479,7 @@ function AgentPageContent() {
     rationaleText, appendRationale, clearRationale,
     slotQuestion, setSlotQuestion,
     currentStep, setCurrentStep,
+    compositeFlow, setCompositeFlow,
     readyToExecute, setReadyToExecute,
   } = useAgentStore();
 
@@ -520,6 +521,7 @@ function AgentPageContent() {
     state.clearRationale();
     state.setSessionId('');
     state.setCurrentStep(null);
+    state.setCompositeFlow(false);
     state.setSlotQuestion(null);
     state.setViewingSession(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -588,7 +590,11 @@ function AgentPageContent() {
         const toolName = frame.agent_node_name as string;
         // SSE 콜백은 클로저라 구조분해된 currentStep이 stale될 수 있어 store에서 최신값을 읽는다.
         const prev = useAgentStore.getState().currentStep;
-        setCurrentStep(nextMonotonicStep(prev, toolName));
+        const next = nextMonotonicStep(prev, toolName);
+        // 복합(skill_then_compose) 흐름 — 스킬 빌드 단계 진입 시 '스킬 생성' 선두 단계를 노출.
+        // 한 번 켜지면 이후 컴포저 파이프라인 동안에도 유지(단계가 done으로 남도록), 리셋은 새 턴에서만.
+        if (next === 'skill') setCompositeFlow(true);
+        setCurrentStep(next);
         break;
       }
       case 'rationale_delta':
@@ -678,6 +684,7 @@ function AgentPageContent() {
     setInput('');
     setStreaming(true);
     setCurrentStep(null);
+    setCompositeFlow(false);  // 새 턴 — 복합 흐름 플래그 리셋 (라운드2 resume은 별도 경로라 미리셋)
     setSkillSelection(null);
     clearRationale();
 
@@ -707,6 +714,17 @@ function AgentPageContent() {
       ? (skillSelection?.options.find((o) => o.skill_id === skillId)?.name ?? '선택한 스킬')
       : '건너뛰기';
     addMessage({ id: `sk${Date.now()}`, role: 'user', content: `스킬: ${chosen}`, timestamp: Date.now() });
+    // round2 resume은 백엔드가 "작성을 시작할게요" 진행 안내를 침묵 처리(composer 노드만 재개)한다.
+    // 빈 단계처럼 보이지 않도록 프론트가 이어가기 안내를 즉시 표시한다(composer/resume/bind_skill
+    // 프레임이 도착해 스테퍼가 노드 검색→초안 생성으로 전진하기까지의 공백 보완).
+    addMessage({
+      id: `ack${Date.now()}`,
+      role: 'agent',
+      content: skillId
+        ? '선택하신 스킬을 적용해 워크플로우 작성을 이어갈게요.'
+        : '스킬 없이 워크플로우 작성을 이어갈게요.',
+      timestamp: Date.now(),
+    });
     setSkillSelection(null);
     setStreaming(true);
 
@@ -746,7 +764,7 @@ function AgentPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const stepIndex = currentStep ? STEP_ORDER.indexOf(currentStep) + 1 : 0;
+  const stepIndex = stepIndexFor(currentStep, compositeFlow);
   const handleNewChat = () => {
     // 테스트 3: sessionId가 비어있어도 메시지가 있으면 히스토리에 저장
     if (messages.length > 0) {
@@ -758,6 +776,7 @@ function AgentPageContent() {
     clearRationale();
     setSessionId('');
     setCurrentStep(null);
+    setCompositeFlow(false);
     setSlotQuestion(null);
     setReadyToExecute(null);
     setSkillSelection(null);
@@ -1020,7 +1039,7 @@ function AgentPageContent() {
                     AI 처리 단계
                   </div>
                   <Steps
-                    items={STEP_ORDER.map((s) => STEP_LABELS[s])}
+                    items={displayLabels(compositeFlow)}
                     current={stepIndex}
                   />
                 </div>
