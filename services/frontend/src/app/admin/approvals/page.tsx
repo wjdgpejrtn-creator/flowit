@@ -118,36 +118,45 @@ export default function AdminApprovalsPage() {
     );
 
   return (
-    <>
-      <div className="font-bold text-[16px] mb-[2px]">승인 큐</div>
-      <div className="text-[13px] text-[var(--color-ink3)] mb-3">
-        리뷰 요청·승격 요청된 스킬을 승인하고 게시합니다 (개인·팀·전사)
+    <div className="max-w-[860px]">
+      <div className="border-b border-[var(--color-line-soft)] pb-3 mb-4">
+        <h1 className="text-lg font-bold text-[var(--color-ink)]">승인 큐</h1>
+        <p className="text-xs text-[var(--color-ink3)] mt-0.5">
+          리뷰 요청·승격 요청된 스킬을 승인하고 게시합니다 (개인·팀·전사)
+        </p>
       </div>
 
       {loading ? (
-        <div className="text-[13px] text-[var(--color-ink4)]">불러오는 중…</div>
+        <div className="bg-white border border-[var(--color-line-soft)] rounded-2xl shadow-sm py-16 flex items-center justify-center">
+          <span className="text-sm text-[var(--color-ink4)] font-bold">불러오는 중…</span>
+        </div>
       ) : error ? (
-        <div className="flex items-center gap-3">
-          <span className="text-[13px] font-bold text-[var(--color-risk-high)]">{error}</span>
+        <div className="bg-white border border-[var(--color-line-soft)] rounded-2xl shadow-sm py-12 flex flex-col items-center justify-center gap-3">
+          <span className="text-sm font-bold text-[var(--color-danger)]">{error}</span>
           <button
             type="button"
             onClick={() => setFetchKey((k) => k + 1)}
-            className="text-[12px] px-3 py-1.5 rounded-lg border border-[var(--color-line-soft)] bg-white font-bold hover:bg-[var(--color-paper2)]"
+            className="text-xs px-3 py-1.5 rounded-lg border border-[var(--color-line-soft)] bg-white font-bold hover:bg-[var(--color-paper)]"
           >
             다시 시도
           </button>
         </div>
       ) : items.length === 0 ? (
-        <div className="text-[13px] text-[var(--color-ink4)]">대기 중인 승인 요청이 없습니다.</div>
+        <div className="bg-white border border-[var(--color-line-soft)] rounded-2xl shadow-sm py-16 flex items-center justify-center">
+          <span className="text-sm text-[var(--color-ink4)] font-bold">대기 중인 승인 요청이 없습니다.</span>
+        </div>
       ) : (
-        <div className="flex flex-col gap-2 max-w-[820px]">
+        <div className="flex flex-col gap-2">
           {items.map((item) => {
             const busy = busyId === item.skill_id;
             const approved = item.lifecycle_state === 'approved';
             return (
               <div
                 key={`${item.scope}:${item.skill_id}`}
-                className="border-[1.5px] border-[var(--color-line-soft)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] p-3 flex items-center gap-3"
+                className={[
+                  'border border-[var(--color-line-soft)] rounded-2xl shadow-sm bg-white p-4 flex items-center gap-3',
+                  approved ? 'ring-1 ring-[var(--color-accent-coral)]/30' : '',
+                ].join(' ')}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
@@ -203,6 +212,6 @@ export default function AdminApprovalsPage() {
           })}
         </div>
       )}
-    </>
+    </div>
   );
 }

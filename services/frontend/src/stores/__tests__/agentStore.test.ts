@@ -38,8 +38,8 @@ describe('messages', () => {
 
 describe('sessions', () => {
   it('addSession prepends (newest first)', () => {
-    useAgentStore.getState().addSession({ id: 's-1', title: 'First', createdAt: 1 });
-    useAgentStore.getState().addSession({ id: 's-2', title: 'Second', createdAt: 2 });
+    useAgentStore.getState().addSession({ id: 's-1', title: 'First', createdAt: 1, messages: [] });
+    useAgentStore.getState().addSession({ id: 's-2', title: 'Second', createdAt: 2, messages: [] });
     expect(useAgentStore.getState().sessions[0].id).toBe('s-2');
   });
 });
