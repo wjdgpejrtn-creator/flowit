@@ -29,8 +29,7 @@ export default function EdgeLine(props: EdgeProps) {
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const [from, to] = id.split('->');
-    if (from && to) removeEdge(from, to);
+    removeEdge(id);
   };
 
   return (

@@ -253,7 +253,7 @@ if (payload?.status === 'ready_to_execute') {
 - **단계 리스트**: steps를 번호와 함께 (`①②③`), 각 줄 끝에 risk_level 칩(`RiskPill` 재사용)
 - **권한 매니페스트** (강조 박스): "이 워크플로우가 접근하는 것:" + permissions를 `connection` + risk 강조로 나열. **high/medium risk는 시각적으로 강조** (빨강/주황)
 - **가정** (접을 수 있는 섹션): assumptions를 리스트로. "다르면 [편집]에서 수정하세요"
-- 하단: 기존 **▶ 실행** 버튼 + **✏️ 편집**(edit mode 전환) 버튼
+- 하단: **💾 저장** 버튼(컨펌 닫기 + toast) + **✏️ 편집**(edit mode 전환) 버튼. 실행은 편집창(`WorkflowEditPane`)의 **▶ 실행** 버튼 경유. (2026-06-03 팀장 지시 변경 — PR #340)
 
 **수용 기준:** explanation이 있는 result 프레임 수신 시 컨펌 카드에 단계·권한·가정이 보이고, 권한 박스가 항상 노출된다. explanation이 없으면(레거시) 기존 단순 메시지로 graceful fallback.
 
@@ -272,6 +272,24 @@ if (payload?.status === 'ready_to_execute') {
 
 - PR-3 머지 후 **composer 재배포 필수** (`code_change_deploy_verify`). 배포 없이 두면 다음 배포 때 surprise.
 - PR-1은 `common_schemas` 버전 bump → 이를 dep으로 쓰는 모듈들 lock 갱신 확인.
+
+---
+
+## 5-1. QA 검증 완료 체크리스트 (PR #340 추가, 2026-06-03)
+
+ConfirmCard 직전 채팅창에 AI 검증 완료 보고서를 `ChatMessageFrame`으로 emit한다.
+
+**구현 위치:** `composer_graph._build_qa_checklist(state)` static 메서드
+
+**표시 항목:**
+| # | 항목 | 데이터 출처 |
+|---|------|------------|
+| ① | 의도 분석 | `intent`, `draft_spec.natural_language_intent`, `intent_analyzed_entities` |
+| ② | 노드 선출 | `node_candidates` 수, `workflow_draft.nodes` 최종 선정 |
+| ③ | 워크플로우 작성 | 노드 수, 연결 수, DAG 검증 완료 |
+| ④ | QA 품질 평가 통과 | `qa_score`, `qa_feedback` |
+
+**emit 순서:** `ChatMessageFrame(qa_checklist)` → `ResultFrame(propose)` (ConfirmCard)
 
 ---
 
@@ -297,9 +315,11 @@ if (payload?.status === 'ready_to_execute') {
 
 ## 8. 완료 정의 (DoD)
 
-- [ ] `WorkflowExplanation` common_schemas export + 프론트 타입 생성
-- [ ] 도메인 서비스 단위테스트 통과 (LLM 없이 결정론 추출)
-- [ ] composer e2e: 최종 result 프레임 payload에 explanation 포함
-- [ ] staging에서 실제 초안 생성 → 컨펌 카드에 단계/권한/가정 표시 확인
-- [ ] 권한 매니페스트 박스 항상 노출, high/medium risk 시각 강조
-- [ ] explanation 없는 레거시 응답도 깨지지 않음
+- [x] `WorkflowExplanation` common_schemas export + 프론트 타입 생성
+- [x] 도메인 서비스 단위테스트 통과 (LLM 없이 결정론 추출)
+- [x] composer e2e: 최종 result 프레임 payload에 explanation 포함
+- [ ] staging에서 실제 초안 생성 → 컨펌 카드에 단계/권한/가정 표시 확인 (Modal 에러로 미확인)
+- [x] 권한 매니페스트 박스 항상 노출, high/medium risk 시각 강조
+- [x] explanation 없는 레거시 응답도 깨지지 않음
+- [x] ConfirmCard 버튼: 💾 저장 + ✏️ 편집 (PR #340, 2026-06-03)
+- [x] QA 검증 완료 체크리스트 ChatMessageFrame emit (PR #340, 2026-06-03)

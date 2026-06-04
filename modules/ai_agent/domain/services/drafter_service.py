@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,6 +13,29 @@ from pydantic import BaseModel
 from ..ports.llm_port import LLMPort
 
 _logger = logging.getLogger(__name__)
+
+# 데이터 흐름 참조 ${<token>.<field>} — LLM은 token으로 node_type(fresh)/ref(edit)를 쓰고,
+# 빌드 시 instance_id로 재작성한다(token엔 점 없음 → 첫 '.'로 분리, ADR-0023 L1).
+_REF_TOKEN_RE = re.compile(r"\$\{([^.}]+)\.([^}]+)\}")
+
+
+def _rewrite_refs(value: Any, id_by_token: dict[str, UUID]) -> Any:
+    """파라미터 값 내 ``${<token>.<field>}``의 token을 instance_id로 치환.
+
+    token이 맵에 없으면(존재하지 않는 노드 참조) 원본을 보존한다 — 실행 시점
+    ReferenceResolver가 미해결로 graceful degrade한다.
+    """
+    if isinstance(value, str):
+        def _sub(m: re.Match[str]) -> str:
+            token, field = m.group(1), m.group(2)
+            inst = id_by_token.get(token)
+            return f"${{{inst}.{field}}}" if inst is not None else m.group(0)
+        return _REF_TOKEN_RE.sub(_sub, value)
+    if isinstance(value, list):
+        return [_rewrite_refs(v, id_by_token) for v in value]
+    if isinstance(value, dict):
+        return {k: _rewrite_refs(v, id_by_token) for k, v in value.items()}
+    return value
 
 _SYSTEM_PROMPT = """You are a workflow drafter. Given a DraftSpec and candidate nodes,
 output a JSON object matching this schema:
@@ -32,6 +56,20 @@ Fill in `parameters` for each node using:
    for which fields to fill. Fill every field listed in `required`; when the user did not specify
    a value, use the field's `default` if present.
 3. Use an empty string "" only for optional fields the user did not specify that have no default.
+
+Each candidate also carries `required_connections` — the external services it needs at runtime
+(e.g. ["google"], ["slack"], ["anthropic"], or [] for none). When multiple candidates satisfy the
+same step, prefer the one needing the fewest external connections, and do NOT add a
+connection-requiring node the intent does not call for. Never invent credential values; required
+connections are resolved separately after drafting.
+
+DATA FLOW between nodes: when a node's input should receive data PRODUCED by an upstream node
+(not a fixed value the user gave inline), set that parameter's value to a reference
+"${<from_node_type>.<output_field>}", where <from_node_type> is the upstream node's node_type and
+<output_field> is one of that node's `outputs`. Also add a connection so the upstream node runs
+first. Use a literal string ONLY when the user provided the value directly. Example: a summary
+node whose `document_text` is fed by a sheet reader → "document_text": "${google_sheets_read.values}".
+Do NOT put placeholder prose like "the sheet data" where an upstream output should flow in.
 """
 
 # refine(대화형 수정) 전용 — 이전 워크플로우를 주고 "지시한 부분만" 고치게 한다.
@@ -49,7 +87,11 @@ nodes each carry a stable "ref". Output a JSON object matching this schema:
 }
 Apply ONLY the change requested in the DraftSpec intent. Preserve every OTHER node's ref, node_type,
 and parameters EXACTLY, and keep unchanged connections. node_type must come from the candidate list.
-The SAME node_type may appear multiple times — each is a distinct node identified by its ref."""
+The SAME node_type may appear multiple times — each is a distinct node identified by its ref.
+
+DATA FLOW: to feed a node's input from an upstream node's output, set that parameter to
+"${<ref>.<output_field>}" using the upstream node's "ref" (NOT its node_type) and one of that
+node's `outputs` from the candidate list. Use a literal only for values the user gave inline."""
 
 
 # LLM 응답 전용 — common_schemas.WorkflowSchema의 owner_user_id/workflow_id 제외 부분집합.
@@ -120,7 +162,10 @@ class DrafterService:
                 "node_type": n.node_type,
                 "name": n.name,
                 "description": n.description,
+                "required_connections": n.required_connections,
                 "input_schema": n.input_schema,
+                # 데이터 흐름 참조에 쓸 수 있는 출력 필드명 (ADR-0023 L1)
+                "outputs": list((n.output_schema or {}).get("properties", {}).keys()),
             }
             for n in candidates
         ]
@@ -216,6 +261,12 @@ class DrafterService:
                     )
                 )
 
+            # 데이터 흐름 참조 재작성 — LLM이 쓴 ref 토큰을 instance_id로 (ADR-0023 L1)
+            nodes = [
+                n.model_copy(update={"parameters": _rewrite_refs(n.parameters, ref_to_instance)})
+                for n in nodes
+            ]
+
             connections: list[Edge] = []
             for edge in draft.connections:
                 from_id = ref_to_instance.get(edge.from_ref)
@@ -275,6 +326,12 @@ class DrafterService:
                         position=Position(x=raw.x, y=raw.y),
                     )
                 )
+
+            # 데이터 흐름 참조 재작성 — LLM이 쓴 node_type 토큰을 instance_id로 (ADR-0023 L1)
+            nodes = [
+                n.model_copy(update={"parameters": _rewrite_refs(n.parameters, instance_id_map)})
+                for n in nodes
+            ]
 
             connections: list[Edge] = []
             for edge in draft.connections:

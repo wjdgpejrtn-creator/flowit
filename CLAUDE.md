@@ -134,6 +134,7 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 | 소비자 모듈 | import 가능한 대상 | 구체적 예시 |
 |-----------|-----------------|------------|
 | ai_agent | auth의 `domain/services` | `from auth.domain.services import CredentialInjectionService` |
+| ai_agent | auth의 `domain/ports` | `from auth.domain.ports import OAuthConnectionRepository` (`OAuthConnectionResolver` 어댑터가 `ConnectionResolver` 구현 시 — 사용자 보유 connection을 credential로 해소해 노드 선바인딩, PR #348) |
 | ai_agent | nodes_graph의 `domain/services` | `from nodes_graph.domain.services import GraphValidator` |
 | ai_agent | nodes_graph의 `domain/ports` | `from nodes_graph.domain.ports import NodeDefinitionRepository` |
 | auth | nodes_graph의 `domain/ports` | `from nodes_graph.domain.ports import NodeDefinitionRepository` (CredentialInjectionService가 `required_connections` / `risk_level` 검증 시) |
