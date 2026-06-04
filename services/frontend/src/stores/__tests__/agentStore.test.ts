@@ -1,6 +1,7 @@
 import { useAgentStore } from '../agentStore';
 
 beforeEach(() => {
+  localStorage.clear();
   useAgentStore.setState({
     mode: 'wizard',
     sessionId: null,
@@ -87,6 +88,27 @@ describe('readyToExecute', () => {
     useAgentStore.getState().setReadyToExecute({ workflowId: 'wf-123', message: '...' });
     useAgentStore.getState().setReadyToExecute(null);
     expect(useAgentStore.getState().readyToExecute).toBeNull();
+  });
+});
+
+describe('persist (새로고침 생존 — 버그 C)', () => {
+  it('addMessage 후 대화내역이 localStorage에 영속된다', () => {
+    useAgentStore.getState().addMessage({ id: 'm-1', role: 'user', content: '슬랙 알림', timestamp: 1 });
+    const raw = localStorage.getItem('flowit-agent');
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw as string);
+    expect(parsed.state.messages).toHaveLength(1);
+    expect(parsed.state.messages[0].content).toBe('슬랙 알림');
+  });
+
+  it('일시 UI 상태(slotQuestion/sseFrames/mode)는 영속 대상에서 제외된다', () => {
+    useAgentStore.getState().setSlotQuestion({ fieldName: 'x', question: 'q' });
+    useAgentStore.getState().appendSSEFrame('frame1');
+    useAgentStore.getState().setMode('edit');
+    const parsed = JSON.parse(localStorage.getItem('flowit-agent') as string);
+    expect(parsed.state.slotQuestion).toBeUndefined();
+    expect(parsed.state.sseFrames).toBeUndefined();
+    expect(parsed.state.mode).toBeUndefined();
   });
 });
 

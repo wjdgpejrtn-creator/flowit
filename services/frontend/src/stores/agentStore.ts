@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { WorkflowExplanation } from '@common/generated';
 
 export type WorkspaceMode = 'wizard' | 'edit' | 'run';
@@ -78,7 +79,9 @@ interface AgentStoreState {
   appendSSEFrame: (frame: string) => void;
 }
 
-export const useAgentStore = create<AgentStoreState>((set) => ({
+export const useAgentStore = create<AgentStoreState>()(
+  persist(
+    (set) => ({
   mode: 'wizard',
   setMode: (mode) => set({ mode }),
 
@@ -130,4 +133,24 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   sseFrames: [],
   appendSSEFrame: (frame) =>
     set((s) => ({ sseFrames: [...s.sseFrames, frame] })),
-}));
+    }),
+    {
+      // 새로고침(F5/Shift+Ctrl+R)에도 대화내역이 살아남도록 localStorage 영속화.
+      // 새로고침 후 이어쓰기/복원은 page.tsx 마운트 가드(문서 최초 로드 시 유지)와 함께 동작한다.
+      name: 'flowit-agent',
+      storage: createJSONStorage(() => localStorage),
+      version: 1,
+      // 영속 대상 = 대화 맥락(durable)만. mode/viewingSession/slotQuestion/sseFrames 같은
+      // 일시 UI 상태와 streaming 파생값은 새로고침 시 재계산되므로 저장하지 않는다.
+      partialize: (s) => ({
+        sessionId: s.sessionId,
+        sessions: s.sessions,
+        messages: s.messages,
+        readyToExecute: s.readyToExecute,
+        rationaleText: s.rationaleText,
+        currentStep: s.currentStep,
+        compositeFlow: s.compositeFlow,
+      }),
+    },
+  ),
+);
