@@ -404,3 +404,91 @@ class TestCatalogNodeExecutorSkillInjection:
 
         assert out["seen_system"] is None
         assert out["echo"] == 9
+
+
+# --- credential 복수화 (REQ-012) -----------------------------------------------
+
+@dataclasses.dataclass
+class _TokensOutput:
+    tokens: dict
+
+
+class _TokensNode:
+    """process() 중 context.connection_tokens 스냅샷을 출력으로 반환(wipe 전 관측)."""
+
+    input_schema = _FakeInput
+
+    async def process(self, node_input: _FakeInput, context: NodeContext) -> _TokensOutput:
+        return _TokensOutput(tokens=dict(context.connection_tokens))
+
+
+class _MultiCredentialService:
+    def __init__(self, captured: dict) -> None:
+        self._captured = captured
+        captured.setdefault("injected", [])
+
+    async def inject(self, credential_id, node_id) -> PlaintextCredential:
+        self._captured["injected"].append((credential_id, node_id))
+        return PlaintextCredential(
+            credential_id=str(credential_id), credential_kind="aes_gcm", value=f"tok-{credential_id}"
+        )
+
+
+def _multi_factory(captured: dict):
+    @asynccontextmanager
+    async def factory():
+        yield _MultiCredentialService(captured)
+
+    return factory
+
+
+class TestCatalogNodeExecutorMultiCredential:
+    def test_credential_ids_populate_connection_tokens(self):
+        """credential_ids의 provider별로 inject → context.connection_tokens 적재 (REQ-012)."""
+        captured: dict = {}
+        slack, google = uuid4(), uuid4()
+        executor = CatalogNodeExecutor(
+            {"multi": _TokensNode}, credential_service_factory=_multi_factory(captured)
+        )
+        node = NodeInstance(
+            instance_id=uuid4(), node_id=uuid4(), parameters={},
+            credential_ids={"slack": slack, "google": google}, position=Position(x=0, y=0),
+        )
+
+        out = executor.execute(node=node, config=_config("multi"), inputs={}, context=_ctx())
+
+        assert out["tokens"] == {"slack": f"tok-{slack}", "google": f"tok-{google}"}
+        assert len(captured["injected"]) == 2
+
+    def test_single_credential_ids_also_sets_primary_token(self):
+        """단일 provider credential_ids면 connection_token(primary)도 채워 하위호환."""
+        captured: dict = {}
+        google = uuid4()
+        executor = CatalogNodeExecutor(
+            {"fake": _FakeNode}, credential_service_factory=_multi_factory(captured)
+        )
+        node = NodeInstance(
+            instance_id=uuid4(), node_id=uuid4(), parameters={},
+            credential_ids={"google": google}, position=Position(x=0, y=0),
+        )
+
+        out = executor.execute(node=node, config=_config("fake"), inputs={"value": 1}, context=_ctx())
+
+        assert out["seen_token"] == f"tok-{google}"
+
+    def test_connection_tokens_wiped_after_execution(self):
+        """실행 종료 후 connection_tokens도 제거된다(평문 토큰 잔존 금지)."""
+        captured: dict = {}
+        ctx = _ctx()
+        executor = CatalogNodeExecutor(
+            {"multi": _TokensNode}, credential_service_factory=_multi_factory(captured)
+        )
+        node = NodeInstance(
+            instance_id=uuid4(), node_id=uuid4(), parameters={},
+            credential_ids={"slack": uuid4()}, position=Position(x=0, y=0),
+        )
+
+        executor.execute(node=node, config=_config("multi"), inputs={}, context=ctx)
+
+        assert ctx.connection_tokens == {}
+        assert ctx.connection_token is None

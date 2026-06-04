@@ -7,6 +7,15 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.19.0] - 2026-06-04
+
+### Added — credential 복수화 (멀티커넥션 노드 지원, REQ-012)
+- `workflow.py` `NodeInstance`에 `credential_ids: dict[str, UUID] = {}` 추가 — provider(service)별 credential 바인딩. 멀티커넥션 노드(예: `required_connections=["slack","google"]`)가 connection을 모두 충족할 수 있게 한다. key는 `required_connections`의 provider 문자열.
+  - 기존 `credential_id`(단수)는 legacy 단일 바인딩으로 유지 — provider 미지정이라 node 정의의 `required_connections`로 추론. default None이라 기존 workflows JSONB row 역호환(`NodeInstance.model_validate`).
+  - 신규 메서드 `resolve_credentials(required_connections) -> dict[str, UUID]`: `credential_ids` 우선 + 단일 connection이면 legacy `credential_id`를 해당 provider에 매핑(하위호환). validator(provider 검증)·CredentialInjectionService·execution_engine이 공통 소비.
+- `node.py` `NodeContext`에 `connection_tokens: dict[str, str] = {}` 추가 — provider별 해결된 connection 토큰. `CatalogNodeExecutor`가 노드의 모든 required connection을 inject해 채운다. `connection_token`(단수)은 단일 노드 하위호환 primary 토큰으로 유지. `wipe()`가 둘 다 제거.
+- 신규 Optional 필드(기존 필드 변경 없음) → MINOR. TS regenerate 완료 — `NodeInstance.credential_ids?: Record<string, string>`, `NodeContext.connection_tokens?` 자동 반영.
+
 ## [0.18.0] - 2026-05-31
 
 ### Added — 스킬 선택 SSE 프레임 (REQ-013 two-shot HITL 생산자)

@@ -155,3 +155,44 @@ class TestWorkflowSchema:
             connections=[],
         )
         assert wf.owner_user_id == owner_id
+
+
+class TestNodeInstanceResolveCredentials:
+    """REQ-012 credential 복수화 — resolve_credentials provider 매핑."""
+
+    def _ni(self, credential_id=None, credential_ids=None):
+        return NodeInstance(
+            instance_id=uuid4(), node_id=uuid4(), parameters={},
+            credential_id=credential_id, credential_ids=credential_ids or {},
+            position=Position(x=0, y=0),
+        )
+
+    def test_legacy_single_credential_maps_to_sole_provider(self):
+        cid = uuid4()
+        ni = self._ni(credential_id=cid)
+        assert ni.resolve_credentials(["google"]) == {"google": cid}
+
+    def test_legacy_credential_not_mapped_when_multiple_required(self):
+        ni = self._ni(credential_id=uuid4())
+        # provider를 특정할 수 없어 legacy 단일 바인딩은 매핑하지 않는다
+        assert ni.resolve_credentials(["slack", "google"]) == {}
+
+    def test_credential_ids_explicit_mapping(self):
+        slack, google = uuid4(), uuid4()
+        ni = self._ni(credential_ids={"slack": slack, "google": google})
+        assert ni.resolve_credentials(["slack", "google"]) == {"slack": slack, "google": google}
+
+    def test_filters_providers_not_in_required(self):
+        ni = self._ni(credential_ids={"slack": uuid4(), "linear": uuid4()})
+        assert ni.resolve_credentials(["slack"]) == {"slack": ni.credential_ids["slack"]}
+
+    def test_credential_ids_take_precedence_over_legacy(self):
+        explicit = uuid4()
+        ni = self._ni(credential_id=uuid4(), credential_ids={"google": explicit})
+        assert ni.resolve_credentials(["google"]) == {"google": explicit}
+
+    def test_default_credential_ids_is_empty_dict(self):
+        ni = NodeInstance(
+            instance_id=uuid4(), node_id=uuid4(), parameters={}, position=Position(x=0, y=0)
+        )
+        assert ni.credential_ids == {}

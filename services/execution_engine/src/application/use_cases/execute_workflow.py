@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from common_schemas.enums import ExecutionStatus
+from common_schemas.workflow import Edge
 
 from ...domain.entities.execution_context import ExecutionContext
 from ...domain.entities.execution_level import ExecutionLevel
 from ...domain.entities.execution_result import ExecutionResult, NodeResult
+from ...domain.entities.execution_step import LoopBody
 from ...domain.ports.event_publisher_port import EventPublisherPort
 from ...domain.ports.execution_repository_port import ExecutionRepositoryPort
 from ...domain.ports.workflow_repository_port import WorkflowRepositoryPort
+from ...domain.services.branch_evaluator import BranchEvaluator
+from ...domain.services.cyclic_scheduler import CyclicScheduler
 from ...domain.services.execution_orchestrator import ExecutionOrchestrator
+from ...domain.services.reference_resolver import ReferenceResolver
 from .dispatch_node import DispatchNodeUseCase
 
 
@@ -24,12 +32,18 @@ class ExecuteWorkflowUseCase:
         orchestrator: ExecutionOrchestrator,
         dispatch_node: DispatchNodeUseCase,
         event_publisher: EventPublisherPort,
+        reference_resolver: ReferenceResolver | None = None,
+        branch_evaluator: BranchEvaluator | None = None,
+        cyclic_scheduler: CyclicScheduler | None = None,
     ) -> None:
         self._workflow_repo = workflow_repo
         self._execution_repo = execution_repo
         self._orchestrator = orchestrator
         self._dispatch_node = dispatch_node
         self._events = event_publisher
+        self._resolver = reference_resolver or ReferenceResolver()
+        self._branch = branch_evaluator or BranchEvaluator()
+        self._planner = cyclic_scheduler or CyclicScheduler()
 
     def execute(self, workflow_id: UUID, context: ExecutionContext) -> ExecutionResult:
         result = ExecutionResult(
@@ -42,20 +56,62 @@ class ExecuteWorkflowUseCase:
 
         try:
             workflow = self._workflow_repo.get(workflow_id)
-            levels = self._orchestrator.plan(workflow)
+
+            # config 캐시 + 조건 노드 판별 + 엣지 인접 (ADR-0023 L2 reachability).
+            configs = {
+                n.node_id: self._workflow_repo.get_node_config(n.node_id) for n in workflow.nodes
+            }
+            is_brancher = {
+                n.instance_id: getattr(configs.get(n.node_id), "category", None) == "condition"
+                for n in workflow.nodes
+            }
+            outgoing_handles: dict[UUID, list[str]] = defaultdict(list)
+            for e in workflow.connections:
+                outgoing_handles[e.from_instance_id].append(e.from_handle)
+
+            # 응축 DAG 스텝 — 비순환은 레벨, 순환은 루프 바디 (ADR-0023 L3).
+            steps = self._planner.plan(workflow, is_brancher)
+
+            # reachability용 incoming은 back-edge를 제외한다 — back-edge는 루프 내부 제어
+            # 엣지라 진입/하류 도달 판정에 끼면 루프 루트(외부 선행 없는 진입 노드)를 막는다.
+            # 루프 지속 판정(_loop_continues)은 outgoing_handles 풀셋을 그대로 쓴다.
+            back_set = {e for st in steps if st.kind == "loop" for e in st.loop.back_edges}
+            incoming: dict[UUID, list[Edge]] = defaultdict(list)
+            for e in workflow.connections:
+                if e not in back_set:
+                    incoming[e.to_instance_id].append(e)
 
             self._events.publish_status(context.execution_id, ExecutionStatus.RUNNING)
 
-            for level in levels:
-                level_results = self._execute_level(level, workflow_id, context)
-                result.node_results.extend(level_results)
+            # 상류 노드 출력 누적 — 하류 ${ref} 해석 소스 (L1, latest-wins).
+            node_outputs: dict[str, dict[str, Any]] = {}
+            # 노드 도달 가능 여부 (L2). 위상정렬상 선행이 먼저 확정된다.
+            reachable: dict[UUID, bool] = {}
+            # 가드 초과로 강제 탈출한 루프의 exit 엣지 — 하류 reachability에서 강제 live (L3).
+            forced_live: set[Edge] = set()
 
-                if self._orchestrator.has_failures(level_results):
-                    result.mark_failed(
-                        f"레벨 {level.level}에서 "
-                        f"{sum(1 for r in level_results if r.status == 'failed')}개 노드 실패"
+            for step in steps:
+                if step.kind == "level":
+                    level_results = self._execute_level(
+                        step.level, context, configs, node_outputs, reachable,
+                        incoming, outgoing_handles, is_brancher, forced_live,
                     )
-                    break
+                    result.node_results.extend(level_results)
+                    if self._orchestrator.has_failures(level_results):
+                        result.mark_failed(
+                            f"레벨 {step.level.level}에서 "
+                            f"{sum(1 for r in level_results if r.status == 'failed')}개 노드 실패"
+                        )
+                        break
+                else:
+                    loop_results, failed = self._execute_loop(
+                        step.loop, context, configs, node_outputs, reachable,
+                        incoming, outgoing_handles, is_brancher, forced_live,
+                    )
+                    result.node_results.extend(loop_results)
+                    if failed:
+                        result.mark_failed("루프 바디에서 노드 실패")
+                        break
 
             if result.status == ExecutionStatus.RUNNING:
                 result.mark_completed()
@@ -67,31 +123,187 @@ class ExecuteWorkflowUseCase:
         self._events.publish_status(context.execution_id, result.status)
         return result
 
+    def _execute_loop(
+        self,
+        loop: LoopBody,
+        context: ExecutionContext,
+        configs: dict[UUID, Any],
+        node_outputs: dict[str, dict[str, Any]],
+        reachable: dict[UUID, bool],
+        incoming: dict[UUID, list[Edge]],
+        outgoing_handles: dict[UUID, list[str]],
+        is_brancher: dict[UUID, bool],
+        forced_live: set[Edge],
+    ) -> tuple[list[NodeResult], bool]:
+        """루프 바디를 가드 한도까지 반복 실행한다 (ADR-0023 L3).
+
+        반환: (모든 iteration의 NodeResult, 실패 여부). 한 iteration 완료마다 back-edge
+        liveness로 지속/탈출을 판정하고, 가드 도달 시 exit 엣지를 강제 live로 표시한다.
+        """
+        results: list[NodeResult] = []
+
+        # 루프 진입 가능 여부 — 바디 진입 노드(levels[0])의 외부 incoming이 live여야 한다.
+        # 안 탄 분기 위의 루프는 통째로 skip (L2 + L3 합성).
+        entry = loop.levels[0].nodes if loop.levels else []
+        if entry and not any(
+            self._is_reachable(
+                n, incoming, outgoing_handles, reachable, node_outputs, is_brancher, forced_live
+            )
+            for n in entry
+        ):
+            for body_level in loop.levels:
+                for n in body_level.nodes:
+                    reachable[n.instance_id] = False
+                    skipped = self._skipped_result(n)
+                    self._events.publish_node_complete(context.execution_id, skipped)
+                    results.append(skipped)
+            return results, False
+
+        iteration = 0
+        while True:
+            for body_level in loop.levels:
+                level_results = self._execute_level(
+                    body_level, context, configs, node_outputs, reachable,
+                    incoming, outgoing_handles, is_brancher, forced_live,
+                    iteration=iteration, force_run=True,
+                )
+                results.extend(level_results)
+                if self._orchestrator.has_failures(level_results):
+                    return results, True
+
+            if not self._loop_continues(loop, node_outputs, outgoing_handles, is_brancher):
+                break  # 자연 탈출 — condition exit 핸들이 live → 하류는 L2가 처리
+            iteration += 1
+            if iteration >= loop.max_iterations:
+                # 강제 탈출(best-effort): 미통과 결과라도 exit 엣지를 live로 하류 진행.
+                forced_live.update(loop.exit_edges)
+                break
+
+        return results, False
+
+    def _loop_continues(
+        self,
+        loop: LoopBody,
+        node_outputs: dict[str, dict[str, Any]],
+        outgoing_handles: dict[UUID, list[str]],
+        is_brancher: dict[UUID, bool],
+    ) -> bool:
+        for e in loop.back_edges:
+            src = e.from_instance_id
+            src_out = node_outputs.get(str(src))
+            if src_out is None:
+                continue
+            if self._branch.is_edge_live(
+                is_brancher.get(src, False), src_out, outgoing_handles.get(src, []), e.from_handle
+            ):
+                return True
+        return False
+
     def _execute_level(
-        self, level: ExecutionLevel, workflow_id: UUID, context: ExecutionContext,
+        self,
+        level: ExecutionLevel,
+        context: ExecutionContext,
+        configs: dict[UUID, Any],
+        node_outputs: dict[str, dict[str, Any]],
+        reachable: dict[UUID, bool],
+        incoming: dict[UUID, list[Edge]],
+        outgoing_handles: dict[UUID, list[str]],
+        is_brancher: dict[UUID, bool],
+        forced_live: set[Edge],
+        iteration: int = 0,
+        force_run: bool = False,
     ) -> list[NodeResult]:
-        if len(level.nodes) == 1:
-            return [self._dispatch_single(level.nodes[0], context)]
+        # 도달 가능 노드만 실행, 나머지는 skip (ADR-0023 L2). 루프 바디는 force_run.
+        results: list[NodeResult] = []
+        to_run = []
+        for node in level.nodes:
+            if force_run or self._is_reachable(
+                node, incoming, outgoing_handles, reachable, node_outputs, is_brancher, forced_live
+            ):
+                reachable[node.instance_id] = True
+                to_run.append(node)
+            else:
+                reachable[node.instance_id] = False
+                skipped = self._skipped_result(node, iteration)
+                self._events.publish_node_complete(context.execution_id, skipped)
+                results.append(skipped)
 
-        node_results: list[NodeResult] = []
-        with ThreadPoolExecutor(max_workers=len(level.nodes)) as pool:
-            futures = {
-                pool.submit(self._dispatch_single, node, context): node
-                for node in level.nodes
-            }
-            for future in as_completed(futures):
-                node_results.append(future.result())
+        if len(to_run) == 1:
+            results.append(self._dispatch_single(to_run[0], context, configs, node_outputs, iteration))
+        elif to_run:
+            with ThreadPoolExecutor(max_workers=len(to_run)) as pool:
+                futures = {
+                    pool.submit(
+                        self._dispatch_single, node, context, configs, node_outputs, iteration
+                    ): node
+                    for node in to_run
+                }
+                for future in as_completed(futures):
+                    results.append(future.result())
 
-        return node_results
+        # 레벨 완료 후 성공 출력을 누적 — 하류/다음 iteration의 ${ref} 소스 (L1, latest-wins).
+        for r in results:
+            if r.status == "succeeded" and isinstance(r.output, dict):
+                node_outputs[str(r.node_instance_id)] = r.output
 
-    def _dispatch_single(self, node, context: ExecutionContext) -> NodeResult:
-        config = self._workflow_repo.get_node_config(node.node_id)
+        return results
+
+    def _is_reachable(
+        self,
+        node,
+        incoming: dict[UUID, list[Edge]],
+        outgoing_handles: dict[UUID, list[str]],
+        reachable: dict[UUID, bool],
+        node_outputs: dict[str, dict[str, Any]],
+        is_brancher: dict[UUID, bool],
+        forced_live: set[Edge],
+    ) -> bool:
+        inc = incoming.get(node.instance_id, [])
+        if not inc:
+            return True  # 루트 노드는 항상 실행
+        for e in inc:
+            if e in forced_live:
+                return True  # 가드 초과 루프의 강제 exit (L3)
+            src = e.from_instance_id
+            if not reachable.get(src, False):
+                continue  # 선행이 미도달/skip
+            src_out = node_outputs.get(str(src))
+            if src_out is None:
+                continue  # 선행이 성공 출력 없음(실패 등)
+            if self._branch.is_edge_live(
+                is_brancher.get(src, False), src_out, outgoing_handles.get(src, []), e.from_handle
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _skipped_result(node, iteration: int = 0) -> NodeResult:
+        now = datetime.now(UTC)
+        return NodeResult(
+            node_instance_id=node.instance_id,
+            status="skipped",
+            output={},
+            started_at=now,
+            completed_at=now,
+            iteration=iteration,
+        )
+
+    def _dispatch_single(
+        self, node, context: ExecutionContext, configs: dict[UUID, Any],
+        node_outputs: dict[str, dict[str, Any]], iteration: int = 0,
+    ) -> NodeResult:
+        config = configs[node.node_id]
+        # 노드 파라미터의 ${상류.출력} 참조를 해석한 노드로 교체 후 dispatch (ADR-0023 L1).
+        # model_copy로 resolved 파라미터만 갈아끼워 기존 입력 precedence(global override)는 보존.
+        resolved_params = self._resolver.resolve_params(node.parameters, node_outputs)
+        resolved_node = node.model_copy(update={"parameters": resolved_params})
         node_result = self._dispatch_node.execute(
-            node=node,
+            node=resolved_node,
             config=config,
             inputs=context.parameters,
             user_id=context.user_id,
             execution_id=context.execution_id,
+            iteration=iteration,
         )
         self._events.publish_node_complete(context.execution_id, node_result)
         return node_result

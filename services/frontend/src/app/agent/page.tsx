@@ -9,7 +9,7 @@ import { useAgentStore, WorkspaceMode, ChatMessage, AgentSession } from '@/store
 import { useAuthStore } from '@/stores/authStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession, streamSlotAnswer } from '@/lib/api/agentApi';
-import { getWorkflow } from '@/lib/api/workflowApi';
+import { getWorkflow, validateWorkflow } from '@/lib/api/workflowApi';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import WorkflowEditPane from '@/components/workflow/WorkflowEditPane';
 import { ReactFlow, Background, BackgroundVariant, Controls, ConnectionMode, useNodesState, useEdgesState, addEdge as rfAddEdge, type ReactFlowInstance, type Node as RFNode, type Edge as RFEdge, type Connection, type NodeMouseHandler } from '@xyflow/react';
@@ -571,10 +571,33 @@ function AgentPageContent() {
     },
   });
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!readyToExecute) return;
-    setReadyToExecute(null);
-    showToast('워크플로우가 확인됐습니다.');
+    try {
+      const result = await validateWorkflow(readyToExecute.workflowId);
+      if (result.validation_status === 'passed') {
+        showToast('워크플로우가 저장됐습니다.');
+        setMode('run');
+      } else {
+        const errorList = result.errors
+          .map((e) => e.hint ?? e.message)
+          .filter(Boolean)
+          .join(', ');
+        addMessage({
+          id: `a${Date.now()}`,
+          role: 'agent',
+          content: `워크플로우가 저장되었습니다. 실행하기 위해서는 편집 탭에서 ${errorList || '검증 오류'} 부분 수정이 필요합니다.`,
+          timestamp: Date.now(),
+        });
+      }
+    } catch {
+      addMessage({
+        id: `a${Date.now()}`,
+        role: 'agent',
+        content: '워크플로우 검증 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
+        timestamp: Date.now(),
+      });
+    }
   };
 
   useEffect(() => {

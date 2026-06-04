@@ -17,16 +17,18 @@
 
 | source_type | 경로 | NodeDefinition 생성 시점 |
 |-------------|------|--------------------------|
-| `sop` | wizard 2단계(extract → 사용자 편집 → confirm) → personal DRAFT (Q8) → Marketplace lifecycle | **PUBLISHED 시점** (skills_marketplace `PublishSkillUseCase`, Option B) |
+| `sop` | wizard 3단계(metadata → 사용자 선택 → detail → 사용자 편집 → confirm) → personal DRAFT (Q8 + 옵션 1 2단계 분리) → Marketplace lifecycle | **PUBLISHED 시점** (skills_marketplace `PublishSkillUseCase`, Option B) |
 | `industry_default` / `functional_domain` | seed JSON → `SkillNode` 검증 → 즉시 upsert | **upsert 시점** (Q7 큐레이션 자동 PUBLISHED) |
 
 - **Q3 promotion-only**: Skills Builder는 **personal DRAFT만** 생성. team/company 스킬은 Marketplace `PromoteToTeam/Company` 승격으로만 도달(직접 생성 경로 없음).
+- **옵션 1 (2026-06-04, LLM JSON 잘림 해소)**: 1회 호출에 노드 N개 × (긴 inputs/outputs JSON Schema + instructions markdown) 전체를 받아 `max_tokens=4096`을 초과하던 문제(line 220~250 col 부근 EOF) 해결. extract를 메타 5필드 추출(`extract_metadata`) + 선택된 메타에 detail 추출(`extract_detail`) 2단계로 분리하고, 안전망으로 `_STRUCTURED_MAX_TOKENS`를 8192로 상향.
 
 ## 인터페이스
 
 입력: `AgentProtocolRequest`
 - `payload.source_type` ∈ `{"sop", "industry_default", "functional_domain"}`
-- `sop`은 `payload.step` ∈ `{"extract", "confirm"}` 추가 (wizard 2단계, 기본 `extract`)
+- `sop`은 `payload.step` ∈ `{"metadata", "detail", "confirm"}` 추가 (wizard 3단계, 기본 `metadata`)
+- `step=detail`은 `payload.meta` 필수 (1차 응답에서 사용자가 선택한 메타 dict)
 
 출력: `AsyncGenerator[SSEFrame]` — `AgentNodeFrame`(진행) + `ResultFrame`/`ErrorFrame`(결과)
 
@@ -34,16 +36,18 @@
 
 ## Work items
 
-- [x] `BuildFromSOPUseCase` — wizard 2단계 (PR #151)
-  - `extract_draft`: `DocumentBlock` + personal_memory → LLM 추출 → `NodeSpecStaging` + 메타 반환 (**저장 X**, 사용자 검토용)
+- [x] `BuildFromSOPUseCase` — wizard 3단계 (PR #151 + 2026-06-04 옵션 1 2단계 분리)
+  - `extract_metadata`: `DocumentBlock` + personal_memory → LLM 메타 5필드 추출(node_type/name/description/category/risk_level) → 카드 그리드용 (**저장 X**)
+  - `extract_detail`: `DocumentBlock` + 선택된 meta dict → LLM detail 5필드 추출(inputs/outputs/required_connections/service_type/instructions) + `NodeSpecStaging` 변환 → 폼 prefill용 (**저장 X**)
   - `confirm`: 사용자 편집 결과 → `CreateDraftSkillUseCase`로 personal DRAFT (NodeDefinition 미생성)
   - 입력은 JSON 프롬프트 강제(XML 금지), category(영문 8종)/risk_level 검증, confirm 신뢰경계 격리(`E_SKILL_INVALID`)
+  - `_STRUCTURED_MAX_TOKENS` 4096 → 8192 (안전망, 2단계 분리로 응답당 토큰 자체도 줄어듦)
 - [x] `BuildFromIndustryDefaultUseCase` — 산업 seed JSON → `SkillNode` 검증 → `NodeDefinition` upsert (idempotent, uuid5 deterministic)
 - [x] `BuildFromFunctionalDomainUseCase` — 직무 seed JSON → upsert (동일 패턴, `source_type="functional_domain"`)
 - [x] seed JSON 작성
   - 산업 6종 (`seeds/industry_defaults/`): ecommerce / food / it / manufacturing / service / wholesale_retail
   - 직무 5종 (`seeds/functional_domain_defaults/`): customer_support / document_data / hr / it_ops / marketing
-- [x] Modal app (`services/agents/agent-skills-builder/main.py`) — source_type 분기 + sop step(extract/confirm) 라우팅
+- [x] Modal app (`services/agents/agent-skills-builder/main.py`) — source_type 분기 + sop step(metadata/detail/confirm) 라우팅
 - [x] Modal 배포 — `agent-skills-builder` `/v1/health` 200 (GCP Secret Manager 패턴, 2026-05-19 검증)
 - [x] 단위 테스트 — skills_builder 116 passed (wizard 정상/실패경로 격리 + confirm instructions 전달/누락 포함)
 - [x] integration test — `tests/integration/test_agent_skills_builder.py`

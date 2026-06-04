@@ -69,11 +69,11 @@ async def dispose_orchestrator_http(client: httpx.AsyncClient | None) -> None:
 
 
 def init_skills_builder_http(settings: Settings) -> httpx.AsyncClient | None:
-    """Skills Builder Sub-Agent 직결 클라이언트 — SOP 문서→스킬 추출(extract) SSE 프록시용.
+    """Skills Builder Sub-Agent 직결 클라이언트 — SOP 문서→스킬 추출 wizard 3단계 SSE/JSON 프록시용.
 
     orchestrator(intent 분류 경유)와 별도 — 추출은 문서 기반 결정적 흐름이라 skills-builder
-    `/v1/agent/route`(source_type="sop", step="extract")를 직접 호출한다. 미설정 시 None →
-    `/extract` 라우트가 503으로 graceful 응답 (orchestrator 패턴과 동일).
+    `/v1/agent/route`(source_type="sop", step ∈ {metadata, detail, confirm})를 직접 호출한다.
+    미설정 시 None → `/extract` / `/extract/detail` 라우트가 503으로 graceful 응답 (orchestrator 패턴과 동일).
     """
     url = (settings.skills_builder_url or "").strip()
     if not url:

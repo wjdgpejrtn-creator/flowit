@@ -193,17 +193,22 @@ function DetailPanel({
             {filled.map((node) => (
               <div key={node.nodeName}>
                 <div className="text-[12px] font-semibold text-[var(--color-ink2)]">{node.nodeName}</div>
-                <ul className="mt-[2px] flex flex-col gap-[2px]">
+                <ul className="mt-[2px] flex flex-col gap-[4px]">
                   {node.fields.map((f) => (
-                    <li key={f.name} className="flex items-baseline gap-[6px] text-[12px]">
-                      <span className="font-mono text-[11px] text-[var(--color-ink3)] flex-shrink-0">{f.name}</span>
-                      <span className="text-[var(--color-ink3)]">=</span>
-                      <span className="font-mono text-[11px] text-[var(--color-ink2)] break-all min-w-0">{f.value}</span>
-                      {f.tag === 'review' && (
-                        <span className="ml-auto flex-shrink-0 text-[10px] font-bold text-[var(--color-danger)]">⚠ 확인 필요</span>
-                      )}
-                      {f.tag === 'default' && (
-                        <span className="ml-auto flex-shrink-0 text-[10px] text-[var(--color-ink4)]">기본값</span>
+                    <li key={f.name} className="flex flex-col gap-[1px]">
+                      <div className="flex items-baseline gap-[6px] text-[12px]">
+                        <span className="font-mono text-[11px] text-[var(--color-ink3)] flex-shrink-0">{f.name}</span>
+                        <span className="text-[var(--color-ink3)]">=</span>
+                        <span className="font-mono text-[11px] text-[var(--color-ink2)] break-all min-w-0">{f.value}</span>
+                        {f.tag === 'review' && (
+                          <span className="ml-auto flex-shrink-0 text-[10px] font-bold text-[var(--color-danger)]">⚠ 확인 필요</span>
+                        )}
+                        {f.tag === 'default' && (
+                          <span className="ml-auto flex-shrink-0 text-[10px] text-[var(--color-ink4)]">기본값</span>
+                        )}
+                      </div>
+                      {f.description && (
+                        <span className="text-[10px] text-[var(--color-ink3)] leading-snug pl-[2px]">{f.description}</span>
                       )}
                     </li>
                   ))}
