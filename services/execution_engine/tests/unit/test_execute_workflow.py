@@ -254,3 +254,51 @@ class TestExecuteWorkflowDataflow:
         passed_node = b_call.kwargs["node"]
         assert passed_node.instance_id == b.instance_id
         assert passed_node.parameters["text"] == "요약본"
+
+
+class TestExecuteWorkflowBranching:
+    """ADR-0023 L2 — 조건 노드 분기: 안 탄 가지 노드는 skip."""
+
+    def test_condition_skips_not_taken_branch(
+        self, use_case, mock_workflow_repo, mock_dispatch_node
+    ):
+        from datetime import UTC, datetime
+
+        c, t, f = _make_node(), _make_node(), _make_node()
+        wf = WorkflowSchema(
+            workflow_id=uuid4(), name="wf", scope="private", is_draft=False,
+            nodes=[c, t, f],
+            connections=[
+                Edge(from_instance_id=c.instance_id, to_instance_id=t.instance_id,
+                     from_handle="true", to_handle="input"),
+                Edge(from_instance_id=c.instance_id, to_instance_id=f.instance_id,
+                     from_handle="false", to_handle="input"),
+            ],
+        )
+        context = _make_context(wf.workflow_id)
+
+        cond_cfg = MagicMock(spec=NodeConfig)
+        cond_cfg.category = "condition"
+        plain_cfg = MagicMock(spec=NodeConfig)
+        plain_cfg.category = "action"
+        mock_workflow_repo.get.return_value = wf
+        mock_workflow_repo.get_node_config.side_effect = (
+            lambda nid: cond_cfg if nid == c.node_id else plain_cfg
+        )
+        c_result = NodeResult(
+            node_instance_id=c.instance_id, status="succeeded",
+            output={"branch": "true", "value": 1},
+            started_at=datetime.now(UTC), completed_at=datetime.now(UTC),
+        )
+        # c와 t만 dispatch — f는 skip되어 dispatch 안 됨
+        mock_dispatch_node.execute.side_effect = [c_result, _make_node_result(t)]
+
+        result = use_case.execute(wf.workflow_id, context)
+
+        statuses = {r.node_instance_id: r.status for r in result.node_results}
+        assert statuses[c.instance_id] == "succeeded"
+        assert statuses[t.instance_id] == "succeeded"
+        assert statuses[f.instance_id] == "skipped"
+        assert result.status == ExecutionStatus.COMPLETED
+        dispatched = [call.kwargs["node"].instance_id for call in mock_dispatch_node.execute.call_args_list]
+        assert f.instance_id not in dispatched
