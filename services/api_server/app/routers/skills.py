@@ -591,9 +591,13 @@ async def extract_skill_detail(
         raise HTTPException(status_code=502, detail=f"Skills Builder 호출 실패: {exc}") from exc
 
     if error_frame is not None:
-        # LLM/입력 검증 실패 — 422로 매핑(클라이언트 입력 또는 LLM 응답 문제).
+        # 상류 LLM 실패(E_LLM_*)는 502, 클라이언트 입력/메타 검증 실패는 422로 분리 매핑
+        # — 조장 리뷰 LOW #3(2026-06-04): 클라이언트가 자기 입력 문제와 상류 인프라 실패 구분 필요.
+        code = error_frame.get("code") or ""
+        upstream_codes = {"E_LLM_GENERATION_FAILED", "E_LLM_RESPONSE_INVALID"}
+        status = 502 if code in upstream_codes else 422
         raise HTTPException(
-            status_code=422,
+            status_code=status,
             detail={"code": error_frame.get("code"), "message": error_frame.get("message")},
         )
 

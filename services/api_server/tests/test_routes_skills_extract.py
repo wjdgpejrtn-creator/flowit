@@ -315,15 +315,26 @@ def test_extract_detail_with_template_code():
     assert sent["payload"]["document"]["blocks"]
 
 
-def test_extract_detail_error_frame_yields_422():
-    """skills-builder가 ErrorFrame 반환 → 422 (LLM/입력 검증 실패 매핑)."""
+def test_extract_detail_upstream_llm_failure_yields_502():
+    """상류 LLM 실패(E_LLM_GENERATION_FAILED/E_LLM_RESPONSE_INVALID) → 502 (조장 리뷰 LOW #3)."""
     error_frame = {"frame_type": "error", "code": "E_LLM_GENERATION_FAILED", "message": "modal timeout"}
+    envelope = {"frames": [error_frame], "next_action": "error", "state_delta": {}}
+    fake = _FakeSkillsBuilderClient([f"data: {json.dumps(envelope)}"])
+    res = _post_detail(_make_app(client=fake))
+    assert res.status_code == 502
+    body = res.json()
+    assert body["detail"]["code"] == "E_LLM_GENERATION_FAILED"
+
+
+def test_extract_detail_client_validation_failure_yields_422():
+    """클라이언트/메타 검증 실패(E_META_INVALID/E_DOCUMENT_EMPTY 등) → 422."""
+    error_frame = {"frame_type": "error", "code": "E_META_INVALID", "message": "메타 검증 실패"}
     envelope = {"frames": [error_frame], "next_action": "error", "state_delta": {}}
     fake = _FakeSkillsBuilderClient([f"data: {json.dumps(envelope)}"])
     res = _post_detail(_make_app(client=fake))
     assert res.status_code == 422
     body = res.json()
-    assert body["detail"]["code"] == "E_LLM_GENERATION_FAILED"
+    assert body["detail"]["code"] == "E_META_INVALID"
 
 
 def test_extract_detail_no_result_yields_502():
