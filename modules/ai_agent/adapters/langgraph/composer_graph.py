@@ -1503,7 +1503,7 @@ class LangGraphOrchestrator:
                     payload={
                         "workflow_id": str(workflow_id) if workflow_id else None,
                         "status": "ready_to_execute",
-                        "message": "워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.",
+                        "message": "워크플로우가 완성됐습니다. 저장하거나 편집 탭에서 편집 후 실행하세요.",
                         "session_id": str(state["session_id"]),
                         "explanation": explanation.model_dump(mode="json") if explanation else None,
                     },
