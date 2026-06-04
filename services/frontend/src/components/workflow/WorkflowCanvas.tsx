@@ -26,7 +26,7 @@ import NodePalette, { readPaletteDragPayload, type NodePaletteDragPayload } from
 import Icon from '@/components/common/Icon';
 import CustomNode, { type CustomNodeData } from './CustomNode';
 import EdgeLine from './EdgeLine';
-import { resolveSourceHandle, resolveTargetHandle } from '@/lib/adapters/reactFlowAdapter';
+import { buildEdgeId, resolveSourceHandle, resolveTargetHandle } from '@/lib/adapters/reactFlowAdapter';
 
 const nodeTypes = { custom: CustomNode };
 const edgeTypes = { custom: EdgeLine };
@@ -50,6 +50,10 @@ function CanvasInner({ catalog, showPalette = true }: { catalog?: NodeConfig[] |
   const addEdge = useWorkflowStore((s) => s.addEdge);
   const removeEdge = useWorkflowStore((s) => s.removeEdge);
   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
+  // 엣지 선택은 store가 아닌 로컬 — rfEdges가 workflow에서 파생되는 컨트롤드 구조라
+  // selected를 명시 주입하지 않으면 React Flow 선택이 매 렌더 유실돼 EdgeLine ×버튼·
+  // Delete가 동작하지 않는다(노드 selectedNodeId와 동일 패턴).
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const { screenToFlowPosition } = useReactFlow();
@@ -77,17 +81,21 @@ function CanvasInner({ catalog, showPalette = true }: { catalog?: NodeConfig[] |
 
   const rfEdges: RFEdge[] = useMemo(() => {
     if (!workflow) return [];
-    return workflow.connections.map((e) => ({
-      id: `${e.from_instance_id}->${e.to_instance_id}`,
-      source: e.from_instance_id,
-      target: e.to_instance_id,
-      // 레거시/AI 엣지의 from_handle="output"·to_handle="input" 을 4방향 핸들 id 로 매핑.
-      // 빈 값/미지 값은 기존 좌→우 레이아웃으로 폴백 (reactFlowAdapter 단일 소스).
-      sourceHandle: resolveSourceHandle(e.from_handle),
-      targetHandle: resolveTargetHandle(e.to_handle),
-      type: 'custom',
-    }));
-  }, [workflow]);
+    return workflow.connections.map((e) => {
+      const id = buildEdgeId(e);
+      return {
+        id,
+        source: e.from_instance_id,
+        target: e.to_instance_id,
+        // 레거시/AI 엣지의 from_handle="output"·to_handle="input" 을 4방향 핸들 id 로 매핑.
+        // 빈 값/미지 값은 기존 좌→우 레이아웃으로 폴백 (reactFlowAdapter 단일 소스).
+        sourceHandle: resolveSourceHandle(e.from_handle),
+        targetHandle: resolveTargetHandle(e.to_handle),
+        type: 'custom',
+        selected: id === selectedEdgeId,
+      };
+    });
+  }, [workflow, selectedEdgeId]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -108,8 +116,7 @@ function CanvasInner({ catalog, showPalette = true }: { catalog?: NodeConfig[] |
     (changes: EdgeChange[]) => {
       for (const c of changes) {
         if (c.type === 'remove') {
-          const [from, to] = c.id.split('->');
-          if (from && to) removeEdge(from, to);
+          removeEdge(c.id);
         }
       }
     },
@@ -135,8 +142,9 @@ function CanvasInner({ catalog, showPalette = true }: { catalog?: NodeConfig[] |
     (params: OnSelectionChangeParams) => {
       const first = params.nodes[0];
       setSelectedNodeId(first?.id ?? null);
+      setSelectedEdgeId(params.edges[0]?.id ?? null);
     },
-    [setSelectedNodeId],
+    [setSelectedNodeId, setSelectedEdgeId],
   );
 
   const onDragOver = useCallback((e: React.DragEvent) => {

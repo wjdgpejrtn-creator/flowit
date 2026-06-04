@@ -6,6 +6,7 @@ import type {
   Position,
   ValidationErrorItem,
 } from '@common/generated';
+import { buildEdgeId } from '@/lib/adapters/reactFlowAdapter';
 
 interface WorkflowStoreState {
   workflow: WorkflowSchema | null;
@@ -19,7 +20,7 @@ interface WorkflowStoreState {
   updateNodePosition: (instanceId: string, position: Position) => void;
   removeNode: (instanceId: string) => void;
   addEdge: (edge: Edge) => void;
-  removeEdge: (fromInstanceId: string, toInstanceId: string) => void;
+  removeEdge: (edgeId: string) => void;
   setSelectedNodeId: (id: string | null) => void;
   setValidationErrors: (errors: ValidationErrorItem[]) => void;
   markClean: () => void;
@@ -104,16 +105,14 @@ export const useWorkflowStore = create<WorkflowStoreState>((set) => ({
       };
     }),
 
-  removeEdge: (fromInstanceId, toInstanceId) =>
+  removeEdge: (edgeId) =>
     set((s) => {
       if (!s.workflow) return s;
+      // 노드쌍이 아닌 핸들 포함 식별자로 매칭 — 병렬 엣지 중 선택된 1개만 제거.
       return {
         workflow: {
           ...s.workflow,
-          connections: s.workflow.connections.filter(
-            (e) =>
-              !(e.from_instance_id === fromInstanceId && e.to_instance_id === toInstanceId),
-          ),
+          connections: s.workflow.connections.filter((e) => buildEdgeId(e) !== edgeId),
         },
         dirty: true,
       };
