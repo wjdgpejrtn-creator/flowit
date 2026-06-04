@@ -471,6 +471,11 @@ function FlowEditor() {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
+// 문서(탭) 단위 1회성 플래그 — 모듈 스코프라 전체 새로고침(JS 컨텍스트 재생성) 때만 false로
+// 초기화되고, SPA 클라이언트 네비게이션(대시보드→AI채팅 재진입)에서는 값이 유지된다.
+// 이를 이용해 "새로고침/첫 진입(=persist 복원 대화 이어가기)"과 "재진입(=새 대화로 시작)"을 구분.
+let agentDocumentLoadConsumed = false;
+
 function AgentPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -501,6 +506,8 @@ function AgentPageContent() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
+  // StrictMode(dev)의 effect 더블 invoke가 같은 마운트에서 두 번 실행되지 않도록 인스턴스 가드.
+  const didMountResetRef = useRef(false);
 
   // 완성된 워크플로우를 편집 캔버스에 로드 — useWorkflowStore(WorkflowEditPane이 읽음).
   const setLoadedWorkflow = useWorkflowStore((s) => s.setWorkflow);
@@ -511,11 +518,21 @@ function AgentPageContent() {
     return () => { abortRef.current?.abort(); };
   }, []);
 
-  // 테스트 1: 페이지 진입 시 이전 세션 정리.
+  // 페이지 진입 시 이전 세션 정리.
   // Zustand 싱글턴은 페이지 이동 후 재진입해도 상태가 남아있으므로
   // 대시보드 → AI 채팅 재진입 시 빈 대화창으로 시작하도록 초기화.
-  // 단, readyToExecute가 있으면 워크플로우 완성 후 이탈→복귀 흐름이므로 초기화 건너뜀.
+  // 단, 두 경우엔 초기화를 건너뛰어 대화를 이어간다:
+  //  ① readyToExecute가 있으면 워크플로우 완성 후 이탈→복귀 흐름.
+  //  ② 문서 최초 로드(새로고침/첫 진입) — persist로 복원된 대화를 그대로 유지(버그 C).
+  //     SPA 재진입에서만 아카이브+초기화가 동작하도록 모듈 플래그로 구분한다.
   useEffect(() => {
+    if (didMountResetRef.current) return;  // StrictMode 더블 invoke 가드(동일 인스턴스)
+    didMountResetRef.current = true;
+    if (!agentDocumentLoadConsumed) {
+      // 새로고침/첫 진입 — 복원 대화 유지, 아카이브/초기화 건너뜀.
+      agentDocumentLoadConsumed = true;
+      return;
+    }
     const state = useAgentStore.getState();
     if (state.readyToExecute) return;
     const { sessionId: sid, messages: msgs } = state;
