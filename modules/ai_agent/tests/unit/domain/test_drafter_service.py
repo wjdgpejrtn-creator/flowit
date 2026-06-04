@@ -73,7 +73,6 @@ class TestDrafterServiceBuild:
 
         assert len(schema.connections) == 1
         edge = schema.connections[0]
-        a_id = next(n.instance_id for n in schema.nodes if True)
         node_ids = {n.instance_id for n in schema.nodes}
         assert edge.from_instance_id in node_ids
         assert edge.to_instance_id in node_ids
@@ -274,3 +273,87 @@ class TestDrafterConnectionExposure:
         prompt = llm.generate_structured.call_args.args[0]
         assert "required_connections" in prompt
         assert "google" in prompt
+
+
+class TestDrafterRefGeneration:
+    """L1b — drafter가 생성한 ${node_type.field} / ${ref.field} 참조를 instance_id로 재작성."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    def _svc(self, response):
+        return DrafterService(_mock_llm(response))
+
+    @pytest.mark.asyncio
+    async def test_fresh_draft_rewrites_node_type_token_to_instance_id(self):
+        response = _DraftResponse(
+            name="W",
+            nodes=[
+                _NodeDraft(node_type="sheets"),
+                _NodeDraft(node_type="summary", parameters={"document_text": "${sheets.values}"}),
+            ],
+            connections=[_EdgeDraft(from_node_type="sheets", to_node_type="summary")],
+        )
+        candidates = [_node_config("sheets"), _node_config("summary")]
+        schema = await self._svc(response).draft(_spec(), candidates, self.owner_id)
+
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        sheets = next(n for n in schema.nodes if type_by_id[n.node_id] == "sheets")
+        summary = next(n for n in schema.nodes if type_by_id[n.node_id] == "summary")
+        assert summary.parameters["document_text"] == f"${{{sheets.instance_id}.values}}"
+
+    @pytest.mark.asyncio
+    async def test_unknown_ref_token_preserved(self):
+        response = _DraftResponse(
+            nodes=[_NodeDraft(node_type="summary", parameters={"x": "${ghost.field}"})],
+            connections=[],
+        )
+        schema = await self._svc(response).draft(_spec(), [_node_config("summary")], self.owner_id)
+        assert schema.nodes[0].parameters["x"] == "${ghost.field}"
+
+    @pytest.mark.asyncio
+    async def test_embedded_ref_rewritten(self):
+        response = _DraftResponse(
+            nodes=[
+                _NodeDraft(node_type="sheets"),
+                _NodeDraft(node_type="slack", parameters={"text": "요약:\n${sheets.summary}"}),
+            ],
+            connections=[_EdgeDraft(from_node_type="sheets", to_node_type="slack")],
+        )
+        candidates = [_node_config("sheets"), _node_config("slack")]
+        schema = await self._svc(response).draft(_spec(), candidates, self.owner_id)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        sheets = next(n for n in schema.nodes if type_by_id[n.node_id] == "sheets")
+        slack = next(n for n in schema.nodes if type_by_id[n.node_id] == "slack")
+        assert slack.parameters["text"] == f"요약:\n${{{sheets.instance_id}.summary}}"
+
+    @pytest.mark.asyncio
+    async def test_catalog_exposes_outputs_to_llm(self):
+        response = _DraftResponse(nodes=[_NodeDraft(node_type="sheets")], connections=[])
+        llm = _mock_llm(response)
+        cfg = _node_config("sheets").model_copy(
+            update={"output_schema": {"properties": {"values": {}, "rows": {}}}}
+        )
+        await DrafterService(llm).draft(_spec(), [cfg], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "outputs" in prompt and "values" in prompt
+
+
+@pytest.mark.asyncio
+async def test_refine_rewrites_ref_token_to_instance_id():
+    """L1b refine 경로 — _build_from_edit가 ${<ref>.<field>}를 instance_id로 재작성."""
+    cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+    prior = _prior_workflow(cfg_a, cfg_b)
+    llm = _mock_llm(_EditResponse(
+        name="W",
+        nodes=[
+            _EditNodeDraft(ref="n0", node_type="http"),
+            _EditNodeDraft(ref="n1", node_type="slack", parameters={"text": "${n0.body}"}),
+        ],
+        connections=[_EditEdgeDraft(from_ref="n0", to_ref="n1")],
+    ))
+    result = await DrafterService(llm).draft(_spec(), [cfg_a, cfg_b], uuid4(), prior_workflow=prior)
+
+    http_id = next(n.instance_id for n in result.nodes if n.node_id == cfg_a.node_id)
+    slack = next(n for n in result.nodes if n.node_id == cfg_b.node_id)
+    assert slack.parameters["text"] == f"${{{http_id}.body}}"
