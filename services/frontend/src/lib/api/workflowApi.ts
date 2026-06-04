@@ -20,7 +20,9 @@ export interface ControlResponse {
 
 export interface NodeResultEntry {
   node_instance_id: string;
-  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'retrying' | 'cancelled';
+  // 'skipped' = L2 조건 분기에서 안 탄 가지 노드(execution_engine `_skipped_result`, ADR-0023).
+  // execution_engine이 save하는 NodeResult.status 기준 — 백엔드가 raw list[dict]로 반환한다.
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'retrying' | 'cancelled' | 'skipped';
   attempt?: number;
   last_error?: string | null;
 }

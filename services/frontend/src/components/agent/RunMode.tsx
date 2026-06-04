@@ -25,7 +25,7 @@ import type { NodeConfig } from '@common/generated';
  * pause 엔드포인트는 백엔드에 없으므로(cancel/resume만 노출) 일시정지 버튼은 두지 않는다.
  */
 
-type NodeState = 'pending' | 'running' | 'succeeded' | 'failed' | 'retrying' | 'cancelled';
+type NodeState = 'pending' | 'running' | 'succeeded' | 'failed' | 'retrying' | 'cancelled' | 'skipped';
 
 interface DisplayNode {
   instanceId: string;
@@ -96,6 +96,9 @@ function nodeCardStyle(state: NodeState): React.CSSProperties {
       return { boxShadow: '0 0 0 2px #C75146', borderColor: '#C75146' };
     case 'cancelled':
       return { borderColor: '#C75146', opacity: 0.55 };
+    case 'skipped':
+      // L2 조건 분기에서 안 탄 가지 — 흐릿하게 비활성 표시(실패 아님).
+      return { borderColor: '#D8CBB8', opacity: 0.4, borderStyle: 'dashed' };
     default:
       return { borderColor: '#ECE3D6', opacity: 0.7 };
   }
@@ -107,6 +110,7 @@ function StatusTag({ state }: { state: NodeState }) {
   if (state === 'retrying') return <Icon name="refresh-cw" className="w-3.5 h-3.5 text-accent animate-spin" />;
   if (state === 'failed') return <Icon name="alert-triangle" className="w-3.5 h-3.5 text-danger" />;
   if (state === 'cancelled') return <Icon name="x" className="w-3.5 h-3.5 text-danger" />;
+  if (state === 'skipped') return <Icon name="skip-forward" className="w-3.5 h-3.5 text-ink4" />;
   return <Icon name="clock" className="w-3 h-3 text-ink4" />;
 }
 
@@ -122,6 +126,7 @@ const NODE_STATE_LOG: Partial<Record<NodeState, [string, string]>> = {
   failed: ['✗ Node "%s" 실행 실패 (failed)', 'text-danger'],
   retrying: ['↻ Node "%s" 재시도 중 (retrying)', 'text-hl'],
   cancelled: ['⏹ Node "%s" 취소됨', 'text-danger'],
+  skipped: ['⊘ Node "%s" 건너뜀 (조건 분기 미선택)', 'text-ink4'],
 };
 
 const EXEC_STATE_LOG: Record<string, [string, string]> = {

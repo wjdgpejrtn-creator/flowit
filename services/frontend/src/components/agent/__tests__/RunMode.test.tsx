@@ -126,6 +126,21 @@ describe('RunMode', () => {
     expect(mockCancel).toHaveBeenCalledWith('exec-1');
   });
 
+  it('skipped 노드(L2 분기 미선택)는 완료 카운트에서 제외하고 건너뜀 로그를 남긴다', async () => {
+    mockGetLatest.mockResolvedValue(
+      latest(ExecutionStatus.COMPLETED, [
+        { node_instance_id: 'n-a', status: 'succeeded' },
+        { node_instance_id: 'n-b', status: 'skipped' },
+      ]),
+    );
+
+    render(<RunMode />);
+
+    // succeeded 1건만 완료로 카운트(skipped 제외)
+    expect(await screen.findByText('1 / 2 노드 완료')).toBeInTheDocument();
+    expect(await screen.findByText(/건너뜀/)).toBeInTheDocument();
+  });
+
   it('완료된 실행이면 다시 실행 버튼이 executeWorkflow를 호출한다', async () => {
     mockGetLatest.mockResolvedValue(
       latest(ExecutionStatus.COMPLETED, [
