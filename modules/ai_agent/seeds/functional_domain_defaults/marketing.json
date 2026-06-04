@@ -29,8 +29,8 @@
         }
       },
       "risk_level": "Medium",
-      "required_connections": ["google"],
-      "service_type": "google_workspace"
+      "required_connections": [],
+      "service_type": null
     },
     {
       "node_type": "marketing_lead_scoring",
