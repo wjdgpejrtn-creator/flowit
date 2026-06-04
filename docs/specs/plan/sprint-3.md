@@ -62,7 +62,7 @@ modules/ai_agent/
 │       │   ├── compose_workflow_use_case.py
 │       │   └── continue_conversation_use_case.py
 │       ├── skills_builder/
-│       │   ├── build_from_sop_use_case.py
+│       │   ├── build_from_sop_use_case.py  (extract_metadata / extract_detail / confirm 3메서드, 옵션 1 2단계 분리)
 │       │   └── build_from_industry_default_use_case.py
 │       └── personalization/
 │           ├── load_user_memory_use_case.py
