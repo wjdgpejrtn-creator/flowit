@@ -388,18 +388,19 @@ async def extract_skill_from_document(
     doc_repo: DocumentRepositoryPort = Depends(get_document_repository),
     client: httpx.AsyncClient | None = Depends(get_skills_builder_http),
 ) -> StreamingResponse:
-    """문서 또는 default 템플릿 → Skills Builder(extract) → 추출 초안 SSE 스트림 (저장 X, 검토용).
+    """문서 또는 default 템플릿 → Skills Builder(metadata) → 메타 5필드 SSE 스트림 (저장 X, 검토용).
 
-    스킬빌더 위저드 1단계. 두 갈래는 **추출 입력(DocumentBlock)을 무엇으로 만드느냐만** 다르고,
-    skills-builder `/v1/agent/route`(`source_type="sop"`, `step="extract"`)로 **전체 DocumentBlock**을
-    전달하는 이후 경로는 완전히 동일하다 — LLM이 추출한 SkillNode 초안(name/description/
-    **instructions(SKILL.md 본문)**)을 SSE로 프록시한다. orchestrator(의도 분류)를 우회하는 결정적 경로.
+    스킬빌더 위저드 1단계(옵션 1 — 2단계 분리). 두 갈래는 **추출 입력(DocumentBlock)을 무엇으로
+    만드느냐만** 다르고, skills-builder `/v1/agent/route`(`source_type="sop"`, `step="metadata"`)로
+    **전체 DocumentBlock**을 전달하는 이후 경로는 동일. LLM이 추출한 SkillNode 메타 5필드
+    (node_type/name/description/category/risk_level)를 SSE로 프록시한다 — inputs/outputs/
+    instructions 등 토큰 무거운 detail은 `POST /extract/detail`로 분리(LLM JSON 잘림 해소).
 
     - `source_document_id`: 내 분석 완료 문서. 소유/존재/blocks 검증(404/403/409).
     - `template_code`: default seed(업종/직무). 서버가 seed→SOP DocumentBlock 합성(미존재 404).
 
-    프레임: `agent_node`(진행) → `result`(payload.skills 초안 목록) | `error`. 확정·저장은
-    사용자가 폼에서 검토 후 `POST /personal`(instructions 포함)로 수행한다 — 단일 생성 경로 유지.
+    프레임: `agent_node`(진행) → `result`(payload.skill_metas 메타 목록) | `error`. 사용자가 카드
+    그리드에서 1건 선택하면 frontend는 `POST /extract/detail`로 detail을 채워 폼에 prefill한다.
     """
     if client is None:
         raise HTTPException(
@@ -438,7 +439,7 @@ async def extract_skill_from_document(
         "personal_memory": [],
         "payload": {
             "source_type": "sop",
-            "step": "extract",
+            "step": "metadata",
             "document": document.model_dump(mode="json"),
         },
         "state": {
@@ -470,6 +471,136 @@ async def extract_skill_from_document(
             yield f"data: {json.dumps(err)}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+# ── 선택된 메타에 대한 detail 추출 (옵션 1 — 2단계 분리, LLM JSON 잘림 해소) ────────
+
+
+class ExtractSkillDetailRequest(BaseModel):
+    """detail 추출 재료 — `source_document_id`(내 문서) XOR `template_code`(default seed) 중 하나
+    + 1차에서 받은 선택된 메타 5필드.
+    """
+
+    source_document_id: UUID | None = None
+    template_code: str | None = None
+    # 1차 extract 응답의 skill_metas[i] 그대로 (node_type/name/description/category/risk_level).
+    meta: dict
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> ExtractSkillDetailRequest:
+        if (self.source_document_id is None) == (self.template_code is None):
+            raise ValueError("source_document_id 또는 template_code 중 정확히 하나를 지정하세요")
+        return self
+
+    @model_validator(mode="after")
+    def _meta_required_keys(self) -> ExtractSkillDetailRequest:
+        required = {"node_type", "name", "description", "category", "risk_level"}
+        missing = required - set(self.meta.keys())
+        if missing:
+            raise ValueError(f"meta에 필수 필드 누락: {sorted(missing)}")
+        return self
+
+
+class ExtractSkillDetailResponse(BaseModel):
+    """detail 응답 — frontend가 1차 메타와 합쳐 폼에 prefill."""
+
+    skill_detail: dict
+
+
+@router.post("/extract/detail", response_model=ExtractSkillDetailResponse)
+async def extract_skill_detail(
+    body: ExtractSkillDetailRequest,
+    permission: PermissionSource = Depends(get_permission_source),
+    doc_repo: DocumentRepositoryPort = Depends(get_document_repository),
+    client: httpx.AsyncClient | None = Depends(get_skills_builder_http),
+) -> ExtractSkillDetailResponse:
+    """선택된 메타에 대한 detail(inputs/outputs/instructions/...) 추출 — JSON 단건 응답.
+
+    옵션 1의 2차 호출: frontend가 1차 `POST /extract` 응답에서 받은 메타 1건을 선택해
+    detail을 채우면 폼에 prefill한다. LLM 1회 호출이라 SSE 진행률 표시 의미 적어 JSON으로 반환.
+
+    Stateless: source(document_id/template_code)와 meta를 다시 전달받는다 — 1차 결과를 서버에
+    보관하지 않음(인프라 의존 회피, 인가 단순화).
+    """
+    if client is None:
+        raise HTTPException(
+            status_code=503, detail="Skills Builder unavailable — SKILLS_BUILDER_URL 미설정"
+        )
+
+    # source 검증/합성 — extract 라우트와 동일 정책(소유/존재/blocks).
+    document: DocumentBlock
+    if body.template_code is not None:
+        synthesized = synthesize_sop_document(body.template_code, permission.user_id)
+        if synthesized is None:
+            raise HTTPException(status_code=404, detail=f"Template '{body.template_code}' not found")
+        document = synthesized
+    else:
+        document = await doc_repo.get_by_id(body.source_document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail=f"Document {body.source_document_id} not found")
+        if document.user_id != permission.user_id:
+            raise HTTPException(status_code=403, detail="Document belongs to another user")
+        if not document.blocks:
+            raise HTTPException(
+                status_code=409,
+                detail="Document has no parsed blocks — 먼저 문서 분석을 완료하세요",
+            )
+
+    session_id = str(uuid4())
+    user_id = str(permission.user_id)
+    proxy_payload = {
+        "session_id": session_id,
+        "user_id": user_id,
+        "personal_memory": [],
+        "payload": {
+            "source_type": "sop",
+            "step": "detail",
+            "document": document.model_dump(mode="json"),
+            "meta": body.meta,
+        },
+        "state": {
+            "session_id": session_id,
+            "user_id": user_id,
+            "messages": [],
+            "turn_count": 0,
+            "mode": "general",
+            "execution_status": "pending",
+            "node_candidates": [],
+        },
+    }
+
+    # detail은 단일 ResultFrame이 핵심 — SSE envelope에서 result/error frame을 collect 후 JSON 반환.
+    result_payload: dict | None = None
+    error_frame: dict | None = None
+    try:
+        async with client.stream("POST", "/v1/agent/route", json=proxy_payload) as resp:
+            async for line in resp.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    envelope = json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
+                for frame in envelope.get("frames", []):
+                    if frame.get("frame_type") == "result":
+                        result_payload = frame.get("payload")
+                    elif frame.get("frame_type") == "error":
+                        error_frame = frame
+    except Exception as exc:
+        logger.error("skills-builder extract/detail 호출 실패: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Skills Builder 호출 실패: {exc}") from exc
+
+    if error_frame is not None:
+        # LLM/입력 검증 실패 — 422로 매핑(클라이언트 입력 또는 LLM 응답 문제).
+        raise HTTPException(
+            status_code=422,
+            detail={"code": error_frame.get("code"), "message": error_frame.get("message")},
+        )
+
+    if result_payload is None or "skill_detail" not in result_payload:
+        raise HTTPException(status_code=502, detail="Skills Builder가 detail 응답을 반환하지 않음")
+
+    return ExtractSkillDetailResponse(skill_detail=result_payload["skill_detail"])
 
 
 @router.get("/personal", response_model=list[PersonalSkillResponse])

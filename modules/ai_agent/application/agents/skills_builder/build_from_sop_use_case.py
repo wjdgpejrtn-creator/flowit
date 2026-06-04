@@ -1,16 +1,21 @@
-"""Skills Builder — SOP 문서(DocumentBlock) → LLM → wizard extract_draft + confirm (ADR-0020 ③-a).
+"""Skills Builder — SOP 문서(DocumentBlock) → LLM → wizard (ADR-0020 ③-a, 옵션 1 2단계 분리).
 
 REQ-004 spec §2.2 BuildFromSOPUseCase. wizard 1차(Q8): 추출 결과를 사용자가 검토·수정 후 확정.
 
 LLM 호출은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base` Modal) 배포 후 wiring.
 
-흐름 (2단계 wizard):
-    [extract_draft] DocumentBlock + personal_memory(list[MemoryEntry])
+흐름 (옵션 1 — 2단계 분리, LLM JSON 잘림 해소):
+    [extract_metadata] DocumentBlock + personal_memory(list[MemoryEntry])
       → JSON prompt 구성 (XML 금지 — 메모리 룰)
-      → LLM.generate_structured(prompt, ExtractedSkillNodeList)
-      → 응답 검증 + NodeSpecStaging 변환 (NodeDefinition 미생성 — Option B)
-      → ResultFrame(payload.skills) — 사용자 검토·수정용, **저장 X**
-    [confirm] 편집된 skills
+      → LLM.generate_structured(prompt, _ExtractedSkillNodeMetaList)
+      → ResultFrame(payload.skill_metas) — 메타 5필드만(node_type/name/description/category/risk_level)
+      → 사용자 카드 그리드 표시, 1건 선택
+    [extract_detail] DocumentBlock + 선택된 meta dict
+      → JSON prompt 구성 (target_skill_meta 명시)
+      → LLM.generate_structured(prompt, _ExtractedSkillNodeDetail)
+      → ResultFrame(payload.skill_detail) — detail 5필드(inputs/outputs/instructions/...) + staging
+      → 사용자 폼 prefill (frontend가 메타와 합쳐서)
+    [confirm] 편집된 skills (메타 + detail 합친 형태)
       → embed(description) + CreateDraftSkillUseCase로 personal DRAFT 생성
       → ResultFrame(payload.skill_ids). NodeDefinition은 publish 시점(②d)에 생성.
 
@@ -41,7 +46,9 @@ LLM 호출은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base
        embedder=ModalEmbeddingAdapter(base_url=os.environ["EMBEDDING_BASE_URL"]),
        llm=ModalLLMAdapter(),  # MODAL_TOKEN_ID/SECRET 환경변수 자동 사용
    )
-   # 2단계: extract_draft(user_id, document, personal_memory) → 사용자 검토·수정 → confirm(user_id, skills)
+   # 3단계: extract_metadata(user_id, document, personal_memory) → 카드 그리드 표시 →
+   #        사용자 1건 선택 → extract_detail(user_id, document, meta=selected) → 폼 prefill →
+   #        사용자 검토·수정 → confirm(user_id, skills)
    # NodeDefinition은 미생성(Option B) — publish 시점(PublishSkillUseCase ②d)에 staging→NodeDefinition.
    ```
 
@@ -81,16 +88,10 @@ _ALLOWED_CATEGORIES = {"trigger", "action", "condition", "transform", "ai", "int
 # ----------------------------------------------------------------------
 
 
-class _ExtractedSkillNode(BaseModel):
-    """LLM이 SOP에서 추출한 SkillNode 1건 (BuildFromSOP 내부 표현).
+class _ExtractedSkillNodeMeta(BaseModel):
+    """1차 LLM 추출 — 메타 5필드만. 카드 그리드 표시용.
 
-    LLM 응답 검증용 — Pydantic이 자동 validate.
-    NodeDefinition 변환 시 추가 메타(node_id/version/parameter_schema/embedding)는 use case가 채움.
-
-    `instructions`는 ADR-0017 이중 저장 중 SkillDocument(SKILL.md) 지침서 본문 —
-    LLM이 NodeDefinition 메타와 함께 동시 생성한다 (사용자 대화 중 옵션 제시용 사람이 읽는 형식).
-    skills_marketplace.SkillDocument를 직접 import하지 않고 dict 데이터로 반환 (조장 리뷰 #98
-    "ai_agent는 use case 경유" 결정 — 저장 wiring은 후속 GCS adapter + skills_marketplace use case).
+    옵션 1(2단계 분리)의 1차 응답 스키마. 사용자가 카드 선택 시 식별 정보로 detail 호출에 전달.
     """
     model_config = ConfigDict(frozen=True)
 
@@ -99,18 +100,31 @@ class _ExtractedSkillNode(BaseModel):
     description: str = Field(min_length=1)
     category: str                           # 영문 8종 (검증은 use case에서)
     risk_level: str                         # Low/Medium/High/Restricted
+
+
+class _ExtractedSkillNodeMetaList(BaseModel):
+    """1차 LLM structured output 컨테이너."""
+    model_config = ConfigDict(frozen=True)
+
+    skill_node_metas: list[_ExtractedSkillNodeMeta]
+
+
+class _ExtractedSkillNodeDetail(BaseModel):
+    """2차 LLM 추출 — 선택된 메타에 대한 detail 5필드. 폼 prefill용.
+
+    옵션 1의 2차 응답 스키마. inputs/outputs JSON Schema + instructions markdown 등 토큰 무거운 필드.
+    1차에서 받은 메타와 frontend가 합쳐서 사용자 폼에 prefill한다.
+
+    `instructions`는 ADR-0017 이중 저장 중 SkillDocument(SKILL.md) 지침서 본문 —
+    confirm 단계에서 GCS 저장된다(use case 경유).
+    """
+    model_config = ConfigDict(frozen=True)
+
     inputs: dict[str, Any] = Field(default_factory=dict)
     outputs: dict[str, Any] = Field(default_factory=dict)
     required_connections: list[str] = Field(default_factory=list)
     service_type: str | None = None
     instructions: str = Field(min_length=1)  # SkillDocument(SKILL.md) markdown body — ADR-0017
-
-
-class _ExtractedSkillNodeList(BaseModel):
-    """LLM structured output 컨테이너."""
-    model_config = ConfigDict(frozen=True)
-
-    skill_nodes: list[_ExtractedSkillNode]
 
 
 # ----------------------------------------------------------------------
@@ -136,18 +150,19 @@ class BuildFromSOPUseCase:
         self._embedder = embedder
         self._llm = llm
 
-    async def extract_draft(
+    async def extract_metadata(
         self,
         user_id: UUID,
         document: DocumentBlock,
         personal_memory: list[MemoryEntry] | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
-        """wizard 1단계 — SOP에서 SkillNode 추출 → 노드 스펙(staging) + 메타 반환. **저장 안 함**.
+        """wizard 1단계 — SOP에서 SkillNode 메타만 추출(카드 그리드용). **저장 안 함**.
 
-        사용자가 추출 결과를 검토·수정한 뒤 `confirm`으로 확정한다 (ADR-0020 Q8 wizard 1차).
+        옵션 1(2단계 분리): 응답당 토큰을 줄여 LLM JSON 잘림(EOF) 해소. 메타 5필드만
+        받고, 사용자가 카드 선택 시 frontend가 `extract_detail`을 호출해 detail을 채운다.
 
         Yields:
-            AgentNodeFrame (진행) / ErrorFrame (실패) / ResultFrame(payload.skills) — 추출 결과 목록
+            AgentNodeFrame (진행) / ErrorFrame (실패) / ResultFrame(payload.skill_metas) — 메타 목록
         """
         personal_memory = personal_memory or []
 
@@ -159,46 +174,46 @@ class BuildFromSOPUseCase:
             return
 
         yield AgentNodeFrame(agent_node_name="skills_builder.sop.parse_document")
-        prompt = self._build_prompt(document, personal_memory)
-        yield AgentNodeFrame(agent_node_name="skills_builder.sop.llm_extract")
+        prompt = self._build_prompt_metadata(document, personal_memory)
+        yield AgentNodeFrame(agent_node_name="skills_builder.sop.llm_extract_metadata")
 
         try:
-            extracted = await self._llm.generate_structured(prompt, _ExtractedSkillNodeList)
+            extracted = await self._llm.generate_structured(prompt, _ExtractedSkillNodeMetaList)
         except Exception as e:
             yield ErrorFrame(code="E_LLM_GENERATION_FAILED", message=f"LLM 호출 실패: {e}")
             return
 
-        if not isinstance(extracted, _ExtractedSkillNodeList):
+        if not isinstance(extracted, _ExtractedSkillNodeMetaList):
             yield ErrorFrame(
                 code="E_LLM_RESPONSE_INVALID",
-                message=f"LLM 응답이 _ExtractedSkillNodeList 형태 아님: {type(extracted).__name__}",
+                message=f"LLM 응답이 _ExtractedSkillNodeMetaList 형태 아님: {type(extracted).__name__}",
             )
             return
 
-        if not extracted.skill_nodes:
+        if not extracted.skill_node_metas:
             yield ErrorFrame(
                 code="E_NO_SKILLS_EXTRACTED",
-                message="LLM이 SkillNode를 추출하지 못함 (SOP 문서에 자동화 가능 작업 없음으로 판단)",
+                message="LLM이 SkillNode 메타를 추출하지 못함 (SOP 문서에 자동화 가능 작업 없음으로 판단)",
             )
             return
 
-        # 각 추출 항목 → NodeSpecStaging 변환 (LLM 응답 비유효 시 전체 중단 — fail-fast)
-        skills: list[dict] = []
-        for ext in extracted.skill_nodes:
+        # 각 메타 항목 검증 (category/risk_level은 DB CHECK 정합)
+        skill_metas: list[dict] = []
+        for meta in extracted.skill_node_metas:
             try:
-                staging = self._convert_to_staging(ext)
-            except (KeyError, ValueError) as e:
+                self._validate_meta(meta)
+            except ValueError as e:
                 yield ErrorFrame(
                     code="E_LLM_RESPONSE_INVALID",
-                    message=f"LLM 추출 항목 변환 실패 ({ext.node_type}): {e}",
+                    message=f"LLM 추출 메타 검증 실패 ({meta.node_type}): {e}",
                 )
                 return
-            skills.append({
-                "node_type": ext.node_type,
-                "name": ext.name,
-                "description": ext.description,
-                "instructions": ext.instructions,  # SKILL.md 본문 — confirm이 GCS 저장(use case 경유)
-                "staging": staging.model_dump(mode="json"),
+            skill_metas.append({
+                "node_type": meta.node_type,
+                "name": meta.name,
+                "description": meta.description,
+                "category": meta.category,
+                "risk_level": meta.risk_level,
             })
 
         yield ResultFrame(
@@ -207,7 +222,87 @@ class BuildFromSOPUseCase:
                 "source_type": "sop",
                 "document_id": str(document.document_id),
                 "file_name": document.file_meta.file_name,
-                "skills": skills,  # 사용자 검토·수정 대상 (저장 전)
+                "skill_metas": skill_metas,  # 카드 그리드용 (사용자 선택 → extract_detail)
+                "user_id": str(user_id),
+            },
+        )
+
+    async def extract_detail(
+        self,
+        user_id: UUID,
+        document: DocumentBlock,
+        meta: dict,
+        personal_memory: list[MemoryEntry] | None = None,
+    ) -> AsyncGenerator[SSEFrame, None]:
+        """wizard 1.5단계 — 선택된 메타의 detail(inputs/outputs/instructions/...) 추출.
+
+        옵션 1의 2차 호출. 1차에서 받은 메타와 합쳐 사용자 폼에 prefill된다.
+        Stateless: frontend가 1차 메타 + source(document) 정보를 다시 전달.
+
+        Args:
+            meta: 1차에서 받은 메타 dict (node_type/name/description/category/risk_level).
+
+        Yields:
+            AgentNodeFrame (진행) / ErrorFrame (실패) / ResultFrame(payload.skill_detail) — 단건 detail
+        """
+        personal_memory = personal_memory or []
+
+        if not document.blocks:
+            yield ErrorFrame(
+                code="E_DOCUMENT_EMPTY",
+                message=f"DocumentBlock(id={document.document_id})에 blocks 없음 — 추출할 내용 없음",
+            )
+            return
+
+        # 입력 meta dict 검증 — frontend가 1차 응답을 그대로 전달했는지
+        try:
+            meta_obj = _ExtractedSkillNodeMeta(**meta)
+            self._validate_meta(meta_obj)
+        except (TypeError, ValueError, ValidationError) as e:
+            yield ErrorFrame(code="E_META_INVALID", message=f"입력 메타 검증 실패: {e}")
+            return
+
+        yield AgentNodeFrame(agent_node_name="skills_builder.sop.parse_document")
+        prompt = self._build_prompt_detail(document, personal_memory, meta_obj)
+        yield AgentNodeFrame(agent_node_name=f"skills_builder.sop.llm_extract_detail.{meta_obj.node_type}")
+
+        try:
+            detail = await self._llm.generate_structured(prompt, _ExtractedSkillNodeDetail)
+        except Exception as e:
+            yield ErrorFrame(code="E_LLM_GENERATION_FAILED", message=f"LLM 호출 실패: {e}")
+            return
+
+        if not isinstance(detail, _ExtractedSkillNodeDetail):
+            yield ErrorFrame(
+                code="E_LLM_RESPONSE_INVALID",
+                message=f"LLM 응답이 _ExtractedSkillNodeDetail 형태 아님: {type(detail).__name__}",
+            )
+            return
+
+        try:
+            staging = self._convert_detail_to_staging(meta_obj, detail)
+        except (KeyError, ValueError) as e:
+            yield ErrorFrame(
+                code="E_LLM_RESPONSE_INVALID",
+                message=f"LLM detail 변환 실패 ({meta_obj.node_type}): {e}",
+            )
+            return
+
+        yield ResultFrame(
+            intent="build_skill",
+            payload={
+                "source_type": "sop",
+                "document_id": str(document.document_id),
+                "file_name": document.file_meta.file_name,
+                "skill_detail": {
+                    "node_type": meta_obj.node_type,            # 식별용 echo
+                    "instructions": detail.instructions,
+                    "inputs": detail.inputs,
+                    "outputs": detail.outputs,
+                    "required_connections": detail.required_connections,
+                    "service_type": detail.service_type,
+                    "staging": staging.model_dump(mode="json"),
+                },
                 "user_id": str(user_id),
             },
         )
@@ -294,91 +389,50 @@ class BuildFromSOPUseCase:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_prompt(
+    def _build_prompt_metadata(
         document: DocumentBlock,
         personal_memory: list[MemoryEntry],
     ) -> str:
-        """LLM 프롬프트 구성. **JSON 형식 강제** (XML 금지 — 메모리 룰).
+        """1차 LLM 프롬프트 — 메타 5필드만 추출(카드 그리드용). **JSON 형식 강제**.
 
-        구조:
-            - 시스템 지시 (역할/규칙)
-            - personal_memory (JSON dump, 도메인 컨텍스트)
-            - document blocks (JSON dump, text/heading/table 만 필터)
-            - few-shot 예시 1건 (LLM 응답 품질 향상)
-            - 출력 스키마 명시 (_ExtractedSkillNodeList JSON schema)
+        토큰을 가볍게 유지하기 위해 inputs/outputs JSON Schema + instructions markdown은
+        2차(`_build_prompt_detail`)로 분리. 메타만으로도 사용자가 어느 노드를 선택할지 결정 가능.
         """
-        # 1) document blocks 필터링 + JSON 변환
         relevant_blocks = [
             b.model_dump(mode="json")
             for b in document.blocks
             if b.block_type in {"text", "heading", "table"}
         ]
-
-        # 2) personal_memory JSON 변환
         memory_json = [m.model_dump(mode="json") for m in personal_memory]
 
-        # 3) 시스템 지시
         instruction = (
             "당신은 사내 업무 자동화 SOP 문서를 분석해 워크플로우 노드(SkillNode)를 추출하는 어시스턴트입니다. "
             "SOP 문서의 단계별 작업 중 외부 시스템 호출/조건 분기/데이터 변환이 들어가는 단위를 "
             "SkillNode로 정의해주세요.\n\n"
-            "출력 전체는 **반드시 JSON** 형식입니다 (XML 금지). "
-            "단 instructions 필드의 *값*은 사람이 읽는 markdown 문자열입니다.\n"
-            "각 SkillNode 필드:\n"
+            "이 단계에서는 **메타 5필드만** 추출합니다 (입출력 스키마/지침서는 후속 단계에서 채움).\n"
+            "각 SkillNode 메타 필드:\n"
             "  - node_type: snake_case 식별자 (e.g. 'send_approval_email')\n"
             "  - name: 사람이 읽을 수 있는 한글 이름\n"
             "  - description: 노드 동작 설명 (한 문장)\n"
             f"  - category: 다음 중 하나 — {sorted(_ALLOWED_CATEGORIES)}\n"
-            "  - risk_level: 'Low' / 'Medium' / 'High' / 'Restricted'\n"
-            "  - inputs: JSON Schema (type=object + properties). **각 property는 반드시 `description`을 포함** — "
-            "비전문가도 무슨 값을 넣어야 할지 알 수 있도록 한 줄 설명 + 구체적인 예시(예: ...)를 넣는다. "
-            "특히 외부에서 발급되는 ID·토큰처럼 값을 추정하기 어려운 필드는 '어디서 얻는지'까지 적는다. "
-            "선택지가 정해져 있으면 enum, 기본값이 있으면 default도 명시한다\n"
-            "  - outputs: JSON Schema. 각 property에 무엇이 나오는지 `description`을 넣는다\n"
-            "  - required_connections: list[str] (e.g. ['slack', 'google'])\n"
-            "  - service_type: str | null (e.g. 'slack', 'google_workspace')\n"
-            "  - instructions: 이 스킬의 SKILL.md 지침서 본문 (markdown 문자열). 사용자가 대화 중 읽고 "
-            "선택할 수 있도록 '## When to use', '## Steps', '## Inputs/Outputs' 섹션을 포함한 설명 (ADR-0017)\n\n"
+            "  - risk_level: 'Low' / 'Medium' / 'High' / 'Restricted'\n\n"
             "사용자의 personal_memory와 작업 패턴을 참고해 도메인 맥락 반영. "
             "추출 결과가 없으면 빈 배열 반환."
         )
 
-        # 4) Few-shot 예시 (LLM 출력 품질 향상 — 형식·필드·카테고리 의도 명확화)
         few_shot_example = {
             "input_sop_snippet": (
                 "고객 환불 요청이 접수되면 1) 매니저에게 슬랙 알림 2) 환불 금액이 5만원 초과면 "
                 "승인 대기 3) 승인 후 결제 취소 API 호출"
             ),
             "expected_output": {
-                "skill_nodes": [
+                "skill_node_metas": [
                     {
                         "node_type": "refund_request_slack_alert",
                         "name": "환불 요청 매니저 알림",
                         "description": "환불 요청 접수 시 매니저 슬랙 채널에 알림",
                         "category": "action",
                         "risk_level": "Medium",
-                        "inputs": {
-                            "type": "object",
-                            "properties": {
-                                "refund_id": {"type": "string", "description": "환불 요청 건의 ID. 예: RF-10293"},
-                                "amount": {"type": "number", "description": "환불 금액(원). 예: 35000"},
-                                "channel": {"type": "string", "description": "Slack 채널. 예: '#cs-refund'"},
-                            },
-                            "required": ["refund_id", "amount"],
-                        },
-                        "outputs": {
-                            "type": "object",
-                            "properties": {"message_ts": {"type": "string", "description": "메시지 타임스탬프"}},
-                        },
-                        "required_connections": ["slack"],
-                        "service_type": "slack",
-                        "instructions": (
-                            "## When to use\n환불 요청이 접수되어 담당 매니저에게 즉시 알려야 할 때.\n"
-                            "## Steps\n1. 환불 요청 정보(refund_id, amount) 확인\n"
-                            "2. 지정 Slack 채널에 알림 메시지 발송\n"
-                            "## Inputs/Outputs\n- 입력: refund_id, amount, channel\n"
-                            "- 출력: message_ts (메시지 타임스탬프)"
-                        ),
                     },
                     {
                         "node_type": "refund_amount_threshold_check",
@@ -386,38 +440,15 @@ class BuildFromSOPUseCase:
                         "description": "환불 금액이 임계값 초과 시 승인 대기, 이하면 자동 진행",
                         "category": "condition",
                         "risk_level": "High",
-                        "inputs": {
-                            "type": "object",
-                            "properties": {
-                                "amount": {"type": "number", "description": "판단 대상 환불 금액(원). 예: 35000"},
-                                "threshold": {"type": "number", "default": 50000, "description": "분기 기준 금액(원)"},
-                            },
-                            "required": ["amount"],
-                        },
-                        "outputs": {
-                            "type": "object",
-                            "properties": {
-                                "requires_approval": {"type": "boolean", "description": "승인 대기 필요 여부"},
-                            },
-                        },
-                        "required_connections": [],
-                        "service_type": None,
-                        "instructions": (
-                            "## When to use\n환불 금액에 따라 자동 승인 가능 여부를 분기해야 할 때.\n"
-                            "## Steps\n1. 환불 금액과 임계값(기본 5만원) 비교\n"
-                            "2. 초과 시 승인 대기, 이하면 자동 진행 플래그 설정\n"
-                            "## Inputs/Outputs\n- 입력: amount, threshold\n- 출력: requires_approval (boolean)"
-                        ),
                     },
                 ],
             },
         }
 
-        # 5) 출력 스키마 (LLM이 따라야 할 JSON 구조 — grammar-level 강제와 정합)
         output_schema = {
             "type": "object",
             "properties": {
-                "skill_nodes": {
+                "skill_node_metas": {
                     "type": "array",
                     "items": {
                         "type": "object",
@@ -427,20 +458,12 @@ class BuildFromSOPUseCase:
                             "description": {"type": "string"},
                             "category": {"type": "string", "enum": sorted(_ALLOWED_CATEGORIES)},
                             "risk_level": {"type": "string", "enum": ["Low", "Medium", "High", "Restricted"]},
-                            "inputs": {"type": "object"},
-                            "outputs": {"type": "object"},
-                            "required_connections": {"type": "array", "items": {"type": "string"}},
-                            "service_type": {"type": ["string", "null"]},
-                            "instructions": {"type": "string"},
                         },
-                        "required": [
-                            "node_type", "name", "description", "category",
-                            "risk_level", "inputs", "outputs", "required_connections", "instructions",
-                        ],
+                        "required": ["node_type", "name", "description", "category", "risk_level"],
                     },
                 },
             },
-            "required": ["skill_nodes"],
+            "required": ["skill_node_metas"],
         }
 
         payload = {
@@ -457,34 +480,134 @@ class BuildFromSOPUseCase:
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     @staticmethod
-    def _convert_to_staging(ext: _ExtractedSkillNode) -> NodeSpecStaging:
-        """LLM 추출 항목을 검증 → NodeSpecStaging 변환 (NodeDefinition은 publish 시 생성, Option B).
+    def _build_prompt_detail(
+        document: DocumentBlock,
+        personal_memory: list[MemoryEntry],
+        meta: _ExtractedSkillNodeMeta,
+    ) -> str:
+        """2차 LLM 프롬프트 — 선택된 메타에 대한 detail 5필드 추출(폼 prefill용).
 
-        검증:
-        - category가 DB CHECK 8영문 내인지
-        - risk_level이 RiskLevel enum 내인지 (`RiskLevel(...)` 변환 시 raise)
+        SOP 전체 context를 함께 전달해 instructions(Steps 등)가 SOP 흐름 기반으로 생성되도록 한다.
+        메타는 LLM에 echo하지 않음 — frontend가 1차 메타와 합쳐 사용.
         """
-        if ext.category not in _ALLOWED_CATEGORIES:
-            raise ValueError(
-                f"category '{ext.category}'가 DB CHECK 8영문에 없음. 가능: {sorted(_ALLOWED_CATEGORIES)}"
-            )
+        relevant_blocks = [
+            b.model_dump(mode="json")
+            for b in document.blocks
+            if b.block_type in {"text", "heading", "table"}
+        ]
+        memory_json = [m.model_dump(mode="json") for m in personal_memory]
 
-        # SkillNode 검증 (Pydantic — risk_level이 RiskLevel enum이 아니면 raise, source 일관성)
+        instruction = (
+            "당신은 사내 업무 자동화 SOP 문서에서 추출된 SkillNode의 **상세 스펙(detail)을 채우는** 어시스턴트입니다. "
+            "아래 `target_skill_meta`에 명시된 노드에 대해서만, SOP 문서를 근거로 다음 5필드를 생성하세요:\n\n"
+            "  - inputs: JSON Schema (type=object + properties). **각 property는 반드시 `description`을 포함** — "
+            "비전문가도 무슨 값을 넣어야 할지 알 수 있도록 한 줄 설명 + 구체적인 예시(예: ...)를 넣는다. "
+            "특히 외부에서 발급되는 ID·토큰처럼 값을 추정하기 어려운 필드는 '어디서 얻는지'까지 적는다. "
+            "선택지가 정해져 있으면 enum, 기본값이 있으면 default도 명시한다\n"
+            "  - outputs: JSON Schema. 각 property에 무엇이 나오는지 `description`을 넣는다\n"
+            "  - required_connections: list[str] (e.g. ['slack', 'google'])\n"
+            "  - service_type: str | null (e.g. 'slack', 'google_workspace')\n"
+            "  - instructions: 이 스킬의 SKILL.md 지침서 본문 (markdown 문자열). "
+            "사용자가 대화 중 읽고 선택할 수 있도록 '## When to use', '## Steps', '## Inputs/Outputs' 섹션을 "
+            "포함한 충분한 설명 (ADR-0017)\n\n"
+            "출력 전체는 **반드시 JSON** 형식입니다 (XML 금지). "
+            "단 instructions 필드의 *값*은 사람이 읽는 markdown 문자열입니다."
+        )
+
+        few_shot_example = {
+            "input_meta": {
+                "node_type": "refund_request_slack_alert",
+                "name": "환불 요청 매니저 알림",
+                "description": "환불 요청 접수 시 매니저 슬랙 채널에 알림",
+                "category": "action",
+                "risk_level": "Medium",
+            },
+            "expected_output": {
+                "inputs": {
+                    "type": "object",
+                    "properties": {
+                        "refund_id": {"type": "string", "description": "환불 요청 건의 ID. 예: RF-10293"},
+                        "amount": {"type": "number", "description": "환불 금액(원). 예: 35000"},
+                        "channel": {"type": "string", "description": "Slack 채널. 예: '#cs-refund'"},
+                    },
+                    "required": ["refund_id", "amount"],
+                },
+                "outputs": {
+                    "type": "object",
+                    "properties": {"message_ts": {"type": "string", "description": "메시지 타임스탬프"}},
+                },
+                "required_connections": ["slack"],
+                "service_type": "slack",
+                "instructions": (
+                    "## When to use\n환불 요청이 접수되어 담당 매니저에게 즉시 알려야 할 때.\n"
+                    "## Steps\n1. 환불 요청 정보(refund_id, amount) 확인\n"
+                    "2. 지정 Slack 채널에 알림 메시지 발송\n"
+                    "## Inputs/Outputs\n- 입력: refund_id, amount, channel\n"
+                    "- 출력: message_ts (메시지 타임스탬프)"
+                ),
+            },
+        }
+
+        output_schema = {
+            "type": "object",
+            "properties": {
+                "inputs": {"type": "object"},
+                "outputs": {"type": "object"},
+                "required_connections": {"type": "array", "items": {"type": "string"}},
+                "service_type": {"type": ["string", "null"]},
+                "instructions": {"type": "string"},
+            },
+            "required": ["inputs", "outputs", "required_connections", "instructions"],
+        }
+
+        payload = {
+            "instruction": instruction,
+            "personal_memory": memory_json,
+            "document": {
+                "file_name": document.file_meta.file_name,
+                "blocks": relevant_blocks,
+            },
+            "target_skill_meta": meta.model_dump(mode="json"),
+            "few_shot_example": few_shot_example,
+            "output_schema": output_schema,
+        }
+
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _validate_meta(meta: _ExtractedSkillNodeMeta) -> None:
+        """메타 검증 — category가 DB CHECK 8영문 내, risk_level이 RiskLevel enum 내."""
+        if meta.category not in _ALLOWED_CATEGORIES:
+            raise ValueError(
+                f"category '{meta.category}'가 DB CHECK 8영문에 없음. 가능: {sorted(_ALLOWED_CATEGORIES)}"
+            )
+        RiskLevel(meta.risk_level)  # raise ValueError if not in enum
+
+    @staticmethod
+    def _convert_detail_to_staging(
+        meta: _ExtractedSkillNodeMeta,
+        detail: _ExtractedSkillNodeDetail,
+    ) -> NodeSpecStaging:
+        """메타 + detail → NodeSpecStaging (NodeDefinition은 publish 시 생성, Option B).
+
+        category/risk_level은 메타에서, input/output/connections/service_type은 detail에서 가져온다.
+        SkillNode Pydantic 검증으로 source 일관성도 확인.
+        """
         SkillNode(
             source_type="sop",
             source_id="",
-            name=ext.name,
-            description=ext.description,
-            inputs=ext.inputs,
-            outputs=ext.outputs,
-            risk_level=RiskLevel(ext.risk_level),
+            name=meta.name,
+            description=meta.description,
+            inputs=detail.inputs,
+            outputs=detail.outputs,
+            risk_level=RiskLevel(meta.risk_level),
         )
 
         return NodeSpecStaging(
-            category=ext.category,
-            input_schema=ext.inputs,
-            output_schema=ext.outputs,
-            risk_level=RiskLevel(ext.risk_level),
-            required_connections=ext.required_connections,
-            service_type=ext.service_type,
+            category=meta.category,
+            input_schema=detail.inputs,
+            output_schema=detail.outputs,
+            risk_level=RiskLevel(meta.risk_level),
+            required_connections=detail.required_connections,
+            service_type=detail.service_type,
         )
