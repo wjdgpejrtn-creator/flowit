@@ -23,6 +23,9 @@ class NodeResult(BaseModel):
     completed_at: UtcDatetime
     retry_count: int = 0
     error: str | None = None
+    # 유한 순환(ADR-0023 L3)에서 루프 바디 노드는 iteration마다 별도 NodeResult로 append된다.
+    # 비순환 노드는 0. 같은 node_instance_id가 반복되면 iteration으로 구분한다.
+    iteration: int = 0
 
 
 class ExecutionResult(BaseModel):
