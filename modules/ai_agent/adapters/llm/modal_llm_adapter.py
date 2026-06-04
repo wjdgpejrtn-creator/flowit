@@ -7,9 +7,8 @@ from typing import Any, TypeVar
 
 import httpx
 import modal
-from pydantic import BaseModel
-
 from common_schemas.exceptions import ExecutionError
+from pydantic import BaseModel
 
 from ...domain.ports.llm_port import LLMPort
 
