@@ -103,6 +103,7 @@ export default function WorkflowEditPane({ onExecuted }: Props) {
   const setValidationErrors = useWorkflowStore((s) => s.setValidationErrors);
   const setSelectedNodeId = useWorkflowStore((s) => s.setSelectedNodeId);
   const markClean = useWorkflowStore((s) => s.markClean);
+  const setActiveExecutionId = useWorkflowStore((s) => s.setActiveExecutionId);
 
   const [catalog, setCatalog] = useState<NodeConfig[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -184,6 +185,8 @@ export default function WorkflowEditPane({ onExecuted }: Props) {
         if (!saved) return;
       }
       const resp = await executeWorkflow(String(workflow.workflow_id));
+      // RunMode가 polling으로 집어든 latest execution이 방금 트리거한 것인지 판별하는 가드.
+      setActiveExecutionId(resp.execution_id);
       setActionMsg(`실행 시작 (${resp.execution_id.slice(0, 8)}…)`);
       onExecuted?.(resp);
     } catch (e) {

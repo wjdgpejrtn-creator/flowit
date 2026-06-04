@@ -13,8 +13,13 @@ interface WorkflowStoreState {
   selectedNodeId: string | null;
   dirty: boolean;
   validationErrors: ValidationErrorItem[];
+  // 가장 최근에 사용자가 트리거한 execution. RunMode가 polling 대상(getLatestExecution)이
+  // 새로 생성된 execution인지(worker가 INSERT 완료) 판별하는 race 가드로 사용. 새 워크플로우
+  // 로드 시 자동 클리어 — 이전 워크플로우의 execution_id를 끌고 가지 않도록.
+  activeExecutionId: string | null;
 
   setWorkflow: (workflow: WorkflowSchema | null) => void;
+  setActiveExecutionId: (id: string | null) => void;
   addNode: (node: NodeInstance) => void;
   updateNodeParams: (instanceId: string, parameters: Record<string, unknown>) => void;
   updateNodePosition: (instanceId: string, position: Position) => void;
@@ -31,9 +36,12 @@ export const useWorkflowStore = create<WorkflowStoreState>((set) => ({
   selectedNodeId: null,
   dirty: false,
   validationErrors: [],
+  activeExecutionId: null,
 
   setWorkflow: (workflow) =>
-    set({ workflow, selectedNodeId: null, dirty: false, validationErrors: [] }),
+    set({ workflow, selectedNodeId: null, dirty: false, validationErrors: [], activeExecutionId: null }),
+
+  setActiveExecutionId: (id) => set({ activeExecutionId: id }),
 
   addNode: (node) =>
     set((s) => {
