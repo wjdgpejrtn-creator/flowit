@@ -7,9 +7,8 @@ from typing import Any, TypeVar
 
 import httpx
 import modal
-from pydantic import BaseModel
-
 from common_schemas.exceptions import ExecutionError
+from pydantic import BaseModel
 
 from ...domain.ports.llm_port import LLMPort
 
@@ -22,8 +21,10 @@ _MODAL_CLS_NAME = "LLMBase"
 
 # structured 생성은 llm-base 기본 max_tokens(512)로는 부족하다 — SOP 추출은 노드 N개를
 # 각각 긴 instructions(SKILL.md 본문) + inputs/outputs 스키마와 함께 한 JSON으로 내보내므로
-# 512에서 문자열 중간에 잘려 "EOF while parsing a string"(json_invalid)가 난다. 충분히 넉넉히 준다.
-_STRUCTURED_MAX_TOKENS = 4096
+# 512에서 문자열 중간에 잘려 "EOF while parsing a string"(json_invalid)가 난다.
+# 4096도 실측에서 노드 5~6개부터 잘림(라인 220~250 col 부근 EOF) — 8192로 상향하면서
+# BuildFromSOPUseCase는 메타/detail 2단계 분리로 응답당 토큰 자체를 줄였다 (안전망 + 근본 해결).
+_STRUCTURED_MAX_TOKENS = 8192
 
 
 class ModalLLMAdapter(LLMPort):
