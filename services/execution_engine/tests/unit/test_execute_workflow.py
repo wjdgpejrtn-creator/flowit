@@ -221,3 +221,36 @@ class TestEventPublishing:
         use_case.execute(wf.workflow_id, context)
 
         assert mock_events.publish_node_complete.call_count == 2
+
+
+class TestExecuteWorkflowDataflow:
+    """ADR-0023 L1 — 상류 출력이 하류 노드 파라미터 ${ref}로 흐르는지 검증."""
+
+    def test_ref_resolved_from_upstream_output(
+        self, use_case, mock_workflow_repo, mock_dispatch_node
+    ):
+        from datetime import datetime, timezone
+
+        a = _make_node()
+        b = NodeInstance(
+            instance_id=uuid4(), node_id=uuid4(),
+            parameters={"text": f"${{{a.instance_id}.summary}}"}, position=Position(x=0, y=0),
+        )
+        wf = _make_workflow([a, b], [(a.instance_id, b.instance_id)])
+        context = _make_context(wf.workflow_id)
+
+        mock_workflow_repo.get.return_value = wf
+        mock_workflow_repo.get_node_config.return_value = MagicMock(spec=NodeConfig)
+        a_result = NodeResult(
+            node_instance_id=a.instance_id, status="succeeded", output={"summary": "요약본"},
+            started_at=datetime.now(timezone.utc), completed_at=datetime.now(timezone.utc),
+        )
+        mock_dispatch_node.execute.side_effect = [a_result, _make_node_result(b)]
+
+        use_case.execute(wf.workflow_id, context)
+
+        # B의 dispatch에 넘어간 노드는 resolved 파라미터를 가져야 함
+        b_call = mock_dispatch_node.execute.call_args_list[1]
+        passed_node = b_call.kwargs["node"]
+        assert passed_node.instance_id == b.instance_id
+        assert passed_node.parameters["text"] == "요약본"
