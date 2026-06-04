@@ -3,7 +3,7 @@
 /**
  * AI 채팅(Composer) 메시지 렌더 컴포넌트 — "대화는 텍스트, 카드는 최소".
  *
- * 디자인 SSOT: Flowit-채팅-레이아웃-구현-프롬프트.md (claude.ai/design 핸드오프).
+ * 디자인 SSOT: docs/Flowit-채팅-레이아웃-구현-프롬프트.md (claude.ai/design 핸드오프).
  *   1. 유저 입력만 말풍선(오른쪽 갈색 pill) — 화면의 유일한 채팅 말풍선.
  *   2. AI 출력은 카드/테두리/배경 없이 작은 마커 + 본문 텍스트로 흐른다.
  *   3. 진행 중 단계는 dim 텍스트 + 스피너 한 줄.
@@ -89,7 +89,7 @@ export function AgentWorkProcess({
             if (n < currentIndex) {
               // 완료 단계 — 흐릿한 체크 줄
               return (
-                <div key={label} className="flex items-center gap-2 text-[var(--color-ink3)]">
+                <div key={i} className="flex items-center gap-2 text-[var(--color-ink3)]">
                   <Icon name="check" className="w-3.5 h-3.5 text-[var(--color-accent)] flex-shrink-0" />
                   <span>{label} 완료</span>
                 </div>
@@ -98,7 +98,7 @@ export function AgentWorkProcess({
             if (n === currentIndex) {
               // 진행 중 단계 — 스피너 한 줄
               return (
-                <div key={label} className="flex items-center gap-2 text-[var(--color-ink4)]">
+                <div key={i} className="flex items-center gap-2 text-[var(--color-ink4)]">
                   <span className="flowit-spinner" />
                   <span>{label}…</span>
                 </div>
