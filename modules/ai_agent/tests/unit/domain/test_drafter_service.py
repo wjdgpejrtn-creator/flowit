@@ -338,6 +338,79 @@ class TestDrafterRefGeneration:
         prompt = llm.generate_structured.call_args.args[0]
         assert "outputs" in prompt and "values" in prompt
 
+    @pytest.mark.asyncio
+    async def test_valid_output_field_ref_unchanged(self):
+        # 상류 출력에 실제 존재하는 필드 참조 → 보정 없이 instance_id만 치환되어 보존.
+        response = _DraftResponse(
+            nodes=[
+                _NodeDraft(node_type="sheets"),
+                _NodeDraft(node_type="summary", parameters={"document_text": "${sheets.values}"}),
+            ],
+            connections=[_EdgeDraft(from_node_type="sheets", to_node_type="summary")],
+        )
+        sheets_cfg = _node_config("sheets").model_copy(
+            update={"output_schema": {"properties": {"values": {}, "rows": {}}}}
+        )
+        candidates = [sheets_cfg, _node_config("summary")]
+        schema = await self._svc(response).draft(_spec(), candidates, self.owner_id)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        sheets = next(n for n in schema.nodes if type_by_id[n.node_id] == "sheets")
+        summary = next(n for n in schema.nodes if type_by_id[n.node_id] == "summary")
+        assert summary.parameters["document_text"] == f"${{{sheets.instance_id}.values}}"
+
+    @pytest.mark.asyncio
+    async def test_invalid_field_remapped_when_single_output(self):
+        # 환각 필드(.output)인데 상류 출력이 단일(result) → result로 보정.
+        response = _DraftResponse(
+            nodes=[
+                _NodeDraft(node_type="gen"),
+                _NodeDraft(node_type="summary", parameters={"document_text": "${gen.output}"}),
+            ],
+            connections=[_EdgeDraft(from_node_type="gen", to_node_type="summary")],
+        )
+        gen_cfg = _node_config("gen").model_copy(
+            update={"output_schema": {"properties": {"result": {}}}}
+        )
+        candidates = [gen_cfg, _node_config("summary")]
+        schema = await self._svc(response).draft(_spec(), candidates, self.owner_id)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        gen = next(n for n in schema.nodes if type_by_id[n.node_id] == "gen")
+        summary = next(n for n in schema.nodes if type_by_id[n.node_id] == "summary")
+        assert summary.parameters["document_text"] == f"${{{gen.instance_id}.result}}"
+
+    @pytest.mark.asyncio
+    async def test_invalid_field_preserved_with_warning_when_multi_output(self, caplog):
+        # 재현 케이스: 환각 필드(.values)인데 상류 출력이 다중 → 보정 불가, 보존 + 경고.
+        import logging
+        response = _DraftResponse(
+            nodes=[
+                _NodeDraft(node_type="sched"),
+                _NodeDraft(node_type="summary", parameters={"document_text": "${sched.values}"}),
+            ],
+            connections=[_EdgeDraft(from_node_type="sched", to_node_type="summary")],
+        )
+        sched_cfg = _node_config("sched").model_copy(
+            update={"output_schema": {"properties": {"scheduled_at": {}, "channel_breakdown": {}}}}
+        )
+        candidates = [sched_cfg, _node_config("summary")]
+        with caplog.at_level(logging.WARNING):
+            schema = await self._svc(response).draft(_spec(), candidates, self.owner_id)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        sched = next(n for n in schema.nodes if type_by_id[n.node_id] == "sched")
+        summary = next(n for n in schema.nodes if type_by_id[n.node_id] == "summary")
+        assert summary.parameters["document_text"] == f"${{{sched.instance_id}.values}}"
+        assert "보정 불가" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_prompt_drops_biasing_values_example(self):
+        # `.values` 하드코딩 예시가 프롬프트에서 제거됐는지(편향 방지) 회귀 가드.
+        response = _DraftResponse(nodes=[_NodeDraft(node_type="sheets")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("sheets")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "google_sheets_read.values" not in prompt
+        assert "VERBATIM" in prompt
+
 
 @pytest.mark.asyncio
 async def test_refine_rewrites_ref_token_to_instance_id():
