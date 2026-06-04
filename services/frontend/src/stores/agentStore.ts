@@ -79,6 +79,10 @@ interface AgentStoreState {
   appendSSEFrame: (frame: string) => void;
 }
 
+// persist(localStorage) 누적 상한 — 각 세션이 전체 messages를 보유하므로 무한 누적 시
+// 브라우저 localStorage 한계(5~10MB)에 도달할 수 있다. 최근 N개만 유지(오래된 대화 eviction).
+const MAX_PERSISTED_SESSIONS = 30;
+
 export const useAgentStore = create<AgentStoreState>()(
   persist(
     (set) => ({
@@ -90,7 +94,10 @@ export const useAgentStore = create<AgentStoreState>()(
   setSessionId: (id) => set({ sessionId: id }),
   addSession: (session) =>
     // 같은 id는 갱신(아카이브 idempotent — 세션 전환 왕복 시 중복 누적 방지).
-    set((s) => ({ sessions: [session, ...s.sessions.filter((x) => x.id !== session.id)] })),
+    // 최근 MAX_PERSISTED_SESSIONS개로 상한 — localStorage quota 누적 방지(가장 오래된 것부터 제거).
+    set((s) => ({
+      sessions: [session, ...s.sessions.filter((x) => x.id !== session.id)].slice(0, MAX_PERSISTED_SESSIONS),
+    })),
 
   restoreSession: (session) =>
     set((s) => ({

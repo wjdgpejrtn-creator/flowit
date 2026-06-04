@@ -101,6 +101,16 @@ describe('persist (새로고침 생존 — 버그 C)', () => {
     expect(parsed.state.messages[0].content).toBe('슬랙 알림');
   });
 
+  it('sessions는 최근 30개로 상한된다(localStorage quota 누적 방지)', () => {
+    for (let i = 0; i < 35; i++) {
+      useAgentStore.getState().addSession({ id: `s-${i}`, title: `t${i}`, createdAt: i, messages: [] });
+    }
+    const { sessions } = useAgentStore.getState();
+    expect(sessions).toHaveLength(30);
+    expect(sessions[0].id).toBe('s-34');   // 최신 유지
+    expect(sessions.find((x) => x.id === 's-4')).toBeUndefined();  // 가장 오래된 것 제거
+  });
+
   it('일시 UI 상태(slotQuestion/sseFrames/mode)는 영속 대상에서 제외된다', () => {
     useAgentStore.getState().setSlotQuestion({ fieldName: 'x', question: 'q' });
     useAgentStore.getState().appendSSEFrame('frame1');
