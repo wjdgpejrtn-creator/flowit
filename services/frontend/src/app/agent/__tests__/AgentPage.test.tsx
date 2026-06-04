@@ -78,9 +78,9 @@ describe('AgentPage — handleSend SSE 연동', () => {
   it('메시지 전송 시 streamCreateSession을 호출한다', async () => {
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '슬랙 알림 워크플로우');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(mockStreamCreateSession).toHaveBeenCalledTimes(1);
@@ -95,9 +95,9 @@ describe('AgentPage — handleSend SSE 연동', () => {
   it('전송한 메시지가 채팅에 표시된다', async () => {
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '테스트 메시지');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(screen.getByText('테스트 메시지')).toBeInTheDocument();
@@ -113,9 +113,9 @@ describe('AgentPage — handleSend SSE 연동', () => {
 
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '테스트');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(useAgentStore.getState().sessionId).toBe('sid-123');
@@ -133,36 +133,42 @@ describe('AgentPage — handleSend SSE 연동', () => {
 
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '테스트');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(useAgentStore.getState().currentStep).toBe('intent');
     });
   });
 
-  it('복합 흐름(build_skill) 수신 시 compositeFlow가 켜지고 "스킬 생성" 단계가 표시된다', async () => {
+  it('복합 흐름(build_skill) 수신 시 compositeFlow가 켜지고 "스킬 생성" 단계가 채팅 인라인에 표시된다', async () => {
+    // 작업과정은 스트리밍 중에만 채팅 인라인(AgentWorkProcess)으로 보이므로 스트림을 열어둔다.
+    let resolveStream: () => void;
     mockStreamCreateSession.mockImplementation(
-      async (_req: unknown, onFrame: (frame: Record<string, unknown>) => void) => {
-        onFrame({ frame_type: 'session', session_id: 'sid-1' });
-        onFrame({ frame_type: 'agent_node', agent_node_name: 'build_skill' });
-        onFrame({ frame_type: 'agent_node', agent_node_name: 'composer' });   // 홉 마커 — 유지
-        onFrame({ frame_type: 'agent_node', agent_node_name: 'security' });   // 컴포저 진입 — 전진
-      },
+      (_req: unknown, onFrame: (frame: Record<string, unknown>) => void) =>
+        new Promise<void>((resolve) => {
+          resolveStream = resolve;
+          onFrame({ frame_type: 'session', session_id: 'sid-1' });
+          onFrame({ frame_type: 'agent_node', agent_node_name: 'build_skill' });
+          onFrame({ frame_type: 'agent_node', agent_node_name: 'composer' });   // 홉 마커 — 유지
+          onFrame({ frame_type: 'agent_node', agent_node_name: 'security' });   // 컴포저 진입 — 전진
+        }),
     );
 
     render(<AgentPage />);
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '스킬 만들어서 워크플로우 만들어줘');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(useAgentStore.getState().compositeFlow).toBe(true);
       expect(useAgentStore.getState().currentStep).toBe('security');
     });
-    // 선두 '스킬 생성' 단계가 단계 표시에 노출된다 (비복합이면 안 보임)
-    expect(screen.getByText('스킬 생성')).toBeInTheDocument();
+    // 선두 '스킬 생성'이 완료 단계로 채팅 인라인에 노출된다 (비복합이면 안 보임)
+    expect(screen.getByText('스킬 생성 완료')).toBeInTheDocument();
+
+    await act(async () => resolveStream!());
   });
 
   it('result frame의 ready_to_execute 시 실행 버튼이 표시된다', async () => {
@@ -179,9 +185,9 @@ describe('AgentPage — handleSend SSE 연동', () => {
 
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '테스트');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(useAgentStore.getState().readyToExecute).toEqual({
@@ -200,9 +206,9 @@ describe('AgentPage — handleSend SSE 연동', () => {
 
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '테스트');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(screen.getByText(/오류가 발생했습니다: 연결 실패/)).toBeInTheDocument();
@@ -214,9 +220,9 @@ describe('AgentPage — handleSend SSE 연동', () => {
 
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '테스트');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(screen.getByText(/연결 오류: Failed to fetch/)).toBeInTheDocument();
@@ -231,20 +237,20 @@ describe('AgentPage — handleSend SSE 연동', () => {
 
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '테스트');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(screen.getByPlaceholderText('AI가 처리 중입니다…')).toBeDisabled();
-      expect(screen.getByRole('button', { name: '처리 중…' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '전송' })).toBeDisabled();
     });
 
     await act(async () => resolveStream!());
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/워크플로우를 자연어로/)).not.toBeDisabled();
-      expect(screen.getByRole('button', { name: '전송 ↑' })).not.toBeDisabled();
+      expect(screen.getByPlaceholderText(/이어서 말씀해/)).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: '전송' })).not.toBeDisabled();
     });
   });
 
@@ -260,17 +266,17 @@ describe('AgentPage — handleSend SSE 연동', () => {
 
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
 
     await userEvent.type(textarea, '첫 메시지');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(useAgentStore.getState().sessionId).toBe('server-sid');
     });
 
     await userEvent.type(textarea, '후속 메시지');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(mockStreamCreateSession).toHaveBeenCalledTimes(2);
@@ -284,7 +290,7 @@ describe('AgentPage — handleSend SSE 연동', () => {
 
   it('빈 메시지는 전송하지 않는다', async () => {
     render(<AgentPage />);
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
     expect(mockStreamCreateSession).not.toHaveBeenCalled();
   });
 
@@ -302,9 +308,9 @@ describe('AgentPage — handleSend SSE 연동', () => {
 
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '테스트');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(screen.getByText('AI 응답입니다')).toBeInTheDocument();
@@ -321,9 +327,9 @@ describe('AgentPage — handleSend SSE 연동', () => {
 
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '테스트');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(useAgentStore.getState().slotQuestion).toEqual({
@@ -336,9 +342,9 @@ describe('AgentPage — handleSend SSE 연동', () => {
   it('AbortController signal이 streamCreateSession에 전달된다', async () => {
     render(<AgentPage />);
 
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '테스트');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       const call = mockStreamCreateSession.mock.calls[0];
@@ -355,14 +361,14 @@ describe('AgentPage — handleSend SSE 연동', () => {
       .mockImplementationOnce(() => Promise.resolve());
 
     render(<AgentPage />);
-    const textarea = screen.getByPlaceholderText(/워크플로우를 자연어로/);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
     await userEvent.type(textarea, '슬랙 알림 워크플로우');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
     await waitFor(() => expect(useAgentStore.getState().readyToExecute).not.toBeNull());
 
     // refine 후속 — 같은 세션 이어가야(이전엔 새 세션으로 리셋되는 버그)
     await userEvent.type(textarea, 'url을 바꿔줘');
-    await userEvent.click(screen.getByRole('button', { name: '전송 ↑' }));
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
 
     await waitFor(() => {
       expect(mockStreamCreateSession).toHaveBeenLastCalledWith(
