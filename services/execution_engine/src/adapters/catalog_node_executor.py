@@ -73,11 +73,23 @@ class CatalogNodeExecutor(NodeExecutorPort):
         config: NodeConfig,
         context: NodeContext,
     ) -> dict[str, Any]:
-        credential: Any = None
+        injected: list[Any] = []
         try:
-            if node.credential_id is not None:
-                credential = await self._inject(node.credential_id, node.node_id)
-                context.connection_token = credential.value
+            if node.credential_ids:
+                # 멀티 provider 바인딩 — provider별 토큰을 connection_tokens에 적재 (REQ-012).
+                for service, cred_id in node.credential_ids.items():
+                    cred = await self._inject(cred_id, node.node_id)
+                    injected.append(cred)
+                    context.connection_tokens[service] = cred.value
+                # 단일 connection이면 primary(connection_token)도 채워 단일 노드 하위호환 유지.
+                if len(injected) == 1:
+                    context.connection_token = injected[0].value
+            elif node.credential_id is not None:
+                # legacy 단일 바인딩 — provider 미지정(주입 시 CredentialInjectionService가
+                # node 정의 required_connections로 service 매칭 검증).
+                cred = await self._inject(node.credential_id, node.node_id)
+                injected.append(cred)
+                context.connection_token = cred.value
             # 바인딩된 SkillDocument(도메인 지침서)를 system 프롬프트에 주입 (REQ-013).
             # skill은 선택적 보강이라 미배선/실패/미존재는 무주입 degrade(실행 막지 않음).
             if node.skill_id is not None and self._supports_system(node_instance, config):
@@ -86,8 +98,8 @@ class CatalogNodeExecutor(NodeExecutorPort):
             return self._to_dict(output)
         finally:
             # 평문 connection 토큰을 노드 실행 종료 즉시 제거 (ADR-0018 Decision 5).
-            if credential is not None:
-                credential.wipe()
+            for cred in injected:
+                cred.wipe()
             context.wipe()
 
     async def _inject(self, credential_id: Any, node_id: Any) -> Any:

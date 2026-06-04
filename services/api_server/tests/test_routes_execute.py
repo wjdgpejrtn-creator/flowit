@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.dependencies.celery_client import get_celery
 from app.dependencies.permission import get_permission_source
-from app.dependencies.repositories import get_workflow_repository
+from app.dependencies.repositories import get_execution_repository, get_workflow_repository
 from app.main import create_app
 from common_schemas import PermissionSource, WorkflowSchema
 
@@ -39,7 +39,7 @@ def _bearer():
     return pyjwt.encode(
         {"sub": str(uuid4()), "session_hash": "h", "type": "access",
          "exp": now + timedelta(seconds=3600), "iat": now},
-        "",
+        "test-jwt-secret-key-min-32-bytes",
         algorithm="HS256",
     )
 
@@ -117,8 +117,14 @@ def test_execute_nonexistent_workflow_returns_404(app) -> None:
 
 
 def test_cancel_execution_dispatches_task(app) -> None:
-    _override_permission(app, uuid4())
+    user_id = uuid4()
+    _override_permission(app, user_id)
     exec_id = uuid4()
+
+    # cancel 라우트는 dispatch 전 _verify_execution_owner로 소유자를 확인 → repo.get 필요.
+    repo = MagicMock()
+    repo.get = AsyncMock(return_value=MagicMock(user_id=user_id))
+    app.dependency_overrides[get_execution_repository] = lambda: repo
 
     fake_async = MagicMock(id="cancel-task-id")
     fake_celery = MagicMock()
@@ -144,8 +150,14 @@ def test_cancel_execution_dispatches_task(app) -> None:
 
 
 def test_resume_execution_dispatches_task(app) -> None:
-    _override_permission(app, uuid4())
+    user_id = uuid4()
+    _override_permission(app, user_id)
     exec_id = uuid4()
+
+    # resume 라우트도 dispatch 전 _verify_execution_owner로 소유자를 확인 → repo.get 필요.
+    repo = MagicMock()
+    repo.get = AsyncMock(return_value=MagicMock(user_id=user_id))
+    app.dependency_overrides[get_execution_repository] = lambda: repo
 
     fake_async = MagicMock(id="resume-task-id")
     fake_celery = MagicMock()

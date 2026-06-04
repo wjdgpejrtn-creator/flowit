@@ -255,3 +255,22 @@ class TestDrafterServiceRefine:
                 self.owner_id,
             )
         assert exc.value.code == "E_DUPLICATE_REF"
+
+
+class TestDrafterConnectionExposure:
+    """PR2-A: 후보의 required_connections가 LLM 프롬프트에 노출되는지 검증."""
+
+    @pytest.mark.asyncio
+    async def test_required_connections_passed_to_llm_prompt(self):
+        owner_id = uuid4()
+        response = _DraftResponse(
+            name="W", nodes=[_NodeDraft(node_type="gmail_send")], connections=[]
+        )
+        llm = _mock_llm(response)
+        svc = DrafterService(llm)
+        cfg = _node_config("gmail_send").model_copy(update={"required_connections": ["google"]})
+        await svc.draft(_spec(), [cfg], owner_id)
+
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "required_connections" in prompt
+        assert "google" in prompt

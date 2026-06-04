@@ -1,5 +1,6 @@
 from .agent_memory_repository import AgentMemoryRepository
 from .composer_state_store import ComposerStateStore
+from .connection_resolver import ConnectionResolver
 from .llm_port import LLMPort
 from .node_registry import NodeRegistry
 from .personal_memory_store import PersonalMemoryStore
@@ -11,6 +12,7 @@ from .workflow_repository import WorkflowRepository
 __all__ = [
     "AgentMemoryRepository",
     "ComposerStateStore",
+    "ConnectionResolver",
     "LLMPort",
     "NodeRegistry",
     "PersonalMemoryStore",

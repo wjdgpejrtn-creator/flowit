@@ -58,6 +58,7 @@ from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 from ...domain.entities.memory_file import MemoryFile, MemoryFileRef
 from ...domain.entities.session_ref import SessionRef
 from ...domain.ports.composer_state_store import ComposerStateStore
+from ...domain.ports.connection_resolver import ConnectionResolver
 from ...domain.ports.llm_port import LLMPort
 from ...domain.ports.node_registry import NodeRegistry
 from ...domain.ports.personal_memory_store import PersonalMemoryStore
@@ -188,6 +189,7 @@ class LangGraphOrchestrator:
         personal_memory_store: PersonalMemoryStore | None = None,
         composer_state_store: ComposerStateStore | None = None,
         workflow_explanation_svc: WorkflowExplanationService | None = None,
+        connection_resolver: ConnectionResolver | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -206,6 +208,7 @@ class LangGraphOrchestrator:
         self._personal_memory_store = personal_memory_store
         self._composer_state_store = composer_state_store
         self._workflow_explanation_svc = workflow_explanation_svc or WorkflowExplanationService()
+        self._connection_resolver = connection_resolver
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -1009,6 +1012,11 @@ class LangGraphOrchestrator:
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:
             return {"error": f"drafter 실패: {exc}"}
+        # 사용자가 이미 연결한 서비스(예: SSO google) 노드에 credential_id 선바인딩 —
+        # 검증 단계의 불필요한 E_MISSING_CONNECTION을 줄인다(resolver 미주입 시 no-op).
+        workflow, bound_services = await self._autobind_connections(
+            workflow, candidates, state["user_id"]
+        )
         elapsed = int((time.monotonic() - t0) * 1000)
         nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
         connections_data = [c.model_dump(mode="json") for c in workflow.connections]
@@ -1020,15 +1028,64 @@ class LangGraphOrchestrator:
             f"✏️ 워크플로우 초안 {verb} 완료 — 노드 {len(workflow.nodes)}개 "
             f"({node_summary}), 연결 {len(workflow.connections)}개"
         )
+        frames: list[AnySSEFrame] = [RationaleDeltaFrame(delta=draft_summary)]
+        if bound_services:
+            frames.append(
+                RationaleDeltaFrame(
+                    delta=f"🔌 보유 연결 자동 바인딩 — {', '.join(sorted(bound_services))}"
+                )
+            )
+        frames.extend([
+            DraftSpecDeltaFrame(delta={"attempt": state["qa_attempts"] + 1}),
+            WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
+            PipelineStatusFrame(service_name="drafter", status="completed", elapsed_ms=elapsed),
+        ])
         return {
             "workflow_draft": workflow,
-            "collected_frames": [
-                RationaleDeltaFrame(delta=draft_summary),
-                DraftSpecDeltaFrame(delta={"attempt": state["qa_attempts"] + 1}),
-                WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
-                PipelineStatusFrame(service_name="drafter", status="completed", elapsed_ms=elapsed),
-            ],
+            "collected_frames": frames,
         }
+
+    async def _autobind_connections(
+        self, workflow: WorkflowSchema, candidates: list[NodeConfig], user_id: UUID
+    ) -> tuple[WorkflowSchema, set[str]]:
+        """노드의 required_connections를 사용자가 보유한 connection으로 **provider별** 선바인딩.
+
+        resolver 미주입 시 그대로 반환(no-op). 각 노드의 required provider를 모두 조회해
+        사용자가 보유한 것만 ``credential_ids[provider]``에 채운다 — 멀티커넥션 노드
+        (required ≥2)도 provider별로 완전 자동바인딩되며, validator(provider-aware)·executor가
+        이 값을 그대로 소비한다(REQ-012). 이미 해소된 provider(명시 ``credential_ids`` 키 또는
+        단일 legacy ``credential_id``)는 보존해 refine·사용자 선택을 덮어쓰지 않는다.
+        반환된 set은 자동 바인딩된 provider 이름(요약 프레임용).
+        """
+        if self._connection_resolver is None:
+            return workflow, set()
+        conns_by_node_id = {c.node_id: c.required_connections for c in candidates}
+        bound_services: set[str] = set()
+        nodes = list(workflow.nodes)
+        changed = False
+        for i, node in enumerate(nodes):
+            required = conns_by_node_id.get(node.node_id, [])
+            if not required:
+                continue
+            already = set(node.resolve_credentials(required).keys())
+            new_binding = dict(node.credential_ids)
+            for service in required:
+                if service in already:
+                    continue  # 이미 바인딩됨(refine/사용자 선택/legacy) — 보존
+                try:
+                    cid = await self._connection_resolver.resolve(user_id, service)
+                except Exception as exc:  # 조회 실패는 비치명적 — 바인딩만 생략
+                    _logger.warning("connection 자동 바인딩 조회 실패 (%s): %s", service, exc)
+                    cid = None
+                if cid is not None:
+                    new_binding[service] = cid
+                    bound_services.add(service)
+            if new_binding != node.credential_ids:
+                nodes[i] = node.model_copy(update={"credential_ids": new_binding})
+                changed = True
+        if not changed:
+            return workflow, set()
+        return workflow.model_copy(update={"nodes": nodes}), bound_services
 
     async def _augment_candidates_with_prior(
         self, candidates: list[NodeConfig], prior: WorkflowSchema

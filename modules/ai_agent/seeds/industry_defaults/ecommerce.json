@@ -12,12 +12,13 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "cart_id": {"type": "string"},
-          "customer_email": {"type": "string", "format": "email"},
-          "abandoned_at": {"type": "string", "format": "date-time"},
-          "delay_hours": {"type": "integer", "default": 4, "minimum": 1, "maximum": 168},
-          "discount_code": {"type": ["string", "null"]},
+          "cart_id": {"type": "string", "description": "장바구니 식별자. 쇼핑몰 시스템이 발급하는 ID. 예: 'cart_8f3a2'"},
+          "customer_email": {"type": "string", "format": "email", "description": "회복 메일을 받을 고객 이메일. 예: 'buyer@example.com'"},
+          "abandoned_at": {"type": "string", "format": "date-time", "description": "장바구니를 이탈한 시각(ISO 8601 date-time). 발송 지연 계산 기준. 예: '2026-06-03T14:30:00'"},
+          "delay_hours": {"type": "integer", "default": 4, "minimum": 1, "maximum": 168, "description": "이탈 후 회복 메일을 보내기까지 대기할 시간(시간 단위). 기본값 4"},
+          "discount_code": {"type": ["string", "null"], "description": "(선택) 메일에 포함할 할인 코드. 미지정 시 할인 없이 발송. 예: 'COMEBACK10'"},
           "cart_items": {
+            "description": "(선택) 장바구니에 담긴 상품 목록. 메일 본문에 표시",
             "type": "array",
             "items": {
               "type": "object",
@@ -52,13 +53,13 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "order_id": {"type": "string"},
-          "customer_email": {"type": "string", "format": "email"},
-          "status": {"type": "string", "enum": ["paid", "shipped", "delivered", "cancelled", "refunded"]},
-          "tracking_number": {"type": ["string", "null"]},
-          "carrier": {"type": ["string", "null"]},
-          "manager_channel": {"type": "string"},
-          "estimated_arrival": {"type": ["string", "null"], "format": "date"}
+          "order_id": {"type": "string", "description": "주문 식별자. 쇼핑몰이 발급하는 주문번호. 예: 'ORD-2026-1052'"},
+          "customer_email": {"type": "string", "format": "email", "description": "알림을 받을 고객 이메일. 예: 'buyer@example.com'"},
+          "status": {"type": "string", "enum": ["paid", "shipped", "delivered", "cancelled", "refunded"], "description": "주문 상태. paid=결제완료, shipped=배송시작, delivered=도착, cancelled=취소, refunded=환불"},
+          "tracking_number": {"type": ["string", "null"], "description": "(선택) 운송장 번호. shipped 상태에서 배송 추적 안내에 사용. 예: '1234567890'"},
+          "carrier": {"type": ["string", "null"], "description": "(선택) 택배사 이름. 예: 'CJ대한통운'"},
+          "manager_channel": {"type": "string", "description": "(선택) 매니저 알림을 보낼 Slack 채널. 예: '#orders'"},
+          "estimated_arrival": {"type": ["string", "null"], "format": "date", "description": "(선택) 예상 도착 날짜(YYYY-MM-DD). 예: '2026-06-07'"}
         },
         "required": ["order_id", "customer_email", "status"]
       },
@@ -82,9 +83,10 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "marketplace": {"type": "string", "enum": ["coupang", "naver", "11st", "smart_store", "custom"]},
-          "marketplace_endpoint": {"type": "string", "format": "uri"},
+          "marketplace": {"type": "string", "enum": ["coupang", "naver", "11st", "smart_store", "custom"], "description": "동기화할 마켓플레이스. coupang=쿠팡, naver=네이버, 11st=11번가, smart_store=스마트스토어, custom=직접 지정"},
+          "marketplace_endpoint": {"type": "string", "format": "uri", "description": "마켓플레이스 재고 API의 엔드포인트 URL. 예: 'https://api.coupang.com/v2/inventory'"},
           "products": {
+            "description": "동기화할 상품·수량 목록. 각 항목은 상품 식별자와 재고 수량",
             "type": "array",
             "items": {
               "type": "object",
@@ -97,7 +99,7 @@
             },
             "minItems": 1
           },
-          "dry_run": {"type": "boolean", "default": false}
+          "dry_run": {"type": "boolean", "default": false, "description": "true면 실제 반영 없이 변경 내역만 미리보기. 기본값 false"}
         },
         "required": ["marketplace", "marketplace_endpoint", "products"]
       },
@@ -121,12 +123,12 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "order_id": {"type": "string"},
-          "customer_email": {"type": "string", "format": "email"},
-          "delivered_at": {"type": "string", "format": "date-time"},
-          "delay_days": {"type": "integer", "default": 3, "minimum": 1, "maximum": 30},
-          "review_url": {"type": "string", "format": "uri"},
-          "incentive_code": {"type": ["string", "null"]}
+          "order_id": {"type": "string", "description": "주문 식별자. 예: 'ORD-2026-1052'"},
+          "customer_email": {"type": "string", "format": "email", "description": "리뷰 요청 메일을 받을 고객 이메일. 예: 'buyer@example.com'"},
+          "delivered_at": {"type": "string", "format": "date-time", "description": "배송 완료 시각(ISO 8601 date-time). 발송 지연 계산 기준. 예: '2026-06-03T10:00:00'"},
+          "delay_days": {"type": "integer", "default": 3, "minimum": 1, "maximum": 30, "description": "배송 완료 후 리뷰 요청 메일을 보내기까지 대기할 일수. 기본값 3"},
+          "review_url": {"type": "string", "format": "uri", "description": "고객이 리뷰를 작성할 페이지 URL. 예: 'https://shop.example.com/review/ORD-2026-1052'"},
+          "incentive_code": {"type": ["string", "null"], "description": "(선택) 리뷰 작성 인센티브 코드. 예: 'REVIEW5'"}
         },
         "required": ["order_id", "customer_email", "delivered_at", "review_url"]
       },
@@ -150,13 +152,13 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "refund_request_id": {"type": "string"},
-          "order_id": {"type": "string"},
-          "amount": {"type": "number", "minimum": 0},
-          "reason": {"type": "string", "enum": ["defective", "wrong_item", "size", "change_of_mind", "other"]},
-          "auto_approve_threshold": {"type": "number", "default": 50000, "minimum": 0},
-          "approval_channel": {"type": "string"},
-          "customer_email": {"type": "string", "format": "email"}
+          "refund_request_id": {"type": "string", "description": "환불 요청 식별자. 시스템이 발급. 예: 'RF-2026-008'"},
+          "order_id": {"type": "string", "description": "환불 대상 주문번호. 예: 'ORD-2026-1052'"},
+          "amount": {"type": "number", "minimum": 0, "description": "환불 요청 금액(원). 자동/수동 승인 분기 기준. 예: 35000"},
+          "reason": {"type": "string", "enum": ["defective", "wrong_item", "size", "change_of_mind", "other"], "description": "환불 사유. defective=불량, wrong_item=오배송, size=사이즈, change_of_mind=단순변심, other=기타"},
+          "auto_approve_threshold": {"type": "number", "default": 50000, "minimum": 0, "description": "이 금액(원) 이하면 자동 승인, 초과 시 매니저 승인 대기. 기본값 50000"},
+          "approval_channel": {"type": "string", "description": "(선택) 수동 승인 요청을 보낼 Slack 채널. 예: '#refund-approval'"},
+          "customer_email": {"type": "string", "format": "email", "description": "(선택) 환불 결과를 안내할 고객 이메일. 예: 'buyer@example.com'"}
         },
         "required": ["refund_request_id", "order_id", "amount", "reason"]
       },

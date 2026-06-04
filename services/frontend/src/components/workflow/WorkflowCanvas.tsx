@@ -158,6 +158,7 @@ function CanvasInner({ catalog, showPalette = true }: { catalog?: NodeConfig[] |
           },
         },
         credential_id: null,
+        credential_ids: {},
         position: { x: position.x, y: position.y },
       });
       showToast(`'${payload.name}' 노드를 추가했습니다.`);

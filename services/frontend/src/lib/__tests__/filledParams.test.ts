@@ -90,6 +90,24 @@ describe('computeFilledParams', () => {
     expect(computeFilledParams(wf([{ node_id: 'unknown', parameters: { x: 1 } }]), [HTTP])).toEqual([]);
   });
 
+  it('input_schema의 필드 description을 노출한다 (없으면 undefined)', () => {
+    const cat = cfg('http', 'HTTP 요청', {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '호출할 API의 전체 URL' },
+        method: { type: 'string', default: 'GET' }, // description 없음
+      },
+      required: ['url'],
+    });
+    const out = computeFilledParams(
+      wf([{ node_id: 'http', parameters: { url: 'https://example.com', method: 'GET' } }]),
+      [cat],
+    );
+    const byName = Object.fromEntries(out[0].fields.map((f) => [f.name, f]));
+    expect(byName.url.description).toBe('호출할 API의 전체 URL');
+    expect(byName.method.description).toBeUndefined();
+  });
+
   it('reviewCount는 review 태그 필드 수 합', () => {
     const out = computeFilledParams(
       wf([
