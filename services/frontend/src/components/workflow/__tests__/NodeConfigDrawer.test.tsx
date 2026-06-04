@@ -49,6 +49,7 @@ const WORKFLOW: WorkflowSchema = {
       node_id: 'id-http',
       parameters: {},
       credential_id: null,
+      credential_ids: {},
       position: { x: 0, y: 0 },
     },
   ],

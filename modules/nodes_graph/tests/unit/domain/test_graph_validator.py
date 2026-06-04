@@ -181,3 +181,50 @@ async def test_type_compatibility_returns_no_errors():
     result = await GraphValidator(_InMemoryRepo()).validate(_wf([n1, n2], [edge]))
     assert not any(e.code for e in result.errors if e.validator == "TypeCompatibility")
     assert result.validation_status == "passed"
+
+
+@pytest.mark.asyncio
+async def test_multi_connection_partial_binding_reports_missing():
+    """멀티커넥션 노드에 일부 provider만 바인딩 → 빠진 provider만 정확히 보고 (REQ-012)."""
+    repo = _InMemoryRepo()
+    node_def = _make_node_def(required_connections=["slack", "google"])
+    await repo.upsert(node_def)
+    ni = NodeInstance(
+        instance_id=uuid4(), node_id=node_def.node_id, parameters={},
+        credential_ids={"slack": uuid4()}, position=Position(x=0, y=0),
+    )
+    result = await GraphValidator(repo).validate(_wf([ni], []))
+    errs = [e for e in result.errors if e.code == ErrorCode.E_MISSING_CONNECTION]
+    assert len(errs) == 1
+    assert "google" in errs[0].message
+    assert "slack" not in errs[0].message
+
+
+@pytest.mark.asyncio
+async def test_multi_connection_full_binding_passes():
+    """credential_ids로 required provider 전부 바인딩 → 통과."""
+    repo = _InMemoryRepo()
+    node_def = _make_node_def(required_connections=["slack", "google"])
+    await repo.upsert(node_def)
+    ni = NodeInstance(
+        instance_id=uuid4(), node_id=node_def.node_id, parameters={},
+        credential_ids={"slack": uuid4(), "google": uuid4()}, position=Position(x=0, y=0),
+    )
+    other = _node()
+    result = await GraphValidator(repo).validate(_wf([ni, other], [_edge(ni.instance_id, other.instance_id)]))
+    assert result.validation_status == "passed"
+
+
+@pytest.mark.asyncio
+async def test_credential_ids_single_provider_passes():
+    """단일 required를 legacy credential_id가 아닌 credential_ids로 바인딩해도 통과."""
+    repo = _InMemoryRepo()
+    node_def = _make_node_def(required_connections=["google"])
+    await repo.upsert(node_def)
+    ni = NodeInstance(
+        instance_id=uuid4(), node_id=node_def.node_id, parameters={},
+        credential_ids={"google": uuid4()}, position=Position(x=0, y=0),
+    )
+    other = _node()
+    result = await GraphValidator(repo).validate(_wf([ni, other], [_edge(ni.instance_id, other.instance_id)]))
+    assert result.validation_status == "passed"

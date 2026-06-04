@@ -7,6 +7,7 @@ function makeNode(id: string, x = 0, y = 0): NodeInstance {
     node_id: 'node-type-uuid',
     parameters: {},
     credential_id: null,
+    credential_ids: {},
     position: { x, y },
   };
 }
