@@ -32,6 +32,12 @@ Fill in `parameters` for each node using:
    for which fields to fill. Fill every field listed in `required`; when the user did not specify
    a value, use the field's `default` if present.
 3. Use an empty string "" only for optional fields the user did not specify that have no default.
+
+Each candidate also carries `required_connections` — the external services it needs at runtime
+(e.g. ["google"], ["slack"], ["anthropic"], or [] for none). When multiple candidates satisfy the
+same step, prefer the one needing the fewest external connections, and do NOT add a
+connection-requiring node the intent does not call for. Never invent credential values; required
+connections are resolved separately after drafting.
 """
 
 # refine(대화형 수정) 전용 — 이전 워크플로우를 주고 "지시한 부분만" 고치게 한다.
@@ -120,6 +126,7 @@ class DrafterService:
                 "node_type": n.node_type,
                 "name": n.name,
                 "description": n.description,
+                "required_connections": n.required_connections,
                 "input_schema": n.input_schema,
             }
             for n in candidates
