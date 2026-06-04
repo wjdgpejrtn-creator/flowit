@@ -133,9 +133,10 @@ class _ExtractedSkillNodeDetail(BaseModel):
 
 
 class BuildFromSOPUseCase:
-    """SOP DocumentBlock → LLM 추출 → wizard extract_draft + confirm (ADR-0020 ③-a, Q8 wizard 1차).
+    """SOP DocumentBlock → LLM 추출 → wizard 3단계 (ADR-0020 ③-a, Q8 wizard 1차 + 옵션 1 2단계 분리).
 
-    - extract_draft: 추출 결과(NodeSpecStaging + name/desc/instructions)만 반환, **저장 X** — 사용자 검토·수정용
+    - extract_metadata: 메타 5필드만 추출(node_type/name/description/category/risk_level), **저장 X** — 카드 그리드용
+    - extract_detail: 선택된 메타에 대한 detail(inputs/outputs/instructions/...) + `NodeSpecStaging` 반환, **저장 X** — 폼 prefill용
     - confirm: 편집 결과 → CreateDraftSkillUseCase로 personal DRAFT 생성 (Option B — NodeDefinition은 publish 시점)
     - JSON 강제 (LLM 입출력), category/risk_level 검증
     """
@@ -312,10 +313,10 @@ class BuildFromSOPUseCase:
         user_id: UUID,
         skills: list[dict],
     ) -> AsyncGenerator[SSEFrame, None]:
-        """wizard 2단계 — 사용자가 편집·확정한 추출 결과 → personal DRAFT 스킬 생성.
+        """wizard 3단계 — 사용자가 편집·확정한 추출 결과 → personal DRAFT 스킬 생성.
 
-        각 skill = `{node_type, name, description, instructions, staging:{...}}` (extract_draft 결과를
-        사용자가 편집한 형태). `CreateDraftSkillUseCase`로 DRAFT 생성 (Option B — NodeDefinition은 publish 시).
+        각 skill = `{node_type, name, description, instructions, staging:{...}}` (extract_metadata + extract_detail
+        결과를 frontend가 합쳐 사용자가 편집한 형태). `CreateDraftSkillUseCase`로 DRAFT 생성 (Option B — NodeDefinition은 publish 시).
 
         Yields:
             AgentNodeFrame (진행) / ErrorFrame (격리) / ResultFrame(payload.skill_ids)
