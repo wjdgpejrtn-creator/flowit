@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from common_schemas.enums import ExecutionStatus
-from common_schemas.exceptions import ValidationError
+from common_schemas.exceptions import NotFoundError, ValidationError
 from common_schemas.workflow import Edge, NodeConfig, NodeInstance, Position, WorkflowSchema
 from common_schemas.enums import RiskLevel
 
@@ -558,3 +558,107 @@ class TestCheckpointResume:
 
         assert result.status == ExecutionStatus.COMPLETED
         assert mock_dispatch_node.execute.call_count == 2  # 둘 다 실행
+
+
+class _StatefulRepo:
+    """get/save가 같은 row를 공유하는 fake — 실 Postgres의 status clobber 재현용.
+
+    `save`는 status를 전부 덮어쓰고(EXCLUDED.status), `save_checkpoint`는 node_results만
+    갱신하고 status를 보존한다. MagicMock(side_effect로 get/save 독립 스텁)으로는
+    이 결합을 재현할 수 없어 clobber 회귀를 못 잡는다 — #380 리뷰 HIGH 대응.
+    """
+
+    def __init__(self) -> None:
+        self._status: dict = {}
+        self._nr: dict = {}
+
+    def save(self, result) -> None:
+        self._status[result.execution_id] = result.status  # 전체 덮어쓰기
+        self._nr[result.execution_id] = list(result.node_results)
+
+    def save_checkpoint(self, result) -> None:
+        self._nr[result.execution_id] = list(result.node_results)  # status 보존
+
+    def get(self, execution_id):
+        from types import SimpleNamespace
+
+        if execution_id not in self._status:
+            raise NotFoundError("not found")
+        return SimpleNamespace(
+            status=self._status[execution_id], node_results=self._nr.get(execution_id, [])
+        )
+
+    def update_node_state(self, *a, **k) -> None:
+        pass
+
+    def external_pause(self, execution_id) -> None:
+        """다른 트랜잭션(pause task)이 PAUSED를 쓴 상황을 모사."""
+        self._status[execution_id] = ExecutionStatus.PAUSED
+
+
+class TestPauseClobberRegression:
+    """#380 리뷰 HIGH — step별 체크포인트 save가 PAUSED를 RUNNING으로 덮어쓰면 안 된다."""
+
+    def _use_case(self, repo, mock_workflow_repo, mock_dispatch_node, mock_events):
+        return ExecuteWorkflowUseCase(
+            workflow_repo=mock_workflow_repo,
+            execution_repo=repo,
+            orchestrator=ExecutionOrchestrator(TopologicalScheduler()),
+            dispatch_node=mock_dispatch_node,
+            event_publisher=mock_events,
+        )
+
+    def test_pause_during_middle_step_is_not_clobbered(
+        self, mock_workflow_repo, mock_dispatch_node, mock_events
+    ):
+        """B 실행 도중 pause 도착 → 체크포인트 save가 status 보존 → C 진입 전 감지."""
+        a, b, c = _make_node(), _make_node(), _make_node()
+        wf = _make_workflow(
+            [a, b, c],
+            [(a.instance_id, b.instance_id), (b.instance_id, c.instance_id)],
+        )
+        context = _make_context(wf.workflow_id)
+        repo = _StatefulRepo()
+        use_case = self._use_case(repo, mock_workflow_repo, mock_dispatch_node, mock_events)
+
+        mock_workflow_repo.get.return_value = wf
+        mock_workflow_repo.get_node_config.return_value = MagicMock(spec=NodeConfig)
+
+        def dispatch(*, node, **kwargs):
+            if node.instance_id == b.instance_id:
+                repo.external_pause(context.execution_id)  # step 도중 pause 도착
+            return _make_node_result(node)
+
+        mock_dispatch_node.execute.side_effect = dispatch
+
+        result = use_case.execute(wf.workflow_id, context)
+
+        assert result.status == ExecutionStatus.PAUSED
+        assert repo.get(context.execution_id).status == ExecutionStatus.PAUSED  # clobber 없음
+        dispatched = [call.kwargs["node"].instance_id for call in mock_dispatch_node.execute.call_args_list]
+        assert c.instance_id not in dispatched  # 다음 step 미진입
+
+    def test_pause_during_last_step_detected_after_loop(
+        self, mock_workflow_repo, mock_dispatch_node, mock_events
+    ):
+        """마지막 step 도중 pause → top-check 못 잡음 → 루프 후 재확인이 잡아 PAUSED."""
+        a, b = _make_node(), _make_node()
+        wf = _make_workflow([a, b], [(a.instance_id, b.instance_id)])
+        context = _make_context(wf.workflow_id)
+        repo = _StatefulRepo()
+        use_case = self._use_case(repo, mock_workflow_repo, mock_dispatch_node, mock_events)
+
+        mock_workflow_repo.get.return_value = wf
+        mock_workflow_repo.get_node_config.return_value = MagicMock(spec=NodeConfig)
+
+        def dispatch(*, node, **kwargs):
+            if node.instance_id == b.instance_id:
+                repo.external_pause(context.execution_id)
+            return _make_node_result(node)
+
+        mock_dispatch_node.execute.side_effect = dispatch
+
+        result = use_case.execute(wf.workflow_id, context)
+
+        assert result.status == ExecutionStatus.PAUSED
+        assert result.completed_at is None  # 완료 마킹 안 됨

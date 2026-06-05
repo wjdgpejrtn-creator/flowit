@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from common_schemas.enums import ExecutionStatus
+from common_schemas.exceptions import NotFoundError
 from common_schemas.workflow import Edge
 
 from ...domain.entities.execution_context import ExecutionContext
@@ -165,8 +166,16 @@ class ExecuteWorkflowUseCase:
                         break
 
                 # step 완료마다 부분 결과를 체크포인트로 저장 — 폴링 진행률 노출 +
-                # pause/crash 시 resume이 끝난 step부터 이어가게 한다.
-                self._execution_repo.save(result)
+                # pause/crash 시 resume이 끝난 step부터 이어가게 한다. status는 쓰지
+                # 않는다(save_checkpoint) — 협조적 pause가 쓴 PAUSED를 덮어쓰지 않기 위함.
+                self._execution_repo.save_checkpoint(result)
+
+            # 마지막 step 실행 도중 도착한 pause는 위 top-check가 못 잡는다(다음 step 없음).
+            # 루프 종료 후 한 번 더 재확인해 PAUSED면 완료로 마킹하지 않는다.
+            if result.status == ExecutionStatus.RUNNING and self._is_pause_requested(
+                context.execution_id
+            ):
+                result.status = ExecutionStatus.PAUSED
 
             if result.status == ExecutionStatus.RUNNING:
                 result.mark_completed()
@@ -181,11 +190,15 @@ class ExecuteWorkflowUseCase:
     def _load_checkpoint(self, execution_id: UUID) -> _Checkpoint | None:
         """직전 실행의 node_results에서 완료 노드를 복원한다 (resume 전용).
 
-        조회 실패(row 없음 등)면 None — 체크포인트 없이 처음부터 실행한다.
+        row이 아직 없으면(최초 실행이 save 전이었거나 미존재) None — 체크포인트 없이
+        처음부터 실행한다. 일시적 DB 오류·역직렬화 실패 등은 **삼키지 않고 전파**한다 —
+        조용히 None을 반환하면 resume이 완료 노드를 전부 재실행해 외부 부작용(Slack/시트
+        등)을 중복시키므로(이 PR의 존재 이유를 무력화), 차라리 task를 실패시켜 PAUSED를
+        유지하고 사용자가 재시도하게 한다 (ADR-0025, #380 리뷰 MED).
         """
         try:
             prior = self._execution_repo.get(execution_id)
-        except Exception:
+        except NotFoundError:
             return None
         cp = _Checkpoint()
         for nr in getattr(prior, "node_results", []):

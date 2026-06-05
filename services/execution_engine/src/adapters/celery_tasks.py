@@ -3,12 +3,21 @@ from __future__ import annotations
 from uuid import UUID
 
 from celery import shared_task
+from common_schemas.broker_tasks import (
+    TASK_CANCEL_EXECUTION,
+    TASK_EXECUTE_NODE,
+    TASK_EXECUTE_WORKFLOW,
+    TASK_HANDLE_HANDOFF,
+    TASK_LEVEL_CALLBACK,
+    TASK_PAUSE_EXECUTION,
+    TASK_RESUME_EXECUTION,
+)
 
 from ..domain.entities.execution_context import ExecutionContext
 
 
 @shared_task(
-    name="execution_engine.execute_workflow",
+    name=TASK_EXECUTE_WORKFLOW,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -35,7 +44,7 @@ def execute_workflow_task(self, workflow_id: str, context_data: dict) -> dict:
 
 
 @shared_task(
-    name="execution_engine.cancel_execution",
+    name=TASK_CANCEL_EXECUTION,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -65,7 +74,7 @@ def cancel_execution_task(self, execution_id: str) -> dict:
 
 
 @shared_task(
-    name="execution_engine.pause_execution",
+    name=TASK_PAUSE_EXECUTION,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -95,7 +104,7 @@ def pause_execution_task(self, execution_id: str) -> dict:
 
 
 @shared_task(
-    name="execution_engine.resume_execution",
+    name=TASK_RESUME_EXECUTION,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -123,7 +132,7 @@ def resume_execution_task(self, execution_id: str) -> dict:
 
 
 @shared_task(
-    name="execution_engine.execute_node",
+    name=TASK_EXECUTE_NODE,
     bind=True,
     max_retries=3,
     acks_late=True,
@@ -157,7 +166,7 @@ def execute_node_task(
 
 
 @shared_task(
-    name="execution_engine.handle_handoff",
+    name=TASK_HANDLE_HANDOFF,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -175,7 +184,7 @@ def handle_handoff_task(self, payload_data: dict) -> dict:
     return result.model_dump(mode="json")
 
 
-@shared_task(name="execution_engine.level_callback", bind=True)
+@shared_task(name=TASK_LEVEL_CALLBACK, bind=True)
 def level_callback_task(self, results: list[dict], execution_id: str) -> dict:
     return {
         "execution_id": execution_id,
