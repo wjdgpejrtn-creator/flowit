@@ -6,7 +6,6 @@ from common_schemas.enums import RiskLevel
 
 from skills_marketplace.application.use_cases.publish_skill_use_case import PublishSkillUseCase
 from skills_marketplace.domain.entities.marketplace_personal_skill import MarketplacePersonalSkill
-from skills_marketplace.domain.entities.marketplace_team_skill import MarketplaceTeamSkill
 from skills_marketplace.domain.value_objects import NodeSpecStaging, SkillScope, SkillState
 
 _NOW = datetime.now(UTC)
@@ -39,6 +38,8 @@ class _SkillRepo:
 
 
 class _NodeDefRepo:
+    """ADR-0024 D2: 게시 시 NodeDef를 만들지 않으므로 upsert가 호출되지 않아야 한다."""
+
     def __init__(self):
         self.upserted: list = []
 
@@ -58,12 +59,13 @@ def _staging() -> NodeSpecStaging:
     )
 
 
-# ADR-0020 Q1 + ②(d): publish(APPROVED→PUBLISHED) 시 staging → NodeDefinition 생성 (Option B)
-# (위임2 인가: personal=owner / team=team_manager+dept 로 actor 전달)
+# ADR-0024 D2 (#372 결함 B): publish는 더 이상 NodeDefinition을 생성하지 않는다.
+# 스킬은 "실행 노드"가 아니라 "LLM 노드 주입 지침서"(모델 A)이며 스킬 자체 임베딩으로 검색된다.
+# (NodeDef를 만들면 일반 노드 검색에 섞여 워크플로우 노드로 둔갑 → 결함 B.)
 
 
 @pytest.mark.asyncio
-async def test_publish_personal_creates_node_definition():
+async def test_publish_does_not_create_node_definition():
     repo = _SkillRepo()
     node_def_repo = _NodeDefRepo()
     sid, owner = uuid4(), uuid4()
@@ -77,47 +79,30 @@ async def test_publish_personal_creates_node_definition():
         sid, SkillScope.PERSONAL, actor_user_id=owner, actor_role="User"
     )
 
-    # staging + skill 메타 → NodeDefinition 생성·upsert
-    assert len(node_def_repo.upserted) == 1
-    nd = node_def_repo.upserted[0]
-    assert nd.name == "Slack 알림 스킬"
-    assert nd.description == "슬랙 알림"
-    assert nd.category == "action"
-    assert nd.risk_level == RiskLevel.HIGH
-    assert nd.required_connections == ["slack"]
-    assert nd.service_type == "slack"
-    assert nd.input_schema == {"a": 1}
-    assert nd.embedding == [0.1] * 768
-    assert nd.owner_user_id == owner   # personal scope → owner 격리
-    assert nd.team_id is None
-
-    # skill에 node_definition_id 연결 + PUBLISHED 전이
+    # D2: NodeDefinition 생성·upsert 안 함 + node_definition_id None 유지
+    assert node_def_repo.upserted == []
     updated = repo.personal[sid]
-    assert updated.node_definition_id == nd.node_id
+    assert updated.node_definition_id is None
     assert updated.lifecycle_state == SkillState.PUBLISHED
 
 
 @pytest.mark.asyncio
-async def test_publish_team_scope_isolates_team_id():
-    # ADR-0020 ① scope 격리: team 스킬 publish → NodeDefinition.team_id 채움, owner None
+async def test_publish_succeeds_without_node_def_repo():
+    # node_def_repo 미주입(Optional, ADR-0024 D2)이어도 게시 성공 — 더 이상 필요 없음.
     repo = _SkillRepo()
-    node_def_repo = _NodeDefRepo()
-    sid, tid, author = uuid4(), uuid4(), uuid4()
-    repo.team[sid] = MarketplaceTeamSkill(
-        skill_id=sid, team_id=tid, author_id=author, name="팀 스킬", description="팀용",
+    sid, owner = uuid4(), uuid4()
+    repo.personal[sid] = MarketplacePersonalSkill(
+        skill_id=sid, owner_user_id=owner, name="x", description="x",
         node_spec_staging=_staging(), lifecycle_state=SkillState.APPROVED,
-        created_at=_NOW, updated_at=_NOW,
+        embedding=[0.1] * 768, created_at=_NOW, updated_at=_NOW,
     )
 
-    # team publish 인가: 같은 부서(team_id) team_manager
-    await PublishSkillUseCase(repo, node_def_repo).execute(
-        sid, SkillScope.TEAM, actor_user_id=uuid4(), actor_role="team_manager", actor_department_id=tid
+    await PublishSkillUseCase(repo).execute(
+        sid, SkillScope.PERSONAL, actor_user_id=owner, actor_role="User"
     )
 
-    nd = node_def_repo.upserted[0]
-    assert nd.team_id == tid          # team scope → team_id 격리
-    assert nd.owner_user_id is None   # owner 누출 없음
-    assert repo.team[sid].node_definition_id == nd.node_id
+    assert repo.personal[sid].lifecycle_state == SkillState.PUBLISHED
+    assert repo.personal[sid].node_definition_id is None
 
 
 class _Embedder:
@@ -143,84 +128,63 @@ def _personal_skill(sid, owner, embedding):
     )
 
 
+# --- 검색용 임베딩 백필 (D2 후에도 스킬 자체 검색을 위해 유지) ---
+
+
 @pytest.mark.asyncio
 async def test_publish_backfills_embedding_when_missing():
-    # 생성 경로가 임베딩을 안 채운 스킬(embedding=None)도 publish 시 embedder로 백필 →
-    # skill row + NodeDefinition 둘 다 임베딩이 채워져 검색에 노출.
-    repo, node_def_repo, embedder = _SkillRepo(), _NodeDefRepo(), _Embedder(vec=[0.7] * 768)
+    # embedding=None 스킬도 publish 시 embedder로 백필 → skill row가 채워져 스킬 검색에 노출.
+    repo, embedder = _SkillRepo(), _Embedder(vec=[0.7] * 768)
     sid, owner = uuid4(), uuid4()
     repo.personal[sid] = _personal_skill(sid, owner, embedding=None)
 
-    await PublishSkillUseCase(repo, node_def_repo, embedder=embedder).execute(
+    await PublishSkillUseCase(repo, embedder=embedder).execute(
         sid, SkillScope.PERSONAL, actor_user_id=owner, actor_role="User"
     )
 
-    assert embedder.calls == ["문서를 요약하는 스킬"]          # description으로 임베딩
-    assert repo.personal[sid].embedding == [0.7] * 768          # skill row 백필
-    assert node_def_repo.upserted[0].embedding == [0.7] * 768   # NodeDefinition도 백필
+    assert embedder.calls == ["문서를 요약하는 스킬"]      # description으로 임베딩
+    assert repo.personal[sid].embedding == [0.7] * 768      # skill row 백필
 
 
 @pytest.mark.asyncio
 async def test_publish_keeps_existing_embedding_no_embed_call():
     # 이미 임베딩 있으면 embedder 호출 안 함(불필요 Modal 호출/비용 회피).
-    repo, node_def_repo, embedder = _SkillRepo(), _NodeDefRepo(), _Embedder()
+    repo, embedder = _SkillRepo(), _Embedder()
     sid, owner = uuid4(), uuid4()
     repo.personal[sid] = _personal_skill(sid, owner, embedding=[0.1] * 768)
 
-    await PublishSkillUseCase(repo, node_def_repo, embedder=embedder).execute(
+    await PublishSkillUseCase(repo, embedder=embedder).execute(
         sid, SkillScope.PERSONAL, actor_user_id=owner, actor_role="User"
     )
 
     assert embedder.calls == []
-    assert node_def_repo.upserted[0].embedding == [0.1] * 768
 
 
 @pytest.mark.asyncio
 async def test_publish_without_embedder_leaves_none():
     # embedder 미주입(하위호환) — 임베딩 None이어도 publish는 성공(검색만 누락).
-    repo, node_def_repo = _SkillRepo(), _NodeDefRepo()
+    repo = _SkillRepo()
     sid, owner = uuid4(), uuid4()
     repo.personal[sid] = _personal_skill(sid, owner, embedding=None)
 
-    await PublishSkillUseCase(repo, node_def_repo).execute(
+    await PublishSkillUseCase(repo).execute(
         sid, SkillScope.PERSONAL, actor_user_id=owner, actor_role="User"
     )
 
     assert repo.personal[sid].lifecycle_state == SkillState.PUBLISHED
     assert repo.personal[sid].embedding is None
-    assert node_def_repo.upserted[0].embedding is None
 
 
 @pytest.mark.asyncio
 async def test_publish_embedding_failure_is_non_fatal():
     # embedder 실패해도 게시는 진행(검색 누락은 감수, 게시 차단 안 함).
-    repo, node_def_repo, embedder = _SkillRepo(), _NodeDefRepo(), _Embedder(fail=True)
+    repo, embedder = _SkillRepo(), _Embedder(fail=True)
     sid, owner = uuid4(), uuid4()
     repo.personal[sid] = _personal_skill(sid, owner, embedding=None)
 
-    await PublishSkillUseCase(repo, node_def_repo, embedder=embedder).execute(
+    await PublishSkillUseCase(repo, embedder=embedder).execute(
         sid, SkillScope.PERSONAL, actor_user_id=owner, actor_role="User"
     )
 
     assert repo.personal[sid].lifecycle_state == SkillState.PUBLISHED
     assert repo.personal[sid].embedding is None
-
-
-@pytest.mark.asyncio
-async def test_publish_skips_node_definition_when_already_linked():
-    # node_definition_id가 이미 있으면(재게시 등) 중복 생성 안 함
-    repo = _SkillRepo()
-    node_def_repo = _NodeDefRepo()
-    sid, owner = uuid4(), uuid4()
-    repo.personal[sid] = MarketplacePersonalSkill(
-        skill_id=sid, owner_user_id=owner, name="x", description="x",
-        node_definition_id=uuid4(), lifecycle_state=SkillState.APPROVED,
-        created_at=_NOW, updated_at=_NOW,
-    )
-
-    await PublishSkillUseCase(repo, node_def_repo).execute(
-        sid, SkillScope.PERSONAL, actor_user_id=owner, actor_role="User"
-    )
-
-    assert len(node_def_repo.upserted) == 0
-    assert repo.personal[sid].lifecycle_state == SkillState.PUBLISHED
