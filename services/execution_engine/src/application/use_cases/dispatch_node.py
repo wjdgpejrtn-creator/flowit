@@ -42,6 +42,7 @@ class DispatchNodeUseCase:
         inputs: dict[str, Any],
         user_id: UUID,
         execution_id: UUID,
+        iteration: int = 0,
     ) -> NodeResult:
         started_at = datetime.now(UTC)
         attempt = 0
@@ -59,6 +60,7 @@ class DispatchNodeUseCase:
                     started_at=started_at,
                     completed_at=datetime.now(UTC),
                     retry_count=attempt,
+                    iteration=iteration,
                 )
             except Exception as e:
                 last_error = e
@@ -77,4 +79,5 @@ class DispatchNodeUseCase:
             completed_at=datetime.now(UTC),
             retry_count=attempt,
             error=str(last_error),
+            iteration=iteration,
         )

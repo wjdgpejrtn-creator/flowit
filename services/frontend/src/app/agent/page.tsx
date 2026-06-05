@@ -4,9 +4,9 @@ import { Suspense, useRef, useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
-import Steps from '@/components/common/Steps';
 import RunMode from '@/components/agent/RunMode';
 import { useAgentStore, WorkspaceMode, ChatMessage, AgentSession } from '@/stores/agentStore';
+import { useAuthStore } from '@/stores/authStore';
 import { useSSEStream } from '@/hooks/useSSEStream';
 import { streamCreateSession, streamSlotAnswer } from '@/lib/api/agentApi';
 import { getWorkflow, validateWorkflow } from '@/lib/api/workflowApi';
@@ -16,14 +16,18 @@ import { ReactFlow, Background, BackgroundVariant, Controls, ConnectionMode, use
 import '@xyflow/react/dist/style.css';
 import { getCatalog } from '@/lib/api/nodeApi';
 import type { NodeConfig, WorkflowExplanation } from '@common/generated';
+import { RiskLevel } from '@common/generated';
 import RiskPill from '@/components/common/RiskPill';
 import Icon from '@/components/common/Icon';
 import { showToast } from '@/stores/toastStore';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
 import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
+import { UserBubble, AiTurn, AgentWorkProcess, SkillSelectionCard } from '@/components/agent/ChatTurns';
+import WorkflowCanvasPanel, { type CanvasNodeChip } from '@/components/agent/WorkflowCanvasPanel';
 import { nextMonotonicStep, stepIndexFor, displayLabels } from '@/lib/agentSteps';
 import { computeFilledParams } from '@/lib/filledParams';
+import { resolveNodeIcon } from '@/lib/nodeIcon';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -467,6 +471,11 @@ function FlowEditor() {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
+// 문서(탭) 단위 1회성 플래그 — 모듈 스코프라 전체 새로고침(JS 컨텍스트 재생성) 때만 false로
+// 초기화되고, SPA 클라이언트 네비게이션(대시보드→AI채팅 재진입)에서는 값이 유지된다.
+// 이를 이용해 "새로고침/첫 진입(=persist 복원 대화 이어가기)"과 "재진입(=새 대화로 시작)"을 구분.
+let agentDocumentLoadConsumed = false;
+
 function AgentPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -484,8 +493,13 @@ function AgentPageContent() {
     readyToExecute, setReadyToExecute,
   } = useAgentStore();
 
+  const userName = useAuthStore().userName || '사용자';
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
+  const [canvasOpen, setCanvasOpen] = useState(false);
+  // 컨펌 게이트 저장 검증 실패 피드백 — messages에 넣으면 ConfirmCard보다 먼저 렌더돼
+  // 카드 위에 표시되는 버그(#368). 별도 상태로 분리해 ConfirmCard '아래'에 렌더한다.
+  const [saveError, setSaveError] = useState<string | null>(null);
   // two-shot 스킬 선택 카드 (skill_selection 프레임 수신 시 표시, REQ-013)
   const [skillSelection, setSkillSelection] = useState<{
     prompt: string;
@@ -495,6 +509,8 @@ function AgentPageContent() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
+  // StrictMode(dev)의 effect 더블 invoke가 같은 마운트에서 두 번 실행되지 않도록 인스턴스 가드.
+  const didMountResetRef = useRef(false);
 
   // 완성된 워크플로우를 편집 캔버스에 로드 — useWorkflowStore(WorkflowEditPane이 읽음).
   const setLoadedWorkflow = useWorkflowStore((s) => s.setWorkflow);
@@ -505,11 +521,21 @@ function AgentPageContent() {
     return () => { abortRef.current?.abort(); };
   }, []);
 
-  // 테스트 1: 페이지 진입 시 이전 세션 정리.
+  // 페이지 진입 시 이전 세션 정리.
   // Zustand 싱글턴은 페이지 이동 후 재진입해도 상태가 남아있으므로
   // 대시보드 → AI 채팅 재진입 시 빈 대화창으로 시작하도록 초기화.
-  // 단, readyToExecute가 있으면 워크플로우 완성 후 이탈→복귀 흐름이므로 초기화 건너뜀.
+  // 단, 두 경우엔 초기화를 건너뛰어 대화를 이어간다:
+  //  ① readyToExecute가 있으면 워크플로우 완성 후 이탈→복귀 흐름.
+  //  ② 문서 최초 로드(새로고침/첫 진입) — persist로 복원된 대화를 그대로 유지(버그 C).
+  //     SPA 재진입에서만 아카이브+초기화가 동작하도록 모듈 플래그로 구분한다.
   useEffect(() => {
+    if (didMountResetRef.current) return;  // StrictMode 더블 invoke 가드(동일 인스턴스)
+    didMountResetRef.current = true;
+    if (!agentDocumentLoadConsumed) {
+      // 새로고침/첫 진입 — 복원 대화 유지, 아카이브/초기화 건너뜀.
+      agentDocumentLoadConsumed = true;
+      return;
+    }
     const state = useAgentStore.getState();
     if (state.readyToExecute) return;
     const { sessionId: sid, messages: msgs } = state;
@@ -567,6 +593,7 @@ function AgentPageContent() {
 
   const handleSave = async () => {
     if (!readyToExecute) return;
+    setSaveError(null);
     try {
       const result = await validateWorkflow(readyToExecute.workflowId);
       if (result.validation_status === 'passed') {
@@ -577,20 +604,12 @@ function AgentPageContent() {
           .map((e) => e.hint ?? e.message)
           .filter(Boolean)
           .join(', ');
-        addMessage({
-          id: `a${Date.now()}`,
-          role: 'agent',
-          content: `워크플로우가 저장되었습니다. 실행하기 위해서는 편집 탭에서 ${errorList || '검증 오류'} 부분 수정이 필요합니다.`,
-          timestamp: Date.now(),
-        });
+        setSaveError(
+          `워크플로우가 저장되었습니다. 실행하기 위해서는 편집 탭에서 ${errorList || '검증 오류'} 부분 수정이 필요합니다.`,
+        );
       }
     } catch {
-      addMessage({
-        id: `a${Date.now()}`,
-        role: 'agent',
-        content: '워크플로우 검증 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
-        timestamp: Date.now(),
-      });
+      setSaveError('워크플로우 검증 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
     }
   };
 
@@ -686,6 +705,7 @@ function AgentPageContent() {
       // 오면 다시 채워진다. session_id·messages는 보존해 대화 맥락을 잇는다.
       setReadyToExecute(null);
       setLoadedWorkflow(null);
+      setSaveError(null);  // 카드가 사라지므로 이전 저장 검증 피드백도 함께 해제
     }
 
     abortRef.current?.abort();
@@ -776,10 +796,24 @@ function AgentPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  const stepLabels = displayLabels(compositeFlow);
   const stepIndex = stepIndexFor(currentStep, compositeFlow);
   // 컨펌 게이트 "실행 전 확인할 입력값" — AI가 자동으로 채운 노드 파라미터를 노드 안 들어가도
   // 보이게. loadedWorkflow(저장본)×editCatalog(input_schema)로 프론트 계산(백엔드 변경 0).
   const filledParams = computeFilledParams(loadedWorkflow, editCatalog);
+  // 우측 캔버스 노드 칩 — loadedWorkflow.nodes × editCatalog(이름/타입/리스크/아이콘). 백엔드 변경 0.
+  const canvasChips: CanvasNodeChip[] = (loadedWorkflow?.nodes ?? []).map((node, i) => {
+    const cfg = editCatalog?.find((c) => c.node_id === node.node_id);
+    const { icon, color } = resolveNodeIcon(cfg?.node_type, cfg?.category);
+    return {
+      key: node.instance_id || `chip-${i}`,
+      name: cfg?.name ?? node.node_id,
+      nodeType: cfg?.node_type ?? node.node_id,
+      risk: cfg?.risk_level ?? RiskLevel.LOW,
+      icon,
+      color,
+    };
+  });
   // 현재 active 대화를 전체 상태 스냅샷으로 아카이브(복원 가능하게). 내용 없으면 no-op.
   const archiveCurrent = () => {
     const s = useAgentStore.getState();
@@ -812,6 +846,7 @@ function AgentPageContent() {
     setSkillSelection(null);
     setLoadedWorkflow(null);
     setViewingSession(null);
+    setSaveError(null);
     autoSentRef.current = false;
     setMode('wizard');
   };
@@ -827,7 +862,10 @@ function AgentPageContent() {
           style={{ width: 220 }}
         >
           <div className="px-3 py-[10px] border-b border-[var(--color-line-soft)]">
-            <span className="font-bold text-[13px]">∿ 워크스페이스</span>
+            <span className="font-bold text-[13px] flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent-coral)]" />
+              대화 세션
+            </span>
           </div>
 
           <div className="flex-1 overflow-auto py-2 flex flex-col gap-[2px] px-2">
@@ -850,7 +888,7 @@ function AgentPageContent() {
               </button>
             ) : (
               <p className="px-[8px] py-[10px] text-[11px] text-[var(--color-ink4)] italic leading-snug">
-                새 대화를 시작하세요.
+                대화를 시작하면<br />세션이 여기 쌓여요.
               </p>
             )}
 
@@ -892,9 +930,18 @@ function AgentPageContent() {
         {/* ── Main Workspace ───────────────────────────────────── */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
 
-          {/* Mode toggle bar */}
-          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--color-line-soft)] bg-[var(--color-surface)] flex-shrink-0">
-            <div className="flex items-center space-x-1.5">
+          {/* 헤더 — 세션 타이틀(좌) + 모드 pill(우) (디자인 상단 헤더) */}
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-line-soft)] bg-[var(--color-surface)] flex-shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[14px] font-bold text-[var(--color-ink)] truncate">{userName}님의 Flowit</span>
+              {readyToExecute && (
+                <span className="text-[11px] text-[var(--color-ink3)] border border-[var(--color-line-soft)] px-[8px] py-[2px] rounded-lg whitespace-nowrap font-mono flex-shrink-0">
+                  {readyToExecute.workflowId.slice(0, 8)}…
+                </span>
+              )}
+            </div>
+            <div className="flex-1" />
+            <div className="flex items-center gap-1.5">
               {(['wizard', 'edit', 'run'] as WorkspaceMode[]).map((m) => {
                 const META: Record<WorkspaceMode, { icon: string; label: string }> = {
                   wizard: { icon: 'message-circle', label: '대화' },
@@ -907,7 +954,7 @@ function AgentPageContent() {
                     key={m}
                     onClick={() => setMode(m)}
                     className={[
-                      'px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1',
+                      'px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1',
                       active
                         ? 'bg-[var(--color-accent)] text-white shadow-sm'
                         : 'text-[var(--color-ink3)] hover:text-[var(--color-ink)] hover:bg-[var(--color-paper)]',
@@ -919,12 +966,6 @@ function AgentPageContent() {
                 );
               })}
             </div>
-            <div className="flex-1" />
-            {readyToExecute && (
-              <span className="text-[12px] text-[var(--color-ink3)] border border-[var(--color-line-soft)] px-[8px] py-[2px] rounded-lg whitespace-nowrap font-mono">
-                {readyToExecute.workflowId.slice(0, 8)}…
-              </span>
-            )}
           </div>
 
           {/* ── Wizard Mode ─────────────────────────────────────── */}
@@ -949,171 +990,121 @@ function AgentPageContent() {
                   </div>
                 )}
 
-                {/* Message list */}
-                <div className="flex-1 overflow-auto px-4 py-3 flex flex-col gap-3">
-                  {(viewingSession ? viewingSession.messages : messages).length === 0 && !streaming && (
-                    <div className="flex-1 flex items-center justify-center text-center px-6">
+                {/* Message list — 디자인 3: 720px 가운데, 유저만 말풍선, AI는 본문 텍스트 */}
+                <div className="flex-1 overflow-auto">
+                  {(viewingSession ? viewingSession.messages : messages).length === 0 && !streaming ? (
+                    <div className="h-full flex items-center justify-center text-center px-6">
                       <div className="text-[13px] text-[var(--color-ink4)] leading-relaxed max-w-[420px]">
                         만들고 싶은 워크플로우를 자연어로 설명해주세요.<br />
                         예: <span className="text-[var(--color-ink3)]">&ldquo;매주 월요일 9시에 광고 시트를 읽어서 요약하고 Slack으로 보내줘&rdquo;</span>
                       </div>
                     </div>
-                  )}
-                  {(viewingSession ? viewingSession.messages : messages).map((msg: ChatMessage) => (
-                    <div
-                      key={msg.id}
-                      className={['flex items-end gap-2', msg.role === 'user' ? 'justify-end' : 'justify-start'].join(' ')}
-                    >
-                      {msg.role === 'agent' && (
-                        <span className="w-[26px] h-[26px] rounded-full bg-[var(--color-agent)] text-white text-[10px] flex items-center justify-center flex-shrink-0 font-bold mb-[1px]">
-                          AI
-                        </span>
+                  ) : (
+                    <div className="max-w-[720px] mx-auto px-6 py-8 space-y-9">
+                      {(viewingSession ? viewingSession.messages : messages).map((msg: ChatMessage) =>
+                        msg.role === 'user' ? (
+                          <UserBubble key={msg.id}>{msg.content}</UserBubble>
+                        ) : (
+                          <AiTurn key={msg.id}>
+                            <p>{msg.content}</p>
+                          </AiTurn>
+                        ),
                       )}
-                      <div
-                        className={[
-                          'max-w-[72%] px-3.5 py-2.5 text-[13px] font-medium leading-relaxed shadow-sm break-keep',
-                          msg.role === 'user'
-                            ? 'bg-[var(--color-accent)] text-[#FCF7EF] rounded-2xl rounded-tr-md'
-                            : 'bg-[var(--color-paper2)] border border-[var(--color-line-soft)] text-[var(--color-ink)] rounded-2xl rounded-tl-md',
-                        ].join(' ')}
-                      >
-                        {msg.content}
-                      </div>
-                    </div>
-                  ))}
-                  {streaming && (
-                    <div className="flex items-end gap-2 justify-start">
-                      <span className="w-[26px] h-[26px] rounded-full bg-[var(--color-agent)] text-white text-[10px] flex items-center justify-center flex-shrink-0 font-bold mb-[1px]">
-                        AI
-                      </span>
-                      <div className="max-w-[72%] px-3.5 py-2.5 text-[13px] leading-relaxed border border-[var(--color-line-soft)] bg-[var(--color-paper2)] rounded-2xl rounded-tl-md text-[var(--color-ink3)] italic animate-pulse">
-                        워크플로우를 분석 중입니다… (1~2분 소요)
-                      </div>
-                    </div>
-                  )}
-                  {readyToExecute && (
-                    <ConfirmCard
-                      message={readyToExecute.message}
-                      explanation={readyToExecute.explanation}
-                      filledParams={filledParams}
-                      onSave={handleSave}
-                      onEdit={() => setMode('edit')}
-                    />
-                  )}
-                  {skillSelection && !streaming && (
-                    <div className="self-start max-w-[80%] border-[1.5px] border-[var(--color-accent)] rounded-[8px_12px_12px_4px] bg-[var(--color-surface)] p-3">
-                      <div className="text-[12px] font-bold text-[var(--color-ink)] mb-2">{skillSelection.prompt}</div>
-                      <div className="flex flex-col gap-1.5">
-                        {skillSelection.options.map((opt) => (
-                          <button
-                            key={opt.skill_id}
-                            onClick={() => void submitSkillSelection(opt.skill_id)}
-                            className="text-left px-[10px] py-[7px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] bg-[var(--color-paper)] hover:border-[var(--color-accent)] hover:bg-[var(--color-hl)] transition-colors"
-                          >
-                            <div className="text-[12px] font-bold text-[var(--color-ink)]">{opt.name}</div>
-                            {opt.description && (
-                              <div className="text-[11px] text-[var(--color-ink3)] mt-0.5 leading-snug">{opt.description}</div>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                      {skillSelection.allowSkip && (
-                        <div className="mt-2 flex justify-end">
-                          <button
-                            onClick={() => void submitSkillSelection(null)}
-                            className="text-[11px] text-[var(--color-ink3)] underline hover:text-[var(--color-ink)]"
-                          >
-                            건너뛰기 (스킬 없이 진행)
-                          </button>
-                        </div>
+                      {streaming && (
+                        <AgentWorkProcess
+                          labels={stepLabels}
+                          currentIndex={stepIndex}
+                          rationale={rationaleText}
+                        />
                       )}
+                      {slotQuestion && !streaming && (
+                        <AiTurn>
+                          <p>
+                            <span className="font-bold text-[var(--color-ink)]">추가 정보가 필요해요</span> — {slotQuestion.question}
+                          </p>
+                        </AiTurn>
+                      )}
+                      {readyToExecute && (
+                        <>
+                          <ConfirmCard
+                            message={readyToExecute.message}
+                            explanation={readyToExecute.explanation}
+                            filledParams={filledParams}
+                            onSave={handleSave}
+                            onEdit={() => setMode('edit')}
+                          />
+                          {/* 저장 검증 실패 피드백 — 카드 '아래'에 표시(#368) */}
+                          {saveError && (
+                            <AiTurn>
+                              <p>{saveError}</p>
+                            </AiTurn>
+                          )}
+                        </>
+                      )}
+                      {skillSelection && !streaming && (
+                        <SkillSelectionCard
+                          prompt={skillSelection.prompt}
+                          options={skillSelection.options}
+                          allowSkip={skillSelection.allowSkip}
+                          onPick={(id) => void submitSkillSelection(id)}
+                          onSkip={() => void submitSkillSelection(null)}
+                          disabled={streaming}
+                        />
+                      )}
+                      <div ref={bottomRef} />
                     </div>
                   )}
-                  <div ref={bottomRef} />
                 </div>
 
-                {/* Input bar */}
-                <div className="border-t border-[var(--color-line-soft)] px-3 py-2 flex gap-2 bg-[var(--color-surface)] flex-shrink-0">
-                  <textarea
-                    className="flex-1 resize-none border border-[var(--color-line-soft)] rounded-lg px-[10px] py-[7px] text-[13px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
-                    rows={2}
-                    placeholder={
-                      viewingSession ? '이전 대화 보기 중 — 입력하려면 현재 대화로 돌아가세요'
-                      : streaming ? 'AI가 처리 중입니다…'
-                      : '워크플로우를 자연어로 설명하세요… (Shift+Enter 줄바꿈)'
-                    }
-                    value={input}
-                    disabled={streaming || !!viewingSession}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        void handleSend();
-                      }
-                    }}
-                  />
-                  <Btn onClick={() => void handleSend()} disabled={streaming || !!viewingSession} className="self-end">
-                    {streaming ? '처리 중…' : '전송 ↑'}
-                  </Btn>
+                {/* Input bar — 디자인 5: ChatGPT식 하단 고정, 720px 가운데 */}
+                <div className="flex-shrink-0 px-6 pb-5 pt-2">
+                  <div className="max-w-[720px] mx-auto">
+                    <div className="flex items-end gap-2 bg-white border border-[var(--color-line-soft)] rounded-2xl px-3 py-2 shadow-[0_4px_16px_-10px_rgba(70,58,48,.35)] focus-within:border-[var(--color-accent)] transition-all">
+                      <textarea
+                        className="flex-1 resize-none bg-transparent text-[14px] font-medium text-[var(--color-ink)] placeholder-[var(--color-ink4)] outline-none py-1.5 disabled:opacity-50"
+                        rows={1}
+                        placeholder={
+                          viewingSession ? '이전 대화 보기 중 — 입력하려면 현재 대화로 돌아가세요'
+                          : streaming ? 'AI가 처리 중입니다…'
+                          : '이어서 말씀해 주세요… (Shift+Enter 줄바꿈)'
+                        }
+                        value={input}
+                        disabled={streaming || !!viewingSession}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            void handleSend();
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleSend()}
+                        disabled={streaming || !!viewingSession}
+                        aria-label="전송"
+                        className="w-8 h-8 rounded-lg bg-[var(--color-accent)] hover:bg-[var(--color-accent3)] text-white flex items-center justify-center flex-shrink-0 transition-all disabled:opacity-40 self-end"
+                      >
+                        <Icon name="arrow-up" className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <p className="text-center text-[10px] text-[var(--color-ink4)] font-bold mt-2">
+                      Flowit은 실수할 수 있어요. 권한이 필요한 작업은 항상 확인 후 실행됩니다.
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              {/* Right panel */}
-              <aside
-                className="flex flex-col border-l border-[var(--color-line-soft)] bg-[var(--color-paper2)] overflow-auto flex-shrink-0"
-                style={{ width: 280 }}
-              >
-                {/* Agent steps */}
-                <div className="p-3 border-b-[1.5px] border-[var(--color-line-soft)]">
-                  <div className="font-bold text-[11px] text-[var(--color-ink3)] uppercase tracking-wider mb-[8px]">
-                    AI 처리 단계
-                  </div>
-                  <Steps
-                    items={displayLabels(compositeFlow)}
-                    current={stepIndex}
-                  />
-                </div>
-
-                {/* Rationale */}
-                <div className="p-3 border-b-[1.5px] border-[var(--color-line-soft)]">
-                  <div className="font-bold text-[11px] text-[var(--color-ink3)] uppercase tracking-wider mb-[8px]">
-                    AI 판단 근거
-                  </div>
-                  <div className="text-[12px] text-[var(--color-ink2)] leading-relaxed bg-[var(--color-surface)] border-[1.5px] border-[var(--color-line-soft)] rounded-lg p-[8px] min-h-[64px]">
-                    {rationaleText || (
-                      <span className="text-[var(--color-ink4)] italic">
-                        AI가 분석 중이면 여기에 판단 근거가 표시됩니다.
-                        <br />
-                        노드 선택 이유, 리스크 평가 등…
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* SlotFill */}
-                <div className="p-3">
-                  <div className="font-bold text-[11px] text-[var(--color-ink3)] uppercase tracking-wider mb-[8px]">
-                    추가 정보 요청
-                  </div>
-                  {slotQuestion ? (
-                    <div className="border border-[var(--color-line-soft)] rounded-lg p-[10px] bg-[var(--color-surface)]">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-[12px] font-bold">{slotQuestion.question}</span>
-                      </div>
-                      <input
-                        type="text"
-                        className="w-full border border-[var(--color-line-soft)] rounded px-[8px] py-[4px] text-[12px] bg-[var(--color-paper)] focus:outline-none focus:border-[var(--color-accent)]"
-                        placeholder="답변 입력…"
-                      />
-                      <div className="mt-2 flex justify-end">
-                        <Btn ghost className="text-[11px]">확인</Btn>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-[12px] text-[var(--color-ink4)] italic">현재 추가 정보 요청 없음.</p>
-                  )}
-                </div>
-              </aside>
+              {/* 우측 접힘 캔버스 — 워크플로우 결과물(디자인 §4). 작업과정·판단근거는
+                  채팅 인라인(AgentWorkProcess)으로 이동, 우측은 결과물 캔버스 전용. */}
+              <WorkflowCanvasPanel
+                open={canvasOpen}
+                onToggle={() => setCanvasOpen((v) => !v)}
+                onEdit={() => setMode('edit')}
+                onRun={() => setMode('run')}
+                chips={canvasChips}
+                hasWork={!!loadedWorkflow || !!readyToExecute}
+              />
             </div>
           )}
 
