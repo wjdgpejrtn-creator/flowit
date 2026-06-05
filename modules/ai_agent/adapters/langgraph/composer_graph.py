@@ -85,6 +85,10 @@ _MAX_AGENT_ITERATIONS = 15  # 무한 루프 방지
 # 데이터 축적 후 SKILL_SEARCH_MAX_DISTANCE env로 무재배포 튜닝.
 _SKILL_SEARCH_MAX_DISTANCE = float(os.getenv("SKILL_SEARCH_MAX_DISTANCE", "0.50"))
 
+# RAG로 회수한 사용자 패턴 본문을 drafter 프롬프트에 넣을 때 항목당 본문 절단 길이 —
+# 프롬프트 비대화 방지. top-k(=RecallPersonalSkillsUseCase 기본 3) × 이 길이가 주입 상한.
+_RECALL_PATTERN_MAX_CHARS = 500
+
 class _NextAction(BaseModel):
     """LLM 에이전트가 다음에 실행할 툴을 선택하는 스키마."""
 
@@ -126,6 +130,7 @@ class _State(TypedDict):
     messages: list[dict[str, Any]]
     turn_count: int
     personal_memory: list[MemoryEntry]
+    personal_patterns: list[str]  # RAG로 회수한 사용자 과거 패턴 본문 — drafter 프롬프트 주입용
     intent: str | None
     intent_analyzed_entities: dict[str, Any]
     draft_spec: DraftSpec | None
@@ -264,6 +269,7 @@ class LangGraphOrchestrator:
             "messages": [{"role": "user", "content": message}],
             "turn_count": 1,
             "personal_memory": personal_memory,
+            "personal_patterns": [],
             "intent": None,
             "intent_analyzed_entities": {},
             "draft_spec": None,
@@ -355,6 +361,10 @@ class LangGraphOrchestrator:
     # ------------------------------------------------------------------ agent loop
 
     def _build_agent_prompt(self, state: _State) -> str:
+        # NOTE: 이 tool-calling 루프(_agent_node)는 현재 _build()의 라이브 DAG에 노드로
+        # 미배선이다(고정 DAG 사용). 개인화의 실제 주입점은 drafter(_drafter_node →
+        # DrafterService.draft(personal_patterns=...))다. 이 루프가 향후 다시 배선될 때
+        # 동일 버그(개인 패턴 미반영)가 재발하지 않도록 여기서도 함께 주입한다.
         intent = state.get("intent") or "아직 분석 안 됨"
         has_draft = state.get("workflow_draft") is not None
         qa_score = state.get("qa_score", 0.0)
@@ -366,9 +376,18 @@ class LangGraphOrchestrator:
             f"{m['role']}: {m.get('content', '')[:200]}"
             for m in (state.get("messages") or [])[-3:]
         )
+        patterns = state.get("personal_patterns") or []
+        patterns_section = (
+            "사용자 과거 패턴 (관련 있을 때만 반영):\n"
+            + "\n".join(f"- {p}" for p in patterns)
+            + "\n\n"
+            if patterns
+            else ""
+        )
         return (
             "워크플로우 자동화 AI 에이전트입니다.\n\n"
             f"대화:\n{messages_preview}\n\n"
+            f"{patterns_section}"
             f"현재 상태:\n"
             f"- 의도: {intent}\n"
             f"- 워크플로우 초안: {'있음' if has_draft else '없음'}\n"
@@ -667,7 +686,37 @@ class LangGraphOrchestrator:
             }
         return {}
 
-    # 6. retriever_node — 노드 후보 검색 + 커스텀 스킬 합산
+    async def _recall_personal_patterns(self, user_id: UUID, query: str) -> list[str]:
+        """RAG(BGE-M3 코사인 유사도)로 이번 요청과 관련된 사용자 과거 패턴 본문을 회수.
+
+        ``RecallPersonalSkillsUseCase`` 독스트링의 설계 의도 — "Workflow Composer가 프롬프트
+        작성 전 호출해 관련 사용자 패턴을 주입" — 를 라이브 그래프에 배선한다. store/embedder
+        미주입 또는 회수 실패 시 빈 리스트를 반환해 개인화를 조용히 건너뛴다(non-fatal).
+        load_memory 전체 덤프와 달리 쿼리 관련 top-k만 회수해 프롬프트 오염을 막는다.
+        """
+        if self._personal_memory_store is None or self._embedder is None:
+            return []
+        try:
+            from ...application.agents.personalization.recall_personal_skills_use_case import (
+                RecallPersonalSkillsUseCase,
+            )
+
+            recall = RecallPersonalSkillsUseCase(self._personal_memory_store, self._embedder)
+            files = await recall.execute(user_id, query)
+        except Exception as exc:
+            _logger.warning("개인 패턴 회수 실패 (non-fatal, 개인화 미적용): %s", exc)
+            return []
+        patterns: list[str] = []
+        for f in files:
+            body = (f.body or "").strip()
+            if not body:
+                continue
+            label = (f.description or f.name or "").strip()
+            snippet = body[:_RECALL_PATTERN_MAX_CHARS]
+            patterns.append(f"[{label}] {snippet}" if label else snippet)
+        return patterns
+
+    # 6. retriever_node — 노드 후보 검색 + 커스텀 스킬 합산 + 개인 패턴 RAG 회수
     async def _retriever_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         spec = state["draft_spec"]
@@ -677,40 +726,33 @@ class LangGraphOrchestrator:
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
 
-        # 커스텀 스킬 검색 — embedder + skill_search 모두 주입된 경우에만.
-        # 접근 가능 스코프(개인 본인 + 전사)를 관련성 컷과 함께 병합 검색(회사만 보던 한계 보완).
-        if self._embedder is not None and self._skill_search is not None:
-            try:
-                query_embedding = await self._embedder.embed(query)
-                skill_results = await self._skill_search.execute_accessible(
-                    query_embedding=query_embedding,
-                    user_id=state["user_id"],
-                    limit=10,
-                    max_distance=_SKILL_SEARCH_MAX_DISTANCE,
-                )
-                existing_ids = {c.node_id for c in candidates}
-                for skill in skill_results:
-                    if skill.node_definition_id is None:
-                        continue
-                    try:
-                        node_cfg = await self._node_registry.get_schema(skill.node_definition_id)
-                        if node_cfg.node_id not in existing_ids:
-                            candidates = [*candidates, node_cfg]
-                            existing_ids.add(node_cfg.node_id)
-                    except Exception:
-                        continue
-            except Exception as _skill_exc:
-                _logger.warning("skill search failed: %s", _skill_exc)
+        # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
+        # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는
+        # two-shot 경로(`_suggest_skill_select_node`)가 전담하고, 선택된 스킬은 `_drafter_node`가
+        # LLM 노드를 보장 → `_bind_skill_node`가 skill_id를 바인딩한다. 여기서 스킬 NodeDefinition을
+        # candidates에 넣으면 drafter가 스킬을 빈 껍데기 노드로 배치해(parameter_schema={}) 실행
+        # 불가 + 바인딩 대상 LLM 노드 미생성으로 이어진다(#372 재현 증상).
+
+        # 개인 패턴 RAG 회수 — drafter 프롬프트 주입용(retry 루프 밖, 1회만 수행).
+        personal_patterns = await self._recall_personal_patterns(state["user_id"], query)
 
         elapsed = int((time.monotonic() - t0) * 1000)
         node_types = ", ".join(c.node_type for c in candidates[:5])
         more = f" 외 {len(candidates) - 5}개" if len(candidates) > 5 else ""
+        frames: list[AnySSEFrame] = [
+            RationaleDeltaFrame(delta=f"🔍 노드 검색 완료 — {len(candidates)}개 후보 발견: {node_types}{more}"),
+        ]
+        if personal_patterns:
+            frames.append(
+                RationaleDeltaFrame(delta=f"🧠 사용자 과거 패턴 {len(personal_patterns)}건 반영")
+            )
+        frames.append(
+            PipelineStatusFrame(service_name="retriever", status="completed", elapsed_ms=elapsed)
+        )
         return {
             "node_candidates": candidates,
-            "collected_frames": [
-                RationaleDeltaFrame(delta=f"🔍 노드 검색 완료 — {len(candidates)}개 후보 발견: {node_types}{more}"),
-                PipelineStatusFrame(service_name="retriever", status="completed", elapsed_ms=elapsed),
-            ],
+            "personal_patterns": personal_patterns,
+            "collected_frames": frames,
         }
 
     # 6.5. suggest_skill_node — 스킬 마켓플레이스 후보 제시
@@ -918,10 +960,15 @@ class LangGraphOrchestrator:
 
         draft_spec = DraftSpec.model_validate(blob["draft_spec"]) if blob.get("draft_spec") else None
         node_candidates = [NodeConfig.model_validate(c) for c in blob.get("node_candidates") or []]
+        # 2차 라운드는 search_nodes를 건너뛰므로(resume→draft) 여기서 개인 패턴을 직접 회수해
+        # 재초안에도 개인화가 반영되게 한다(1차 회수 결과는 GCS 영속 상태에 없음).
+        query = draft_spec.natural_language_intent if draft_spec else state["messages"][-1].get("content", "")
+        personal_patterns = await self._recall_personal_patterns(state["user_id"], query)
         return {
             "resume_ok": True,
             "draft_spec": draft_spec,
             "node_candidates": node_candidates,
+            "personal_patterns": personal_patterns,
             "intent": blob.get("intent"),
             "intent_analyzed_entities": blob.get("intent_analyzed_entities") or {},
             "offered_skill_ids": blob.get("offered_skill_ids") or [],
@@ -986,6 +1033,26 @@ class LangGraphOrchestrator:
             ],
         }
 
+    async def _ensure_llm_candidate(self, candidates: list[NodeConfig]) -> list[NodeConfig]:
+        """후보에 LLM 노드(category=="ai")가 없으면 카탈로그에서 하나 확보해 추가 (#372 결함 A).
+
+        스킬 바인딩 대상이 되는 LLM 노드를 drafter가 배치할 수 있게 보장한다. NodeRegistry는
+        타입 조회 API가 없어 의미 검색으로 찾고 category=="ai" 첫 후보를 채택한다. 못 찾으면
+        무변경(non-fatal) — drafter가 LLM 노드를 못 넣어 바인딩이 skip될 수 있으나 비차단.
+        """
+        try:
+            results = await self._node_registry.search(
+                "AI 언어모델 LLM으로 텍스트를 생성·요약·추론하는 노드", limit=5
+            )
+        except Exception as exc:
+            _logger.warning("LLM 노드 확보 검색 실패 (스킬 바인딩 대상 없을 수 있음): %s", exc)
+            return candidates
+        existing_ids = {c.node_id for c in candidates}
+        for cfg in results:
+            if getattr(cfg, "category", None) == "ai" and cfg.node_id not in existing_ids:
+                return [*candidates, cfg]
+        return candidates
+
     # 7. drafter_node — 워크플로우 초안 생성
     async def _drafter_node(self, state: _State) -> dict:
         t0 = time.monotonic()
@@ -1005,9 +1072,25 @@ class LangGraphOrchestrator:
                 prior_workflow = None
             if prior_workflow is not None:
                 candidates = await self._augment_candidates_with_prior(candidates, prior_workflow)
+        # 스킬이 선택되면(two-shot 2차) 그 지침서를 주입할 LLM 노드(category=="ai")가 반드시
+        # 필요하다 (#372 결함 A). 후보에 LLM 노드가 없으면 확보해 넣고 drafter에 포함을 지시
+        # → drafter가 LLM 노드를 배치 → `_bind_skill_node`가 skill_id를 바인딩한다.
+        skill_selected = state.get("selected_skill_id") is not None
+        if skill_selected and not any(getattr(c, "category", None) == "ai" for c in candidates):
+            candidates = await self._ensure_llm_candidate(candidates)
+        # LLM 노드를 끝내 확보 못 했으면(카탈로그 의미검색이 ai 노드 미검출) drafter에 "ai 노드를
+        # 포함하라"고 지시하지 않는다 — 후보에 없는 노드 포함을 지시하면 지시/후보 desync(환각·미준수
+        # 위험, PR #376 리뷰 LOW #2). 이 경우 바인딩은 어차피 skip(non-fatal)된다.
+        instruct_skill_binding = skill_selected and any(
+            getattr(c, "category", None) == "ai" for c in candidates
+        )
+        if skill_selected and not instruct_skill_binding:
+            _logger.warning("스킬 선택됐으나 LLM 노드 후보 확보 실패 — 바인딩 skip 예상")
         try:
             workflow = await self._drafter.draft(
-                spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow
+                spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow,
+                personal_patterns=state.get("personal_patterns"),
+                skill_selected=instruct_skill_binding,
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:

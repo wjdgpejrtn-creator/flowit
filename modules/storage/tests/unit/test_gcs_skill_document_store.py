@@ -43,6 +43,66 @@ async def test_save_and_load_round_trip(store: GcsSkillDocumentStore) -> None:
 
 
 @pytest.mark.asyncio
+async def test_composer_instructions_round_trip(store: GcsSkillDocumentStore, storage_dir: Path) -> None:
+    """composer 지침(COMPOSER.md)이 있으면 같은 디렉토리에 저장되고 round-trip (#372)."""
+    skill_id = uuid4()
+    doc = SkillDocument(
+        skill_id=skill_id,
+        name="온보딩 가이드",
+        description="신규 입사자 안내",
+        instructions="## 노드측 지침\n요약 작성 방법...",
+        composer_instructions="이 스킬은 LLM 노드(anthropic_chat) + Email 노드가 필수입니다.",
+    )
+    await store.save(skill_id, doc)
+
+    assert (storage_dir / f"skills/{skill_id}/COMPOSER.md").exists()
+    loaded = await store.load(skill_id)
+    assert loaded is not None
+    assert loaded.instructions == doc.instructions
+    assert loaded.composer_instructions == doc.composer_instructions
+
+
+@pytest.mark.asyncio
+async def test_update_to_empty_composer_removes_stale_md(
+    store: GcsSkillDocumentStore, storage_dir: Path
+) -> None:
+    """COMPOSER.md 있던 스킬을 빈 composer_instructions로 재저장하면 stale COMPOSER.md를 정리한다.
+    (PR #374 리뷰 MEDIUM — 안 지우면 load가 옛 composer 지침을 반환해 문서≠저장상태.)"""
+    skill_id = uuid4()
+    await store.save(
+        skill_id,
+        SkillDocument(
+            skill_id=skill_id, name="x", description="y", instructions="z", composer_instructions="old"
+        ),
+    )
+    assert (storage_dir / f"skills/{skill_id}/COMPOSER.md").exists()
+
+    # 재저장(업데이트) — composer_instructions 비움
+    await store.save(
+        skill_id,
+        SkillDocument(skill_id=skill_id, name="x", description="y", instructions="z"),
+    )
+    assert not (storage_dir / f"skills/{skill_id}/COMPOSER.md").exists()
+    loaded = await store.load(skill_id)
+    assert loaded is not None
+    assert loaded.composer_instructions == ""
+
+
+@pytest.mark.asyncio
+async def test_composer_md_not_written_when_empty(store: GcsSkillDocumentStore, storage_dir: Path) -> None:
+    """composer_instructions 미지정 시 COMPOSER.md를 만들지 않고, load는 ""로 degrade (#372 detail 3)."""
+    skill_id = uuid4()
+    await store.save(
+        skill_id,
+        SkillDocument(skill_id=skill_id, name="x", description="y", instructions="z"),
+    )
+    assert not (storage_dir / f"skills/{skill_id}/COMPOSER.md").exists()
+    loaded = await store.load(skill_id)
+    assert loaded is not None
+    assert loaded.composer_instructions == ""
+
+
+@pytest.mark.asyncio
 async def test_load_missing_returns_none(store: GcsSkillDocumentStore) -> None:
     assert await store.load(uuid4()) is None
 
@@ -89,17 +149,21 @@ async def test_description_with_special_chars_round_trip(store: GcsSkillDocument
 
 @pytest.mark.asyncio
 async def test_delete_removes_skill_document(store: GcsSkillDocumentStore, storage_dir: Path) -> None:
-    """save → delete → load None — DeletePersonalSkillUseCase의 orphan 정리 경로."""
+    """save → delete → load None — DeletePersonalSkillUseCase의 orphan 정리 경로 (SKILL.md+COMPOSER.md)."""
     skill_id = uuid4()
     await store.save(
         skill_id,
-        SkillDocument(skill_id=skill_id, name="x", description="y", instructions="z"),
+        SkillDocument(
+            skill_id=skill_id, name="x", description="y", instructions="z", composer_instructions="c"
+        ),
     )
     assert (storage_dir / f"skills/{skill_id}/SKILL.md").exists()
+    assert (storage_dir / f"skills/{skill_id}/COMPOSER.md").exists()
 
     await store.delete(skill_id)
 
     assert not (storage_dir / f"skills/{skill_id}/SKILL.md").exists()
+    assert not (storage_dir / f"skills/{skill_id}/COMPOSER.md").exists()
     assert await store.load(skill_id) is None
 
 

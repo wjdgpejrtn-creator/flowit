@@ -37,6 +37,50 @@ def _rewrite_refs(value: Any, id_by_token: dict[str, UUID]) -> Any:
         return {k: _rewrite_refs(v, id_by_token) for k, v in value.items()}
     return value
 
+
+def _ground_ref_fields(value: Any, outputs_by_instance: dict[UUID, list[str]]) -> Any:
+    """``${<instance_id>.<field>}`` 참조의 ``<field>``를 상류 노드의 실제 출력 필드에 grounding.
+
+    `_rewrite_refs` 이후(토큰이 이미 instance_id로 치환된 상태) 호출한다. LLM이 존재하지 않는
+    출력 필드를 환각하는 것(예: 출력이 ``[scheduled_at, ...]``인데 ``.values`` 참조)을 방어:
+
+    - 참조 노드의 출력 필드 집합에 ``<field>``가 있으면 그대로 둔다.
+    - 없고 그 노드의 출력이 **정확히 1개**면 그 단일 필드로 보정한다(거의 확실히 의도한 필드).
+    - 없고 출력이 0개 또는 2개 이상이면(어느 필드인지 결정 불가) 원본을 보존하고 경고만 남긴다
+      — 런타임 ReferenceResolver가 미해결로 graceful degrade한다. 잘못된 **소스 노드 선택**은
+      의미 판단이라 결정론적으로 고칠 수 없으므로 로그로만 노출한다.
+    - 토큰이 instance_id가 아니거나(미해결 토큰) 맵에 없는 노드면 손대지 않는다.
+    """
+    if isinstance(value, str):
+        def _sub(m: re.Match[str]) -> str:
+            token, field = m.group(1), m.group(2)
+            try:
+                inst = UUID(token)
+            except ValueError:
+                return m.group(0)
+            outs = outputs_by_instance.get(inst)
+            if outs is None or field in outs:
+                return m.group(0)
+            if len(outs) == 1:
+                _logger.warning("ref 필드 보정: %s.%s → %s.%s", token, field, token, outs[0])
+                return f"${{{token}.{outs[0]}}}"
+            _logger.warning(
+                "ref 필드 미존재(보정 불가, graceful degrade): %s.%s (outputs=%s)", token, field, outs
+            )
+            return m.group(0)
+        return _REF_TOKEN_RE.sub(_sub, value)
+    if isinstance(value, list):
+        return [_ground_ref_fields(v, outputs_by_instance) for v in value]
+    if isinstance(value, dict):
+        return {k: _ground_ref_fields(v, outputs_by_instance) for k, v in value.items()}
+    return value
+
+
+def _outputs_of(nc: NodeConfig) -> list[str]:
+    """NodeConfig의 출력 필드명 목록 (output_schema.properties 키)."""
+    return list((nc.output_schema or {}).get("properties", {}).keys())
+
+
 _SYSTEM_PROMPT = """You are a workflow drafter. Given a DraftSpec and candidate nodes,
 output a JSON object matching this schema:
 {
@@ -65,11 +109,17 @@ connections are resolved separately after drafting.
 
 DATA FLOW between nodes: when a node's input should receive data PRODUCED by an upstream node
 (not a fixed value the user gave inline), set that parameter's value to a reference
-"${<from_node_type>.<output_field>}", where <from_node_type> is the upstream node's node_type and
-<output_field> is one of that node's `outputs`. Also add a connection so the upstream node runs
-first. Use a literal string ONLY when the user provided the value directly. Example: a summary
-node whose `document_text` is fed by a sheet reader → "document_text": "${google_sheets_read.values}".
-Do NOT put placeholder prose like "the sheet data" where an upstream output should flow in.
+"${<from_node_type>.<output_field>}". TWO hard rules — violating either produces a broken workflow:
+1. SOURCE node: <from_node_type> MUST be a node whose output is SEMANTICALLY the data this input
+   needs. Do not wire an unrelated node just to have a source (e.g. never feed a text-summary input
+   from a scheduling/notification node). If NO candidate actually produces the needed data, leave
+   the parameter as "" instead of referencing an unrelated node.
+2. FIELD name: <output_field> MUST be copied VERBATIM from the chosen node's own `outputs` array.
+   Never invent a field name, and never borrow a field name that belongs to a different node. If a
+   node's `outputs` is ["a", "b"], its ONLY valid references are "${that_node.a}" and "${that_node.b}".
+Also add a connection so the upstream node runs first. Use a literal string ONLY when the user
+provided the value directly. Do NOT put placeholder prose like "the sheet data" where an upstream
+output should flow in.
 """
 
 # refine(대화형 수정) 전용 — 이전 워크플로우를 주고 "지시한 부분만" 고치게 한다.
@@ -90,8 +140,11 @@ and parameters EXACTLY, and keep unchanged connections. node_type must come from
 The SAME node_type may appear multiple times — each is a distinct node identified by its ref.
 
 DATA FLOW: to feed a node's input from an upstream node's output, set that parameter to
-"${<ref>.<output_field>}" using the upstream node's "ref" (NOT its node_type) and one of that
-node's `outputs` from the candidate list. Use a literal only for values the user gave inline."""
+"${<ref>.<output_field>}" using the upstream node's "ref" (NOT its node_type). <output_field> MUST
+be copied VERBATIM from that node's `outputs` in the candidate list — never invent a field name and
+never borrow a field that belongs to a different node. Choose a source node whose output is
+semantically the data the input needs; if none fits, leave "". Use a literal only for values the
+user gave inline."""
 
 
 # LLM 응답 전용 — common_schemas.WorkflowSchema의 owner_user_id/workflow_id 제외 부분집합.
@@ -152,10 +205,23 @@ class DrafterService:
         candidates: list[NodeConfig],
         owner_user_id: UUID,
         prior_workflow: WorkflowSchema | None = None,
+        personal_patterns: list[str] | None = None,
+        skill_selected: bool = False,
+        skill_composer_instructions: str | None = None,
     ) -> WorkflowSchema:
         """워크플로우 초안 생성. ``prior_workflow``가 주어지면(대화형 refine) 처음부터
         재생성하지 않고 그 워크플로우를 편집 컨텍스트로 주어 지시한 부분만 수정한다.
         직렬화 불가(후보에 없는 node_type 포함) 시엔 안전하게 fresh draft로 폴백한다.
+
+        ``personal_patterns``(RAG로 회수한 사용자 과거 패턴 본문)가 주어지면 시스템
+        프롬프트에 "사용자 패턴" 블록으로 주입해, 이 사용자의 확립된 선호(예: 알림 채널,
+        요약 언어/형식)가 이번 요청과 관련 있을 때 초안에 반영되게 한다(REQ-004 개인화 배선).
+
+        ``skill_selected``가 True면(two-shot 스킬 선택) 그 스킬을 바인딩할 LLM 노드
+        (category=="ai")를 반드시 포함하도록 프롬프트에 지시한다(#372 결함 A — 스킬은 LLM
+        노드 system 프롬프트에 주입되는 지침서라 주입 대상 LLM 노드가 없으면 바인딩 불가).
+        ``skill_composer_instructions``(COMPOSER.md 본문, 선택)가 주어지면 어떤 노드를 어떻게
+        엮을지 구체 지침으로 함께 주입한다(미주어지면 LLM 노드 포함 기준선만 지시).
         """
         catalog = [
             {
@@ -174,6 +240,8 @@ class DrafterService:
             ensure_ascii=False,
         )
         catalog_json = json.dumps(catalog, ensure_ascii=False)
+        patterns_block = self._personal_patterns_block(personal_patterns)
+        binding_block = self._skill_binding_block(skill_selected, skill_composer_instructions)
         # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
         # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
         if prior_workflow is not None:
@@ -181,6 +249,8 @@ class DrafterService:
             if current is not None:
                 edit_prompt = (
                     _EDIT_SYSTEM_PROMPT
+                    + patterns_block
+                    + binding_block
                     + f"\nDraftSpec: {spec_json}"
                     + f"\nAvailable nodes: {catalog_json}"
                     + f"\nCURRENT WORKFLOW: {json.dumps(current, ensure_ascii=False)}"
@@ -191,12 +261,62 @@ class DrafterService:
                     raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
                 return self._build_from_edit(edit_resp, candidates, owner_user_id)
 
-        prompt = _SYSTEM_PROMPT + f"\nDraftSpec: {spec_json}" + f"\nAvailable nodes: {catalog_json}"
+        prompt = (
+            _SYSTEM_PROMPT
+            + patterns_block
+            + binding_block
+            + f"\nDraftSpec: {spec_json}"
+            + f"\nAvailable nodes: {catalog_json}"
+        )
         try:
             draft_resp = await self._llm.generate_structured(prompt, _DraftResponse)
         except Exception as e:
             raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
         return self._build(draft_resp, candidates, owner_user_id)
+
+    @staticmethod
+    def _personal_patterns_block(personal_patterns: list[str] | None) -> str:
+        """RAG로 회수한 사용자 패턴을 시스템 프롬프트 주입용 블록으로 직렬화.
+
+        패턴이 없으면 빈 문자열을 반환해 프롬프트를 그대로 둔다(개인화 미적용 시 무영향).
+        '관련 있을 때만 적용 / 패턴 충족을 위해 노드를 추가하지 말 것'을 명시해, 무관한
+        과거 패턴이 이번 워크플로우를 오염시키는 것을 막는다(노이즈 가드).
+        """
+        if not personal_patterns:
+            return ""
+        joined = "\n".join(f"- {p}" for p in personal_patterns)
+        return (
+            "\nUSER PATTERNS (this user's established preferences recalled from their past "
+            "workflows — apply ONLY the ones relevant to THIS request, e.g. a preferred "
+            "notification channel, summary language, or output format. Ignore patterns that "
+            "do not fit, and NEVER add a node solely to satisfy a pattern):\n"
+            f"{joined}\n"
+        )
+
+    @staticmethod
+    def _skill_binding_block(skill_selected: bool, composer_instructions: str | None) -> str:
+        """선택된 스킬 바인딩을 위해 LLM 노드 포함을 drafter에 지시하는 프롬프트 블록 (#372 결함 A).
+
+        스킬(모델 A)은 LLM 노드 system 프롬프트에 주입되는 도메인 지침서이므로, 스킬이 선택되면
+        주입 대상 LLM 노드(category=="ai")가 워크플로우에 반드시 있어야 바인딩이 성립한다(없으면
+        `_bind_skill_node`가 대상을 못 찾아 skip). composer_instructions(COMPOSER.md 본문, 선택)가
+        주어지면 노드 구성 구체 지침으로 함께 주입한다(미주어지면 LLM 노드 포함 기준선만 지시).
+        """
+        if not skill_selected:
+            return ""
+        block = (
+            "\nSKILL BINDING (a reusable skill will be bound to this workflow): you MUST include "
+            'exactly one LLM node (a node whose category is "ai" in the available nodes) as the '
+            "core reasoning/generation step and wire it into the flow. The skill's domain "
+            "instructions are injected into that LLM node's system prompt at runtime — without an "
+            "LLM node the skill cannot bind.\n"
+        )
+        if composer_instructions:
+            block += (
+                "Composition requirements from the selected skill (follow these when choosing and "
+                f"wiring nodes):\n{composer_instructions}\n"
+            )
+        return block
 
     @staticmethod
     def _serialize_for_edit(
@@ -262,8 +382,18 @@ class DrafterService:
                 )
 
             # 데이터 흐름 참조 재작성 — LLM이 쓴 ref 토큰을 instance_id로 (ADR-0023 L1)
+            # → grounding: 환각한 출력 필드를 상류 노드의 실제 output_schema에 맞춘다 (REQ-004 bug B)
+            outputs_by_instance = {
+                ref_to_instance[raw.ref]: _outputs_of(node_map[raw.node_type]) for raw in draft.nodes
+            }
             nodes = [
-                n.model_copy(update={"parameters": _rewrite_refs(n.parameters, ref_to_instance)})
+                n.model_copy(
+                    update={
+                        "parameters": _ground_ref_fields(
+                            _rewrite_refs(n.parameters, ref_to_instance), outputs_by_instance
+                        )
+                    }
+                )
                 for n in nodes
             ]
 
@@ -328,8 +458,18 @@ class DrafterService:
                 )
 
             # 데이터 흐름 참조 재작성 — LLM이 쓴 node_type 토큰을 instance_id로 (ADR-0023 L1)
+            # → grounding: 환각한 출력 필드를 상류 노드의 실제 output_schema에 맞춘다 (REQ-004 bug B)
+            outputs_by_instance = {
+                instance_id_map[ntype]: _outputs_of(node_map[ntype]) for ntype in instance_id_map
+            }
             nodes = [
-                n.model_copy(update={"parameters": _rewrite_refs(n.parameters, instance_id_map)})
+                n.model_copy(
+                    update={
+                        "parameters": _ground_ref_fields(
+                            _rewrite_refs(n.parameters, instance_id_map), outputs_by_instance
+                        )
+                    }
+                )
                 for n in nodes
             ]
 

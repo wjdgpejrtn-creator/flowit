@@ -33,9 +33,15 @@ jest.mock('../../../hooks/useSSEStream', () => ({
   useSSEStream: () => {},
 }));
 
+const mockValidateWorkflow = jest.fn();
 jest.mock('../../../lib/api/workflowApi', () => ({
   executeWorkflow: jest.fn(),
   getWorkflow: jest.fn(() => Promise.resolve(null)),
+  validateWorkflow: (...args: unknown[]) => mockValidateWorkflow(...args),
+  // RunMode(저장 성공 → 실행 모드 전환)가 렌더될 때 호출하는 API 스텁
+  getLatestExecution: jest.fn(() => Promise.resolve(null)),
+  cancelExecution: jest.fn(),
+  resumeExecution: jest.fn(),
 }));
 
 jest.mock('../../../stores/authStore', () => ({
@@ -59,6 +65,7 @@ import { useAgentStore } from '../../../stores/agentStore';
 
 beforeEach(() => {
   mockStreamCreateSession.mockClear();
+  mockValidateWorkflow.mockReset();
   streamOnFrame = null;
   useAgentStore.setState({
     mode: 'wizard',
@@ -381,5 +388,57 @@ describe('AgentPage — handleSend SSE 연동', () => {
     const contents = useAgentStore.getState().messages.map((m) => m.content);
     expect(contents).toContain('슬랙 알림 워크플로우');
     expect(contents).toContain('url을 바꿔줘');
+  });
+});
+
+describe('AgentPage — 컨펌 게이트 저장 검증 피드백 위치 (#368)', () => {
+  // 워크플로우 완성(ConfirmCard 노출) 상태까지 진입시키는 공용 셋업
+  const arriveAtConfirmCard = async () => {
+    mockStreamCreateSession.mockImplementation(
+      async (_req: unknown, onFrame: (f: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'session', session_id: 'sid-1' });
+        onFrame({
+          frame_type: 'result',
+          intent: 'propose',
+          payload: { status: 'ready_to_execute', workflow_id: 'wf-1', message: '완성됐어요' },
+        });
+      },
+    );
+    render(<AgentPage />);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
+    await userEvent.type(textarea, '슬랙 알림 워크플로우');
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
+    await waitFor(() => expect(useAgentStore.getState().readyToExecute).not.toBeNull());
+  };
+
+  it('검증 실패 시 에러가 ConfirmCard 아래에 표시되고 messages에 누수되지 않는다', async () => {
+    mockValidateWorkflow.mockResolvedValue({
+      validation_status: 'failed',
+      errors: [{ message: 'Slack 채널 누락', hint: 'Slack 채널을 지정' }],
+    });
+    await arriveAtConfirmCard();
+
+    await userEvent.click(screen.getByRole('button', { name: /저장하고 활성화/ }));
+
+    const errorEl = await screen.findByText(/Slack 채널을 지정 부분 수정이 필요합니다/);
+    // 에러는 messages가 아닌 별도 상태 → ConfirmCard('최종 확인') '뒤'에 위치해야 함
+    const cardLabel = screen.getByText('최종 확인');
+    expect(
+      cardLabel.compareDocumentPosition(errorEl) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // messages 배열에는 들어가지 않음(위에 쌓이던 기존 버그 회귀 방지)
+    expect(
+      useAgentStore.getState().messages.some((m) => m.content.includes('수정이 필요합니다')),
+    ).toBe(false);
+  });
+
+  it('검증 통과 시 실행 모드로 전환하고 에러를 표시하지 않는다', async () => {
+    mockValidateWorkflow.mockResolvedValue({ validation_status: 'passed', errors: [] });
+    await arriveAtConfirmCard();
+
+    await userEvent.click(screen.getByRole('button', { name: /저장하고 활성화/ }));
+
+    await waitFor(() => expect(useAgentStore.getState().mode).toBe('run'));
+    expect(screen.queryByText(/수정이 필요합니다/)).not.toBeInTheDocument();
   });
 });
