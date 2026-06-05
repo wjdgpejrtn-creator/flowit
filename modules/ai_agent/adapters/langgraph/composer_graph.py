@@ -53,7 +53,6 @@ from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.services.graph_validator import GraphValidator
 from pydantic import BaseModel
 from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
-from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 
 from ...domain.entities.memory_file import MemoryFile, MemoryFileRef
 from ...domain.entities.session_ref import SessionRef
@@ -97,8 +96,6 @@ class _NextAction(BaseModel):
         "ask_clarification",
         "fill_slots",
         "search_nodes",
-        "suggest_skill",
-        "use_suggested_skill",
         "draft_workflow",
         "validate_workflow",
         "evaluate_quality",
@@ -436,7 +433,6 @@ class LangGraphOrchestrator:
             "ask_clarification": self._consultant_node,
             "fill_slots":       self._slot_fill_node,
             "search_nodes":         self._retriever_node,
-
             "draft_workflow":       self._drafter_node,
             "validate_workflow": self._validator_node,
             "evaluate_quality": self._qa_evaluator_node,
