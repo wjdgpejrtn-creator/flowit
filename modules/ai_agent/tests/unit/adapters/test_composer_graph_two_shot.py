@@ -544,3 +544,68 @@ class TestSerializeResumeState:
         restored = NodeConfig.model_validate(blob["node_candidates"][0])
         assert restored.node_id == node_id
         assert restored.category == "ai"
+
+
+class TestEnsureLlmCandidate:
+    """#372 결함 A — 스킬 바인딩 대상 LLM 노드(category=="ai")를 후보에 보장."""
+
+    @pytest.mark.asyncio
+    async def test_adds_llm_node_when_absent(self):
+        oc = _build_orchestrator()
+        oc._node_registry.search = AsyncMock(return_value=[_node_config(name="gemma_chat", category="ai")])
+        out = await oc._ensure_llm_candidate([_node_config(name="email", category="action")])
+        assert any(c.category == "ai" for c in out)
+        assert len(out) == 2
+
+    @pytest.mark.asyncio
+    async def test_noop_when_search_has_no_ai_node(self):
+        oc = _build_orchestrator()
+        oc._node_registry.search = AsyncMock(return_value=[_node_config(name="x", category="action")])
+        base = [_node_config(name="email", category="action")]
+        assert await oc._ensure_llm_candidate(base) == base
+
+    @pytest.mark.asyncio
+    async def test_noop_on_search_failure(self):
+        oc = _build_orchestrator()
+        oc._node_registry.search = AsyncMock(side_effect=Exception("registry down"))
+        base = [_node_config(name="email", category="action")]
+        assert await oc._ensure_llm_candidate(base) == base
+
+
+class TestDrafterNodeSkillBinding:
+    """#372 결함 A — selected_skill_id가 있으면 drafter에 skill_selected=True + LLM 노드 보장."""
+
+    @pytest.mark.asyncio
+    async def test_passes_skill_selected_and_ensures_llm_candidate(self):
+        oc = _build_orchestrator()
+        oc._node_registry.search = AsyncMock(return_value=[_node_config(name="gemma_chat", category="ai")])
+        oc._drafter.draft = AsyncMock(return_value=_workflow([]))
+
+        await oc._drafter_node(_state(
+            selected_skill_id=uuid4(),
+            node_candidates=[_node_config(name="email", category="action")],
+            qa_attempts=0,
+        ))
+
+        kwargs = oc._drafter.draft.call_args.kwargs
+        assert kwargs["skill_selected"] is True
+        passed_candidates = oc._drafter.draft.call_args.args[1]
+        assert any(c.category == "ai" for c in passed_candidates)
+
+    @pytest.mark.asyncio
+    async def test_no_skill_selected_does_not_force_llm(self):
+        oc = _build_orchestrator()
+        oc._node_registry.search = AsyncMock(return_value=[_node_config(name="gemma_chat", category="ai")])
+        oc._drafter.draft = AsyncMock(return_value=_workflow([]))
+
+        await oc._drafter_node(_state(
+            selected_skill_id=None,
+            node_candidates=[_node_config(name="email", category="action")],
+            qa_attempts=0,
+        ))
+
+        kwargs = oc._drafter.draft.call_args.kwargs
+        assert kwargs["skill_selected"] is False
+        # LLM 노드 강제 확보 안 함 (search로 LLM 노드 끌어오지 않음)
+        passed_candidates = oc._drafter.draft.call_args.args[1]
+        assert not any(c.category == "ai" for c in passed_candidates)

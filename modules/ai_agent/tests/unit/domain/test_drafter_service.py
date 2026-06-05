@@ -323,6 +323,46 @@ class TestDrafterPersonalization:
         assert "3줄 요약" in prompt
 
 
+class TestDrafterSkillBinding:
+    """#372 결함 A — skill_selected 시 LLM 노드 포함을 drafter 프롬프트에 지시하는지."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    @pytest.mark.asyncio
+    async def test_skill_selected_injects_binding_block(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("slack")], self.owner_id, skill_selected=True,
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "SKILL BINDING" in prompt
+        assert 'category is "ai"' in prompt
+
+    @pytest.mark.asyncio
+    async def test_not_selected_leaves_prompt_unchanged(self):
+        # 기본값(skill_selected=False) → SKILL BINDING 블록 미삽입.
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "SKILL BINDING" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_composer_instructions_appended_when_present(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("slack")], self.owner_id,
+            skill_selected=True,
+            skill_composer_instructions="이 스킬은 LLM 노드 + Email 노드를 순서대로 엮어야 합니다.",
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "SKILL BINDING" in prompt
+        assert "Email 노드를 순서대로" in prompt
+
+
 class TestDrafterRefGeneration:
     """L1b — drafter가 생성한 ${node_type.field} / ${ref.field} 참조를 instance_id로 재작성."""
 

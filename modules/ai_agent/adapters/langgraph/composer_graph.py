@@ -726,30 +726,12 @@ class LangGraphOrchestrator:
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
 
-        # 커스텀 스킬 검색 — embedder + skill_search 모두 주입된 경우에만.
-        # 접근 가능 스코프(개인 본인 + 전사)를 관련성 컷과 함께 병합 검색(회사만 보던 한계 보완).
-        if self._embedder is not None and self._skill_search is not None:
-            try:
-                query_embedding = await self._embedder.embed(query)
-                skill_results = await self._skill_search.execute_accessible(
-                    query_embedding=query_embedding,
-                    user_id=state["user_id"],
-                    limit=10,
-                    max_distance=_SKILL_SEARCH_MAX_DISTANCE,
-                )
-                existing_ids = {c.node_id for c in candidates}
-                for skill in skill_results:
-                    if skill.node_definition_id is None:
-                        continue
-                    try:
-                        node_cfg = await self._node_registry.get_schema(skill.node_definition_id)
-                        if node_cfg.node_id not in existing_ids:
-                            candidates = [*candidates, node_cfg]
-                            existing_ids.add(node_cfg.node_id)
-                    except Exception:
-                        continue
-            except Exception as _skill_exc:
-                _logger.warning("skill search failed: %s", _skill_exc)
+        # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
+        # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는
+        # two-shot 경로(`_suggest_skill_select_node`)가 전담하고, 선택된 스킬은 `_drafter_node`가
+        # LLM 노드를 보장 → `_bind_skill_node`가 skill_id를 바인딩한다. 여기서 스킬 NodeDefinition을
+        # candidates에 넣으면 drafter가 스킬을 빈 껍데기 노드로 배치해(parameter_schema={}) 실행
+        # 불가 + 바인딩 대상 LLM 노드 미생성으로 이어진다(#372 재현 증상).
 
         # 개인 패턴 RAG 회수 — drafter 프롬프트 주입용(retry 루프 밖, 1회만 수행).
         personal_patterns = await self._recall_personal_patterns(state["user_id"], query)
@@ -1051,6 +1033,26 @@ class LangGraphOrchestrator:
             ],
         }
 
+    async def _ensure_llm_candidate(self, candidates: list[NodeConfig]) -> list[NodeConfig]:
+        """후보에 LLM 노드(category=="ai")가 없으면 카탈로그에서 하나 확보해 추가 (#372 결함 A).
+
+        스킬 바인딩 대상이 되는 LLM 노드를 drafter가 배치할 수 있게 보장한다. NodeRegistry는
+        타입 조회 API가 없어 의미 검색으로 찾고 category=="ai" 첫 후보를 채택한다. 못 찾으면
+        무변경(non-fatal) — drafter가 LLM 노드를 못 넣어 바인딩이 skip될 수 있으나 비차단.
+        """
+        try:
+            results = await self._node_registry.search(
+                "AI 언어모델 LLM으로 텍스트를 생성·요약·추론하는 노드", limit=5
+            )
+        except Exception as exc:
+            _logger.warning("LLM 노드 확보 검색 실패 (스킬 바인딩 대상 없을 수 있음): %s", exc)
+            return candidates
+        existing_ids = {c.node_id for c in candidates}
+        for cfg in results:
+            if getattr(cfg, "category", None) == "ai" and cfg.node_id not in existing_ids:
+                return [*candidates, cfg]
+        return candidates
+
     # 7. drafter_node — 워크플로우 초안 생성
     async def _drafter_node(self, state: _State) -> dict:
         t0 = time.monotonic()
@@ -1070,10 +1072,17 @@ class LangGraphOrchestrator:
                 prior_workflow = None
             if prior_workflow is not None:
                 candidates = await self._augment_candidates_with_prior(candidates, prior_workflow)
+        # 스킬이 선택되면(two-shot 2차) 그 지침서를 주입할 LLM 노드(category=="ai")가 반드시
+        # 필요하다 (#372 결함 A). 후보에 LLM 노드가 없으면 확보해 넣고 drafter에 포함을 지시
+        # → drafter가 LLM 노드를 배치 → `_bind_skill_node`가 skill_id를 바인딩한다.
+        skill_selected = state.get("selected_skill_id") is not None
+        if skill_selected and not any(getattr(c, "category", None) == "ai" for c in candidates):
+            candidates = await self._ensure_llm_candidate(candidates)
         try:
             workflow = await self._drafter.draft(
                 spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow,
                 personal_patterns=state.get("personal_patterns"),
+                skill_selected=skill_selected,
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:
