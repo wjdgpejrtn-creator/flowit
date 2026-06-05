@@ -15,6 +15,9 @@
     $env:PYTHONUTF8 = "1"; $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONPATH = "modules;packages/common_schemas/python"
     python -m ai_agent.tests.eval.rag_personalization.live_eval [all|seed|recall|cleanup]
+
+all/seed/recall은 자동 정리하지 않는다(검사 후 수동 정리가 의도된 설계). 동일 EVAL_USER_ID라
+재실행 시 덮어써져 누적 폭증은 없지만, 끝나면 `cleanup`으로 staging 버킷을 비워두길 권장.
 """
 from __future__ import annotations
 
@@ -25,6 +28,10 @@ import uuid
 
 from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
 from ai_agent.adapters.memory.gcs_memory_store import GCSMemoryStore
+from ai_agent.application.agents.personalization.recall_personal_skills_use_case import (
+    _DEFAULT_MIN_SCORE,
+    _DEFAULT_TOP_K,
+)
 from ai_agent.domain.entities.memory_file import MemoryFileRef
 
 from .corpus import PERSONA_CORPUS
@@ -34,8 +41,11 @@ from .scenarios import SCENARIOS, build_query
 # 전용 eval user_id (고정 — 실유저 prefix와 충돌 없음, cleanup으로 통째 삭제 가능)
 EVAL_USER_ID = uuid.uuid5(uuid.NAMESPACE_DNS, "rag-eval.gawon.personalization")
 
-TOP_K = 3
-MIN_SCORE = 0.5
+# 운영 기본값을 단일 출처(RecallPersonalSkillsUseCase)에서 그대로 가져온다.
+# 이 eval의 목적이 "운영 기본 top_k/min_score의 라이브 타당성 확인"이므로
+# 운영값이 바뀌면 eval도 자동으로 따라가야 drift("타당성 확인" misleading)를 막는다.
+TOP_K = _DEFAULT_TOP_K
+MIN_SCORE = _DEFAULT_MIN_SCORE
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -104,11 +114,16 @@ async def recall(store: GCSMemoryStore, embedder: ModalEmbeddingAdapter) -> None
 
 async def cleanup(store: GCSMemoryStore) -> None:
     print(f"\n── CLEANUP users/{EVAL_USER_ID}/ ──")
+    # index refs ∪ corpus 합집합으로 삭제 — seed가 save_index 전에 중단돼
+    # index가 비어도 corpus 기준으로 orphan .md/.emb.json까지 정리한다.
+    # (delete_file은 없는 blob에 대해 no-op이라 중복/누락 없이 안전)
     refs = await store.load_index(EVAL_USER_ID)
-    for r in refs:
-        await store.delete_file(EVAL_USER_ID, r.filename)
-        await store.delete_file(EVAL_USER_ID, f"{r.name}.emb.json")
-        print(f"  - {r.filename} (+ emb)")
+    targets = {(r.filename, r.name) for r in refs}
+    targets |= {(f.filename, f.name) for f in PERSONA_CORPUS}
+    for filename, name in sorted(targets):
+        await store.delete_file(EVAL_USER_ID, filename)
+        await store.delete_file(EVAL_USER_ID, f"{name}.emb.json")
+        print(f"  - {filename} (+ emb)")
     await store.delete_file(EVAL_USER_ID, "MEMORY.md")
     print("  - MEMORY.md")
 
@@ -125,6 +140,12 @@ async def main() -> None:
             await recall(store, embedder)
         if cmd == "cleanup":
             await cleanup(store)
+        elif cmd in ("all", "seed", "recall"):
+            # 자동 정리하지 않음(검사 후 수동 정리가 의도) — 끝나면 cleanup 권장.
+            print(
+                "\n[i] eval blob은 자동 삭제되지 않음 — 정리:"
+                " python -m ai_agent.tests.eval.rag_personalization.live_eval cleanup"
+            )
     finally:
         await embedder.aclose()
 
