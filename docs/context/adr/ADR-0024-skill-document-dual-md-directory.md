@@ -97,7 +97,7 @@ class SkillDocument(BaseModel):
 | COMPOSER.md (`composer_instructions`) | ai_agent Composer | 워크플로우 **생성** | drafter가 노드 선택/구성에 반영 (**신규** — #372 결함 A 해소) |
 
 **COMPOSER.md 로더 배선** (신규 작업의 핵심 — 신정혜): 현재 Composer에는 SkillDocument **로더가 없다**(`_skill_search`·`_embedder`만 주입 — 검색·임베딩용이지 문서 본문 로드 아님). `composer_instructions`를 읽으려면:
-1. **로더 주입** — 스코프 횡단 `GetSkillDocument`(또는 `SkillDocumentStore.load`) 유스케이스를 Composer에 주입. 선택된 `skill_id`로 COMPOSER.md 본문 회수.
+1. **로더 주입** — 스코프 횡단 `GetSkillDocument` **유스케이스**(`skills_marketplace/application/use_cases`)를 Composer에 주입. 선택된 `skill_id`로 COMPOSER.md 본문 회수. ⚠️ **`SkillDocumentStore` Port를 ai_agent가 직접 참조하지 않는다** — CLAUDE.md 교차 import상 `ai_agent → skills_marketplace`는 `application/use_cases`·`domain/value_objects`만 허용(`domain/ports` 직접은 `execution_engine` 전용). 따라서 반드시 **use case 경유**(기존 허용 경로).
 2. **drafter hook** — `DrafterService.draft(skill_composer_instructions=...)` 파라미터로 전달. **PR #376이 이 hook을 이미 준비**(personalization `personal_patterns` 주입 구조 재사용 가능).
 3. **컨테이너 배선** — `agent-composer` composition root에서 로더 주입.
 
@@ -143,6 +143,12 @@ class SkillDocument(BaseModel):
 - ⏳ PR #343 seed 5종 2-md 전환 + embedding backfill (박아름)
 - ⏳ ADR-0017 §2 "이중 저장" → 본 ADR로 부분 대체 표기 (NodeDefinition 측 폐기 반영)
 - ⏳ Q5 검증: 노드당 instructions ~2,000토큰 시 `llm-base` n_ctx/max_tokens=8192 honor 여부 — 실측 후 instructions 별도 패스 분리 필요 시 재논의
+
+**셀프 3축 리뷰 반영 (PR #377 코멘트):**
+- 🔴 **REQ-013 spec 갱신 — `SkillDocument` 필드에 `composer_instructions` 추가** (spec L59가 PR #374 0.20.0 미반영, SSOT drift) — 조장(REQ-013 spec)
+- 🔴 **REQ-013 spec 갱신 — D2 폐기로 L58/L93/L123 절 정정** (`PublishSkillUseCase`의 "staging→NodeDefinition 생성·upsert + node_definition_id 연결" / "NodeDefinition 메타=skills_marketplace 테이블" 흐름이 D2로 폐기됨) — 박아름(D2 게시측과 동시)
+- 🟡 **기존 published 스킬의 NodeDefinition 잔재 정리** — D2는 publish의 *신규* 생성만 멈추므로, 이미 `node_definitions` 카탈로그에 생성된 스킬 NodeDefinition은 남아 retriever 일반 노드 검색에 잡힐 수 있음(결함 B 잔재). 정리/마이그레이션 필요 — 박아름
+- 🟡 **CLAUDE.md 교차 import 표 검토** — COMPOSER.md 로더용 스코프 횡단 `GetSkillDocument` use case가 신규면 `ai_agent → skills_marketplace.application/use_cases`(L149) 행 예시 보강 — 신정혜 배선 시
 
 ## Alternatives Considered
 
