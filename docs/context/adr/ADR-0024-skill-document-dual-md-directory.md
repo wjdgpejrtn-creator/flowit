@@ -50,8 +50,8 @@ search_nodes(retriever) → _suggest_skill_select_node → [유저 선택] → r
 
 **폐기 범위** (단순 candidates 주입 제거로는 불충분 — 조장 지적 반영):
 1. `PublishSkillUseCase._build_node_definition` + `node_def_repo.upsert` 호출 제거 (`publish_skill_use_case.py:84-90,95-114`) — 게시 시 NodeDefinition을 더는 만들지 않는다. **embedding 생성(`:74-82`)은 유지** (skill row에 채워야 검색됨). → **박아름 (결함 B·C 중 게시 측)**.
-2. retriever(`composer_graph.py:692-698`)의 `node_definition_id` 의존(검색된 스킬→candidates 노드 변환) 제거 + 선택 스킬 LLM 노드 보장(결함 A) → **PR #376(신정혜, OPEN)에서 제거 완료** (development 미반영, 머지 대기).
-3. `SkillOption.node_definition_id`(common_schemas) 제거 또는 `skill_id`로 대체.
+2. retriever의 `node_definition_id` 의존(검색된 스킬→candidates 노드 변환) 제거 + 선택 스킬 LLM 노드 보장(결함 A) → **PR #376(황대원 선반영, OPEN)에서 제거 완료** (development 미반영, 머지 대기). *(라인 번호는 #376 머지 시 변동되는 stale 참조라 생략)*
+3. `SkillOption.node_definition_id`(common_schemas) 제거 또는 `skill_id`로 대체 → **조장 (common_schemas 영역)**. ⚠️ **D2 #1(publish NodeDefinition 생성 중단) 착수 전 선행 검증 필요**: publish가 멈추면 스킬의 `node_definition_id`가 None이 되므로, 활성 two-shot `_suggest_skill_select_node`가 옵션 제시에 그 값을 요구하지 않는지 확인해야 한다 (`SkillOption.node_definition_id`는 0.18.0에서 이미 optional이라 괜찮을 가능성 높지만 착수 전 검증 권장).
 4. `company_skills.node_definition_id` 컬럼 + `idx_*_node_def` 인덱스 → **deprecated** (nullable 유지, 신규 코드 미참조. 물리 DROP은 후속 마이그레이션).
 5. **embedding backfill**: PR #343 seed 5종은 SQL INSERT라 `embedding=NULL` → 검색 누락. seed에 embedding 채우는 backfill 필요(별도 작업, 본 ADR Follow-up).
 
@@ -110,8 +110,10 @@ class SkillDocument(BaseModel):
 | `SkillDocument.composer_instructions` 추가 (7단계 체크리스트) | common_schemas (조장) | ✅ **PR #374 머지** |
 | `GcsSkillDocumentStore` 멀티파일 save/load/delete | storage (조장) | ✅ **PR #374 머지** |
 | `_inject_skill` (SKILL.md 노드 주입, 유지) | execution_engine (조장) | ✅ 무변경(유지) |
-| retriever `node_definition_id` 의존 제거(결함 B) + 선택 스킬 LLM 노드 보장(결함 A) | ai_agent Composer (신정혜) | 🔵 **PR #376 OPEN** |
+| retriever `node_definition_id` 의존 제거(결함 B) + 선택 스킬 LLM 노드 보장(결함 A) | ai_agent Composer (**황대원 선반영 #376 · 신정혜 소유**) | 🔵 **PR #376 OPEN** |
 | COMPOSER.md 로더 주입 + drafter hook 배선(`skill_composer_instructions`) | ai_agent Composer (신정혜) | ⏳ #376 hook 준비됨, 로더 배선 잔여 |
+| `SkillOption.node_definition_id` 제거/`skill_id` 대체 (D2 #3) | common_schemas (조장) | ⏳ 대기 |
+| (선행 검증) publish NodeDef 생성 중단(D2 #1) 전 `_suggest_skill_select_node`가 옵션 제시에 `node_definition_id` 미요구 확인 (0.18.0 optional이라 likely OK) | skills_marketplace (박아름) | ⏳ D2 #1 착수 전 |
 | `PublishSkillUseCase` NodeDefinition 생성 제거 + embedding 유지(결함 B 게시측) | skills_marketplace (박아름) | ⏳ 대기 (본 ADR Accepted 후) |
 | 빌더가 SKILL.md + COMPOSER.md 2-md 합성 (추출 계약 재설계) | ai_agent skills_builder (박아름) | ⏳ 대기 |
 | `category="action"` placeholder 재검토(결함 C — D1로 자연 무의미화) | skills_marketplace (박아름) | ⏳ 대기 |
