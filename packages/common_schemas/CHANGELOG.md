@@ -7,6 +7,16 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.20.0] - 2026-06-05
+
+### Added — 스킬 지침서 묶음 (노드측 / composer측 분리, #372 결함 A·B 해소)
+- `skill_document.py` `SkillDocument`에 `composer_instructions: str = ""` 추가 — **composer측 지침서**(COMPOSER.md). ai_agent drafter가 워크플로우 생성 시 주입해 "이 스킬을 쓰려면 어떤 노드를 어떻게 엮어야 하는가"(예: LLM 노드 + Email 노드 필수)를 명시 → drafter가 LLM 노드를 포함해 바인딩 성립(#372 결함 A 해소). 기존 `instructions`(SKILL.md, **노드측** — execution_engine `_inject_skill`이 LLM 노드 system에 주입)와 소비처·시점이 완전히 분리됨.
+- `instructions: str`를 `instructions: str = ""`로 완화 — 노드 지침/composer 지침 **둘 다 optional**(#372 detail 3: composer 지침만 있는 스킬, 노드 지침만 있는 스킬 모두 허용).
+- 신규 optional 필드 + 기존 필드 완화(required→optional, 더 허용적) → MINOR. `__all__` 카운트(77) 불변(SkillDocument 기존 export). TS regenerate 완료 — `SkillDocument`에 `composer_instructions: string` 자동 반영(이 생성기는 default 있는 str도 `?` 없이 `string`으로 출력 — 기존 `instructions`와 동일 패턴).
+- 저장 계약(storage): `GcsSkillDocumentStore`가 `skills/{skill_id}/SKILL.md` + `skills/{skill_id}/COMPOSER.md`(composer_instructions 비어있지 않을 때만)로 멀티파일 저장. `save()` 반환 URI는 호출부 계약 유지를 위해 항상 SKILL.md.
+
+> ⚠️ TS `package.json` 버전이 0.15.0에 머물러 있어(이전 PR들에서 미동기화 누적) 이번에 0.20.0으로 동기화. private 패키지라 소비처는 generated 타입을 직접 import.
+
 ## [0.19.0] - 2026-06-04
 
 ### Added — credential 복수화 (멀티커넥션 노드 지원, REQ-012)
