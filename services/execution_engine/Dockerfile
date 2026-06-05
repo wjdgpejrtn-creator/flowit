@@ -30,6 +30,16 @@ RUN pip install --no-cache-dir -e /app/modules/auth
 COPY modules/storage /app/modules/storage
 RUN pip install --no-cache-dir -e /app/modules/storage
 
+# skills_marketplace — REQ-013 런타임 주입: CatalogNodeExecutor가 LLM 노드 실행 시 바인딩된
+# SkillDocument 지침서를 GcsSkillDocumentStore(storage.adapters)로 load해 system 프롬프트에
+# 주입한다. container._build_skill_document_store()가 SKILLS_MARKETPLACE_BUCKET env set 시
+# storage.adapters.gcs_skill_document_store(→ skills_marketplace.domain.ports)를 import하므로
+# worker에도 필요. 누락 시 create_container()가 ModuleNotFoundError('skills_marketplace')로
+# 죽어 **모든 워크플로우 실행이 row조차 못 남기고 크래시**한다. flat layout(setuptools find +
+# PYTHONPATH /app/modules)로 import 해결, pip install -e는 deps(common_schemas/pydantic 기설치) 정합용.
+COPY modules/skills_marketplace /app/modules/skills_marketplace
+RUN pip install --no-cache-dir -e /app/modules/skills_marketplace
+
 # doc_parser — REQ-006/009: analyze_document_task가 ParsingPipeline(7종 파서)로 문서를
 # 파싱하고, PgDocumentRepository도 doc_parser.domain.ports를 import한다. nodes_graph와 동일
 # flat layout — pip install -e는 파서 의존성(pymupdf/pdfplumber/python-docx/openpyxl/
