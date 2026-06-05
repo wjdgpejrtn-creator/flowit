@@ -245,6 +245,12 @@ function CanvasInner({ catalog, showPalette = true }: { catalog?: NodeConfig[] |
           edgeTypes={edgeTypes}
           defaultEdgeOptions={defaultEdgeOptions}
           connectionMode={ConnectionMode.Loose}
+          connectionLineStyle={{
+            stroke: 'var(--color-accent-coral)',
+            strokeWidth: 2,
+            strokeDasharray: '6 4',
+            opacity: 0.85,
+          }}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}

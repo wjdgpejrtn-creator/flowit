@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { getCatalog } from '@/lib/api/nodeApi';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import type { NodeConfig } from '@common/generated';
-import RiskPill from '@/components/common/RiskPill';
+import RiskDot from '@/components/common/RiskDot';
 
 interface SchemaField {
   name: string;
@@ -190,7 +190,7 @@ export default function NodeConfigDrawer({
         </div>
         {nodeConfig && (
           <div className="mt-1 flex items-center gap-2">
-            <RiskPill level={nodeConfig.risk_level} />
+            <RiskDot level={nodeConfig.risk_level} />
             <span className="font-mono text-[10px] text-[var(--color-ink3)] truncate">
               {nodeConfig.node_type}
             </span>
