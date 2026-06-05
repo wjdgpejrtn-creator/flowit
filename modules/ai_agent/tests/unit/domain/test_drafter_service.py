@@ -275,6 +275,54 @@ class TestDrafterConnectionExposure:
         assert "google" in prompt
 
 
+class TestDrafterPersonalization:
+    """REQ-004 개인화 배선 — RAG로 회수한 personal_patterns가 drafter 프롬프트에 주입되는지."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    @pytest.mark.asyncio
+    async def test_personal_patterns_injected_into_fresh_prompt(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        svc = DrafterService(llm)
+        await svc.draft(
+            _spec(), [_node_config("slack")], self.owner_id,
+            personal_patterns=["[알림 선호] Slack 알림은 항상 #automation 채널로 보낸다"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "USER PATTERNS" in prompt
+        assert "#automation" in prompt
+
+    @pytest.mark.asyncio
+    async def test_no_patterns_leaves_prompt_unchanged(self):
+        # 개인 패턴 없음(기본값) → USER PATTERNS 블록 미삽입(개인화 미적용 시 무영향).
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "USER PATTERNS" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_personal_patterns_injected_into_edit_prompt(self):
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        llm = _mock_llm(_EditResponse(
+            name="W",
+            nodes=[_EditNodeDraft(ref="n0", node_type="http"), _EditNodeDraft(ref="n1", node_type="slack")],
+            connections=[_EditEdgeDraft(from_ref="n0", to_ref="n1")],
+        ))
+        svc = DrafterService(llm)
+        await svc.draft(
+            _spec(), [cfg_a, cfg_b], self.owner_id, prior_workflow=prior,
+            personal_patterns=["[요약 선호] 보고서는 한국어로 3줄 요약"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert _EDIT_SYSTEM_PROMPT in prompt
+        assert "USER PATTERNS" in prompt
+        assert "3줄 요약" in prompt
+
+
 class TestDrafterRefGeneration:
     """L1b — drafter가 생성한 ${node_type.field} / ${ref.field} 참조를 instance_id로 재작성."""
 

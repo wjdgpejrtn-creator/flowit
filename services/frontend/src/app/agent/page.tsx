@@ -497,6 +497,9 @@ function AgentPageContent() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
+  // 컨펌 게이트 저장 검증 실패 피드백 — messages에 넣으면 ConfirmCard보다 먼저 렌더돼
+  // 카드 위에 표시되는 버그(#368). 별도 상태로 분리해 ConfirmCard '아래'에 렌더한다.
+  const [saveError, setSaveError] = useState<string | null>(null);
   // two-shot 스킬 선택 카드 (skill_selection 프레임 수신 시 표시, REQ-013)
   const [skillSelection, setSkillSelection] = useState<{
     prompt: string;
@@ -590,6 +593,7 @@ function AgentPageContent() {
 
   const handleSave = async () => {
     if (!readyToExecute) return;
+    setSaveError(null);
     try {
       const result = await validateWorkflow(readyToExecute.workflowId);
       if (result.validation_status === 'passed') {
@@ -600,20 +604,12 @@ function AgentPageContent() {
           .map((e) => e.hint ?? e.message)
           .filter(Boolean)
           .join(', ');
-        addMessage({
-          id: `a${Date.now()}`,
-          role: 'agent',
-          content: `워크플로우가 저장되었습니다. 실행하기 위해서는 편집 탭에서 ${errorList || '검증 오류'} 부분 수정이 필요합니다.`,
-          timestamp: Date.now(),
-        });
+        setSaveError(
+          `워크플로우가 저장되었습니다. 실행하기 위해서는 편집 탭에서 ${errorList || '검증 오류'} 부분 수정이 필요합니다.`,
+        );
       }
     } catch {
-      addMessage({
-        id: `a${Date.now()}`,
-        role: 'agent',
-        content: '워크플로우 검증 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
-        timestamp: Date.now(),
-      });
+      setSaveError('워크플로우 검증 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
     }
   };
 
@@ -709,6 +705,7 @@ function AgentPageContent() {
       // 오면 다시 채워진다. session_id·messages는 보존해 대화 맥락을 잇는다.
       setReadyToExecute(null);
       setLoadedWorkflow(null);
+      setSaveError(null);  // 카드가 사라지므로 이전 저장 검증 피드백도 함께 해제
     }
 
     abortRef.current?.abort();
@@ -849,6 +846,7 @@ function AgentPageContent() {
     setSkillSelection(null);
     setLoadedWorkflow(null);
     setViewingSession(null);
+    setSaveError(null);
     autoSentRef.current = false;
     setMode('wizard');
   };
@@ -1027,13 +1025,21 @@ function AgentPageContent() {
                         </AiTurn>
                       )}
                       {readyToExecute && (
-                        <ConfirmCard
-                          message={readyToExecute.message}
-                          explanation={readyToExecute.explanation}
-                          filledParams={filledParams}
-                          onSave={handleSave}
-                          onEdit={() => setMode('edit')}
-                        />
+                        <>
+                          <ConfirmCard
+                            message={readyToExecute.message}
+                            explanation={readyToExecute.explanation}
+                            filledParams={filledParams}
+                            onSave={handleSave}
+                            onEdit={() => setMode('edit')}
+                          />
+                          {/* 저장 검증 실패 피드백 — 카드 '아래'에 표시(#368) */}
+                          {saveError && (
+                            <AiTurn>
+                              <p>{saveError}</p>
+                            </AiTurn>
+                          )}
+                        </>
                       )}
                       {skillSelection && !streaming && (
                         <SkillSelectionCard
