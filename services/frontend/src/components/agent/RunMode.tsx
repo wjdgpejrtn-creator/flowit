@@ -7,6 +7,7 @@ import { getCatalog } from '@/lib/api/nodeApi';
 import {
   executeWorkflow,
   cancelExecution,
+  pauseExecution,
   resumeExecution,
   getLatestExecution,
   type WorkflowLatestExecution,
@@ -20,9 +21,10 @@ import type { NodeConfig } from '@common/generated';
  * execution 진행 상황 전용 SSE는 없으므로 `getLatestExecution(workflowId)`를 2.5초
  * 간격으로 polling한다(status가 pending/running/paused인 동안). 노드 카드 상태는
  * node_results(node_instance_id → status)를, 노드 메타(이름/리스크/서비스)는 노드
- * 카탈로그를 워크플로우 정의와 대조해 만든다. 컨트롤(실행/취소/재개)은 모두 실제 API.
+ * 카탈로그를 워크플로우 정의와 대조해 만든다. 컨트롤(실행/일시정지/취소/재개)은 모두 실제 API.
  *
- * pause 엔드포인트는 백엔드에 없으므로(cancel/resume만 노출) 일시정지 버튼은 두지 않는다.
+ * 일시정지는 협조적 — worker가 다음 step 경계에서 PAUSED를 감지해 멈추고, 재개는
+ * 완료된 step을 건너뛰고 이어 실행한다(ADR-0025, REQ-007).
  */
 
 type NodeState = 'pending' | 'running' | 'succeeded' | 'failed' | 'retrying' | 'cancelled' | 'skipped';
@@ -292,6 +294,7 @@ export default function RunMode() {
   const execId = latest?.execution_id ?? activeExecutionId ?? null;
   const execStatus = preparing ? 'preparing' : latest?.status ?? (activeExecutionId ? 'preparing' : 'idle');
   const isActive = execStatus === 'preparing' || ACTIVE_STATUSES.has(execStatus);
+  const isRunning = execStatus === ExecutionStatus.RUNNING;
   const isPaused = execStatus === ExecutionStatus.PAUSED;
   const isFinished = !isActive && execStatus !== 'idle';
 
@@ -351,6 +354,20 @@ export default function RunMode() {
     }
   }, [execId]);
 
+  const handlePause = useCallback(async () => {
+    if (!execId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await pauseExecution(execId);
+      setPollTrigger((n) => n + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '일시정지 요청 실패');
+    } finally {
+      setBusy(false);
+    }
+  }, [execId]);
+
   const handleResume = useCallback(async () => {
     if (!execId) return;
     setBusy(true);
@@ -395,11 +412,23 @@ export default function RunMode() {
           </div>
         </div>
         <div className="flex items-center space-x-2 flex-shrink-0">
+          {isRunning && (
+            <button
+              type="button"
+              onClick={() => void handlePause()}
+              disabled={busy || !execId}
+              title="실행을 일시정지합니다 (현재 단계 완료 후 멈춤)"
+              className="px-3 py-1.5 rounded-lg text-xs font-bold text-ink3 border border-line-soft hover:bg-paper disabled:opacity-50"
+            >
+              ⏸ 일시정지
+            </button>
+          )}
           {isPaused && (
             <button
               type="button"
               onClick={() => void handleResume()}
               disabled={busy}
+              title="완료된 단계는 건너뛰고 이어서 실행합니다"
               className="px-3 py-1.5 rounded-lg text-xs font-bold text-ink3 border border-line-soft hover:bg-paper disabled:opacity-50"
             >
               ▶ 재개

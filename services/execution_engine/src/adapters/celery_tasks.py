@@ -3,12 +3,21 @@ from __future__ import annotations
 from uuid import UUID
 
 from celery import shared_task
+from common_schemas.broker_tasks import (
+    TASK_CANCEL_EXECUTION,
+    TASK_EXECUTE_NODE,
+    TASK_EXECUTE_WORKFLOW,
+    TASK_HANDLE_HANDOFF,
+    TASK_LEVEL_CALLBACK,
+    TASK_PAUSE_EXECUTION,
+    TASK_RESUME_EXECUTION,
+)
 
 from ..domain.entities.execution_context import ExecutionContext
 
 
 @shared_task(
-    name="execution_engine.execute_workflow",
+    name=TASK_EXECUTE_WORKFLOW,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -35,7 +44,7 @@ def execute_workflow_task(self, workflow_id: str, context_data: dict) -> dict:
 
 
 @shared_task(
-    name="execution_engine.cancel_execution",
+    name=TASK_CANCEL_EXECUTION,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -65,7 +74,37 @@ def cancel_execution_task(self, execution_id: str) -> dict:
 
 
 @shared_task(
-    name="execution_engine.resume_execution",
+    name=TASK_PAUSE_EXECUTION,
+    bind=True,
+    max_retries=0,
+    acks_late=True,
+)
+def pause_execution_task(self, execution_id: str) -> dict:
+    from common_schemas.exceptions import DomainError
+
+    from ..dependencies.container import create_container
+
+    container = create_container()
+    use_case = container.pause_resume_use_case
+    try:
+        use_case.execute(UUID(execution_id), action="pause")
+    except DomainError as exc:
+        # 도메인 계층 오류(이미 종료된 execution을 pause / 존재하지 않는 execution 등)는
+        # 사용자 입력 범주 → graceful skip. 비-DomainError 예외는 그대로 전파.
+        # (cancel_execution_task 참고)
+        return {
+            "execution_id": execution_id,
+            "action": "pause",
+            "status": "skipped",
+            "reason": str(exc),
+        }
+    # status만 PAUSED로 전환 — 실행 중인 worker 루프가 step 경계에서 재조회 후
+    # 협조적으로 중단한다(REQ-007 resumable 실행, ADR-0025).
+    return {"execution_id": execution_id, "action": "pause", "status": "paused"}
+
+
+@shared_task(
+    name=TASK_RESUME_EXECUTION,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -93,7 +132,7 @@ def resume_execution_task(self, execution_id: str) -> dict:
 
 
 @shared_task(
-    name="execution_engine.execute_node",
+    name=TASK_EXECUTE_NODE,
     bind=True,
     max_retries=3,
     acks_late=True,
@@ -127,7 +166,7 @@ def execute_node_task(
 
 
 @shared_task(
-    name="execution_engine.handle_handoff",
+    name=TASK_HANDLE_HANDOFF,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -145,7 +184,7 @@ def handle_handoff_task(self, payload_data: dict) -> dict:
     return result.model_dump(mode="json")
 
 
-@shared_task(name="execution_engine.level_callback", bind=True)
+@shared_task(name=TASK_LEVEL_CALLBACK, bind=True)
 def level_callback_task(self, results: list[dict], execution_id: str) -> dict:
     return {
         "execution_id": execution_id,
