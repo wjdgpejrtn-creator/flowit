@@ -206,6 +206,8 @@ class DrafterService:
         owner_user_id: UUID,
         prior_workflow: WorkflowSchema | None = None,
         personal_patterns: list[str] | None = None,
+        skill_selected: bool = False,
+        skill_composer_instructions: str | None = None,
     ) -> WorkflowSchema:
         """워크플로우 초안 생성. ``prior_workflow``가 주어지면(대화형 refine) 처음부터
         재생성하지 않고 그 워크플로우를 편집 컨텍스트로 주어 지시한 부분만 수정한다.
@@ -214,6 +216,12 @@ class DrafterService:
         ``personal_patterns``(RAG로 회수한 사용자 과거 패턴 본문)가 주어지면 시스템
         프롬프트에 "사용자 패턴" 블록으로 주입해, 이 사용자의 확립된 선호(예: 알림 채널,
         요약 언어/형식)가 이번 요청과 관련 있을 때 초안에 반영되게 한다(REQ-004 개인화 배선).
+
+        ``skill_selected``가 True면(two-shot 스킬 선택) 그 스킬을 바인딩할 LLM 노드
+        (category=="ai")를 반드시 포함하도록 프롬프트에 지시한다(#372 결함 A — 스킬은 LLM
+        노드 system 프롬프트에 주입되는 지침서라 주입 대상 LLM 노드가 없으면 바인딩 불가).
+        ``skill_composer_instructions``(COMPOSER.md 본문, 선택)가 주어지면 어떤 노드를 어떻게
+        엮을지 구체 지침으로 함께 주입한다(미주어지면 LLM 노드 포함 기준선만 지시).
         """
         catalog = [
             {
@@ -233,6 +241,7 @@ class DrafterService:
         )
         catalog_json = json.dumps(catalog, ensure_ascii=False)
         patterns_block = self._personal_patterns_block(personal_patterns)
+        binding_block = self._skill_binding_block(skill_selected, skill_composer_instructions)
         # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
         # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
         if prior_workflow is not None:
@@ -241,6 +250,7 @@ class DrafterService:
                 edit_prompt = (
                     _EDIT_SYSTEM_PROMPT
                     + patterns_block
+                    + binding_block
                     + f"\nDraftSpec: {spec_json}"
                     + f"\nAvailable nodes: {catalog_json}"
                     + f"\nCURRENT WORKFLOW: {json.dumps(current, ensure_ascii=False)}"
@@ -252,7 +262,11 @@ class DrafterService:
                 return self._build_from_edit(edit_resp, candidates, owner_user_id)
 
         prompt = (
-            _SYSTEM_PROMPT + patterns_block + f"\nDraftSpec: {spec_json}" + f"\nAvailable nodes: {catalog_json}"
+            _SYSTEM_PROMPT
+            + patterns_block
+            + binding_block
+            + f"\nDraftSpec: {spec_json}"
+            + f"\nAvailable nodes: {catalog_json}"
         )
         try:
             draft_resp = await self._llm.generate_structured(prompt, _DraftResponse)
@@ -278,6 +292,31 @@ class DrafterService:
             "do not fit, and NEVER add a node solely to satisfy a pattern):\n"
             f"{joined}\n"
         )
+
+    @staticmethod
+    def _skill_binding_block(skill_selected: bool, composer_instructions: str | None) -> str:
+        """선택된 스킬 바인딩을 위해 LLM 노드 포함을 drafter에 지시하는 프롬프트 블록 (#372 결함 A).
+
+        스킬(모델 A)은 LLM 노드 system 프롬프트에 주입되는 도메인 지침서이므로, 스킬이 선택되면
+        주입 대상 LLM 노드(category=="ai")가 워크플로우에 반드시 있어야 바인딩이 성립한다(없으면
+        `_bind_skill_node`가 대상을 못 찾아 skip). composer_instructions(COMPOSER.md 본문, 선택)가
+        주어지면 노드 구성 구체 지침으로 함께 주입한다(미주어지면 LLM 노드 포함 기준선만 지시).
+        """
+        if not skill_selected:
+            return ""
+        block = (
+            "\nSKILL BINDING (a reusable skill will be bound to this workflow): you MUST include "
+            'exactly one LLM node (a node whose category is "ai" in the available nodes) as the '
+            "core reasoning/generation step and wire it into the flow. The skill's domain "
+            "instructions are injected into that LLM node's system prompt at runtime — without an "
+            "LLM node the skill cannot bind.\n"
+        )
+        if composer_instructions:
+            block += (
+                "Composition requirements from the selected skill (follow these when choosing and "
+                f"wiring nodes):\n{composer_instructions}\n"
+            )
+        return block
 
     @staticmethod
     def _serialize_for_edit(
