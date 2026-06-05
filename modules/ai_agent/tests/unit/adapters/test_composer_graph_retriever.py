@@ -205,3 +205,85 @@ class TestRetrieverNodeSkillSearch:
         result = await oc._retriever_node(_make_state())
         skill_search.execute_accessible.assert_not_called()
         assert len(result["node_candidates"]) == 1
+
+
+class TestRetrieverPersonalRecall:
+    """REQ-004 개인화 배선 — retriever가 RAG로 사용자 패턴을 회수해 state에 싣는다."""
+
+    def _orchestrator(self, embedder, personal_memory_store):
+        from nodes_graph.domain.services.graph_validator import GraphValidator
+
+        node_registry = AsyncMock(spec=NodeRegistry)
+        node_registry.search = AsyncMock(return_value=[_node_config(name="slack_trigger")])
+        return LangGraphOrchestrator(
+            intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
+            drafter=AsyncMock(spec=DrafterService),
+            qa_evaluator=AsyncMock(spec=QAEvaluatorService),
+            slot_filler=SlotFillingService(),
+            node_registry=node_registry,
+            workflow_repo=AsyncMock(spec=WorkflowRepository),
+            graph_validator=AsyncMock(spec=GraphValidator),
+            embedder=embedder,
+            skill_search=None,  # 스킬 검색은 끄고 개인 회수만 검증
+            personal_memory_store=personal_memory_store,
+        )
+
+    def _store_returning(self, body: str, vec: list[float]):
+        from ai_agent.domain.entities.memory_file import MemoryFile, MemoryFileRef
+
+        store = AsyncMock()
+        store.load_index = AsyncMock(
+            return_value=[MemoryFileRef(name="p1", filename="p1.md", description="알림 선호")]
+        )
+        store.load_embedding = AsyncMock(return_value=vec)
+        store.load_file = AsyncMock(
+            return_value=MemoryFile(
+                filename="p1.md", name="p1", description="알림 선호",
+                memory_type="user", body=body,
+            )
+        )
+        return store
+
+    @pytest.mark.asyncio
+    async def test_recalled_patterns_populate_state_and_emit_frame(self):
+        from common_schemas.transport import RationaleDeltaFrame
+
+        vec = [0.1] * 768  # query·file 동일 벡터 → 코사인 1.0 ≥ min_score(0.5)
+        embedder = AsyncMock()
+        embedder.embed = AsyncMock(return_value=vec)
+        store = self._store_returning("Slack 알림은 항상 #automation 채널로", vec)
+
+        oc = self._orchestrator(embedder, store)
+        result = await oc._retriever_node(_make_state())
+
+        assert result["personal_patterns"]
+        assert "#automation" in result["personal_patterns"][0]
+        assert any(
+            isinstance(f, RationaleDeltaFrame) and "패턴" in f.delta
+            for f in result["collected_frames"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_store_yields_empty_patterns_no_frame(self):
+        from common_schemas.transport import RationaleDeltaFrame
+
+        oc = self._orchestrator(embedder=None, personal_memory_store=None)
+        result = await oc._retriever_node(_make_state())
+        assert result["personal_patterns"] == []
+        assert not any(
+            isinstance(f, RationaleDeltaFrame) and "패턴" in f.delta
+            for f in result["collected_frames"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_recall_failure_is_non_fatal(self):
+        embedder = AsyncMock()
+        embedder.embed = AsyncMock(side_effect=Exception("embedding 서버 오류"))
+        store = self._store_returning("무시될 본문", [0.1] * 768)
+
+        oc = self._orchestrator(embedder, store)
+        result = await oc._retriever_node(_make_state())
+        # 회수 실패해도 노드 후보는 정상 + 개인 패턴만 비어 반환
+        assert result.get("error") is None
+        assert result["personal_patterns"] == []
+        assert len(result["node_candidates"]) == 1
