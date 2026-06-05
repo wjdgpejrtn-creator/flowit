@@ -128,6 +128,14 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
     }
   }, [execution, preparing]);
 
+  // 언마운트 시 실행-준비 폴백 타이머 정리 (실행 직후 30s 내 페이지 이탈 시
+  // unmounted setState 경고 방지, #385 리뷰 LOW).
+  useEffect(() => {
+    return () => {
+      if (runFallbackRef.current) clearTimeout(runFallbackRef.current);
+    };
+  }, []);
+
   // live 경과 시간
   useEffect(() => {
     if (mode === 'edit') return;

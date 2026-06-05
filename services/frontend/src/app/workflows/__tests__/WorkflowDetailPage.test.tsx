@@ -9,6 +9,7 @@ import {
   pauseExecution,
   type WorkflowLatestExecution,
 } from '../../../lib/api/workflowApi';
+import { ExecutionStatus } from '@common/generated';
 import type { WorkflowSchema } from '@common/generated';
 
 // ReactFlow는 jsdom에서 렌더 불가 — 스텁.
@@ -88,7 +89,7 @@ describe('WorkflowDetailPage 실행/재개 버튼', () => {
   });
 
   it('완료된 실행이면 ↻ 다시 실행 버튼을 노출한다', async () => {
-    mockGetLatest.mockResolvedValue(exec('completed'));
+    mockGetLatest.mockResolvedValue(exec(ExecutionStatus.COMPLETED));
 
     render(<WorkflowDetailPage params={{ id: 'wf-1' }} />);
 
@@ -97,7 +98,7 @@ describe('WorkflowDetailPage 실행/재개 버튼', () => {
   });
 
   it('일시정지 상태면 ▶ 재개 버튼을 노출하고 클릭 시 resumeExecution을 호출한다', async () => {
-    mockGetLatest.mockResolvedValue(exec('paused'));
+    mockGetLatest.mockResolvedValue(exec(ExecutionStatus.PAUSED));
     mockResume.mockResolvedValue({ execution_id: 'exec-1', action: 'resume', task_id: 't-1' });
 
     render(<WorkflowDetailPage params={{ id: 'wf-1' }} />);
@@ -109,7 +110,7 @@ describe('WorkflowDetailPage 실행/재개 버튼', () => {
   });
 
   it('실행 중이면 ⏸ 일시정지 버튼을 노출하고 클릭 시 pauseExecution을 호출한다', async () => {
-    mockGetLatest.mockResolvedValue(exec('running'));
+    mockGetLatest.mockResolvedValue(exec(ExecutionStatus.RUNNING));
     mockPause.mockResolvedValue({ execution_id: 'exec-1', action: 'pause', task_id: 't-1' });
 
     render(<WorkflowDetailPage params={{ id: 'wf-1' }} />);
