@@ -3,11 +3,16 @@ from __future__ import annotations
 from uuid import UUID
 
 from common_schemas import NodeConfig
+from nodes_graph.application.executable_node_types import EXECUTABLE_NODE_TYPES
 from nodes_graph.domain.entities.node_definition import NodeDefinition
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRepository
 
 from ..domain.ports.node_registry import NodeRegistry
+
+# search()가 실행 불가 후보를 거른 뒤에도 limit을 채우도록 넉넉히 당겨온다(과거 게시 스킬
+# NodeDefinition 오염 등 비실행 항목이 top-k를 잠식하는 경우 대비, #378).
+_OVERFETCH_FACTOR = 4
 
 
 class NodeRegistryAdapter(NodeRegistry):
@@ -27,8 +32,13 @@ class NodeRegistryAdapter(NodeRegistry):
 
     async def search(self, query: str, limit: int = 10) -> list[NodeConfig]:
         embedding = await self._embedder.embed(query)
-        definitions = await self._repo.search_by_embedding(embedding, limit=limit)
-        return [self._to_config(d) for d in definitions]
+        # 실행 불가 node_type(예: 과거 게시 스킬이 카탈로그에 남긴 도메인 NodeDefinition)은
+        # drafter가 쓰면 실행 시 "카탈로그 미등록 node_type"으로 실패한다(#378). 그라운딩 가드:
+        # 실행 클래스가 있는 node_type만 후보로 통과시킨다. 거른 뒤에도 limit을 채우도록
+        # over-fetch 후 slice.
+        definitions = await self._repo.search_by_embedding(embedding, limit=limit * _OVERFETCH_FACTOR)
+        executable = [d for d in definitions if d.node_type in EXECUTABLE_NODE_TYPES]
+        return [self._to_config(d) for d in executable[:limit]]
 
     async def get_schema(self, node_id: UUID) -> NodeConfig:
         definition = await self._repo.get_by_id(node_id)
