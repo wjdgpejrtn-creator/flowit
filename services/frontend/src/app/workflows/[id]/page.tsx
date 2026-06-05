@@ -12,6 +12,7 @@ import WorkflowEditPane from '@/components/workflow/WorkflowEditPane';
 import {
   getLatestExecution,
   cancelExecution,
+  pauseExecution,
   resumeExecution,
   type WorkflowLatestExecution,
   type NodeResultEntry,
@@ -133,6 +134,20 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
     }
   };
 
+  const handlePause = async () => {
+    if (!execution) return;
+    setControlBusy(true);
+    setControlError(null);
+    try {
+      await pauseExecution(execution.execution_id);
+      void fetchExecution();
+    } catch (e) {
+      setControlError(e instanceof Error ? e.message : '일시정지 실패');
+    } finally {
+      setControlBusy(false);
+    }
+  };
+
   const handleResume = async () => {
     if (!execution) return;
     setControlBusy(true);
@@ -233,7 +248,27 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
   const workflowName = workflow?.name ?? (wfLoading ? '' : '워크플로우');
   const execStatus = execution?.status ?? 'pending';
   const isActive = execution && ACTIVE_STATUSES.has(execution.status);
+  const isRunning = execution?.status === 'running';
   const isPaused = execution?.status === 'paused';
+
+  // 버튼 disabled 사유 툴팁 — 무반응처럼 보이지 않도록 이유를 명시 (#364).
+  const pauseTitle = !execution
+    ? '실행 중인 워크플로우가 없습니다'
+    : isRunning
+      ? '실행을 일시정지합니다 (현재 단계 완료 후 멈춤)'
+      : isPaused
+        ? '이미 일시정지 상태입니다'
+        : '실행 중일 때만 일시정지할 수 있습니다';
+  const resumeTitle = !execution
+    ? '실행 중인 워크플로우가 없습니다'
+    : isPaused
+      ? '완료된 단계는 건너뛰고 이어서 실행합니다'
+      : '일시정지 상태일 때만 재개할 수 있습니다';
+  const cancelTitle = !execution
+    ? '실행 중인 워크플로우가 없습니다'
+    : isActive
+      ? '실행을 취소합니다'
+      : '진행 중인 실행이 없습니다';
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
@@ -265,10 +300,13 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
 
         {mode === 'view' ? (
           <>
-            <Btn ghost onClick={handleResume} disabled={!isPaused || controlBusy}>
+            <Btn ghost onClick={handlePause} disabled={!isRunning || controlBusy} title={pauseTitle}>
+              ⏸ 일시정지
+            </Btn>
+            <Btn ghost onClick={handleResume} disabled={!isPaused || controlBusy} title={resumeTitle}>
               ▶ 재개
             </Btn>
-            <Btn danger onClick={handleCancel} disabled={!isActive || controlBusy}>
+            <Btn danger onClick={handleCancel} disabled={!isActive || controlBusy} title={cancelTitle}>
               ⏹ 취소
             </Btn>
             <Btn primary onClick={handleToggleMode} disabled={!workflow}>

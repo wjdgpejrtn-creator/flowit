@@ -18,6 +18,7 @@ from __future__ import annotations
 # REQ-007 execution_engine task names
 TASK_EXECUTE_WORKFLOW: str = "execution_engine.execute_workflow"
 TASK_CANCEL_EXECUTION: str = "execution_engine.cancel_execution"
+TASK_PAUSE_EXECUTION: str = "execution_engine.pause_execution"
 TASK_RESUME_EXECUTION: str = "execution_engine.resume_execution"
 TASK_EXECUTE_NODE: str = "execution_engine.execute_node"
 TASK_HANDLE_HANDOFF: str = "execution_engine.handle_handoff"
