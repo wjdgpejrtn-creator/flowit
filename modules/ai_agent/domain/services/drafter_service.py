@@ -208,6 +208,7 @@ class DrafterService:
         personal_patterns: list[str] | None = None,
         skill_selected: bool = False,
         skill_composer_instructions: str | None = None,
+        retry_feedback: str | None = None,
     ) -> WorkflowSchema:
         """워크플로우 초안 생성. ``prior_workflow``가 주어지면(대화형 refine) 처음부터
         재생성하지 않고 그 워크플로우를 편집 컨텍스트로 주어 지시한 부분만 수정한다.
@@ -222,6 +223,10 @@ class DrafterService:
         노드 system 프롬프트에 주입되는 지침서라 주입 대상 LLM 노드가 없으면 바인딩 불가).
         ``skill_composer_instructions``(COMPOSER.md 본문, 선택)가 주어지면 어떤 노드를 어떻게
         엮을지 구체 지침으로 함께 주입한다(미주어지면 LLM 노드 포함 기준선만 지시).
+
+        ``retry_feedback``(validate/QA 실패 후 재시도 시, 선택)가 주어지면 별도 블록으로
+        주입해 다음 초안을 교정한다. **`spec.natural_language_intent`에 섞지 않는다** — 그러면
+        피드백 영어 텍스트가 워크플로우 이름/설명으로 누출되기 때문(#378 부차 — UI 누출).
         """
         catalog = [
             {
@@ -242,6 +247,7 @@ class DrafterService:
         catalog_json = json.dumps(catalog, ensure_ascii=False)
         patterns_block = self._personal_patterns_block(personal_patterns)
         binding_block = self._skill_binding_block(skill_selected, skill_composer_instructions)
+        retry_block = self._retry_feedback_block(retry_feedback)
         # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
         # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
         if prior_workflow is not None:
@@ -251,6 +257,7 @@ class DrafterService:
                     _EDIT_SYSTEM_PROMPT
                     + patterns_block
                     + binding_block
+                    + retry_block
                     + f"\nDraftSpec: {spec_json}"
                     + f"\nAvailable nodes: {catalog_json}"
                     + f"\nCURRENT WORKFLOW: {json.dumps(current, ensure_ascii=False)}"
@@ -265,6 +272,7 @@ class DrafterService:
             _SYSTEM_PROMPT
             + patterns_block
             + binding_block
+            + retry_block
             + f"\nDraftSpec: {spec_json}"
             + f"\nAvailable nodes: {catalog_json}"
         )
@@ -291,6 +299,22 @@ class DrafterService:
             "notification channel, summary language, or output format. Ignore patterns that "
             "do not fit, and NEVER add a node solely to satisfy a pattern):\n"
             f"{joined}\n"
+        )
+
+    @staticmethod
+    def _retry_feedback_block(retry_feedback: str | None) -> str:
+        """validate/QA 실패 후 재시도 교정 피드백을 시스템 프롬프트 주입용 블록으로.
+
+        피드백이 없으면 빈 문자열. **`natural_language_intent`와 분리**해 두므로 이 텍스트가
+        워크플로우 이름/설명으로 새지 않는다(#378 부차 — UI 누출 차단). 직전 시도가 왜
+        미달했는지를 알려 다음 초안을 고치게 하되, 워크플로우 산출물에는 노출되지 않는다.
+        """
+        if not retry_feedback:
+            return ""
+        return (
+            "\nRETRY FEEDBACK (the previous draft failed validation/QA — fix these issues in "
+            "this attempt; this is internal guidance, do NOT echo it into the workflow name or "
+            f"description):\n{retry_feedback}\n"
         )
 
     @staticmethod
