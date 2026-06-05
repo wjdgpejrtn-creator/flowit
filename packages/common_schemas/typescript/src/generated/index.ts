@@ -520,6 +520,7 @@ export interface SkillDocument {
   name: string;
   description: string;
   instructions: string;
+  composer_instructions: string;
   scripts: Array<Record<string, unknown>>;
   templates: Array<Record<string, unknown>>;
 }
