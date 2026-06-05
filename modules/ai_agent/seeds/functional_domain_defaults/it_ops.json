@@ -115,8 +115,8 @@
         }
       },
       "risk_level": "Restricted",
-      "required_connections": ["google"],
-      "service_type": "google_workspace"
+      "required_connections": [],
+      "service_type": null
     },
     {
       "node_type": "it_ops_meeting_room_provision",

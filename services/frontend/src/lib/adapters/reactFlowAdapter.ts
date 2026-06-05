@@ -30,9 +30,18 @@ export function toReactFlowNode(instance: NodeInstance): RFNode {
   };
 }
 
+// 엣지 단일 식별자. 같은 노드쌍에 핸들만 다른 병렬 엣지가 공존할 수 있어(addEdge 가
+// 핸들까지 비교해 dedupe) 노드쌍만으론 선택·삭제 대상이 모호해진다 → 핸들까지 포함한다.
+// React Flow id ↔ 스키마 엣지 매칭의 단일 소스(스토어 removeEdge·캔버스 rfEdges 공용).
+export function buildEdgeId(
+  edge: Pick<SchemaEdge, 'from_instance_id' | 'to_instance_id' | 'from_handle' | 'to_handle'>,
+): string {
+  return `${edge.from_instance_id}|${edge.from_handle ?? ''}->${edge.to_instance_id}|${edge.to_handle ?? ''}`;
+}
+
 export function toReactFlowEdge(edge: SchemaEdge): RFEdge {
   return {
-    id: `${edge.from_instance_id}-${edge.to_instance_id}`,
+    id: buildEdgeId(edge),
     source: edge.from_instance_id,
     target: edge.to_instance_id,
     sourceHandle: resolveSourceHandle(edge.from_handle),

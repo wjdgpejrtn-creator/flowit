@@ -15,6 +15,8 @@ export interface FilledField {
   name: string;
   value: string;
   tag: FillTag;
+  /** 카탈로그 input_schema의 필드 설명 — 사용자가 값의 의미를 알도록 (없으면 생략) */
+  description?: string;
 }
 
 export interface FilledNode {
@@ -24,6 +26,7 @@ export interface FilledNode {
 
 interface SchemaProp {
   default?: unknown;
+  description?: string;
 }
 
 function parseSchema(input: unknown): { required: Set<string>; props: Record<string, SchemaProp> } {
@@ -91,7 +94,8 @@ export function computeFilledParams(
       else if ((isReq || has) && isPlaceholder(v)) tag = 'review';
       else if (isReq && has) tag = 'normal';
       if (tag === null) continue;
-      fields.push({ name: key, value: displayValue(v), tag });
+      const desc = typeof prop.description === 'string' && prop.description.trim() !== '' ? prop.description : undefined;
+      fields.push({ name: key, value: displayValue(v), tag, description: desc });
     }
     if (fields.length > 0) out.push({ nodeName: cfg.name, fields });
   }

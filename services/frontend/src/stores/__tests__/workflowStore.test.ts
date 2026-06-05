@@ -1,4 +1,5 @@
 import { useWorkflowStore } from '../workflowStore';
+import { buildEdgeId } from '@/lib/adapters/reactFlowAdapter';
 import type { WorkflowSchema, NodeInstance, Edge } from '@common/generated';
 
 function makeNode(id: string, x = 0, y = 0): NodeInstance {
@@ -7,6 +8,7 @@ function makeNode(id: string, x = 0, y = 0): NodeInstance {
     node_id: 'node-type-uuid',
     parameters: {},
     credential_id: null,
+    credential_ids: {},
     position: { x, y },
   };
 }
@@ -120,9 +122,19 @@ describe('addEdge', () => {
 describe('removeEdge', () => {
   it('removes the matching edge and marks dirty', () => {
     useWorkflowStore.getState().setWorkflow(BASE);
-    useWorkflowStore.getState().removeEdge('n-1', 'n-2');
+    useWorkflowStore.getState().removeEdge(buildEdgeId(makeEdge('n-1', 'n-2')));
     expect(useWorkflowStore.getState().workflow?.connections).toHaveLength(0);
     expect(useWorkflowStore.getState().dirty).toBe(true);
+  });
+
+  it('removes only the targeted parallel edge (same node pair, different handles)', () => {
+    const e1: Edge = { from_instance_id: 'n-1', to_instance_id: 'n-2', from_handle: 'right', to_handle: 'left' };
+    const e2: Edge = { from_instance_id: 'n-1', to_instance_id: 'n-2', from_handle: 'bottom', to_handle: 'top' };
+    useWorkflowStore.getState().setWorkflow({ ...BASE, connections: [e1, e2] });
+    useWorkflowStore.getState().removeEdge(buildEdgeId(e1));
+    const conns = useWorkflowStore.getState().workflow?.connections ?? [];
+    expect(conns).toHaveLength(1);
+    expect(conns[0]).toEqual(e2);
   });
 });
 

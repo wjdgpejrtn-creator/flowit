@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,6 +13,73 @@ from pydantic import BaseModel
 from ..ports.llm_port import LLMPort
 
 _logger = logging.getLogger(__name__)
+
+# 데이터 흐름 참조 ${<token>.<field>} — LLM은 token으로 node_type(fresh)/ref(edit)를 쓰고,
+# 빌드 시 instance_id로 재작성한다(token엔 점 없음 → 첫 '.'로 분리, ADR-0023 L1).
+_REF_TOKEN_RE = re.compile(r"\$\{([^.}]+)\.([^}]+)\}")
+
+
+def _rewrite_refs(value: Any, id_by_token: dict[str, UUID]) -> Any:
+    """파라미터 값 내 ``${<token>.<field>}``의 token을 instance_id로 치환.
+
+    token이 맵에 없으면(존재하지 않는 노드 참조) 원본을 보존한다 — 실행 시점
+    ReferenceResolver가 미해결로 graceful degrade한다.
+    """
+    if isinstance(value, str):
+        def _sub(m: re.Match[str]) -> str:
+            token, field = m.group(1), m.group(2)
+            inst = id_by_token.get(token)
+            return f"${{{inst}.{field}}}" if inst is not None else m.group(0)
+        return _REF_TOKEN_RE.sub(_sub, value)
+    if isinstance(value, list):
+        return [_rewrite_refs(v, id_by_token) for v in value]
+    if isinstance(value, dict):
+        return {k: _rewrite_refs(v, id_by_token) for k, v in value.items()}
+    return value
+
+
+def _ground_ref_fields(value: Any, outputs_by_instance: dict[UUID, list[str]]) -> Any:
+    """``${<instance_id>.<field>}`` 참조의 ``<field>``를 상류 노드의 실제 출력 필드에 grounding.
+
+    `_rewrite_refs` 이후(토큰이 이미 instance_id로 치환된 상태) 호출한다. LLM이 존재하지 않는
+    출력 필드를 환각하는 것(예: 출력이 ``[scheduled_at, ...]``인데 ``.values`` 참조)을 방어:
+
+    - 참조 노드의 출력 필드 집합에 ``<field>``가 있으면 그대로 둔다.
+    - 없고 그 노드의 출력이 **정확히 1개**면 그 단일 필드로 보정한다(거의 확실히 의도한 필드).
+    - 없고 출력이 0개 또는 2개 이상이면(어느 필드인지 결정 불가) 원본을 보존하고 경고만 남긴다
+      — 런타임 ReferenceResolver가 미해결로 graceful degrade한다. 잘못된 **소스 노드 선택**은
+      의미 판단이라 결정론적으로 고칠 수 없으므로 로그로만 노출한다.
+    - 토큰이 instance_id가 아니거나(미해결 토큰) 맵에 없는 노드면 손대지 않는다.
+    """
+    if isinstance(value, str):
+        def _sub(m: re.Match[str]) -> str:
+            token, field = m.group(1), m.group(2)
+            try:
+                inst = UUID(token)
+            except ValueError:
+                return m.group(0)
+            outs = outputs_by_instance.get(inst)
+            if outs is None or field in outs:
+                return m.group(0)
+            if len(outs) == 1:
+                _logger.warning("ref 필드 보정: %s.%s → %s.%s", token, field, token, outs[0])
+                return f"${{{token}.{outs[0]}}}"
+            _logger.warning(
+                "ref 필드 미존재(보정 불가, graceful degrade): %s.%s (outputs=%s)", token, field, outs
+            )
+            return m.group(0)
+        return _REF_TOKEN_RE.sub(_sub, value)
+    if isinstance(value, list):
+        return [_ground_ref_fields(v, outputs_by_instance) for v in value]
+    if isinstance(value, dict):
+        return {k: _ground_ref_fields(v, outputs_by_instance) for k, v in value.items()}
+    return value
+
+
+def _outputs_of(nc: NodeConfig) -> list[str]:
+    """NodeConfig의 출력 필드명 목록 (output_schema.properties 키)."""
+    return list((nc.output_schema or {}).get("properties", {}).keys())
+
 
 _SYSTEM_PROMPT = """You are a workflow drafter. Given a DraftSpec and candidate nodes,
 output a JSON object matching this schema:
@@ -32,6 +100,26 @@ Fill in `parameters` for each node using:
    for which fields to fill. Fill every field listed in `required`; when the user did not specify
    a value, use the field's `default` if present.
 3. Use an empty string "" only for optional fields the user did not specify that have no default.
+
+Each candidate also carries `required_connections` — the external services it needs at runtime
+(e.g. ["google"], ["slack"], ["anthropic"], or [] for none). When multiple candidates satisfy the
+same step, prefer the one needing the fewest external connections, and do NOT add a
+connection-requiring node the intent does not call for. Never invent credential values; required
+connections are resolved separately after drafting.
+
+DATA FLOW between nodes: when a node's input should receive data PRODUCED by an upstream node
+(not a fixed value the user gave inline), set that parameter's value to a reference
+"${<from_node_type>.<output_field>}". TWO hard rules — violating either produces a broken workflow:
+1. SOURCE node: <from_node_type> MUST be a node whose output is SEMANTICALLY the data this input
+   needs. Do not wire an unrelated node just to have a source (e.g. never feed a text-summary input
+   from a scheduling/notification node). If NO candidate actually produces the needed data, leave
+   the parameter as "" instead of referencing an unrelated node.
+2. FIELD name: <output_field> MUST be copied VERBATIM from the chosen node's own `outputs` array.
+   Never invent a field name, and never borrow a field name that belongs to a different node. If a
+   node's `outputs` is ["a", "b"], its ONLY valid references are "${that_node.a}" and "${that_node.b}".
+Also add a connection so the upstream node runs first. Use a literal string ONLY when the user
+provided the value directly. Do NOT put placeholder prose like "the sheet data" where an upstream
+output should flow in.
 """
 
 # refine(대화형 수정) 전용 — 이전 워크플로우를 주고 "지시한 부분만" 고치게 한다.
@@ -49,7 +137,14 @@ nodes each carry a stable "ref". Output a JSON object matching this schema:
 }
 Apply ONLY the change requested in the DraftSpec intent. Preserve every OTHER node's ref, node_type,
 and parameters EXACTLY, and keep unchanged connections. node_type must come from the candidate list.
-The SAME node_type may appear multiple times — each is a distinct node identified by its ref."""
+The SAME node_type may appear multiple times — each is a distinct node identified by its ref.
+
+DATA FLOW: to feed a node's input from an upstream node's output, set that parameter to
+"${<ref>.<output_field>}" using the upstream node's "ref" (NOT its node_type). <output_field> MUST
+be copied VERBATIM from that node's `outputs` in the candidate list — never invent a field name and
+never borrow a field that belongs to a different node. Choose a source node whose output is
+semantically the data the input needs; if none fits, leave "". Use a literal only for values the
+user gave inline."""
 
 
 # LLM 응답 전용 — common_schemas.WorkflowSchema의 owner_user_id/workflow_id 제외 부분집합.
@@ -120,7 +215,10 @@ class DrafterService:
                 "node_type": n.node_type,
                 "name": n.name,
                 "description": n.description,
+                "required_connections": n.required_connections,
                 "input_schema": n.input_schema,
+                # 데이터 흐름 참조에 쓸 수 있는 출력 필드명 (ADR-0023 L1)
+                "outputs": list((n.output_schema or {}).get("properties", {}).keys()),
             }
             for n in candidates
         ]
@@ -216,6 +314,22 @@ class DrafterService:
                     )
                 )
 
+            # 데이터 흐름 참조 재작성 — LLM이 쓴 ref 토큰을 instance_id로 (ADR-0023 L1)
+            # → grounding: 환각한 출력 필드를 상류 노드의 실제 output_schema에 맞춘다 (REQ-004 bug B)
+            outputs_by_instance = {
+                ref_to_instance[raw.ref]: _outputs_of(node_map[raw.node_type]) for raw in draft.nodes
+            }
+            nodes = [
+                n.model_copy(
+                    update={
+                        "parameters": _ground_ref_fields(
+                            _rewrite_refs(n.parameters, ref_to_instance), outputs_by_instance
+                        )
+                    }
+                )
+                for n in nodes
+            ]
+
             connections: list[Edge] = []
             for edge in draft.connections:
                 from_id = ref_to_instance.get(edge.from_ref)
@@ -275,6 +389,22 @@ class DrafterService:
                         position=Position(x=raw.x, y=raw.y),
                     )
                 )
+
+            # 데이터 흐름 참조 재작성 — LLM이 쓴 node_type 토큰을 instance_id로 (ADR-0023 L1)
+            # → grounding: 환각한 출력 필드를 상류 노드의 실제 output_schema에 맞춘다 (REQ-004 bug B)
+            outputs_by_instance = {
+                instance_id_map[ntype]: _outputs_of(node_map[ntype]) for ntype in instance_id_map
+            }
+            nodes = [
+                n.model_copy(
+                    update={
+                        "parameters": _ground_ref_fields(
+                            _rewrite_refs(n.parameters, instance_id_map), outputs_by_instance
+                        )
+                    }
+                )
+                for n in nodes
+            ]
 
             connections: list[Edge] = []
             for edge in draft.connections:

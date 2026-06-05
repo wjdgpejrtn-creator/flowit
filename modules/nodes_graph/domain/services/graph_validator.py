@@ -131,10 +131,18 @@ class GraphValidator:
             definition = await self._repo.get_by_id(node.node_id)
             if definition is None:
                 continue
-            if definition.required_connections and node.credential_id is None:
+            required = definition.required_connections
+            if not required:
+                continue
+            # provider별 바인딩 해소 — credential_ids(명시적) + legacy credential_id(단일).
+            # required에 있는데 바인딩 안 된 provider만 정확히 보고한다(멀티커넥션 부분
+            # 바인딩 시 어느 connection이 빠졌는지 식별 — REQ-012 credential 복수화).
+            resolved = node.resolve_credentials(required)
+            missing = [svc for svc in required if svc not in resolved]
+            if missing:
                 errors.append(ValidationErrorItem(
                     code=ErrorCode.E_MISSING_CONNECTION,
-                    message=f"Node requires external connection: {definition.required_connections}",
+                    message=f"Node requires external connection(s) not bound: {missing}",
                     node_ids=[str(node.instance_id)],
                     validator="SchemaValidation",
                 ))

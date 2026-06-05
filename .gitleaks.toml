@@ -1,0 +1,23 @@
+# gitleaks 설정 — 기본 룰셋(useDefault=true)을 그대로 유지하면서, 알려진
+# 테스트 전용 더미 자격증명의 오탐만 좁게 면제한다.
+#
+# 배경: api_server 라우트 테스트(conftest.py + 11개 test_routes_*.py)는
+# AuthMiddleware(JWTAdapter)가 토큰을 실제로 decode하므로 비어있지 않은 JWT 서명 키가
+# 필요하다. PyJWT 2.13.0이 빈 HMAC 키를 거부하고(<32B면 InsecureKeyLengthWarning),
+# 그래서 32바이트 더미 시크릿을 쓴다. gitleaks generic-api-key 룰이 이 더미를
+# 실 자격증명으로 오탐(PR #344). 이는 실 시크릿이 아니므로 그 값만 allowlist한다.
+#
+# ⚠️ allowlist는 **이 정확한 더미 문자열에만** 적용된다 — 다른 시크릿 탐지는 그대로다.
+# 새 더미 시크릿을 추가하면 여기에 명시적으로 등록할 것(경로 전체 면제는 의도적으로 안 함).
+
+title = "Workflow Automation gitleaks config"
+
+[extend]
+# 기본 룰셋 전체 상속(필수 — 이게 없으면 모든 룰이 사라져 시크릿 스캔이 무력화된다).
+useDefault = true
+
+[allowlist]
+description = "테스트 전용 더미 JWT 서명 키(실 자격증명 아님)."
+regexes = [
+  '''test-jwt-secret-key-min-32-bytes''',
+]

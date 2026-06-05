@@ -277,16 +277,20 @@ def test_build_from_functional_domain_use_case_signature_compat():
 
 
 def test_build_from_sop_use_case_signature_compat():
-    """main.py wizard 2단계(ADR-0020 Q8, PR #151) 호출 시그니처 정합:
-    extract: use_case.extract_draft(req.user_id, document, req.personal_memory)
-    confirm: use_case.confirm(req.user_id, skills)
+    """main.py wizard 3단계(ADR-0020 Q8 + 옵션 1 2단계 분리) 호출 시그니처 정합:
+    metadata: use_case.extract_metadata(req.user_id, document, req.personal_memory)
+    detail:   use_case.extract_detail(req.user_id, document, meta, req.personal_memory)
+    confirm:  use_case.confirm(req.user_id, skills)
     """
     from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
         BuildFromSOPUseCase,
     )
 
-    extract_params = list(inspect.signature(BuildFromSOPUseCase.extract_draft).parameters.keys())
-    assert extract_params[:4] == ["self", "user_id", "document", "personal_memory"]
+    metadata_params = list(inspect.signature(BuildFromSOPUseCase.extract_metadata).parameters.keys())
+    assert metadata_params[:4] == ["self", "user_id", "document", "personal_memory"]
+
+    detail_params = list(inspect.signature(BuildFromSOPUseCase.extract_detail).parameters.keys())
+    assert detail_params[:5] == ["self", "user_id", "document", "meta", "personal_memory"]
 
     confirm_params = list(inspect.signature(BuildFromSOPUseCase.confirm).parameters.keys())
     assert confirm_params[:3] == ["self", "user_id", "skills"]

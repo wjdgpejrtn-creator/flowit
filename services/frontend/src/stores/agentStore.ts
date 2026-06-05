@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { WorkflowExplanation } from '@common/generated';
 
 export type WorkspaceMode = 'wizard' | 'edit' | 'run';
@@ -78,7 +79,13 @@ interface AgentStoreState {
   appendSSEFrame: (frame: string) => void;
 }
 
-export const useAgentStore = create<AgentStoreState>((set) => ({
+// persist(localStorage) 누적 상한 — 각 세션이 전체 messages를 보유하므로 무한 누적 시
+// 브라우저 localStorage 한계(5~10MB)에 도달할 수 있다. 최근 N개만 유지(오래된 대화 eviction).
+const MAX_PERSISTED_SESSIONS = 30;
+
+export const useAgentStore = create<AgentStoreState>()(
+  persist(
+    (set) => ({
   mode: 'wizard',
   setMode: (mode) => set({ mode }),
 
@@ -87,7 +94,10 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   setSessionId: (id) => set({ sessionId: id }),
   addSession: (session) =>
     // 같은 id는 갱신(아카이브 idempotent — 세션 전환 왕복 시 중복 누적 방지).
-    set((s) => ({ sessions: [session, ...s.sessions.filter((x) => x.id !== session.id)] })),
+    // 최근 MAX_PERSISTED_SESSIONS개로 상한 — localStorage quota 누적 방지(가장 오래된 것부터 제거).
+    set((s) => ({
+      sessions: [session, ...s.sessions.filter((x) => x.id !== session.id)].slice(0, MAX_PERSISTED_SESSIONS),
+    })),
 
   restoreSession: (session) =>
     set((s) => ({
@@ -130,4 +140,24 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   sseFrames: [],
   appendSSEFrame: (frame) =>
     set((s) => ({ sseFrames: [...s.sseFrames, frame] })),
-}));
+    }),
+    {
+      // 새로고침(F5/Shift+Ctrl+R)에도 대화내역이 살아남도록 localStorage 영속화.
+      // 새로고침 후 이어쓰기/복원은 page.tsx 마운트 가드(문서 최초 로드 시 유지)와 함께 동작한다.
+      name: 'flowit-agent',
+      storage: createJSONStorage(() => localStorage),
+      version: 1,
+      // 영속 대상 = 대화 맥락(durable)만. mode/viewingSession/slotQuestion/sseFrames 같은
+      // 일시 UI 상태와 streaming 파생값은 새로고침 시 재계산되므로 저장하지 않는다.
+      partialize: (s) => ({
+        sessionId: s.sessionId,
+        sessions: s.sessions,
+        messages: s.messages,
+        readyToExecute: s.readyToExecute,
+        rationaleText: s.rationaleText,
+        currentStep: s.currentStep,
+        compositeFlow: s.compositeFlow,
+      }),
+    },
+  ),
+);

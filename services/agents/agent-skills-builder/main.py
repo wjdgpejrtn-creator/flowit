@@ -14,12 +14,14 @@ routing:
     POST /v1/agent/route
         body: AgentProtocolRequest
             payload.source_type ∈ {"sop", "industry_default", "functional_domain"}
-            sop은 payload.step ∈ {"extract", "confirm"} 추가 (wizard 2단계, ADR-0020 Q8 / 기본 extract)
+            sop은 payload.step ∈ {"metadata", "detail", "confirm"} 추가
+                (wizard 3단계, ADR-0020 Q8 + 옵션 1 2단계 분리 / 기본 metadata)
         → 분기:
-            "sop" + step=extract → BuildFromSOPUseCase.extract_draft(user_id, document, personal_memory)
-            "sop" + step=confirm → BuildFromSOPUseCase.confirm(user_id, skills)
-            "industry_default"   → BuildFromIndustryDefaultUseCase.execute(user_id, industry_code)
-            "functional_domain"  → BuildFromFunctionalDomainUseCase.execute(user_id, domain_code)
+            "sop" + step=metadata → BuildFromSOPUseCase.extract_metadata(user_id, document, personal_memory)
+            "sop" + step=detail   → BuildFromSOPUseCase.extract_detail(user_id, document, meta, personal_memory)
+            "sop" + step=confirm  → BuildFromSOPUseCase.confirm(user_id, skills)
+            "industry_default"    → BuildFromIndustryDefaultUseCase.execute(user_id, industry_code)
+            "functional_domain"   → BuildFromFunctionalDomainUseCase.execute(user_id, domain_code)
         → 각 use case가 AsyncGenerator[SSEFrame] yield
         → SSE 텍스트 스트림 ("data: <json>\\n\\n") 으로 변환해 응답
     GET /v1/health
@@ -374,7 +376,8 @@ class SkillsBuilderAgent:
                 use_case = BuildFromFunctionalDomainUseCase(repo, self._embedder)
                 stream = use_case.execute(req.user_id, payload["domain_code"])
             elif source_type == "sop":
-                # wizard 2단계(ADR-0020 Q8): extract_draft(추출·검토용, 저장X) / confirm(편집→DRAFT).
+                # wizard 3단계(ADR-0020 Q8, 옵션 1 — 2단계 분리로 LLM JSON 잘림 해소):
+                #   metadata(메타 5필드, 카드 그리드용) → detail(선택된 메타 detail 채우기) → confirm(편집→DRAFT).
                 # confirm은 CreateDraftSkillUseCase(SkillRepository=PgMarketplaceSkillRepository, PR #147) 경유.
                 use_case = BuildFromSOPUseCase(
                     CreateDraftSkillUseCase(
@@ -384,10 +387,15 @@ class SkillsBuilderAgent:
                     self._embedder,
                     self._llm,
                 )
-                step = payload.get("step", "extract")
-                if step == "extract":
+                step = payload.get("step", "metadata")
+                if step == "metadata":
                     document = DocumentBlock.model_validate(payload["document"])
-                    stream = use_case.extract_draft(req.user_id, document, req.personal_memory)
+                    stream = use_case.extract_metadata(req.user_id, document, req.personal_memory)
+                elif step == "detail":
+                    document = DocumentBlock.model_validate(payload["document"])
+                    stream = use_case.extract_detail(
+                        req.user_id, document, payload.get("meta", {}), req.personal_memory
+                    )
                 elif step == "confirm":
                     stream = use_case.confirm(req.user_id, payload.get("skills", []))
                 else:

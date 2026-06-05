@@ -113,6 +113,7 @@ export interface NodeInstance {
   node_id: string;
   parameters: Record<string, unknown>;
   credential_id?: string | null;
+  credential_ids: Record<string, string>;
   skill_id?: string | null;
   position: Position;
 }
@@ -451,6 +452,7 @@ export interface NodeContext {
   execution_id: string;
   user_id: string;
   connection_token?: string | null;
+  connection_tokens: Record<string, string>;
 }
 
 export interface NodeExecutionState {

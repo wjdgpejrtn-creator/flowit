@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import deque
 from uuid import UUID
 
 from common_schemas.enums import ErrorCode

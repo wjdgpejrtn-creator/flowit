@@ -117,6 +117,7 @@ class AgentComposer:
         from ai_agent.adapters.memory.gcs_composer_state_store import GCSComposerStateStore
         from ai_agent.adapters.memory.gcs_memory_store import GCSMemoryStore
         from ai_agent.adapters.node_registry_adapter import NodeRegistryAdapter
+        from ai_agent.adapters.connection_resolver_adapter import OAuthConnectionResolver
         from ai_agent.adapters.langgraph.composer_graph import LangGraphOrchestrator
         from ai_agent.application.agents.workflow_composer.approve_workflow_use_case import ApproveWorkflowUseCase
         from ai_agent.domain.services.intent_analyzer_service import IntentAnalyzerService
@@ -128,6 +129,7 @@ class AgentComposer:
         from storage.repositories.pg_node_definition_repository import PgNodeDefinitionRepository
         from storage.repositories.pg_workflow_repository import PgWorkflowRepository
         from storage.repositories.pg_marketplace_skill_repository import PgMarketplaceSkillRepository
+        from storage.repositories.pg_oauth_repository import PgOAuthRepository
         from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
 
         llm = ModalLLMAdapter()
@@ -138,6 +140,8 @@ class AgentComposer:
         self._node_repo_cls = PgNodeDefinitionRepository
         self._workflow_repo_cls = PgWorkflowRepository
         self._skill_repo_cls = PgMarketplaceSkillRepository
+        self._oauth_repo_cls = PgOAuthRepository
+        self._connection_resolver_cls = OAuthConnectionResolver
         self._search_skills_use_case_cls = SearchSkillsUseCase
         self._node_registry_cls = NodeRegistryAdapter
         self._graph_validator_cls = GraphValidator
@@ -227,9 +231,11 @@ class AgentComposer:
                         node_repo = self._node_repo_cls(session)
                         workflow_repo = self._workflow_repo_cls(session)
                         skill_repo = self._skill_repo_cls(session)
+                        oauth_repo = self._oauth_repo_cls(session)
                         node_registry = self._node_registry_cls(node_repo, self._embedder)
                         graph_validator = self._graph_validator_cls(node_repo)
                         skill_search = self._search_skills_use_case_cls(repo=skill_repo)
+                        connection_resolver = self._connection_resolver_cls(oauth_repo)
                         graph = self._orchestrator_cls(
                             intent_analyzer=self._intent_analyzer,
                             drafter=self._drafter,
@@ -246,6 +252,7 @@ class AgentComposer:
                             skill_search=skill_search,
                             embedder=self._embedder,
                             composer_state_store=self._composer_state_store,
+                            connection_resolver=connection_resolver,
                         )
                         async for frame in await graph.stream(
                             user_id=req.user_id,
