@@ -205,10 +205,15 @@ class DrafterService:
         candidates: list[NodeConfig],
         owner_user_id: UUID,
         prior_workflow: WorkflowSchema | None = None,
+        personal_patterns: list[str] | None = None,
     ) -> WorkflowSchema:
         """워크플로우 초안 생성. ``prior_workflow``가 주어지면(대화형 refine) 처음부터
         재생성하지 않고 그 워크플로우를 편집 컨텍스트로 주어 지시한 부분만 수정한다.
         직렬화 불가(후보에 없는 node_type 포함) 시엔 안전하게 fresh draft로 폴백한다.
+
+        ``personal_patterns``(RAG로 회수한 사용자 과거 패턴 본문)가 주어지면 시스템
+        프롬프트에 "사용자 패턴" 블록으로 주입해, 이 사용자의 확립된 선호(예: 알림 채널,
+        요약 언어/형식)가 이번 요청과 관련 있을 때 초안에 반영되게 한다(REQ-004 개인화 배선).
         """
         catalog = [
             {
@@ -227,6 +232,7 @@ class DrafterService:
             ensure_ascii=False,
         )
         catalog_json = json.dumps(catalog, ensure_ascii=False)
+        patterns_block = self._personal_patterns_block(personal_patterns)
         # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
         # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
         if prior_workflow is not None:
@@ -234,6 +240,7 @@ class DrafterService:
             if current is not None:
                 edit_prompt = (
                     _EDIT_SYSTEM_PROMPT
+                    + patterns_block
                     + f"\nDraftSpec: {spec_json}"
                     + f"\nAvailable nodes: {catalog_json}"
                     + f"\nCURRENT WORKFLOW: {json.dumps(current, ensure_ascii=False)}"
@@ -244,12 +251,33 @@ class DrafterService:
                     raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
                 return self._build_from_edit(edit_resp, candidates, owner_user_id)
 
-        prompt = _SYSTEM_PROMPT + f"\nDraftSpec: {spec_json}" + f"\nAvailable nodes: {catalog_json}"
+        prompt = (
+            _SYSTEM_PROMPT + patterns_block + f"\nDraftSpec: {spec_json}" + f"\nAvailable nodes: {catalog_json}"
+        )
         try:
             draft_resp = await self._llm.generate_structured(prompt, _DraftResponse)
         except Exception as e:
             raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
         return self._build(draft_resp, candidates, owner_user_id)
+
+    @staticmethod
+    def _personal_patterns_block(personal_patterns: list[str] | None) -> str:
+        """RAG로 회수한 사용자 패턴을 시스템 프롬프트 주입용 블록으로 직렬화.
+
+        패턴이 없으면 빈 문자열을 반환해 프롬프트를 그대로 둔다(개인화 미적용 시 무영향).
+        '관련 있을 때만 적용 / 패턴 충족을 위해 노드를 추가하지 말 것'을 명시해, 무관한
+        과거 패턴이 이번 워크플로우를 오염시키는 것을 막는다(노이즈 가드).
+        """
+        if not personal_patterns:
+            return ""
+        joined = "\n".join(f"- {p}" for p in personal_patterns)
+        return (
+            "\nUSER PATTERNS (this user's established preferences recalled from their past "
+            "workflows — apply ONLY the ones relevant to THIS request, e.g. a preferred "
+            "notification channel, summary language, or output format. Ignore patterns that "
+            "do not fit, and NEVER add a node solely to satisfy a pattern):\n"
+            f"{joined}\n"
+        )
 
     @staticmethod
     def _serialize_for_edit(
