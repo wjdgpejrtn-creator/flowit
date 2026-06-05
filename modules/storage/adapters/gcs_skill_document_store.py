@@ -55,6 +55,10 @@ class GcsSkillDocumentStore(SkillDocumentStore):
         COMPOSER.md(composer측 지침)는 `composer_instructions`가 비어 있지 않을 때만 쓴다
         (#372 detail 3 — 노드 지침만 있는 스킬은 COMPOSER.md 미생성). 반환 URI는 호출부
         계약(=SKILL.md) 유지를 위해 항상 SKILL.md.
+
+        save는 upsert이므로, 빈 `composer_instructions`로 재저장(업데이트) 시 이전에 쓴
+        COMPOSER.md를 **삭제**한다 — 안 그러면 stale COMPOSER.md가 잔존해 `load()`가 옛
+        composer 지침을 반환(문서 ≠ 저장상태). 멱등 — 객체 부재면 NotFoundError swallow.
         """
         content = _serialize(document).encode("utf-8")
         uri = await self._storage.upload(_key(skill_id), content, metadata={})
@@ -62,6 +66,11 @@ class GcsSkillDocumentStore(SkillDocumentStore):
             await self._storage.upload(
                 _composer_key(skill_id), document.composer_instructions.encode("utf-8"), metadata={}
             )
+        else:
+            try:
+                await self._storage.delete(_composer_key(skill_id))
+            except NotFoundError:
+                pass
         return uri
 
     async def load(self, skill_id: UUID) -> SkillDocument | None:

@@ -63,6 +63,32 @@ async def test_composer_instructions_round_trip(store: GcsSkillDocumentStore, st
 
 
 @pytest.mark.asyncio
+async def test_update_to_empty_composer_removes_stale_md(
+    store: GcsSkillDocumentStore, storage_dir: Path
+) -> None:
+    """COMPOSER.md 있던 스킬을 빈 composer_instructions로 재저장하면 stale COMPOSER.md를 정리한다.
+    (PR #374 리뷰 MEDIUM — 안 지우면 load가 옛 composer 지침을 반환해 문서≠저장상태.)"""
+    skill_id = uuid4()
+    await store.save(
+        skill_id,
+        SkillDocument(
+            skill_id=skill_id, name="x", description="y", instructions="z", composer_instructions="old"
+        ),
+    )
+    assert (storage_dir / f"skills/{skill_id}/COMPOSER.md").exists()
+
+    # 재저장(업데이트) — composer_instructions 비움
+    await store.save(
+        skill_id,
+        SkillDocument(skill_id=skill_id, name="x", description="y", instructions="z"),
+    )
+    assert not (storage_dir / f"skills/{skill_id}/COMPOSER.md").exists()
+    loaded = await store.load(skill_id)
+    assert loaded is not None
+    assert loaded.composer_instructions == ""
+
+
+@pytest.mark.asyncio
 async def test_composer_md_not_written_when_empty(store: GcsSkillDocumentStore, storage_dir: Path) -> None:
     """composer_instructions 미지정 시 COMPOSER.md를 만들지 않고, load는 ""로 degrade (#372 detail 3)."""
     skill_id = uuid4()
