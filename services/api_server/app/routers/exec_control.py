@@ -6,7 +6,12 @@ from uuid import UUID
 
 from celery import Celery
 from common_schemas import PermissionSource
-from common_schemas.broker_tasks import QUEUE_DEFAULT, TASK_CANCEL_EXECUTION, TASK_RESUME_EXECUTION
+from common_schemas.broker_tasks import (
+    QUEUE_DEFAULT,
+    TASK_CANCEL_EXECUTION,
+    TASK_PAUSE_EXECUTION,
+    TASK_RESUME_EXECUTION,
+)
 from common_schemas.enums import ExecutionStatus
 from common_schemas.exceptions import NotFoundError
 from fastapi import APIRouter, Depends, HTTPException
@@ -89,6 +94,18 @@ async def cancel_execution(
     await _verify_execution_owner(execution_id, permission, repo)
     async_result = celery.send_task(TASK_CANCEL_EXECUTION, args=[str(execution_id)], queue=QUEUE_DEFAULT)
     return ControlResponse(execution_id=execution_id, action="cancel", task_id=async_result.id)
+
+
+@router.post("/{execution_id}/pause", response_model=ControlResponse, status_code=202)
+async def pause_execution(
+    execution_id: UUID,
+    permission: PermissionSource = Depends(get_permission_source),
+    repo: PgExecutionRepository = Depends(get_execution_repository),
+    celery: Celery = Depends(get_celery),
+) -> ControlResponse:
+    await _verify_execution_owner(execution_id, permission, repo)
+    async_result = celery.send_task(TASK_PAUSE_EXECUTION, args=[str(execution_id)], queue=QUEUE_DEFAULT)
+    return ControlResponse(execution_id=execution_id, action="pause", task_id=async_result.id)
 
 
 @router.post("/{execution_id}/resume", response_model=ControlResponse, status_code=202)

@@ -65,6 +65,36 @@ def cancel_execution_task(self, execution_id: str) -> dict:
 
 
 @shared_task(
+    name="execution_engine.pause_execution",
+    bind=True,
+    max_retries=0,
+    acks_late=True,
+)
+def pause_execution_task(self, execution_id: str) -> dict:
+    from common_schemas.exceptions import DomainError
+
+    from ..dependencies.container import create_container
+
+    container = create_container()
+    use_case = container.pause_resume_use_case
+    try:
+        use_case.execute(UUID(execution_id), action="pause")
+    except DomainError as exc:
+        # 도메인 계층 오류(이미 종료된 execution을 pause / 존재하지 않는 execution 등)는
+        # 사용자 입력 범주 → graceful skip. 비-DomainError 예외는 그대로 전파.
+        # (cancel_execution_task 참고)
+        return {
+            "execution_id": execution_id,
+            "action": "pause",
+            "status": "skipped",
+            "reason": str(exc),
+        }
+    # status만 PAUSED로 전환 — 실행 중인 worker 루프가 step 경계에서 재조회 후
+    # 협조적으로 중단한다(REQ-007 resumable 실행, ADR-0025).
+    return {"execution_id": execution_id, "action": "pause", "status": "paused"}
+
+
+@shared_task(
     name="execution_engine.resume_execution",
     bind=True,
     max_retries=0,
