@@ -1078,11 +1078,19 @@ class LangGraphOrchestrator:
         skill_selected = state.get("selected_skill_id") is not None
         if skill_selected and not any(getattr(c, "category", None) == "ai" for c in candidates):
             candidates = await self._ensure_llm_candidate(candidates)
+        # LLM 노드를 끝내 확보 못 했으면(카탈로그 의미검색이 ai 노드 미검출) drafter에 "ai 노드를
+        # 포함하라"고 지시하지 않는다 — 후보에 없는 노드 포함을 지시하면 지시/후보 desync(환각·미준수
+        # 위험, PR #376 리뷰 LOW #2). 이 경우 바인딩은 어차피 skip(non-fatal)된다.
+        instruct_skill_binding = skill_selected and any(
+            getattr(c, "category", None) == "ai" for c in candidates
+        )
+        if skill_selected and not instruct_skill_binding:
+            _logger.warning("스킬 선택됐으나 LLM 노드 후보 확보 실패 — 바인딩 skip 예상")
         try:
             workflow = await self._drafter.draft(
                 spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow,
                 personal_patterns=state.get("personal_patterns"),
-                skill_selected=skill_selected,
+                skill_selected=instruct_skill_binding,
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:

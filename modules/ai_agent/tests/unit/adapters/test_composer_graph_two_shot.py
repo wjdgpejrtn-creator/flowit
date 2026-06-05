@@ -609,3 +609,19 @@ class TestDrafterNodeSkillBinding:
         # LLM 노드 강제 확보 안 함 (search로 LLM 노드 끌어오지 않음)
         passed_candidates = oc._drafter.draft.call_args.args[1]
         assert not any(c.category == "ai" for c in passed_candidates)
+
+    @pytest.mark.asyncio
+    async def test_no_ai_node_available_does_not_instruct_binding(self):
+        """LLM 노드 확보 실패(카탈로그에 ai 노드 미검출) 시 drafter에 바인딩 지시 안 함 (#376 LOW #2)."""
+        oc = _build_orchestrator()
+        oc._node_registry.search = AsyncMock(return_value=[_node_config(name="x", category="action")])
+        oc._drafter.draft = AsyncMock(return_value=_workflow([]))
+
+        await oc._drafter_node(_state(
+            selected_skill_id=uuid4(),
+            node_candidates=[_node_config(name="email", category="action")],
+            qa_attempts=0,
+        ))
+
+        # 후보에 ai 노드가 없으므로 skill_selected=False로 전달(지시/후보 desync 방지)
+        assert oc._drafter.draft.call_args.kwargs["skill_selected"] is False
