@@ -5,11 +5,10 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import text
-
 from common_schemas.enums import ExecutionStatus
 from common_schemas.exceptions import NotFoundError
 from common_schemas.workflow import NodeExecutionState
+from sqlalchemy import text
 
 from ..domain.entities.execution_result import ExecutionResult, NodeResult
 from ..domain.ports.execution_repository_port import ExecutionRepositoryPort
@@ -58,6 +57,25 @@ class PostgresExecutionRepository(ExecutionRepositoryPort):
                     "completed_at": data["completed_at"],
                     "error": data["error"],
                     "task_queue_id": data.get("task_queue_id"),
+                },
+            )
+            session.commit()
+
+    def save_checkpoint(self, result: ExecutionResult) -> None:
+        # 진행 중 부분 결과만 영속 — status/completed_at/error는 건드리지 않는다.
+        # save()의 ON CONFLICT는 status를 무조건 덮어써 협조적 pause(별도 트랜잭션이 쓴
+        # PAUSED)를 RUNNING으로 clobber한다. 체크포인트는 node_results만 UPDATE해
+        # pause 감지 유실을 막는다 (ADR-0025). row 미존재 시 0 rows affected(무해).
+        data = result.model_dump(mode="json")
+        with self._session_factory() as session:
+            session.execute(
+                text(
+                    "UPDATE executions SET node_results = :node_results "
+                    "WHERE execution_id = :execution_id"
+                ),
+                {
+                    "execution_id": data["execution_id"],
+                    "node_results": json.dumps(data["node_results"]),
                 },
             )
             session.commit()

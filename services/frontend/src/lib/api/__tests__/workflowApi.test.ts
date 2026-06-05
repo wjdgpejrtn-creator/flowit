@@ -1,4 +1,4 @@
-import { getLatestExecution } from '../workflowApi';
+import { getLatestExecution, pauseExecution, resumeExecution, cancelExecution } from '../workflowApi';
 
 jest.mock('../../apiClient', () => ({
   apiJson: jest.fn(),
@@ -46,5 +46,27 @@ describe('getLatestExecution', () => {
     mockApiJson.mockRejectedValueOnce(new Error('500 Internal Server Error: boom'));
 
     await expect(getLatestExecution('wf-fail')).rejects.toThrow('500 Internal Server Error');
+  });
+});
+
+describe('실행 제어 (pause/resume/cancel)', () => {
+  const ok = { execution_id: 'e1', action: '', task_id: 't1' };
+
+  it('pauseExecution은 POST /executions/{id}/pause 호출', async () => {
+    mockApiJson.mockResolvedValueOnce({ ...ok, action: 'pause' });
+    await pauseExecution('e1');
+    expect(mockApiJson).toHaveBeenCalledWith('/api/v1/executions/e1/pause', { method: 'POST' });
+  });
+
+  it('resumeExecution은 POST /executions/{id}/resume 호출', async () => {
+    mockApiJson.mockResolvedValueOnce({ ...ok, action: 'resume' });
+    await resumeExecution('e1');
+    expect(mockApiJson).toHaveBeenCalledWith('/api/v1/executions/e1/resume', { method: 'POST' });
+  });
+
+  it('cancelExecution은 POST /executions/{id}/cancel 호출', async () => {
+    mockApiJson.mockResolvedValueOnce({ ...ok, action: 'cancel' });
+    await cancelExecution('e1');
+    expect(mockApiJson).toHaveBeenCalledWith('/api/v1/executions/e1/cancel', { method: 'POST' });
   });
 });

@@ -77,6 +77,10 @@ export async function cancelExecution(executionId: string): Promise<ControlRespo
   return apiJson<ControlResponse>(`/api/v1/executions/${executionId}/cancel`, { method: 'POST' });
 }
 
+export async function pauseExecution(executionId: string): Promise<ControlResponse> {
+  return apiJson<ControlResponse>(`/api/v1/executions/${executionId}/pause`, { method: 'POST' });
+}
+
 export async function resumeExecution(executionId: string): Promise<ControlResponse> {
   return apiJson<ControlResponse>(`/api/v1/executions/${executionId}/resume`, { method: 'POST' });
 }

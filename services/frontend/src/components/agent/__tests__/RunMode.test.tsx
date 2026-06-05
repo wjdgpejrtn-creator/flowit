@@ -8,6 +8,8 @@ import {
   getLatestExecution,
   executeWorkflow,
   cancelExecution,
+  pauseExecution,
+  resumeExecution,
   type WorkflowLatestExecution,
 } from '../../../lib/api/workflowApi';
 import { getCatalog } from '../../../lib/api/nodeApi';
@@ -18,6 +20,8 @@ jest.mock('../../../lib/api/nodeApi');
 const mockGetLatest = getLatestExecution as jest.MockedFunction<typeof getLatestExecution>;
 const mockExecute = executeWorkflow as jest.MockedFunction<typeof executeWorkflow>;
 const mockCancel = cancelExecution as jest.MockedFunction<typeof cancelExecution>;
+const mockPause = pauseExecution as jest.MockedFunction<typeof pauseExecution>;
+const mockResume = resumeExecution as jest.MockedFunction<typeof resumeExecution>;
 const mockGetCatalog = getCatalog as jest.MockedFunction<typeof getCatalog>;
 
 const NODE_ID_A = '11111111-1111-1111-1111-111111111111';
@@ -124,6 +128,37 @@ describe('RunMode', () => {
 
     await userEvent.click(screen.getByText('⏹ 취소'));
     expect(mockCancel).toHaveBeenCalledWith('exec-1');
+  });
+
+  it('실행 중이면 일시정지 버튼이 pauseExecution을 호출한다', async () => {
+    mockGetLatest.mockResolvedValue(
+      latest(ExecutionStatus.RUNNING, [
+        { node_instance_id: 'n-a', status: 'succeeded' },
+        { node_instance_id: 'n-b', status: 'running' },
+      ]),
+    );
+    mockPause.mockResolvedValue({ execution_id: 'exec-1', action: 'pause', task_id: 't-1' });
+
+    render(<RunMode />);
+
+    await userEvent.click(await screen.findByText('⏸ 일시정지'));
+    expect(mockPause).toHaveBeenCalledWith('exec-1');
+  });
+
+  it('일시정지 상태면 재개 버튼이 resumeExecution을 호출하고, 일시정지 버튼은 숨긴다', async () => {
+    mockGetLatest.mockResolvedValue(
+      latest(ExecutionStatus.PAUSED, [
+        { node_instance_id: 'n-a', status: 'succeeded' },
+      ]),
+    );
+    mockResume.mockResolvedValue({ execution_id: 'exec-1', action: 'resume', task_id: 't-1' });
+
+    render(<RunMode />);
+
+    expect(await screen.findByText('▶ 재개')).toBeInTheDocument();
+    expect(screen.queryByText('⏸ 일시정지')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText('▶ 재개'));
+    expect(mockResume).toHaveBeenCalledWith('exec-1');
   });
 
   it('skipped 노드(L2 분기 미선택)는 완료 카운트에서 제외하고 건너뜀 로그를 남긴다', async () => {

@@ -17,7 +17,7 @@ import '@xyflow/react/dist/style.css';
 import { getCatalog } from '@/lib/api/nodeApi';
 import type { NodeConfig, WorkflowExplanation } from '@common/generated';
 import { RiskLevel } from '@common/generated';
-import RiskPill from '@/components/common/RiskPill';
+import RiskDot from '@/components/common/RiskDot';
 import Icon from '@/components/common/Icon';
 import { showToast } from '@/stores/toastStore';
 import NodePalette, { readPaletteDragPayload } from '@/components/workflow/NodePalette';
@@ -176,7 +176,7 @@ function FlowNodeConfigPanel({ nodeData, catalog, onClose, onUpdateParams }: Flo
         </div>
         {nodeConfig && (
           <div className="mt-1 flex items-center gap-2">
-            <RiskPill level={nodeConfig.risk_level} />
+            <RiskDot level={nodeConfig.risk_level} />
             <span className="font-mono text-[10px] text-[var(--color-ink3)] truncate">{nodeType}</span>
           </div>
         )}

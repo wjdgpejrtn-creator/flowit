@@ -77,7 +77,7 @@ def _override_celery(app, task_id="task-xyz"):
     return celery_mock
 
 
-@pytest.mark.parametrize("action", ["cancel", "resume"])
+@pytest.mark.parametrize("action", ["cancel", "pause", "resume"])
 def test_owner_can_cancel_or_resume_own_execution(app, action) -> None:
     """본인 소유 execution은 cancel/resume 모두 202 + Celery dispatch."""
     user_id = uuid4()
@@ -105,7 +105,7 @@ def test_owner_can_cancel_or_resume_own_execution(app, action) -> None:
     app.dependency_overrides.clear()
 
 
-@pytest.mark.parametrize("action", ["cancel", "resume"])
+@pytest.mark.parametrize("action", ["cancel", "pause", "resume"])
 def test_other_user_cancel_or_resume_returns_403(app, action) -> None:
     """타 user 소유 execution 호출 시 403 + Celery dispatch 안 됨 (공격면 차단)."""
     requester_id = uuid4()
@@ -130,7 +130,7 @@ def test_other_user_cancel_or_resume_returns_403(app, action) -> None:
     app.dependency_overrides.clear()
 
 
-@pytest.mark.parametrize("action", ["cancel", "resume"])
+@pytest.mark.parametrize("action", ["cancel", "pause", "resume"])
 def test_missing_execution_returns_404(app, action) -> None:
     """미존재 execution은 404 + Celery dispatch 안 됨."""
     user_id = uuid4()
