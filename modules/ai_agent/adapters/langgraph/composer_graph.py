@@ -140,6 +140,8 @@ class _State(TypedDict):
     qa_score: float
     pass_flag: bool
     qa_feedback: str
+    # validate/QA 실패 후 재시도 교정 피드백 — drafter에 별도 전달(intent 오염·UI 누출 방지, #378)
+    retry_feedback: str
     collected_frames: Annotated[list[AnySSEFrame], operator.add]
     error: str | None
     # tool-calling agent 제어
@@ -279,6 +281,7 @@ class LangGraphOrchestrator:
             "qa_score": 0.0,
             "pass_flag": False,
             "qa_feedback": "",
+            "retry_feedback": "",
             "collected_frames": [],
             "error": None,
             "agent_done": False,
@@ -1091,6 +1094,7 @@ class LangGraphOrchestrator:
                 spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow,
                 personal_patterns=state.get("personal_patterns"),
                 skill_selected=instruct_skill_binding,
+                retry_feedback=state.get("retry_feedback"),
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:
@@ -1275,16 +1279,14 @@ class LangGraphOrchestrator:
     # 10. qa_retry_node — validate/QA 실패 시 재시도 준비 (draft_workflow로 돌아감)
     async def _qa_retry_node(self, state: _State) -> dict:
         t0 = time.monotonic()
-        spec = state.get("draft_spec")
         feedback = state.get("qa_feedback", "")
         validation_issues = state.get("validation_issues") or ""
         combined_feedback = " | ".join(filter(None, [feedback, validation_issues]))
-        if spec and combined_feedback:
-            updated_intent = f"{spec.natural_language_intent}\n[재시도 피드백: {combined_feedback}]"
-            spec = spec.model_copy(update={"natural_language_intent": updated_intent})
+        # 피드백은 natural_language_intent에 섞지 않는다 — 그러면 영어 교정문이 워크플로우
+        # 이름/설명으로 누출된다(#378 부차). 별도 state 필드로 전달해 drafter가 교정에만 쓴다.
         elapsed = int((time.monotonic() - t0) * 1000)
         return {
-            "draft_spec": spec,
+            "retry_feedback": combined_feedback,
             "retry_count": state.get("retry_count", 0) + 1,
             "collected_frames": [
                 PipelineStatusFrame(service_name="qa_retry", status="started", elapsed_ms=elapsed),

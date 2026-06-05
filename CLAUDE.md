@@ -137,6 +137,7 @@ from common_schemas.transport import SSEFrame, SessionFrame, AgentNodeFrame
 | ai_agent | auth의 `domain/ports` | `from auth.domain.ports import OAuthConnectionRepository` (`OAuthConnectionResolver` 어댑터가 `ConnectionResolver` 구현 시 — 사용자 보유 connection을 credential로 해소해 노드 선바인딩, PR #348) |
 | ai_agent | nodes_graph의 `domain/services` | `from nodes_graph.domain.services import GraphValidator` |
 | ai_agent | nodes_graph의 `domain/ports` | `from nodes_graph.domain.ports import NodeDefinitionRepository` |
+| ai_agent | nodes_graph의 `application/executable_node_types` | `from nodes_graph.application.executable_node_types import EXECUTABLE_NODE_TYPES` (Composer retriever가 후보를 실행 가능 node_type으로 그라운딩. **import-safe 상수 미러** — 무거운 `get_all_node_classes`(노드 클래스 deps) 미import. PR #387 #378) |
 | auth | nodes_graph의 `domain/ports` | `from nodes_graph.domain.ports import NodeDefinitionRepository` (CredentialInjectionService가 `required_connections` / `risk_level` 검증 시) |
 | toolset | auth의 `domain/services` | `from auth.domain.services import CredentialInjectionService` |
 | toolset | nodes_graph의 `application/use_cases` | `from nodes_graph.application.use_cases import SearchNodesUseCase` (NodeSearchPort 구현체가 자연어 노드 검색 시. **선반영** — 현재 `modules/toolset/` 실코드 0건, 박아름 후속 PR(toolset 정리) + 햄햄 NodeSearchPort 구현 시 도달) |
