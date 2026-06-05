@@ -3,11 +3,15 @@ from .agent import AgentState, DraftSpec, IntentResult, MemoryEntry, MemoryType,
 from .agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 from .document import (
     AnalysisResult,
+    AnalyzeDispatchResponse,
     BBox,
     Chunk,
     ChunkingStrategy,
     ContentBlock,
     DocumentBlock,
+    DocumentBlocksResponse,
+    DocumentDownloadResponse,
+    DocumentResponse,
     FileMeta,
     ParseCoverage,
     ParserMeta,
@@ -17,7 +21,7 @@ from .document import (
     SourceRef,
     WarningInfo,
 )
-from .enums import AgentMode, ErrorCode, ExecutionStatus, IntentType, RiskLevel
+from .enums import AgentMode, AnalysisStatus, ErrorCode, ExecutionStatus, IntentType, RiskLevel
 from .exceptions import (
     AuthorizationError,
     DomainError,
@@ -43,6 +47,8 @@ from .transport import (
     RationaleDeltaFrame,
     ResultFrame,
     SessionFrame,
+    SkillOption,
+    SkillSelectionFrame,
     SlotFillQuestionFrame,
     SSEFrame,
     ToolCall,
@@ -51,10 +57,12 @@ from .transport import (
 from .types import UtcDatetime
 from .validation import ValidationErrorItem, ValidationErrorResponse
 from .workflow import Edge, NodeConfig, NodeExecutionState, NodeInstance, Position, WorkflowSchema
+from .workflow_explanation import ExplanationStep, PermissionItem, WorkflowExplanation
 
 __all__ = [
     # enums
     "AgentMode",
+    "AnalysisStatus",
     "ErrorCode",
     "ExecutionStatus",
     "IntentType",
@@ -74,11 +82,19 @@ __all__ = [
     "WorkflowSchema",
     # node — 노드 실행 컨텍스트 (ADR-0018)
     "NodeContext",
+    # workflow_explanation — 컨펌 게이트 신뢰 매니페스트 (confirm-gate-explanation)
+    "ExplanationStep",
+    "PermissionItem",
+    "WorkflowExplanation",
     # document
     "AnalysisResult",
+    "AnalyzeDispatchResponse",
     "BBox",
     "ContentBlock",
     "DocumentBlock",
+    "DocumentBlocksResponse",
+    "DocumentDownloadResponse",
+    "DocumentResponse",
     "FileMeta",
     "ParserMeta",
     "SheetMeta",
@@ -110,6 +126,8 @@ __all__ = [
     "ResultFrame",
     "SSEFrame",
     "SessionFrame",
+    "SkillOption",
+    "SkillSelectionFrame",
     "SlotFillQuestionFrame",
     # transport — SSE monitoring frames (PR #74, 사이드바 + 캔버스 실시간)
     "ChatMessageFrame",

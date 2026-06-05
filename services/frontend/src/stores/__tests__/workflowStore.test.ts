@@ -1,56 +1,162 @@
 import { useWorkflowStore } from '../workflowStore';
-import { RiskLevel, ExecutionStatus } from '@common/generated';
-import type { Workflow } from '../workflowStore';
+import { buildEdgeId } from '@/lib/adapters/reactFlowAdapter';
+import type { WorkflowSchema, NodeInstance, Edge } from '@common/generated';
 
-const BASE: Workflow = {
-  id: 'w-1',
+function makeNode(id: string, x = 0, y = 0): NodeInstance {
+  return {
+    instance_id: id,
+    node_id: 'node-type-uuid',
+    parameters: {},
+    credential_id: null,
+    credential_ids: {},
+    position: { x, y },
+  };
+}
+
+function makeEdge(from: string, to: string): Edge {
+  return {
+    from_instance_id: from,
+    to_instance_id: to,
+    from_handle: 'out',
+    to_handle: 'in',
+  };
+}
+
+const BASE: WorkflowSchema = {
+  workflow_id: 'wf-1',
+  owner_user_id: null,
   name: 'Test',
+  description: null,
   scope: 'private',
-  nodes: [
-    { id: 'n-1', name: 'Node 1', icon: 'N', risk: RiskLevel.LOW, position: { x: 0, y: 0 } },
-    { id: 'n-2', name: 'Node 2', icon: 'M', risk: RiskLevel.HIGH, position: { x: 100, y: 0 } },
-  ],
-  edges: [],
-  riskLevel: RiskLevel.LOW,
-  status: ExecutionStatus.PENDING,
-  nodeCount: 2,
-  updatedAt: '2026-05-21T00:00:00Z',
+  is_draft: true,
+  draft_spec: null,
+  nodes: [makeNode('n-1', 0, 0), makeNode('n-2', 100, 0)],
+  connections: [makeEdge('n-1', 'n-2')],
+  version: 1,
+  sha256: null,
+  created_via_session_id: null,
 };
 
 beforeEach(() => {
-  useWorkflowStore.setState({ current: null });
-});
-
-describe('setCurrent', () => {
-  it('sets workflow', () => {
-    useWorkflowStore.getState().setCurrent(BASE);
-    expect(useWorkflowStore.getState().current).toEqual(BASE);
-  });
-
-  it('clears workflow when called with null', () => {
-    useWorkflowStore.getState().setCurrent(BASE);
-    useWorkflowStore.getState().setCurrent(null);
-    expect(useWorkflowStore.getState().current).toBeNull();
+  useWorkflowStore.setState({
+    workflow: null,
+    selectedNodeId: null,
+    dirty: false,
+    validationErrors: [],
   });
 });
 
-describe('updateNode', () => {
-  it('updates matching node status', () => {
-    useWorkflowStore.getState().setCurrent(BASE);
-    useWorkflowStore.getState().updateNode('n-1', { status: 'running' });
-    expect(useWorkflowStore.getState().current?.nodes[0].status).toBe('running');
+describe('setWorkflow', () => {
+  it('sets workflow and resets transient state', () => {
+    useWorkflowStore.setState({ selectedNodeId: 'old', dirty: true });
+    useWorkflowStore.getState().setWorkflow(BASE);
+    const s = useWorkflowStore.getState();
+    expect(s.workflow).toEqual(BASE);
+    expect(s.selectedNodeId).toBeNull();
+    expect(s.dirty).toBe(false);
+    expect(s.validationErrors).toEqual([]);
+  });
+});
+
+describe('addNode', () => {
+  it('appends a node and marks dirty', () => {
+    useWorkflowStore.getState().setWorkflow(BASE);
+    useWorkflowStore.getState().addNode(makeNode('n-3'));
+    const s = useWorkflowStore.getState();
+    expect(s.workflow?.nodes).toHaveLength(3);
+    expect(s.dirty).toBe(true);
   });
 
-  it('does not affect other nodes', () => {
-    useWorkflowStore.getState().setCurrent(BASE);
-    useWorkflowStore.getState().updateNode('n-1', { status: 'succeeded' });
-    expect(useWorkflowStore.getState().current?.nodes[1].status).toBeUndefined();
+  it('is a no-op when workflow is null', () => {
+    expect(() => useWorkflowStore.getState().addNode(makeNode('x'))).not.toThrow();
+    expect(useWorkflowStore.getState().workflow).toBeNull();
+  });
+});
+
+describe('updateNodeParams', () => {
+  it('updates the target node parameters and marks dirty', () => {
+    useWorkflowStore.getState().setWorkflow(BASE);
+    useWorkflowStore.getState().updateNodeParams('n-1', { url: 'https://x' });
+    const s = useWorkflowStore.getState();
+    expect(s.workflow?.nodes[0].parameters).toEqual({ url: 'https://x' });
+    expect(s.workflow?.nodes[1].parameters).toEqual({});
+    expect(s.dirty).toBe(true);
+  });
+});
+
+describe('updateNodePosition', () => {
+  it('updates the position only', () => {
+    useWorkflowStore.getState().setWorkflow(BASE);
+    useWorkflowStore.getState().updateNodePosition('n-1', { x: 50, y: 75 });
+    expect(useWorkflowStore.getState().workflow?.nodes[0].position).toEqual({ x: 50, y: 75 });
+  });
+});
+
+describe('removeNode', () => {
+  it('removes the node and any incident edges, and clears selection if matched', () => {
+    useWorkflowStore.getState().setWorkflow(BASE);
+    useWorkflowStore.getState().setSelectedNodeId('n-2');
+    useWorkflowStore.getState().removeNode('n-2');
+    const s = useWorkflowStore.getState();
+    expect(s.workflow?.nodes).toHaveLength(1);
+    expect(s.workflow?.connections).toHaveLength(0);
+    expect(s.selectedNodeId).toBeNull();
+  });
+});
+
+describe('addEdge', () => {
+  it('appends an edge and marks dirty', () => {
+    useWorkflowStore.getState().setWorkflow({ ...BASE, connections: [] });
+    useWorkflowStore.getState().addEdge(makeEdge('n-1', 'n-2'));
+    expect(useWorkflowStore.getState().workflow?.connections).toHaveLength(1);
+    expect(useWorkflowStore.getState().dirty).toBe(true);
   });
 
-  it('is a no-op when current is null', () => {
-    expect(() => {
-      useWorkflowStore.getState().updateNode('n-1', { status: 'running' });
-    }).not.toThrow();
-    expect(useWorkflowStore.getState().current).toBeNull();
+  it('deduplicates identical edges', () => {
+    useWorkflowStore.getState().setWorkflow(BASE);
+    useWorkflowStore.getState().addEdge(makeEdge('n-1', 'n-2'));
+    expect(useWorkflowStore.getState().workflow?.connections).toHaveLength(1);
+  });
+});
+
+describe('removeEdge', () => {
+  it('removes the matching edge and marks dirty', () => {
+    useWorkflowStore.getState().setWorkflow(BASE);
+    useWorkflowStore.getState().removeEdge(buildEdgeId(makeEdge('n-1', 'n-2')));
+    expect(useWorkflowStore.getState().workflow?.connections).toHaveLength(0);
+    expect(useWorkflowStore.getState().dirty).toBe(true);
+  });
+
+  it('removes only the targeted parallel edge (same node pair, different handles)', () => {
+    const e1: Edge = { from_instance_id: 'n-1', to_instance_id: 'n-2', from_handle: 'right', to_handle: 'left' };
+    const e2: Edge = { from_instance_id: 'n-1', to_instance_id: 'n-2', from_handle: 'bottom', to_handle: 'top' };
+    useWorkflowStore.getState().setWorkflow({ ...BASE, connections: [e1, e2] });
+    useWorkflowStore.getState().removeEdge(buildEdgeId(e1));
+    const conns = useWorkflowStore.getState().workflow?.connections ?? [];
+    expect(conns).toHaveLength(1);
+    expect(conns[0]).toEqual(e2);
+  });
+});
+
+describe('selection + validation + markClean', () => {
+  it('manages selection / validation errors / clean flag', () => {
+    useWorkflowStore.getState().setWorkflow(BASE);
+    useWorkflowStore.getState().setSelectedNodeId('n-1');
+    useWorkflowStore.getState().setValidationErrors([
+      {
+        code: 'E_SCHEMA_INVALID' as never,
+        message: 'fail',
+        node_ids: ['n-1'],
+        edge_id: null,
+        validator: 'SchemaValidation',
+        hint: null,
+      },
+    ]);
+    useWorkflowStore.setState({ dirty: true });
+    useWorkflowStore.getState().markClean();
+    const s = useWorkflowStore.getState();
+    expect(s.selectedNodeId).toBe('n-1');
+    expect(s.validationErrors).toHaveLength(1);
+    expect(s.dirty).toBe(false);
   });
 });

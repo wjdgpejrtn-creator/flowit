@@ -7,6 +7,81 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.20.0] - 2026-06-05
+
+### Added — 스킬 지침서 묶음 (노드측 / composer측 분리, #372 결함 A·B 해소)
+- `skill_document.py` `SkillDocument`에 `composer_instructions: str = ""` 추가 — **composer측 지침서**(COMPOSER.md). ai_agent drafter가 워크플로우 생성 시 주입해 "이 스킬을 쓰려면 어떤 노드를 어떻게 엮어야 하는가"(예: LLM 노드 + Email 노드 필수)를 명시 → drafter가 LLM 노드를 포함해 바인딩 성립(#372 결함 A 해소). 기존 `instructions`(SKILL.md, **노드측** — execution_engine `_inject_skill`이 LLM 노드 system에 주입)와 소비처·시점이 완전히 분리됨.
+- `instructions: str`를 `instructions: str = ""`로 완화 — 노드 지침/composer 지침 **둘 다 optional**(#372 detail 3: composer 지침만 있는 스킬, 노드 지침만 있는 스킬 모두 허용).
+- 신규 optional 필드 + 기존 필드 완화(required→optional, 더 허용적) → MINOR. `__all__` 카운트(77) 불변(SkillDocument 기존 export). TS regenerate 완료 — `SkillDocument`에 `composer_instructions: string` 자동 반영(이 생성기는 default 있는 str도 `?` 없이 `string`으로 출력 — 기존 `instructions`와 동일 패턴).
+- 저장 계약(storage): `GcsSkillDocumentStore`가 `skills/{skill_id}/SKILL.md` + `skills/{skill_id}/COMPOSER.md`(composer_instructions 비어있지 않을 때만)로 멀티파일 저장. `save()` 반환 URI는 호출부 계약 유지를 위해 항상 SKILL.md.
+
+> ⚠️ TS `package.json` 버전이 0.15.0에 머물러 있어(이전 PR들에서 미동기화 누적) 이번에 0.20.0으로 동기화. private 패키지라 소비처는 generated 타입을 직접 import.
+
+## [0.19.0] - 2026-06-04
+
+### Added — credential 복수화 (멀티커넥션 노드 지원, REQ-012)
+- `workflow.py` `NodeInstance`에 `credential_ids: dict[str, UUID] = {}` 추가 — provider(service)별 credential 바인딩. 멀티커넥션 노드(예: `required_connections=["slack","google"]`)가 connection을 모두 충족할 수 있게 한다. key는 `required_connections`의 provider 문자열.
+  - 기존 `credential_id`(단수)는 legacy 단일 바인딩으로 유지 — provider 미지정이라 node 정의의 `required_connections`로 추론. default None이라 기존 workflows JSONB row 역호환(`NodeInstance.model_validate`).
+  - 신규 메서드 `resolve_credentials(required_connections) -> dict[str, UUID]`: `credential_ids` 우선 + 단일 connection이면 legacy `credential_id`를 해당 provider에 매핑(하위호환). validator(provider 검증)·CredentialInjectionService·execution_engine이 공통 소비.
+- `node.py` `NodeContext`에 `connection_tokens: dict[str, str] = {}` 추가 — provider별 해결된 connection 토큰. `CatalogNodeExecutor`가 노드의 모든 required connection을 inject해 채운다. `connection_token`(단수)은 단일 노드 하위호환 primary 토큰으로 유지. `wipe()`가 둘 다 제거.
+- 신규 Optional 필드(기존 필드 변경 없음) → MINOR. TS regenerate 완료 — `NodeInstance.credential_ids?: Record<string, string>`, `NodeContext.connection_tokens?` 자동 반영.
+
+## [0.18.0] - 2026-05-31
+
+### Added — 스킬 선택 SSE 프레임 (REQ-013 two-shot HITL 생산자)
+- `transport/sse.py`:
+  - `SkillSelectionFrame` 신규 — 스킬 검색 후 사용자에게 적용할 스킬을 옵션으로 제시(two-shot 1차). `prompt` + `options: list[SkillOption]` + `field_name`("skill_selection") + `allow_skip`. 프론트가 옵션 렌더 → 사용자 선택 → `POST /sessions/{id}/slot`로 2차 트리거.
+  - `SkillOption` 신규(중첩 모델) — `skill_id` + `name` + `description` + `document_preview?`(SkillDocument.instructions 미리보기) + `node_definition_id?`(노드형 호환, 지침서형은 None).
+  - `AnySSEFrame` Union에 `Tag("skill_selection")` 등록. `SlotFillQuestionFrame`(question/field_name만)은 복수 옵션·skill_id 불가라 신규 프레임 채택.
+- 신규 프레임/모델(기존 변경 없음) → MINOR. TS regenerate 완료.
+
+## [0.17.0] - 2026-05-31
+
+### Added — 스킬 런타임 주입 바인딩 (REQ-013 코어)
+- `workflow.py` `NodeInstance`에 `skill_id: Optional[UUID] = None` 추가. 노드에 바인딩된 SkillDocument(도메인 지침서)를 가리키며, execution_engine이 LLM 노드(`category=="ai"`이면서 input_schema에 `system` 필드 보유) 실행 시 해당 스킬의 `instructions`를 `system` 프롬프트에 주입한다. `credential_id`(노드별 외부 참조)와 동일 패턴.
+- 신규 Optional 필드(기존 필드 변경 없음) → MINOR. default None이라 기존 workflows JSONB row 역호환(`NodeInstance.model_validate`).
+- 바인딩 소스(노드에 skill_id를 박는 것)는 Composer two-shot HITL 후속 PR. 본 변경은 필드 + 실행 시 소비(주입)만 추가.
+- TS regenerate 완료 — `NodeInstance` 인터페이스에 `skill_id?: string | null` 자동 반영.
+
+## [0.16.0] - 2026-05-31
+
+### Added — 컨펌 게이트 신뢰 매니페스트 (confirm-gate-explanation)
+- `workflow_explanation.py` 신규 — one-shot(HITL 없음) 철학에서 신뢰가 몰리는 최종 컨펌 게이트용 구조화 설명. AI 워크플로우 초안을 실행하기 전 "무엇을 하고/무엇을 건드리며/무엇을 가정했는지"를 사용자에게 노출한다.
+  - `WorkflowExplanation`: `intent_restatement`(의도 재진술) · `summary`(평문 요약) · `steps` · `permissions` · `assumptions`.
+  - `ExplanationStep`: `order` · `node_name` · `description` · `risk_level` — 노드 1개 = 단계 1개.
+  - `PermissionItem`: `connection` · `node_name` · `risk_level` — `NodeConfig.required_connections` 원소를 권한 매니페스트로 노출.
+- 전부 신규 모델(기존 필드 변경 없음) → MINOR. steps/permissions/assumptions는 `WorkflowSchema`+`NodeConfig`에서 결정론적으로 추출되는 사실 계약이며, summary만 LLM 다듬기 허용(설계 원칙: §docs/specs/plan/confirm-gate-explanation.md).
+- `ResultFrame.payload["explanation"]`에 직렬화되어 orchestrator→api→프론트로 흐른다. 소비처: ai_agent composer `_explain_node`(영역 C) + frontend `ConfirmCard`(영역 D).
+- TS regenerate 완료 — `WorkflowExplanation` / `ExplanationStep` / `PermissionItem` 인터페이스 자동 생성.
+
+## [0.15.0] - 2026-05-30
+
+### Added — 문서 파싱 커버리지 노출 (REQ-009 — analyze 결과 가시화)
+- `document.py`:
+  - `DocumentBlock` 도메인 엔티티에 `coverage: Optional[ParseCoverage] = None` 추가. QualityGate가 산출한 페이지/블록 종류별 커버리지를 문서에 실어 storage→api→프론트로 흐르게 한다. 기존엔 `QualityGateResult.coverage`가 계산만 되고 `save_quality_log`에서 드롭돼 어디에도 노출 안 됐다.
+  - `DocumentBlocksResponse`에 동일 `coverage` 필드 추가 — `GET /api/v1/documents/{id}/blocks`가 분석 완료 시 커버리지 반환.
+  - `DocumentBlock`이 뒤에 정의된 `ParseCoverage`를 전방 참조하므로 파일 끝 `DocumentBlock.model_rebuild()` 추가.
+- 둘 다 `Optional` 신규 필드 → MINOR. `ParseCoverage`는 기존 정의/TS export 재사용(신규 타입 없음).
+- TS regenerate 완료 — `DocumentBlock` / `DocumentBlocksResponse` 인터페이스에 `coverage` 자동 반영.
+
+## [0.14.0] - 2026-05-29
+
+### Added — 문서 분석 상태 추적 (REQ-009/REQ-007 — 분석 결과 read path 완성)
+- `enums.py`: `AnalysisStatus(pending|running|completed|failed)` 신설. Celery worker가 갱신, api_server가 응답에 노출. 기존엔 `DocumentResponse.is_analyzed` boolean만 있어 "진행중"과 "실패"를 구분 못 했고, 프론트엔드가 폴링으로 완료를 감지할 수 없었다.
+- `document.py`:
+  - `DocumentBlock` 도메인 엔티티에 `analysis_status: AnalysisStatus` / `analysis_error` / `analyzed_at` 필드 추가.
+  - `DocumentResponse`에 동일 필드 추가 — 메타 폴링 응답에서 상태 노출. `is_analyzed`는 호환성 위해 유지(=`status == AnalysisStatus.COMPLETED`).
+  - `DocumentBlocksResponse` 신규 — `GET /api/v1/documents/{id}/blocks` 본문 전용 DTO. 메타와 분리해서 분석 완료 후 1회만 fetch.
+  - 3 스키마 모두 `AnalysisStatus` enum 직접 참조(`Literal` 미사용) — SSOT 활용 일관.
+- TS regenerate 완료.
+
+## [0.13.0] - 2026-05-28
+
+### Added — `ErrorCode.E_MISSING_REQUIRED_PARAMETER` (PR #208 후속)
+- `enums.py`: 워크플로우 노드의 `input_schema.required` 중 `NodeInstance.parameters`에 없는 필드를 `GraphValidator`가 보고할 때 사용. 기존엔 connection 누락(`E_MISSING_CONNECTION`)만 검사해 사용자가 `prompt` 같은 필수 파라미터를 안 넣어도 validate가 passed로 떨어지고 execute 시점에 worker가 `__init__() missing 1 required positional argument` 런타임 에러를 던지는 갭이 있었다.
+- 매핑: `GraphValidator._check_required_parameters`가 본 코드로 노드별 누락 필드를 `ValidationErrorItem(message="Required parameter(s) missing: ...")` 으로 반환.
+- TS regenerate 완료.
+
 ## [0.12.0] - 2026-05-23
 
 ### Added — `UserRole` named Literal (PR #157 review ① SSOT 통합)

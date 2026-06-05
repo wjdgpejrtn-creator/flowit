@@ -63,6 +63,11 @@ class PersonalSkillModel(_MarketplaceSkillCommon, Base):
         pg.UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False
     )
     promoted_to_team_id: Mapped[Optional[uuid.UUID]] = mapped_column(pg.UUID(as_uuid=True), nullable=True)
+    # REQ-010 문서→빌더 핸드오프: 기반 문서 association (documents FK, ON DELETE SET NULL).
+    # personal 전용 — team/company는 승격 복제본이라 문서 association 없음.
+    source_document_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        pg.UUID(as_uuid=True), ForeignKey("documents.document_id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class TeamSkillModel(_MarketplaceSkillCommon, Base):

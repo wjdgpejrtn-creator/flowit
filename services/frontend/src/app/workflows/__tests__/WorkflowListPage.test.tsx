@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 jest.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/workflows',
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
 }));
 
 const mockListWorkflows = jest.fn();

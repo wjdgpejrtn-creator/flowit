@@ -10,29 +10,30 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import pytest
-from common_schemas import NodeContext, PlaintextCredential
+from common_schemas import NodeContext, PlaintextCredential, SkillDocument
 from common_schemas.enums import RiskLevel
 from common_schemas.workflow import NodeConfig, NodeInstance, Position
 from nodes_graph.application.catalog_registry import get_all_node_classes
 from src.adapters.catalog_node_executor import CatalogNodeExecutor
 
 
-def _node(parameters=None, credential_id=None):
+def _node(parameters=None, credential_id=None, skill_id=None):
     return NodeInstance(
         instance_id=uuid4(),
         node_id=uuid4(),
         parameters=parameters or {},
         credential_id=credential_id,
+        skill_id=skill_id,
         position=Position(x=0, y=0),
     )
 
 
-def _config(node_type):
+def _config(node_type, category="transform"):
     return NodeConfig(
         node_id=uuid4(),
         node_type=node_type,
         name=node_type,
-        category="transform",
+        category=category,
         version="1.0.0",
         input_schema={},
         output_schema={},
@@ -239,3 +240,255 @@ class TestCatalogNodeExecutorCredential:
                 inputs={},
                 context=_ctx(),
             )
+
+
+# --- skill 지침서 주입 (REQ-013) ------------------------------------------------
+
+@dataclasses.dataclass
+class _SystemInput:
+    """system 프롬프트를 받는 LLM 계열 노드의 input (anthropic_chat 미러)."""
+
+    system: str | None = None
+    value: int = 0
+
+
+@dataclasses.dataclass
+class _SystemOutput:
+    seen_system: str | None
+    echo: int
+
+
+class _SystemNode:
+    """process()가 받은 system을 출력으로 되돌려 주입 결과를 확인 가능한 LLM 계열 노드."""
+
+    input_schema = _SystemInput
+
+    async def process(self, node_input: _SystemInput, context: NodeContext) -> _SystemOutput:
+        return _SystemOutput(seen_system=node_input.system, echo=node_input.value)
+
+
+class _FakeSkillStore:
+    def __init__(self, document: SkillDocument | None = None, raises: bool = False) -> None:
+        self._document = document
+        self._raises = raises
+        self.load_calls: list = []
+
+    async def load(self, skill_id):
+        self.load_calls.append(skill_id)
+        if self._raises:
+            raise RuntimeError("gcs boom")
+        return self._document
+
+
+def _skill_doc(instructions: str = "너는 세무 전문가다.") -> SkillDocument:
+    return SkillDocument(
+        skill_id=uuid4(), name="tax-expert", description="세무 도메인 지침", instructions=instructions
+    )
+
+
+class TestCatalogNodeExecutorSkillInjection:
+    def test_injects_instructions_into_empty_system(self):
+        """skill_id + ai 노드: 기존 system이 없으면 instructions가 그대로 system이 된다."""
+        store = _FakeSkillStore(_skill_doc("너는 세무 전문가다."))
+        executor = CatalogNodeExecutor({"fake": _SystemNode}, skill_document_store=store)
+
+        out = executor.execute(
+            node=_node(skill_id=uuid4()),
+            config=_config("fake", category="ai"),
+            inputs={"value": 1},
+            context=_ctx(),
+        )
+
+        assert out["seen_system"] == "너는 세무 전문가다."
+        assert len(store.load_calls) == 1
+
+    def test_prepends_instructions_before_existing_system(self):
+        """기존 system이 있으면 instructions를 앞에 두고 `---`로 구분해 병합한다."""
+        store = _FakeSkillStore(_skill_doc("지침서"))
+        executor = CatalogNodeExecutor({"fake": _SystemNode}, skill_document_store=store)
+
+        out = executor.execute(
+            node=_node(parameters={"system": "원래 프롬프트"}, skill_id=uuid4()),
+            config=_config("fake", category="ai"),
+            inputs={},
+            context=_ctx(),
+        )
+
+        assert out["seen_system"] == "지침서\n\n---\n\n원래 프롬프트"
+
+    def test_skips_node_without_system_field(self):
+        """ai 노드라도 system 필드가 없으면 주입 skip(store.load 미호출)."""
+        store = _FakeSkillStore(_skill_doc())
+        executor = CatalogNodeExecutor({"fake": _FakeNode}, skill_document_store=store)
+
+        out = executor.execute(
+            node=_node(skill_id=uuid4()),
+            config=_config("fake", category="ai"),
+            inputs={"value": 5},
+            context=_ctx(),
+        )
+
+        assert out["echo"] == 5
+        assert store.load_calls == []
+
+    def test_skips_non_ai_node_with_system_field(self):
+        """category!='ai'면 system 필드를 가졌어도 over-match 방지로 주입 skip (LOW #5)."""
+        store = _FakeSkillStore(_skill_doc())
+        executor = CatalogNodeExecutor({"fake": _SystemNode}, skill_document_store=store)
+
+        out = executor.execute(
+            node=_node(skill_id=uuid4()),
+            config=_config("fake", category="transform"),
+            inputs={"value": 6},
+            context=_ctx(),
+        )
+
+        assert out["seen_system"] is None
+        assert store.load_calls == []
+
+    def test_no_skill_id_skips_load(self):
+        """skill_id=None이면 store.load를 호출하지 않는다."""
+        store = _FakeSkillStore(_skill_doc())
+        executor = CatalogNodeExecutor({"fake": _SystemNode}, skill_document_store=store)
+
+        out = executor.execute(
+            node=_node(skill_id=None),
+            config=_config("fake", category="ai"),
+            inputs={"value": 2},
+            context=_ctx(),
+        )
+
+        assert out["seen_system"] is None
+        assert store.load_calls == []
+
+    def test_missing_document_degrades(self):
+        """load가 None(미존재)이면 무주입 degrade — 실행은 정상 진행."""
+        store = _FakeSkillStore(document=None)
+        executor = CatalogNodeExecutor({"fake": _SystemNode}, skill_document_store=store)
+
+        out = executor.execute(
+            node=_node(skill_id=uuid4()),
+            config=_config("fake", category="ai"),
+            inputs={"value": 3},
+            context=_ctx(),
+        )
+
+        assert out["seen_system"] is None
+        assert out["echo"] == 3
+
+    def test_load_exception_degrades(self):
+        """load가 예외를 던져도 무주입 degrade — 워크플로우 실행을 막지 않는다."""
+        store = _FakeSkillStore(raises=True)
+        executor = CatalogNodeExecutor({"fake": _SystemNode}, skill_document_store=store)
+
+        out = executor.execute(
+            node=_node(skill_id=uuid4()),
+            config=_config("fake", category="ai"),
+            inputs={"value": 4},
+            context=_ctx(),
+        )
+
+        assert out["seen_system"] is None
+        assert out["echo"] == 4
+
+    def test_store_not_wired_degrades_without_raising(self):
+        """store 미배선 + skill_id 있음 → degrade(credential과 달리 RuntimeError 금지)."""
+        executor = CatalogNodeExecutor({"fake": _SystemNode})
+
+        out = executor.execute(
+            node=_node(skill_id=uuid4()),
+            config=_config("fake", category="ai"),
+            inputs={"value": 9},
+            context=_ctx(),
+        )
+
+        assert out["seen_system"] is None
+        assert out["echo"] == 9
+
+
+# --- credential 복수화 (REQ-012) -----------------------------------------------
+
+@dataclasses.dataclass
+class _TokensOutput:
+    tokens: dict
+
+
+class _TokensNode:
+    """process() 중 context.connection_tokens 스냅샷을 출력으로 반환(wipe 전 관측)."""
+
+    input_schema = _FakeInput
+
+    async def process(self, node_input: _FakeInput, context: NodeContext) -> _TokensOutput:
+        return _TokensOutput(tokens=dict(context.connection_tokens))
+
+
+class _MultiCredentialService:
+    def __init__(self, captured: dict) -> None:
+        self._captured = captured
+        captured.setdefault("injected", [])
+
+    async def inject(self, credential_id, node_id) -> PlaintextCredential:
+        self._captured["injected"].append((credential_id, node_id))
+        return PlaintextCredential(
+            credential_id=str(credential_id), credential_kind="aes_gcm", value=f"tok-{credential_id}"
+        )
+
+
+def _multi_factory(captured: dict):
+    @asynccontextmanager
+    async def factory():
+        yield _MultiCredentialService(captured)
+
+    return factory
+
+
+class TestCatalogNodeExecutorMultiCredential:
+    def test_credential_ids_populate_connection_tokens(self):
+        """credential_ids의 provider별로 inject → context.connection_tokens 적재 (REQ-012)."""
+        captured: dict = {}
+        slack, google = uuid4(), uuid4()
+        executor = CatalogNodeExecutor(
+            {"multi": _TokensNode}, credential_service_factory=_multi_factory(captured)
+        )
+        node = NodeInstance(
+            instance_id=uuid4(), node_id=uuid4(), parameters={},
+            credential_ids={"slack": slack, "google": google}, position=Position(x=0, y=0),
+        )
+
+        out = executor.execute(node=node, config=_config("multi"), inputs={}, context=_ctx())
+
+        assert out["tokens"] == {"slack": f"tok-{slack}", "google": f"tok-{google}"}
+        assert len(captured["injected"]) == 2
+
+    def test_single_credential_ids_also_sets_primary_token(self):
+        """단일 provider credential_ids면 connection_token(primary)도 채워 하위호환."""
+        captured: dict = {}
+        google = uuid4()
+        executor = CatalogNodeExecutor(
+            {"fake": _FakeNode}, credential_service_factory=_multi_factory(captured)
+        )
+        node = NodeInstance(
+            instance_id=uuid4(), node_id=uuid4(), parameters={},
+            credential_ids={"google": google}, position=Position(x=0, y=0),
+        )
+
+        out = executor.execute(node=node, config=_config("fake"), inputs={"value": 1}, context=_ctx())
+
+        assert out["seen_token"] == f"tok-{google}"
+
+    def test_connection_tokens_wiped_after_execution(self):
+        """실행 종료 후 connection_tokens도 제거된다(평문 토큰 잔존 금지)."""
+        captured: dict = {}
+        ctx = _ctx()
+        executor = CatalogNodeExecutor(
+            {"multi": _TokensNode}, credential_service_factory=_multi_factory(captured)
+        )
+        node = NodeInstance(
+            instance_id=uuid4(), node_id=uuid4(), parameters={},
+            credential_ids={"slack": uuid4()}, position=Position(x=0, y=0),
+        )
+
+        executor.execute(node=node, config=_config("multi"), inputs={}, context=ctx)
+
+        assert ctx.connection_tokens == {}
+        assert ctx.connection_token is None

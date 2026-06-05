@@ -12,7 +12,8 @@
 
 | 클래스 | 소스 모듈 | 용도 |
 |--------|-----------|------|
-| `DocumentBlock` | `common_schemas.document` | 파싱 최종 결과 엔티티. 파서 출력의 루트 객체 |
+| `DocumentBlock` | `common_schemas.document` | 파싱 최종 결과 엔티티. 파서 출력의 루트 객체. **분석 lifecycle 3필드 포함**(`analysis_status` `AnalysisStatus`, `analysis_error` `Optional[str]`, `analyzed_at` `Optional[UtcDatetime]` — REQ-009 polling 신호, PR #218) |
+| `AnalysisStatus` | `common_schemas.enums` | 분석 lifecycle enum (`pending`/`running`/`completed`/`failed`) — Celery worker가 갱신, api_server가 응답에 노출 (PR #218) |
 | `ContentBlock` | `common_schemas.document` | 문서 내 개별 블록 (text/table/image/heading/code) |
 | `FileMeta` | `common_schemas.document` | 파일 메타정보 (file_name, file_type, mime_type, file_size 등) |
 | `ParserMeta` | `common_schemas.document` | 파서 이름/버전/실행시간 메타 |

@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     orchestrator_url: str | None = Field(default=None, alias="ORCHESTRATOR_URL")
     orchestrator_timeout_s: float = Field(default=60.0, alias="ORCHESTRATOR_TIMEOUT_S")
 
+    # Skills Builder Sub-Agent 직결 — SOP 문서→스킬 추출(extract) SSE 프록시 (REQ-010/013).
+    # orchestrator(의도 분류)를 거치지 않는 결정적 추출 경로라 전용 클라이언트로 직접 호출.
+    # 추출은 LLM 호출이라 길어 timeout 기본을 크게(290s, Cloud Run 300s 이내) 둔다.
+    skills_builder_url: str | None = Field(default=None, alias="SKILLS_BUILDER_URL")
+    skills_builder_timeout_s: float = Field(default=290.0, alias="SKILLS_BUILDER_TIMEOUT_S")
+
     cloud_sql_instance: str | None = Field(default=None, alias="CLOUD_SQL_INSTANCE")
     db_iam_user: str | None = Field(default=None, alias="DB_IAM_USER")
     db_name: str = Field(alias="DB_NAME")

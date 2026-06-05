@@ -1,6 +1,7 @@
 import { useAgentStore } from '../agentStore';
 
 beforeEach(() => {
+  localStorage.clear();
   useAgentStore.setState({
     mode: 'wizard',
     sessionId: null,
@@ -38,8 +39,8 @@ describe('messages', () => {
 
 describe('sessions', () => {
   it('addSession prepends (newest first)', () => {
-    useAgentStore.getState().addSession({ id: 's-1', title: 'First', createdAt: 1 });
-    useAgentStore.getState().addSession({ id: 's-2', title: 'Second', createdAt: 2 });
+    useAgentStore.getState().addSession({ id: 's-1', title: 'First', createdAt: 1, messages: [] });
+    useAgentStore.getState().addSession({ id: 's-2', title: 'Second', createdAt: 2, messages: [] });
     expect(useAgentStore.getState().sessions[0].id).toBe('s-2');
   });
 });
@@ -87,5 +88,85 @@ describe('readyToExecute', () => {
     useAgentStore.getState().setReadyToExecute({ workflowId: 'wf-123', message: '...' });
     useAgentStore.getState().setReadyToExecute(null);
     expect(useAgentStore.getState().readyToExecute).toBeNull();
+  });
+});
+
+describe('persist (새로고침 생존 — 버그 C)', () => {
+  it('addMessage 후 대화내역이 localStorage에 영속된다', () => {
+    useAgentStore.getState().addMessage({ id: 'm-1', role: 'user', content: '슬랙 알림', timestamp: 1 });
+    const raw = localStorage.getItem('flowit-agent');
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw as string);
+    expect(parsed.state.messages).toHaveLength(1);
+    expect(parsed.state.messages[0].content).toBe('슬랙 알림');
+  });
+
+  it('sessions는 최근 30개로 상한된다(localStorage quota 누적 방지)', () => {
+    for (let i = 0; i < 35; i++) {
+      useAgentStore.getState().addSession({ id: `s-${i}`, title: `t${i}`, createdAt: i, messages: [] });
+    }
+    const { sessions } = useAgentStore.getState();
+    expect(sessions).toHaveLength(30);
+    expect(sessions[0].id).toBe('s-34');   // 최신 유지
+    expect(sessions.find((x) => x.id === 's-4')).toBeUndefined();  // 가장 오래된 것 제거
+  });
+
+  it('일시 UI 상태(slotQuestion/sseFrames/mode)는 영속 대상에서 제외된다', () => {
+    useAgentStore.getState().setSlotQuestion({ fieldName: 'x', question: 'q' });
+    useAgentStore.getState().appendSSEFrame('frame1');
+    useAgentStore.getState().setMode('edit');
+    const parsed = JSON.parse(localStorage.getItem('flowit-agent') as string);
+    expect(parsed.state.slotQuestion).toBeUndefined();
+    expect(parsed.state.sseFrames).toBeUndefined();
+    expect(parsed.state.mode).toBeUndefined();
+  });
+});
+
+describe('세션 아카이브/복원 (전체 상태 보존)', () => {
+  it('addSession은 같은 id를 갱신(중복 누적 방지)', () => {
+    const base = { id: 's1', title: 'A', createdAt: 1, messages: [] };
+    useAgentStore.getState().addSession(base);
+    useAgentStore.getState().addSession({ ...base, title: 'A-updated' });
+    const { sessions } = useAgentStore.getState();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].title).toBe('A-updated');
+  });
+
+  it('restoreSession은 워크플로우/판단근거/단계를 active로 복원하고 목록에서 제거', () => {
+    const snap = {
+      id: 'server-sid-9', title: '캠페인', createdAt: 1,
+      messages: [{ id: 'm1', role: 'user' as const, content: '슬랙 알림', timestamp: 1 }],
+      readyToExecute: { workflowId: 'wf-9', message: '완성' },
+      rationaleText: '판단근거 텍스트',
+      currentStep: 'promote' as const,
+      compositeFlow: true,
+    };
+    useAgentStore.getState().addSession(snap);
+    useAgentStore.getState().restoreSession(snap);
+    const s = useAgentStore.getState();
+    expect(s.sessionId).toBe('server-sid-9');           // 서버 세션 id 복원(continue/refine 가능)
+    expect(s.readyToExecute).toEqual({ workflowId: 'wf-9', message: '완성' });
+    expect(s.rationaleText).toBe('판단근거 텍스트');
+    expect(s.currentStep).toBe('promote');
+    expect(s.compositeFlow).toBe(true);
+    expect(s.messages).toHaveLength(1);
+    expect(s.sessions.find((x) => x.id === 'server-sid-9')).toBeUndefined();  // active 승격 → 목록 제거
+  });
+
+  it('local-* 세션 복원 시 sessionId는 비움(서버 세션 아님)', () => {
+    const snap = { id: 'local-123', title: 'x', createdAt: 1, messages: [], readyToExecute: { workflowId: 'wf-1', message: 'm' } };
+    useAgentStore.getState().restoreSession(snap);
+    expect(useAgentStore.getState().sessionId).toBe('');
+    expect(useAgentStore.getState().readyToExecute).toEqual({ workflowId: 'wf-1', message: 'm' });
+  });
+
+  it('구버전 아카이브(스냅샷 필드 없음) 복원은 기본값으로 안전', () => {
+    const legacy = { id: 's-legacy', title: 'old', createdAt: 1, messages: [] };
+    useAgentStore.getState().restoreSession(legacy);
+    const s = useAgentStore.getState();
+    expect(s.readyToExecute).toBeNull();
+    expect(s.rationaleText).toBe('');
+    expect(s.currentStep).toBeNull();
+    expect(s.compositeFlow).toBe(false);
   });
 });

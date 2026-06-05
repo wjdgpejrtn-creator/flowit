@@ -62,7 +62,7 @@ modules/ai_agent/
 │       │   ├── compose_workflow_use_case.py
 │       │   └── continue_conversation_use_case.py
 │       ├── skills_builder/
-│       │   ├── build_from_sop_use_case.py
+│       │   ├── build_from_sop_use_case.py  (extract_metadata / extract_detail / confirm 3메서드, 옵션 1 2단계 분리)
 │       │   └── build_from_industry_default_use_case.py
 │       └── personalization/
 │           ├── load_user_memory_use_case.py
@@ -152,7 +152,7 @@ A2 부터는 **외부 시스템 연동(Modal, GCS, PostgreSQL, HTTP)**을 도입
 | common_schemas 신규 | ✅ 2026-05-12 — `agent_protocol.py`(AgentProtocolRequest/Response), `MemoryEntry` 이관(ai_agent→common_schemas), `AgentMode.SKILL_BUILDER`, `IntentResult.intent="build_skill"`, `AgentState.personal_memory: list[MemoryEntry]`. PR: `feature/req-012-agent-protocol` | 황대원 |
 | nodes_graph adapters | `catalog/` 36개 노드 구현체 + Plugin discovery + UPSERT | 박아름 |
 | ai_agent adapters (LLM) | `adapters/llm/modal_llm_adapter.py` + `modal_embedding_adapter.py` | 신정혜 |
-| ai_agent adapters (orchestrator/composer) | `adapters/langgraph/{supervisor_graph,composer_graph}.py` + `adapters/agent_clients/http_sub_agent_client.py` + `adapters/node_registry_adapter.py` | 신정혜 |
+| ai_agent adapters (orchestrator/composer) | `adapters/supervisor.py` + `adapters/langgraph/composer_graph.py` + `adapters/agent_clients/http_sub_agent_client.py` + `adapters/node_registry_adapter.py` | 신정혜 |
 | ai_agent skills_builder | Skills Builder use case 본격 구현 + `seeds/industry_defaults/*.json` (5종) | 박아름 |
 | ai_agent personalization | Personalization use case 본격 구현 + `adapters/memory/gcs_memory_store.py` | 햄햄(이가원) |
 | toolset adapters | `adapters/tools/` 8 connectors | 햄햄(이가원) |

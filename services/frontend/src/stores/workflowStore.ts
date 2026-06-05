@@ -1,53 +1,134 @@
 import { create } from 'zustand';
-import { RiskLevel, ExecutionStatus, NodeExecutionState, WorkflowSchema } from '@common/generated';
-
-export interface WorkflowNode {
-  id: string;
-  name: string;
-  icon: string;
-  risk: RiskLevel;
-  status?: NodeExecutionState['status'];
-  meta?: string;
-  position: { x: number; y: number };
-}
-
-export interface WorkflowEdge {
-  id: string;
-  from: string;
-  to: string;
-  label?: string;
-  dashed?: boolean;
-}
-
-export interface Workflow {
-  id: string;
-  name: string;
-  scope: WorkflowSchema['scope'];
-  nodes: WorkflowNode[];
-  edges: WorkflowEdge[];
-  riskLevel: RiskLevel;
-  status: `${ExecutionStatus}`;
-  nodeCount: number;
-  updatedAt: string;
-}
+import type {
+  WorkflowSchema,
+  NodeInstance,
+  Edge,
+  Position,
+  ValidationErrorItem,
+} from '@common/generated';
+import { buildEdgeId } from '@/lib/adapters/reactFlowAdapter';
 
 interface WorkflowStoreState {
-  current: Workflow | null;
-  setCurrent: (workflow: Workflow | null) => void;
-  updateNode: (nodeId: string, updates: Partial<WorkflowNode>) => void;
+  workflow: WorkflowSchema | null;
+  selectedNodeId: string | null;
+  dirty: boolean;
+  validationErrors: ValidationErrorItem[];
+  // 가장 최근에 사용자가 트리거한 execution. RunMode가 polling 대상(getLatestExecution)이
+  // 새로 생성된 execution인지(worker가 INSERT 완료) 판별하는 race 가드로 사용. 새 워크플로우
+  // 로드 시 자동 클리어 — 이전 워크플로우의 execution_id를 끌고 가지 않도록.
+  activeExecutionId: string | null;
+
+  setWorkflow: (workflow: WorkflowSchema | null) => void;
+  setActiveExecutionId: (id: string | null) => void;
+  addNode: (node: NodeInstance) => void;
+  updateNodeParams: (instanceId: string, parameters: Record<string, unknown>) => void;
+  updateNodePosition: (instanceId: string, position: Position) => void;
+  removeNode: (instanceId: string) => void;
+  addEdge: (edge: Edge) => void;
+  removeEdge: (edgeId: string) => void;
+  setSelectedNodeId: (id: string | null) => void;
+  setValidationErrors: (errors: ValidationErrorItem[]) => void;
+  markClean: () => void;
 }
 
 export const useWorkflowStore = create<WorkflowStoreState>((set) => ({
-  current: null,
-  setCurrent: (workflow) => set({ current: workflow }),
-  updateNode: (nodeId, updates) =>
+  workflow: null,
+  selectedNodeId: null,
+  dirty: false,
+  validationErrors: [],
+  activeExecutionId: null,
+
+  setWorkflow: (workflow) =>
+    set({ workflow, selectedNodeId: null, dirty: false, validationErrors: [], activeExecutionId: null }),
+
+  setActiveExecutionId: (id) => set({ activeExecutionId: id }),
+
+  addNode: (node) =>
     set((s) => {
-      if (!s.current) return s;
+      if (!s.workflow) return s;
       return {
-        current: {
-          ...s.current,
-          nodes: s.current.nodes.map((n) => (n.id === nodeId ? { ...n, ...updates } : n)),
-        },
+        workflow: { ...s.workflow, nodes: [...s.workflow.nodes, node] },
+        dirty: true,
       };
     }),
+
+  updateNodeParams: (instanceId, parameters) =>
+    set((s) => {
+      if (!s.workflow) return s;
+      return {
+        workflow: {
+          ...s.workflow,
+          nodes: s.workflow.nodes.map((n) =>
+            n.instance_id === instanceId ? { ...n, parameters } : n,
+          ),
+        },
+        dirty: true,
+      };
+    }),
+
+  updateNodePosition: (instanceId, position) =>
+    set((s) => {
+      if (!s.workflow) return s;
+      return {
+        workflow: {
+          ...s.workflow,
+          nodes: s.workflow.nodes.map((n) =>
+            n.instance_id === instanceId ? { ...n, position } : n,
+          ),
+        },
+        dirty: true,
+      };
+    }),
+
+  removeNode: (instanceId) =>
+    set((s) => {
+      if (!s.workflow) return s;
+      return {
+        workflow: {
+          ...s.workflow,
+          nodes: s.workflow.nodes.filter((n) => n.instance_id !== instanceId),
+          connections: s.workflow.connections.filter(
+            (e) => e.from_instance_id !== instanceId && e.to_instance_id !== instanceId,
+          ),
+        },
+        selectedNodeId: s.selectedNodeId === instanceId ? null : s.selectedNodeId,
+        dirty: true,
+      };
+    }),
+
+  addEdge: (edge) =>
+    set((s) => {
+      if (!s.workflow) return s;
+      const exists = s.workflow.connections.some(
+        (e) =>
+          e.from_instance_id === edge.from_instance_id &&
+          e.to_instance_id === edge.to_instance_id &&
+          e.from_handle === edge.from_handle &&
+          e.to_handle === edge.to_handle,
+      );
+      if (exists) return s;
+      return {
+        workflow: { ...s.workflow, connections: [...s.workflow.connections, edge] },
+        dirty: true,
+      };
+    }),
+
+  removeEdge: (edgeId) =>
+    set((s) => {
+      if (!s.workflow) return s;
+      // 노드쌍이 아닌 핸들 포함 식별자로 매칭 — 병렬 엣지 중 선택된 1개만 제거.
+      return {
+        workflow: {
+          ...s.workflow,
+          connections: s.workflow.connections.filter((e) => buildEdgeId(e) !== edgeId),
+        },
+        dirty: true,
+      };
+    }),
+
+  setSelectedNodeId: (id) => set({ selectedNodeId: id }),
+
+  setValidationErrors: (errors) => set({ validationErrors: errors }),
+
+  markClean: () => set({ dirty: false }),
 }));

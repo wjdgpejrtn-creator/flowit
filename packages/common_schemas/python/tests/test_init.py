@@ -2,12 +2,14 @@ import common_schemas
 
 
 def test_all_exports():
-    assert len(common_schemas.__all__) == 67
+    assert len(common_schemas.__all__) == 77
 
 
 def test_key_symbols_importable():
     from common_schemas import (
         AgentMode,
+        AnalysisStatus,
+        DocumentBlocksResponse,
         AgentProtocolRequest,
         AgentProtocolResponse,
         AgentState,
@@ -30,10 +32,13 @@ def test_key_symbols_importable():
         ToolCall,
         ValidationErrorResponse,
         WorkflowDraftFrame,
+        WorkflowExplanation,
         WorkflowSchema,
     )
 
     assert AgentMode is not None
+    assert AnalysisStatus is not None
+    assert DocumentBlocksResponse is not None
     assert AgentProtocolRequest is not None
     assert AgentProtocolResponse is not None
     assert AgentState is not None
@@ -56,4 +61,5 @@ def test_key_symbols_importable():
     assert ToolCall is not None
     assert ValidationErrorResponse is not None
     assert WorkflowDraftFrame is not None
+    assert WorkflowExplanation is not None
     assert WorkflowSchema is not None

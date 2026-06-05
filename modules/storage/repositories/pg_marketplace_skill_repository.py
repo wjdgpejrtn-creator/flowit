@@ -37,19 +37,27 @@ class PgMarketplaceSkillRepository(SkillRepository):
 
     # ── save (upsert by PK) ──────────────────────────────────────────────────
 
+    # flush 직후 refresh: server_default/onupdate 컬럼(created_at/updated_at)은 UPDATE 후 expired
+    # 상태가 된다. to_domain이 이를 읽으면 async 세션 밖에서 lazy SELECT가 일어나
+    # sqlalchemy.exc.MissingGreenlet으로 터진다(INSERT는 RETURNING으로 채워져 무사, UPDATE에서만 발현).
+    # refresh로 greenlet 컨텍스트 안에서 명시 재로드해 to_domain 매핑을 안전화한다.
+
     async def save_personal(self, skill: MarketplacePersonalSkill) -> MarketplacePersonalSkill:
         merged = await self._session.merge(PersonalSkillMapper.to_orm(skill))
         await self._session.flush()
+        await self._session.refresh(merged)
         return PersonalSkillMapper.to_domain(merged)
 
     async def save_team(self, skill: MarketplaceTeamSkill) -> MarketplaceTeamSkill:
         merged = await self._session.merge(TeamSkillMapper.to_orm(skill))
         await self._session.flush()
+        await self._session.refresh(merged)
         return TeamSkillMapper.to_domain(merged)
 
     async def save_company(self, skill: MarketplaceCompanySkill) -> MarketplaceCompanySkill:
         merged = await self._session.merge(CompanySkillMapper.to_orm(skill))
         await self._session.flush()
+        await self._session.refresh(merged)
         return CompanySkillMapper.to_domain(merged)
 
     # ── get ──────────────────────────────────────────────────────────────────
@@ -75,6 +83,8 @@ class PgMarketplaceSkillRepository(SkillRepository):
         limit: int = 10,
         include_promoted: bool = False,
         lifecycle_state: SkillState | None = None,
+        owner_user_id: UUID | None = None,
+        max_distance: float | None = None,
     ) -> list[MarketplacePersonalSkill | MarketplaceTeamSkill | MarketplaceCompanySkill]:
         # scope별 테이블 + 승격 마킹 컬럼 결정. company는 최상위라 promoted_to_* 없음.
         if scope == SkillScope.PERSONAL:
@@ -88,13 +98,55 @@ class PgMarketplaceSkillRepository(SkillRepository):
         else:
             model, mapper, promoted_col = CompanySkillModel, CompanySkillMapper, None
 
+        # PERSONAL 인가: owner 필터 없이 검색하면 타 사용자 개인 스킬이 노출된다(IDOR).
+        # owner 미지정이면 빈 결과로 전체 노출을 원천 차단(Port 계약).
+        if scope == SkillScope.PERSONAL and owner_user_id is None:
+            return []
+
+        distance = model.embedding.cosine_distance(query_embedding)
         stmt = select(model).where(model.embedding.isnot(None))
+        if scope == SkillScope.PERSONAL:
+            stmt = stmt.where(model.owner_user_id == owner_user_id)
         if lifecycle_state is not None:
             stmt = stmt.where(model.lifecycle_state == lifecycle_state.value)
         # include_promoted=False: 상위 scope로 승격된 원본 제외 (승격=복제, 중복 노출 방지)
         if not include_promoted and promoted_col is not None:
             stmt = stmt.where(promoted_col.is_(None))
-        stmt = stmt.order_by(model.embedding.cosine_distance(query_embedding)).limit(limit)
+        # 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 임계 이내만. 무관 스킬이 top-k에 동반
+        # 노출되는 것을 차단(Composer가 SKILL_SEARCH_MAX_DISTANCE로 주입).
+        if max_distance is not None:
+            stmt = stmt.where(distance <= max_distance)
+        stmt = stmt.order_by(distance).limit(limit)
+
+        result = await self._session.execute(stmt)
+        return [mapper.to_domain(row) for row in result.scalars().all()]
+
+    # ── 마켓플레이스 browse 목록 (Team/Company 탭) ───────────────────────────
+
+    async def list_by_scope(
+        self,
+        scope: SkillScope,
+        lifecycle_state: SkillState | None = SkillState.PUBLISHED,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MarketplaceTeamSkill | MarketplaceCompanySkill]:
+        # team만 상위 승격 마킹(promoted_to_company_id) 보유 — company는 최상위라 없음.
+        if scope == SkillScope.TEAM:
+            model, mapper, promoted_col = (
+                TeamSkillModel, TeamSkillMapper, TeamSkillModel.promoted_to_company_id,
+            )
+        elif scope == SkillScope.COMPANY:
+            model, mapper, promoted_col = CompanySkillModel, CompanySkillMapper, None
+        else:
+            # PERSONAL은 owner 범위 — list_personal_by_user 사용 (Port 계약).
+            raise ValueError(f"list_by_scope는 team/company만 지원합니다 (got {scope})")
+
+        stmt = select(model)
+        if lifecycle_state is not None:
+            stmt = stmt.where(model.lifecycle_state == lifecycle_state.value)
+        if promoted_col is not None:
+            stmt = stmt.where(promoted_col.is_(None))
+        stmt = stmt.order_by(model.updated_at.desc()).limit(limit).offset(offset)
 
         result = await self._session.execute(stmt)
         return [mapper.to_domain(row) for row in result.scalars().all()]
@@ -113,6 +165,23 @@ class PgMarketplaceSkillRepository(SkillRepository):
             stmt = stmt.where(PersonalSkillModel.lifecycle_state == lifecycle_state.value)
         stmt = stmt.order_by(PersonalSkillModel.updated_at.desc()).limit(limit).offset(offset)
 
+        result = await self._session.execute(stmt)
+        return [PersonalSkillMapper.to_domain(row) for row in result.scalars().all()]
+
+    async def list_personal_by_state(
+        self,
+        lifecycle_state: SkillState,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MarketplacePersonalSkill]:
+        # owner 필터 없음 — 전체 소유자의 해당 상태 스킬(관리자 리뷰 큐). 인가는 use case(Admin only).
+        stmt = (
+            select(PersonalSkillModel)
+            .where(PersonalSkillModel.lifecycle_state == lifecycle_state.value)
+            .order_by(PersonalSkillModel.updated_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         result = await self._session.execute(stmt)
         return [PersonalSkillMapper.to_domain(row) for row in result.scalars().all()]
 

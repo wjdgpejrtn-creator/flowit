@@ -38,7 +38,16 @@ import time
 from pathlib import Path
 
 import modal
-from pydantic import BaseModel
+
+# pydantic은 modal.Image 안에만 install됨. GitHub Actions runner의 `modal deploy`
+# CLI가 본 module을 import할 때는 미설치 → ModuleNotFoundError.
+# try/except로 가드, runner에서는 BaseModel=object stub. EmbedReq/EmbedBatchReq/
+# GenerateReq는 module scope 유지 필수(FastAPI 0.115+ 요구사항, 아래 주석 참조),
+# instance화는 container 안에서만 발생하므로 stub 안전.
+try:
+    from pydantic import BaseModel
+except ModuleNotFoundError:
+    BaseModel = object  # type: ignore[misc,assignment]
 
 # Gemma 4 vision-mode chat-template leak. `enable_thinking=False` +
 # `reasoning_format=none` strip the <think> trace in text mode, but the vision
@@ -77,6 +86,10 @@ class GenerateReq(BaseModel):
     system: str | None = None
     format: str | None = None  # "json" 지정 시 grammar-level JSON 강제
     json_schema: dict | None = None
+    # data URL 목록(예: "data:image/png;base64,..."). Gemma 4 멀티모달 vision 입력 —
+    # doc_parser VisionExtractor가 HttpVisionLLM 경유 POST(REQ-006/007). `_run_generate`는
+    # 이미 images kwargs를 처리하므로 HTTP 경로에 필드만 노출하면 됨.
+    images: list[str] = []
 
 
 APP_NAME = "llm-base"
@@ -163,7 +176,8 @@ def download_model() -> None:
     volumes={MODEL_DIR: model_volume},
     secrets=[hf_secret],
     timeout=600,
-    scaledown_window=300,
+    # 15분 idle 유지 — staging 연속 테스트 시 3분 cold start(Gemma mmap+BGE) 회피.
+    scaledown_window=900,
 )
 @modal.concurrent(max_inputs=4)
 class LLMBase:
@@ -436,6 +450,8 @@ class LLMBase:
                 kwargs["format"] = req.format
             if req.json_schema:
                 kwargs["json_schema"] = req.json_schema
+            if req.images:
+                kwargs["images"] = req.images  # Gemma 4 vision — _run_generate가 처리
             return self._run_generate(req.prompt, **kwargs)
 
         return api

@@ -21,8 +21,9 @@ dependencies = [
     "openpyxl>=3.1",
     # PPTX
     "python-pptx>=0.6",
-    # HWP
+    # HWP — pyhwp(hwp5html CLI, subprocess) + BeautifulSoup로 변환 HTML 파싱
     "pyhwp",
+    "beautifulsoup4>=4.12",
     # HWPX
     "lxml>=5.0",
     # Markdown

@@ -109,7 +109,7 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
-| `BuildFromSOPUseCase` | `extract_draft(user_id, document, personal_memory?)` / `confirm(user_id, skills) → AsyncGenerator[SSEFrame]` | SOP 문서 → LLM 추출 **wizard 2단계**(ADR-0020 Q8): 추출 검토 → `CreateDraftSkillUseCase`로 personal DRAFT. NodeDefinition은 publish 시점(Option B) |
+| `BuildFromSOPUseCase` | `extract_metadata(user_id, document, personal_memory?)` / `extract_detail(user_id, document, meta, personal_memory?)` / `confirm(user_id, skills) → AsyncGenerator[SSEFrame]` | SOP 문서 → LLM 추출 **wizard 3단계**(ADR-0020 Q8 + 옵션 1 2단계 분리, 2026-06-04 LLM JSON 잘림 해소): 메타 5필드 → 선택 → detail 추출 → 사용자 검토 → `CreateDraftSkillUseCase`로 personal DRAFT. NodeDefinition은 publish 시점(Option B) |
 | `BuildFromIndustryDefaultUseCase` | `user_id: UUID, industry_code: str → AsyncGenerator[SSEFrame]` | 산업 seed(`ecommerce` 활성) → `NodeDefinitionRepository.upsert()` (seed auto-PUBLISHED, Q7) |
 | `BuildFromFunctionalDomainUseCase` | `user_id: UUID, domain_code: str → AsyncGenerator[SSEFrame]` | 직무 영역 seed(5종) → `NodeDefinitionRepository.upsert()` (seed auto-PUBLISHED, Q7) |
 

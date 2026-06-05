@@ -52,15 +52,15 @@ class PersonalMemoryStore(ABC):
         """{name}.emb.json 저장. if_generation_match로 동시성 제어."""
         ...
 
-    @abstractmethod
     async def claim_debounce_window(self, user_id: UUID, now: datetime, window: timedelta) -> bool:
         """debounce 윈도우를 CAS로 선점.
 
         - 마지막 claim으로부터 window 이내면 False (아직 윈도우 내)
         - 다른 인스턴스가 동시에 선점해 CAS 경쟁에서 패하면 False
         - 선점 성공 시 True
+        구현체가 CAS 기반 debounce가 필요한 경우 override. 기본은 항상 선점 허용.
         """
-        ...
+        return True
 
     async def cleanup(self, user_id: UUID) -> None:
         """세션 종료 후 인메모리 캐시 해제 (기본 no-op; 구현체가 필요 시 override)."""

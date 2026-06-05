@@ -11,12 +11,20 @@ jest.mock('next/navigation', () => ({
 }));
 
 const mockGet = jest.fn();
+const mockGetDoc = jest.fn();
 const mockUpdate = jest.fn();
 const mockDelete = jest.fn();
 jest.mock('../../../lib/api/skillApi', () => ({
   getPersonalSkill: (...args: unknown[]) => mockGet(...args),
+  getPersonalSkillDocument: (...args: unknown[]) => mockGetDoc(...args),
   updatePersonalSkill: (...args: unknown[]) => mockUpdate(...args),
   deletePersonalSkill: (...args: unknown[]) => mockDelete(...args),
+}));
+
+// react-markdown은 ESM이라 next/jest가 변환하지 않음 — 본문 렌더러를 단순 mock으로 대체.
+jest.mock('../../../components/common/MarkdownView', () => ({
+  __esModule: true,
+  default: ({ source }: { source: string }) => <div data-testid="md">{source}</div>,
 }));
 
 jest.mock('../../../stores/authStore', () => ({
@@ -31,10 +39,13 @@ import SkillDetailPage from '../[id]/page';
 
 beforeEach(() => {
   mockGet.mockReset();
+  mockGetDoc.mockReset();
   mockUpdate.mockReset();
   mockDelete.mockReset();
   mockPush.mockReset();
   mockRefresh.mockReset();
+  // 기본: 지침서 없음(404) — 개별 테스트에서 필요 시 override.
+  mockGetDoc.mockRejectedValue(new Error('404 Not Found: '));
 });
 
 const DRAFT_SKILL = {
@@ -105,9 +116,9 @@ describe('SkillDetailPage', () => {
     });
   });
 
-  /* ── DRAFT 제약 ── */
+  /* ── 수정/삭제 노출 정책 ── */
 
-  it('DRAFT 스킬에 수정/삭제 버튼이 보인다', async () => {
+  it('DRAFT 스킬에 수정/삭제 버튼이 모두 보인다', async () => {
     mockGet.mockResolvedValueOnce(DRAFT_SKILL);
     renderPage();
 
@@ -117,14 +128,15 @@ describe('SkillDetailPage', () => {
     expect(screen.getByRole('button', { name: '삭제' })).toBeInTheDocument();
   });
 
-  it('PUBLISHED 스킬에는 수정/삭제 버튼이 없다', async () => {
+  it('PUBLISHED 스킬은 수정 버튼은 보이되 삭제 버튼은 없다', async () => {
     mockGet.mockResolvedValueOnce(PUBLISHED_SKILL);
     renderPublishedPage();
 
     await waitFor(() => {
       expect(screen.getAllByText('게시됨').length).toBeGreaterThanOrEqual(1);
     });
-    expect(screen.queryByRole('button', { name: '수정' })).not.toBeInTheDocument();
+    // 게시 스킬도 owner는 수정 가능(2026-06-02 정책 변경) — 삭제는 DRAFT만.
+    expect(screen.getByRole('button', { name: '수정' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '삭제' })).not.toBeInTheDocument();
   });
 
@@ -155,6 +167,38 @@ describe('SkillDetailPage', () => {
         name: '월간 리포트',
         description: '매주 OKR 요약 생성',
         tags: ['리포트'],
+      });
+    });
+  });
+
+  it('지침서 본문을 편집해 저장하면 instructions가 전송된다', async () => {
+    mockGet.mockResolvedValueOnce(PUBLISHED_SKILL);
+    mockGetDoc.mockResolvedValueOnce({
+      skill_id: 'sk-002',
+      name: '주간 리포트',
+      description: '매주 OKR 요약 생성',
+      instructions: '# 기존 본문',
+    });
+    mockUpdate.mockResolvedValueOnce(PUBLISHED_SKILL);
+
+    renderPublishedPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '수정' })).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByRole('button', { name: '수정' }));
+
+    const bodyArea = screen.getByDisplayValue('# 기존 본문');
+    await userEvent.clear(bodyArea);
+    await userEvent.type(bodyArea, '# 새 본문');
+    await userEvent.click(screen.getByRole('button', { name: '저장' }));
+
+    await waitFor(() => {
+      expect(mockUpdate).toHaveBeenCalledWith('sk-002', {
+        name: '주간 리포트',
+        description: '매주 OKR 요약 생성',
+        tags: ['리포트'],
+        instructions: '# 새 본문',
       });
     });
   });

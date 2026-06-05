@@ -296,4 +296,5 @@ class TestUserConfirmNode:
         oc = _build_orchestrator()
         state = _make_state(session_id=session_id)
         result = await oc._user_confirm_node(state)
-        assert result["collected_frames"][0].payload["session_id"] == str(session_id)
+        frames = [f for f in result["collected_frames"] if isinstance(f, ResultFrame)]
+        assert frames[0].payload["session_id"] == str(session_id)

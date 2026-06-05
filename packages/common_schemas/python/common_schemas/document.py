@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .enums import AnalysisStatus
 from .types import UtcDatetime
 
 
@@ -87,6 +88,13 @@ class DocumentBlock(BaseModel):
     blocks: list[ContentBlock]
     vision_block_count: int = 0
     failed_block_count: int = 0
+    # 분석 상태 추적 (REQ-009/REQ-007 — Celery 태스크 진행/실패 가시화).
+    analysis_status: AnalysisStatus = AnalysisStatus.PENDING
+    analysis_error: Optional[str] = None
+    analyzed_at: Optional[UtcDatetime] = None
+    # 파싱 커버리지 (QualityGate 산출 — 페이지/블록 종류별 수). 분석 완료 시 채워진다.
+    # 전방 참조(ParseCoverage는 아래 정의) — 파일 끝 model_rebuild()로 해소.
+    coverage: Optional["ParseCoverage"] = None
 
 
 class AnalysisResult(BaseModel):
@@ -188,3 +196,55 @@ class ChunkingStrategy(BaseModel):
     max_tokens: int
     overlap_tokens: int
     token_estimator_mode: Literal["tiktoken", "char_estimate"]
+
+
+# ── API 응답 DTO (api_server/routers/documents.py SSOT 이관) ──────────────────
+
+class DocumentResponse(BaseModel):
+    """문서 업로드/조회 공통 응답 DTO."""
+
+    document_id: UUID
+    file_name: str
+    mime_type: str
+    file_size: int
+    gcs_uri: str
+    is_analyzed: bool
+    # 분석 상태 — 프론트엔드 폴링 신호. is_analyzed는 호환성 위해 유지(completed == True).
+    analysis_status: AnalysisStatus = AnalysisStatus.PENDING
+    analysis_error: Optional[str] = None
+    analyzed_at: Optional[UtcDatetime] = None
+
+
+class DocumentBlocksResponse(BaseModel):
+    """GET /api/v1/documents/{id}/blocks 응답 — 파싱 결과 본문 전용 DTO.
+
+    DocumentResponse(메타)와 분리: 메타 폴링은 가벼운 페이로드, blocks는 분석 완료 후 1회.
+    """
+
+    document_id: UUID
+    blocks: list[ContentBlock]
+    analysis_status: AnalysisStatus
+    analysis_error: Optional[str] = None
+    analyzed_at: Optional[UtcDatetime] = None
+    # 파싱 커버리지 — 분석 완료(completed) 시 채워짐. 진행중/실패 시 None.
+    coverage: Optional[ParseCoverage] = None
+
+
+class AnalyzeDispatchResponse(BaseModel):
+    """문서 분석 Celery 태스크 디스패치 응답."""
+
+    document_id: UUID
+    task_id: str
+    action: str
+
+
+class DocumentDownloadResponse(BaseModel):
+    """문서 다운로드 서명 URL 응답."""
+
+    document_id: UUID
+    download_url: str
+    expires_in: int
+
+
+# DocumentBlock.coverage가 아래에서 정의된 ParseCoverage를 전방 참조하므로 재빌드로 해소.
+DocumentBlock.model_rebuild()

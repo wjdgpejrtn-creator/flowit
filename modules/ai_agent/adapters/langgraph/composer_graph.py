@@ -2,14 +2,13 @@
 
 spec §3.2 Workflow Composer 내부 StateGraph 구현. LangGraph는 adapters/에만 존재.
 
-Tool-calling 에이전트 구조:
-  compress (turn_count >= 25 시) → security → agent_loop → END
-
-  agent_loop: LLM이 아래 툴 중 하나를 선택해 실행, done 반환 시 종료.
-    analyze_intent / ask_clarification / fill_slots / search_nodes /
-    draft_workflow / validate_workflow / evaluate_quality / retry_draft /
-    promote_workflow / save_workflow / execute_workflow / evaluate_output /
-    confirm_result / save_memory / done
+Fixed DAG 구조:
+  compress → security → intent
+    → clarify 경로: consultant → slot_fill → END
+    → 일반 경로: search_nodes → draft_workflow → validate_workflow
+        → (retry_draft → draft_workflow)* → qa_evaluator
+        → (retry_draft → draft_workflow)* → promote
+        → save_workflow → confirm_result → save_memory → END
 """
 from __future__ import annotations
 
@@ -22,14 +21,12 @@ import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, TypedDict
-
-from pydantic import BaseModel
 from uuid import UUID, uuid4
 
 import httpx
 from auth.domain.services.permission_resolver import PermissionResolver
-from common_schemas.agent import DraftSpec, MemoryEntry, SlotFillingState
-from common_schemas.enums import RiskLevel
+from common_schemas.agent import DraftSpec, IntentResult, MemoryEntry, SlotFillingState
+from common_schemas.enums import IntentType, RiskLevel
 from common_schemas.transport import (
     AgentNodeFrame,
     AnySSEFrame,
@@ -39,25 +36,32 @@ from common_schemas.transport import (
     IntentResultFrame,
     PipelineStatusFrame,
     QAMetricFrame,
+    RationaleDeltaFrame,
     ResultFrame,
     SessionFrame,
+    SkillOption,
+    SkillSelectionFrame,
     SlotFillQuestionFrame,
     SSEFrame,
     WorkflowDraftFrame,
 )
 from common_schemas.workflow import NodeConfig, WorkflowSchema
+from common_schemas.workflow_explanation import WorkflowExplanation
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, StateGraph
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.services.graph_validator import GraphValidator
+from pydantic import BaseModel
 from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
 from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 
 from ...domain.entities.memory_file import MemoryFile, MemoryFileRef
 from ...domain.entities.session_ref import SessionRef
+from ...domain.ports.composer_state_store import ComposerStateStore
+from ...domain.ports.connection_resolver import ConnectionResolver
 from ...domain.ports.llm_port import LLMPort
-from ...domain.ports.personal_memory_store import PersonalMemoryStore
 from ...domain.ports.node_registry import NodeRegistry
+from ...domain.ports.personal_memory_store import PersonalMemoryStore
 from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.workflow_draft_store import WorkflowDraftStore
 from ...domain.ports.workflow_repository import WorkflowRepository
@@ -65,13 +69,25 @@ from ...domain.services.drafter_service import DrafterService
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 from ...domain.services.qa_evaluator_service import QAEvaluatorService
 from ...domain.services.slot_filling_service import SlotFillingService
+from ...domain.services.workflow_explanation_service import WorkflowExplanationService
 from ...domain.services.workflow_layout_service import WorkflowLayoutService
 from ...domain.value_objects.turn_limit import TurnLimit
 
 _logger = logging.getLogger(__name__)
 
 _QA_MAX_RETRY = 3
-_MAX_AGENT_ITERATIONS = 30  # 무한 루프 방지
+_MAX_AGENT_ITERATIONS = 15  # 무한 루프 방지
+
+# 스킬 검색 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 상한. 이 거리 밖 후보는 제외해
+# 무관한 스킬이 옵션/노드 후보에 딸려 나오는 것을 막는다.
+# 기본값 0.50: staging 실측(BGE-M3, 한국어 짧은 텍스트) 기준 — 관련 스킬은 0.35~0.49,
+# 무관 쿼리는 0.64+에 분포해 0.50이 둘을 가른다(0.30은 거의 동일어도 컷해 과도했음).
+# 데이터 축적 후 SKILL_SEARCH_MAX_DISTANCE env로 무재배포 튜닝.
+_SKILL_SEARCH_MAX_DISTANCE = float(os.getenv("SKILL_SEARCH_MAX_DISTANCE", "0.50"))
+
+# RAG로 회수한 사용자 패턴 본문을 drafter 프롬프트에 넣을 때 항목당 본문 절단 길이 —
+# 프롬프트 비대화 방지. top-k(=RecallPersonalSkillsUseCase 기본 3) × 이 길이가 주입 상한.
+_RECALL_PATTERN_MAX_CHARS = 500
 
 class _NextAction(BaseModel):
     """LLM 에이전트가 다음에 실행할 툴을 선택하는 스키마."""
@@ -114,6 +130,7 @@ class _State(TypedDict):
     messages: list[dict[str, Any]]
     turn_count: int
     personal_memory: list[MemoryEntry]
+    personal_patterns: list[str]  # RAG로 회수한 사용자 과거 패턴 본문 — drafter 프롬프트 주입용
     intent: str | None
     intent_analyzed_entities: dict[str, Any]
     draft_spec: DraftSpec | None
@@ -138,12 +155,23 @@ class _State(TypedDict):
     # skill suggest 필드
     skill_suggested: bool                   # suggest_skill 툴 실행 여부 (재중복 방지)
     suggested_skills: list[dict[str, Any]]  # 제안된 스킬 후보 목록
+    # fixed DAG 필드
+    validation_issues: str | None           # validator 실패 사유 (non-fatal — error 필드와 분리)
+    retry_count: int                        # draft/validate/qa 재시도 횟수
+    # two-shot HITL 스킬 선택 필드 (REQ-013)
+    round: int                              # 1=옵션 제시 라운드, 2=선택 입력 후 재개 라운드
+    selected_skill_id: UUID | None          # 2차 라운드에서 사용자가 선택한 스킬 (LLM 노드 바인딩 대상)
+    awaiting_skill_selection: bool          # suggest_skill_select가 옵션 emit + 중단했는지 (라우팅용)
+    resume_ok: bool                         # 2차 resume에서 GCS 상태 복원 성공 여부 (라우팅용)
+    # 컨펌 게이트 신뢰 매니페스트 (영역 C)
+    workflow_explanation: WorkflowExplanation | None
+    offered_skill_ids: list[str]            # 1차에 제시한 옵션 skill_id 집합 (2차 bind 멤버십 검증 — IDOR 차단)
 
 
 class LangGraphOrchestrator:
-    """Workflow Composer — tool-calling 에이전트 (spec §3.2).
+    """Workflow Composer — fixed DAG (spec §3.2).
 
-    compress → security → agent_loop(LLM이 툴 선택) → END 구조.
+    compress → security → intent → search_nodes → draft → validate → qa → promote → save → confirm → memory → END.
     services/agents/agent-composer/main.py composition root에서 인스턴스화.
     """
 
@@ -164,6 +192,9 @@ class LangGraphOrchestrator:
         workflow_draft_store: WorkflowDraftStore | None = None,
         execution_engine_url: str | None = None,
         personal_memory_store: PersonalMemoryStore | None = None,
+        composer_state_store: ComposerStateStore | None = None,
+        workflow_explanation_svc: WorkflowExplanationService | None = None,
+        connection_resolver: ConnectionResolver | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -180,6 +211,9 @@ class LangGraphOrchestrator:
         self._workflow_draft_store = workflow_draft_store
         self._execution_engine_url = execution_engine_url or os.getenv("EXECUTION_ENGINE_URL", "")
         self._personal_memory_store = personal_memory_store
+        self._composer_state_store = composer_state_store
+        self._workflow_explanation_svc = workflow_explanation_svc or WorkflowExplanationService()
+        self._connection_resolver = connection_resolver
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -193,8 +227,22 @@ class LangGraphOrchestrator:
         personal_memory: list[MemoryEntry] | None = None,
         user_role: str = "User",
         department_id: UUID | None = None,
+        round: int = 1,
+        selected_skill_id: UUID | str | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
-        return self._run(user_id, session_id, message, personal_memory or [], user_role, department_id)
+        # selected_skill_id는 relay(JSON)를 거치며 str로 도착할 수 있어 UUID로 강제
+        coerced_skill_id: UUID | None = None
+        if isinstance(selected_skill_id, UUID):
+            coerced_skill_id = selected_skill_id
+        elif isinstance(selected_skill_id, str) and selected_skill_id:
+            try:
+                coerced_skill_id = UUID(selected_skill_id)
+            except ValueError:
+                coerced_skill_id = None
+        return self._run(
+            user_id, session_id, message, personal_memory or [], user_role,
+            department_id, round, coerced_skill_id,
+        )
 
     async def _run(
         self,
@@ -204,6 +252,8 @@ class LangGraphOrchestrator:
         personal_memory: list[MemoryEntry],
         user_role: str,
         department_id: UUID | None,
+        round: int = 1,
+        selected_skill_id: UUID | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
         session_frame = SessionFrame(session_id=session_id, langgraph_thread_id=uuid4())
         yield session_frame
@@ -219,6 +269,7 @@ class LangGraphOrchestrator:
             "messages": [{"role": "user", "content": message}],
             "turn_count": 1,
             "personal_memory": personal_memory,
+            "personal_patterns": [],
             "intent": None,
             "intent_analyzed_entities": {},
             "draft_spec": None,
@@ -239,18 +290,22 @@ class LangGraphOrchestrator:
             "execution_result": None,
             "output_quality_score": 0.0,
             "output_quality_feedback": "",
-            "skill_suggested": False,
-            "suggested_skills": [],
+            "validation_issues": None,
+            "retry_count": 0,
+            "round": round,
+            "selected_skill_id": selected_skill_id,
+            "awaiting_skill_selection": False,
+            "resume_ok": False,
+            "offered_skill_ids": [],
+            "workflow_explanation": None,
         }
 
         try:
             async for event in self._graph.astream(initial, {"recursion_limit": 40}, stream_mode="updates"):
                 for node_name, updates in event.items():
-                    # agent 루프 노드는 내부에서 tool별 AgentNodeFrame을 collected_frames에 포함
-                    if node_name != "agent":
-                        node_frame = AgentNodeFrame(agent_node_name=node_name)
-                        yield node_frame
-                        all_frames.append(node_frame)
+                    node_frame = AgentNodeFrame(agent_node_name=node_name)
+                    yield node_frame
+                    all_frames.append(node_frame)
                     if not isinstance(updates, dict):
                         continue
                     for frame in updates.get("collected_frames", []):
@@ -265,7 +320,7 @@ class LangGraphOrchestrator:
         except GraphRecursionError:
             error_frame = ErrorFrame(
                 code="E_RECURSION",
-                message=f"에이전트 최대 반복 횟수({_MAX_AGENT_ITERATIONS}) 초과",
+                message="워크플로우 생성 최대 단계 초과",
             )
             yield error_frame
             all_frames.append(error_frame)
@@ -306,6 +361,10 @@ class LangGraphOrchestrator:
     # ------------------------------------------------------------------ agent loop
 
     def _build_agent_prompt(self, state: _State) -> str:
+        # NOTE: 이 tool-calling 루프(_agent_node)는 현재 _build()의 라이브 DAG에 노드로
+        # 미배선이다(고정 DAG 사용). 개인화의 실제 주입점은 drafter(_drafter_node →
+        # DrafterService.draft(personal_patterns=...))다. 이 루프가 향후 다시 배선될 때
+        # 동일 버그(개인 패턴 미반영)가 재발하지 않도록 여기서도 함께 주입한다.
         intent = state.get("intent") or "아직 분석 안 됨"
         has_draft = state.get("workflow_draft") is not None
         qa_score = state.get("qa_score", 0.0)
@@ -317,9 +376,18 @@ class LangGraphOrchestrator:
             f"{m['role']}: {m.get('content', '')[:200]}"
             for m in (state.get("messages") or [])[-3:]
         )
+        patterns = state.get("personal_patterns") or []
+        patterns_section = (
+            "사용자 과거 패턴 (관련 있을 때만 반영):\n"
+            + "\n".join(f"- {p}" for p in patterns)
+            + "\n\n"
+            if patterns
+            else ""
+        )
         return (
             "워크플로우 자동화 AI 에이전트입니다.\n\n"
             f"대화:\n{messages_preview}\n\n"
+            f"{patterns_section}"
             f"현재 상태:\n"
             f"- 의도: {intent}\n"
             f"- 워크플로우 초안: {'있음' if has_draft else '없음'}\n"
@@ -443,6 +511,53 @@ class LangGraphOrchestrator:
             return "end"
         return "continue"
 
+    @staticmethod
+    def _route_after_security(state: _State) -> str:
+        return "end" if state.get("error") else "intent"
+
+    @staticmethod
+    def _route_after_intent(state: _State) -> str:
+        intent = state.get("intent")
+        if intent == "clarify":
+            return "consultant"
+        if intent in {"draft", "refine", None}:
+            return "search_nodes"
+        # propose 포함 예상 외 intent → supervisor가 처리, composer는 no-op END
+        return "end"
+
+    @staticmethod
+    def _route_after_validate(state: _State) -> str:
+        if state.get("pass_flag"):
+            return "qa_evaluator"
+        if state.get("retry_count", 0) < _QA_MAX_RETRY:
+            return "retry_draft"
+        return "validation_failed"
+
+    @staticmethod
+    def _route_after_qa(state: _State) -> str:
+        if state.get("pass_flag"):
+            return "promote"
+        if state.get("qa_attempts", 0) < _QA_MAX_RETRY:
+            return "retry_draft"
+        return "qa_failed"
+
+    # ---- two-shot HITL 라우터 (REQ-013) ----
+
+    @staticmethod
+    def _route_entry(state: _State) -> str:
+        """진입 분기 — 2차(선택 입력) 라운드는 GCS 복원(resume)부터, 1차는 기존 전처리(compress)부터."""
+        return "resume" if state.get("round", 1) == 2 else "compress"
+
+    @staticmethod
+    def _route_after_resume(state: _State) -> str:
+        """복원 성공 시 draft로, 실패(세션 만료) 시 종료."""
+        return "draft" if state.get("resume_ok") else "end"
+
+    @staticmethod
+    def _route_after_suggest(state: _State) -> str:
+        """옵션 emit + 중단(two-shot) → END, 옵션 없음/skill_search 미주입 → 한 라운드 내 draft(one-shot 폴백)."""
+        return "wait" if state.get("awaiting_skill_selection") else "draft"
+
     # ------------------------------------------------------------------ preprocessing nodes
 
     # 1. compress_node — turn_count >= 25 시 메시지 압축
@@ -507,6 +622,10 @@ class LangGraphOrchestrator:
             )
         except Exception as exc:
             return {"intent": "clarify", "error": f"intent 분석 실패: {exc}"}
+        # composer 진입 = supervisor가 draft/refine/clarify로 분류한 상황
+        # result=None(미분류)이면 draft로 기본 처리
+        if result is None:
+            result = IntentResult(intent=IntentType.DRAFT, confidence=0.5, analyzed_entities={})
         elapsed = int((time.monotonic() - t0) * 1000)
         draft_spec = DraftSpec(
             natural_language_intent=state["messages"][-1].get("content", ""),
@@ -567,7 +686,37 @@ class LangGraphOrchestrator:
             }
         return {}
 
-    # 6. retriever_node — 노드 후보 검색 + 커스텀 스킬 합산
+    async def _recall_personal_patterns(self, user_id: UUID, query: str) -> list[str]:
+        """RAG(BGE-M3 코사인 유사도)로 이번 요청과 관련된 사용자 과거 패턴 본문을 회수.
+
+        ``RecallPersonalSkillsUseCase`` 독스트링의 설계 의도 — "Workflow Composer가 프롬프트
+        작성 전 호출해 관련 사용자 패턴을 주입" — 를 라이브 그래프에 배선한다. store/embedder
+        미주입 또는 회수 실패 시 빈 리스트를 반환해 개인화를 조용히 건너뛴다(non-fatal).
+        load_memory 전체 덤프와 달리 쿼리 관련 top-k만 회수해 프롬프트 오염을 막는다.
+        """
+        if self._personal_memory_store is None or self._embedder is None:
+            return []
+        try:
+            from ...application.agents.personalization.recall_personal_skills_use_case import (
+                RecallPersonalSkillsUseCase,
+            )
+
+            recall = RecallPersonalSkillsUseCase(self._personal_memory_store, self._embedder)
+            files = await recall.execute(user_id, query)
+        except Exception as exc:
+            _logger.warning("개인 패턴 회수 실패 (non-fatal, 개인화 미적용): %s", exc)
+            return []
+        patterns: list[str] = []
+        for f in files:
+            body = (f.body or "").strip()
+            if not body:
+                continue
+            label = (f.description or f.name or "").strip()
+            snippet = body[:_RECALL_PATTERN_MAX_CHARS]
+            patterns.append(f"[{label}] {snippet}" if label else snippet)
+        return patterns
+
+    # 6. retriever_node — 노드 후보 검색 + 커스텀 스킬 합산 + 개인 패턴 RAG 회수
     async def _retriever_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         spec = state["draft_spec"]
@@ -577,35 +726,33 @@ class LangGraphOrchestrator:
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
 
-        # 커스텀 스킬 검색 — embedder + skill_search 모두 주입된 경우에만
-        if self._embedder is not None and self._skill_search is not None:
-            try:
-                query_embedding = await self._embedder.embed(query)
-                skill_results = await self._skill_search.execute(
-                    query_embedding=query_embedding,
-                    scope=SkillScope.COMPANY,
-                    limit=10,
-                )
-                existing_ids = {c.node_id for c in candidates}
-                for skill in skill_results:
-                    if skill.node_definition_id is None:
-                        continue
-                    try:
-                        node_cfg = await self._node_registry.get_schema(skill.node_definition_id)
-                        if node_cfg.node_id not in existing_ids:
-                            candidates = [*candidates, node_cfg]
-                            existing_ids.add(node_cfg.node_id)
-                    except Exception:
-                        continue
-            except Exception as _skill_exc:
-                _logger.warning("skill search failed: %s", _skill_exc)
+        # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
+        # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는
+        # two-shot 경로(`_suggest_skill_select_node`)가 전담하고, 선택된 스킬은 `_drafter_node`가
+        # LLM 노드를 보장 → `_bind_skill_node`가 skill_id를 바인딩한다. 여기서 스킬 NodeDefinition을
+        # candidates에 넣으면 drafter가 스킬을 빈 껍데기 노드로 배치해(parameter_schema={}) 실행
+        # 불가 + 바인딩 대상 LLM 노드 미생성으로 이어진다(#372 재현 증상).
+
+        # 개인 패턴 RAG 회수 — drafter 프롬프트 주입용(retry 루프 밖, 1회만 수행).
+        personal_patterns = await self._recall_personal_patterns(state["user_id"], query)
 
         elapsed = int((time.monotonic() - t0) * 1000)
+        node_types = ", ".join(c.node_type for c in candidates[:5])
+        more = f" 외 {len(candidates) - 5}개" if len(candidates) > 5 else ""
+        frames: list[AnySSEFrame] = [
+            RationaleDeltaFrame(delta=f"🔍 노드 검색 완료 — {len(candidates)}개 후보 발견: {node_types}{more}"),
+        ]
+        if personal_patterns:
+            frames.append(
+                RationaleDeltaFrame(delta=f"🧠 사용자 과거 패턴 {len(personal_patterns)}건 반영")
+            )
+        frames.append(
+            PipelineStatusFrame(service_name="retriever", status="completed", elapsed_ms=elapsed)
+        )
         return {
             "node_candidates": candidates,
-            "collected_frames": [
-                PipelineStatusFrame(service_name="retriever", status="completed", elapsed_ms=elapsed)
-            ],
+            "personal_patterns": personal_patterns,
+            "collected_frames": frames,
         }
 
     # 6.5. suggest_skill_node — 스킬 마켓플레이스 후보 제시
@@ -685,38 +832,376 @@ class LangGraphOrchestrator:
             ],
         }
 
+    # 6.7. suggest_skill_select_node — two-shot 1차: 스킬 옵션 제시 + 상태 영속 후 중단 (REQ-013)
+    async def _suggest_skill_select_node(self, state: _State) -> dict:
+        """스킬 검색 후 SkillSelectionFrame으로 옵션 제시하고 1차 라운드를 종료한다.
+
+        skill_search/embedder 미주입 또는 후보 0건이면 `awaiting_skill_selection=False`로
+        반환해 한 라운드 안에서 draft로 진행(one-shot 폴백, 회귀 보존).
+        후보가 있으면 그래프 상태를 GCS에 영속(2차 resume 재료)하고 옵션 frame을 emit한다.
+        """
+        if self._skill_search is None or self._embedder is None:
+            return {"awaiting_skill_selection": False}
+
+        t0 = time.monotonic()
+        spec = state.get("draft_spec")
+        query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
+        try:
+            query_embedding = await self._embedder.embed(query)
+            # 접근 가능 스코프(개인 본인 + 전사) 병합 + 관련성 컷 — 무관 스킬 옵션 노출 차단.
+            skill_results = await self._skill_search.execute_accessible(
+                query_embedding=query_embedding,
+                user_id=state["user_id"],
+                limit=5,
+                max_distance=_SKILL_SEARCH_MAX_DISTANCE,
+            )
+        except Exception as exc:
+            _logger.warning("suggest_skill_select 검색 실패 (one-shot 폴백): %s", exc)
+            return {"awaiting_skill_selection": False}
+
+        options: list[SkillOption] = []
+        for skill in skill_results:
+            skill_id = getattr(skill, "skill_id", None)
+            if skill_id is None:  # 지침서형/노드형 무관 — skill_id만 있으면 선택지로 노출(필터 제거)
+                continue
+            options.append(
+                SkillOption(
+                    skill_id=skill_id,
+                    name=getattr(skill, "name", ""),
+                    description=getattr(skill, "description", ""),
+                    node_definition_id=getattr(skill, "node_definition_id", None),
+                )
+            )
+
+        if not options:
+            return {"awaiting_skill_selection": False}
+
+        # 2차 resume 재료를 GCS에 영속 — store 미주입 시 옵션 제시 자체를 포기하고 one-shot 폴백.
+        # 제시한 옵션 skill_id 집합 + user_id를 함께 저장(2차 멤버십·소유권 검증 재료 — IDOR/세션탈취 차단).
+        offered_skill_ids = [str(o.skill_id) for o in options]
+        if self._composer_state_store is None:
+            _logger.warning("composer_state_store 미주입 — two-shot 불가, one-shot 폴백")
+            return {"awaiting_skill_selection": False}
+        try:
+            await self._composer_state_store.save_state(
+                state["session_id"], self._serialize_resume_state(state, offered_skill_ids)
+            )
+        except Exception as exc:
+            _logger.warning("composer 상태 영속 실패 (one-shot 폴백): %s", exc)
+            return {"awaiting_skill_selection": False}
+
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "awaiting_skill_selection": True,
+            "suggested_skills": [o.model_dump(mode="json") for o in options],
+            "collected_frames": [
+                SkillSelectionFrame(
+                    prompt="요청에 맞는 스킬 지침서를 찾았어요. 워크플로우에 적용할 스킬을 선택해 주세요.",
+                    options=options,
+                    allow_skip=True,
+                ),
+                PipelineStatusFrame(service_name="suggest_skill_select", status="completed", elapsed_ms=elapsed),
+            ],
+        }
+
+    @staticmethod
+    def _serialize_resume_state(state: _State, offered_skill_ids: list[str]) -> dict[str, Any]:
+        """2차 resume에 필요한 그래프 상태를 직렬화 dict로 추출 (Pydantic은 model_dump).
+
+        user_id(세션 소유권 검증)·offered_skill_ids(옵션 멤버십 검증)를 함께 영속해
+        2차 라운드에서 IDOR/세션 탈취를 차단한다.
+        """
+        spec = state.get("draft_spec")
+        return {
+            "user_id": str(state["user_id"]),
+            "offered_skill_ids": offered_skill_ids,
+            "draft_spec": spec.model_dump(mode="json") if spec else None,
+            "node_candidates": [c.model_dump(mode="json") for c in state.get("node_candidates") or []],
+            "intent": state.get("intent"),
+            "intent_analyzed_entities": state.get("intent_analyzed_entities") or {},
+        }
+
+    @staticmethod
+    def _resume_error(code: str, message: str) -> dict:
+        return {"resume_ok": False, "collected_frames": [ErrorFrame(code=code, message=message)]}
+
+    # 6.8. resume_node — two-shot 2차 진입: GCS에서 1차 상태 복원 (REQ-013)
+    async def _resume_node(self, state: _State) -> dict:
+        """2차 라운드 진입점. 1차에서 영속한 그래프 상태를 복원해 draft부터 이어간다.
+
+        - 미존재(None) → `E_SESSION_EXPIRED`(진짜 만료/오타 session_id).
+        - 일시적 저장소 오류(예외) → `E_RESUME_FAILED`(재시도 안내) — 만료와 구분(LOW #3).
+        - 영속 user_id ≠ 호출자 → `E_SESSION_EXPIRED`(generic, 세션 탈취 차단 + 존재 누설 방지, MED #1).
+        """
+        if self._composer_state_store is None:
+            return self._resume_error(
+                "E_SESSION_EXPIRED", "세션 상태 저장소가 없어 재개할 수 없습니다. 처음부터 다시 시작해 주세요."
+            )
+        try:
+            blob = await self._composer_state_store.load_state(state["session_id"])
+        except Exception as exc:
+            # 일시적 GCS/인증 오류 — 만료와 구분해 재시도 유도 (LOW #3)
+            _logger.warning("composer 상태 복원 일시 오류: %s", exc)
+            return self._resume_error(
+                "E_RESUME_FAILED", "일시적인 오류로 재개에 실패했어요. 잠시 후 다시 시도해 주세요."
+            )
+        if not blob:
+            return self._resume_error(
+                "E_SESSION_EXPIRED", "세션이 만료되었습니다. 워크플로우 요청을 다시 말씀해 주세요."
+            )
+
+        # 세션 소유권 검증 — 1차 영속 user_id ≠ 2차 호출자면 거부 (타 세션 resume 가로채기 차단, MED #1)
+        persisted_user = blob.get("user_id")
+        if persisted_user is not None and persisted_user != str(state["user_id"]):
+            _logger.warning("composer resume 소유권 불일치 차단: session=%s", state["session_id"])
+            return self._resume_error(
+                "E_SESSION_EXPIRED", "세션이 만료되었습니다. 워크플로우 요청을 다시 말씀해 주세요."
+            )
+
+        draft_spec = DraftSpec.model_validate(blob["draft_spec"]) if blob.get("draft_spec") else None
+        node_candidates = [NodeConfig.model_validate(c) for c in blob.get("node_candidates") or []]
+        # 2차 라운드는 search_nodes를 건너뛰므로(resume→draft) 여기서 개인 패턴을 직접 회수해
+        # 재초안에도 개인화가 반영되게 한다(1차 회수 결과는 GCS 영속 상태에 없음).
+        query = draft_spec.natural_language_intent if draft_spec else state["messages"][-1].get("content", "")
+        personal_patterns = await self._recall_personal_patterns(state["user_id"], query)
+        return {
+            "resume_ok": True,
+            "draft_spec": draft_spec,
+            "node_candidates": node_candidates,
+            "personal_patterns": personal_patterns,
+            "intent": blob.get("intent"),
+            "intent_analyzed_entities": blob.get("intent_analyzed_entities") or {},
+            "offered_skill_ids": blob.get("offered_skill_ids") or [],
+            "collected_frames": [
+                PipelineStatusFrame(service_name="resume", status="completed", elapsed_ms=0),
+            ],
+        }
+
+    # 6.9. bind_skill_node — draft 후 LLM 노드에 선택 skill_id 바인딩 (결정론적 후처리, REQ-013)
+    async def _bind_skill_node(self, state: _State) -> dict:
+        """선택된 skill_id를 draft된 워크플로우의 첫 LLM 노드(category=="ai")에 바인딩.
+
+        drafter 무변경(바인딩=composer 후처리). 선택 없음/LLM 노드 0개면 no-op(경고).
+        복수 LLM 노드면 첫 노드(MVP 휴리스틱, 향후 옵션에 target_node 추가).
+        """
+        sel = state.get("selected_skill_id")
+        workflow = state.get("workflow_draft")
+        if sel is None or workflow is None:
+            return {}
+
+        # 옵션 멤버십 검증 — 1차에 제시된 옵션(이미 호출자 스코프로 제한됨)에 없는 skill_id는 거부.
+        # /slot이 임의 skill_id를 받을 수 있으므로 미제시 값 바인딩 차단 (스코프 밖 지침서 주입=IDOR 방지, MED #1).
+        offered = set(state.get("offered_skill_ids") or [])
+        if str(sel) not in offered:
+            _logger.warning("bind_skill 거부 — 미제시 skill_id 바인딩 시도 차단: %s", sel)
+            return {
+                "collected_frames": [
+                    RationaleDeltaFrame(delta="⚠️ 제시되지 않은 스킬은 바인딩할 수 없어 건너뜁니다."),
+                ]
+            }
+
+        # node_id → category 맵 (node_candidates 우선, 누락분만 registry 조회)
+        category_by_node_id = {c.node_id: c.category for c in state.get("node_candidates") or []}
+
+        target_idx: int | None = None
+        for i, node in enumerate(workflow.nodes):
+            category = category_by_node_id.get(node.node_id)
+            if category is None:
+                try:
+                    schema = await self._node_registry.get_schema(node.node_id)
+                    category = getattr(schema, "category", None)
+                except Exception:
+                    category = None
+            if category == "ai":
+                target_idx = i
+                break
+
+        if target_idx is None:
+            return {
+                "collected_frames": [
+                    RationaleDeltaFrame(delta="⚠️ 선택한 스킬을 바인딩할 LLM 노드가 워크플로우에 없어 건너뜁니다."),
+                ]
+            }
+
+        nodes = list(workflow.nodes)
+        nodes[target_idx] = nodes[target_idx].model_copy(update={"skill_id": sel})
+        bound = workflow.model_copy(update={"nodes": nodes})
+        return {
+            "workflow_draft": bound,
+            "collected_frames": [
+                RationaleDeltaFrame(delta=f"🔗 스킬 지침서 바인딩 완료 — LLM 노드에 skill_id={sel} 주입"),
+            ],
+        }
+
+    async def _ensure_llm_candidate(self, candidates: list[NodeConfig]) -> list[NodeConfig]:
+        """후보에 LLM 노드(category=="ai")가 없으면 카탈로그에서 하나 확보해 추가 (#372 결함 A).
+
+        스킬 바인딩 대상이 되는 LLM 노드를 drafter가 배치할 수 있게 보장한다. NodeRegistry는
+        타입 조회 API가 없어 의미 검색으로 찾고 category=="ai" 첫 후보를 채택한다. 못 찾으면
+        무변경(non-fatal) — drafter가 LLM 노드를 못 넣어 바인딩이 skip될 수 있으나 비차단.
+        """
+        try:
+            results = await self._node_registry.search(
+                "AI 언어모델 LLM으로 텍스트를 생성·요약·추론하는 노드", limit=5
+            )
+        except Exception as exc:
+            _logger.warning("LLM 노드 확보 검색 실패 (스킬 바인딩 대상 없을 수 있음): %s", exc)
+            return candidates
+        existing_ids = {c.node_id for c in candidates}
+        for cfg in results:
+            if getattr(cfg, "category", None) == "ai" and cfg.node_id not in existing_ids:
+                return [*candidates, cfg]
+        return candidates
+
     # 7. drafter_node — 워크플로우 초안 생성
     async def _drafter_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         spec = state["draft_spec"]
         if spec is None:
             return {"error": "DraftSpec 없음"}
+        candidates = state["node_candidates"]
+        # refine(대화형 수정) — 이전 워크플로우를 불러와 "지시한 부분만" 고친다(처음부터 재생성 X).
+        # 로드/조회 실패는 fresh draft로 폴백(non-fatal). search 후보에 없는 기존 노드는
+        # NodeRegistry.get_schema로 복원해 합쳐야 drafter가 그 노드를 직렬화·보존할 수 있다.
+        prior_workflow: WorkflowSchema | None = None
+        if state.get("intent") == "refine" and self._workflow_draft_store is not None:
+            try:
+                prior_workflow = await self._workflow_draft_store.load_draft(state["session_id"])
+            except Exception as exc:
+                _logger.warning("refine: 이전 워크플로우 로드 실패 (fresh로 진행): %s", exc)
+                prior_workflow = None
+            if prior_workflow is not None:
+                candidates = await self._augment_candidates_with_prior(candidates, prior_workflow)
+        # 스킬이 선택되면(two-shot 2차) 그 지침서를 주입할 LLM 노드(category=="ai")가 반드시
+        # 필요하다 (#372 결함 A). 후보에 LLM 노드가 없으면 확보해 넣고 drafter에 포함을 지시
+        # → drafter가 LLM 노드를 배치 → `_bind_skill_node`가 skill_id를 바인딩한다.
+        skill_selected = state.get("selected_skill_id") is not None
+        if skill_selected and not any(getattr(c, "category", None) == "ai" for c in candidates):
+            candidates = await self._ensure_llm_candidate(candidates)
+        # LLM 노드를 끝내 확보 못 했으면(카탈로그 의미검색이 ai 노드 미검출) drafter에 "ai 노드를
+        # 포함하라"고 지시하지 않는다 — 후보에 없는 노드 포함을 지시하면 지시/후보 desync(환각·미준수
+        # 위험, PR #376 리뷰 LOW #2). 이 경우 바인딩은 어차피 skip(non-fatal)된다.
+        instruct_skill_binding = skill_selected and any(
+            getattr(c, "category", None) == "ai" for c in candidates
+        )
+        if skill_selected and not instruct_skill_binding:
+            _logger.warning("스킬 선택됐으나 LLM 노드 후보 확보 실패 — 바인딩 skip 예상")
         try:
-            workflow = await self._drafter.draft(spec, state["node_candidates"], owner_user_id=state["user_id"])
+            workflow = await self._drafter.draft(
+                spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow,
+                personal_patterns=state.get("personal_patterns"),
+                skill_selected=instruct_skill_binding,
+            )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:
             return {"error": f"drafter 실패: {exc}"}
+        # 사용자가 이미 연결한 서비스(예: SSO google) 노드에 credential_id 선바인딩 —
+        # 검증 단계의 불필요한 E_MISSING_CONNECTION을 줄인다(resolver 미주입 시 no-op).
+        workflow, bound_services = await self._autobind_connections(
+            workflow, candidates, state["user_id"]
+        )
         elapsed = int((time.monotonic() - t0) * 1000)
         nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
         connections_data = [c.model_dump(mode="json") for c in workflow.connections]
+        # NodeInstance엔 node_type 없음(NodeConfig 필드) — candidates로 매핑해 요약 (REQ-004 버그 fix)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        node_summary = ", ".join(type_by_id.get(n.node_id, str(n.node_id)) for n in workflow.nodes)
+        verb = "수정" if prior_workflow is not None else "작성"
+        draft_summary = (
+            f"✏️ 워크플로우 초안 {verb} 완료 — 노드 {len(workflow.nodes)}개 "
+            f"({node_summary}), 연결 {len(workflow.connections)}개"
+        )
+        frames: list[AnySSEFrame] = [RationaleDeltaFrame(delta=draft_summary)]
+        if bound_services:
+            frames.append(
+                RationaleDeltaFrame(
+                    delta=f"🔌 보유 연결 자동 바인딩 — {', '.join(sorted(bound_services))}"
+                )
+            )
+        frames.extend([
+            DraftSpecDeltaFrame(delta={"attempt": state["qa_attempts"] + 1}),
+            WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
+            PipelineStatusFrame(service_name="drafter", status="completed", elapsed_ms=elapsed),
+        ])
         return {
             "workflow_draft": workflow,
-            "collected_frames": [
-                DraftSpecDeltaFrame(delta={"attempt": state["qa_attempts"] + 1}),
-                WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
-                PipelineStatusFrame(service_name="drafter", status="completed", elapsed_ms=elapsed),
-            ],
+            "collected_frames": frames,
         }
+
+    async def _autobind_connections(
+        self, workflow: WorkflowSchema, candidates: list[NodeConfig], user_id: UUID
+    ) -> tuple[WorkflowSchema, set[str]]:
+        """노드의 required_connections를 사용자가 보유한 connection으로 **provider별** 선바인딩.
+
+        resolver 미주입 시 그대로 반환(no-op). 각 노드의 required provider를 모두 조회해
+        사용자가 보유한 것만 ``credential_ids[provider]``에 채운다 — 멀티커넥션 노드
+        (required ≥2)도 provider별로 완전 자동바인딩되며, validator(provider-aware)·executor가
+        이 값을 그대로 소비한다(REQ-012). 이미 해소된 provider(명시 ``credential_ids`` 키 또는
+        단일 legacy ``credential_id``)는 보존해 refine·사용자 선택을 덮어쓰지 않는다.
+        반환된 set은 자동 바인딩된 provider 이름(요약 프레임용).
+        """
+        if self._connection_resolver is None:
+            return workflow, set()
+        conns_by_node_id = {c.node_id: c.required_connections for c in candidates}
+        bound_services: set[str] = set()
+        nodes = list(workflow.nodes)
+        changed = False
+        for i, node in enumerate(nodes):
+            required = conns_by_node_id.get(node.node_id, [])
+            if not required:
+                continue
+            already = set(node.resolve_credentials(required).keys())
+            new_binding = dict(node.credential_ids)
+            for service in required:
+                if service in already:
+                    continue  # 이미 바인딩됨(refine/사용자 선택/legacy) — 보존
+                try:
+                    cid = await self._connection_resolver.resolve(user_id, service)
+                except Exception as exc:  # 조회 실패는 비치명적 — 바인딩만 생략
+                    _logger.warning("connection 자동 바인딩 조회 실패 (%s): %s", service, exc)
+                    cid = None
+                if cid is not None:
+                    new_binding[service] = cid
+                    bound_services.add(service)
+            if new_binding != node.credential_ids:
+                nodes[i] = node.model_copy(update={"credential_ids": new_binding})
+                changed = True
+        if not changed:
+            return workflow, set()
+        return workflow.model_copy(update={"nodes": nodes}), bound_services
+
+    async def _augment_candidates_with_prior(
+        self, candidates: list[NodeConfig], prior: WorkflowSchema
+    ) -> list[NodeConfig]:
+        """refine 시 search 후보에 이전 워크플로우 노드의 NodeConfig를 합친다(node_id dedup).
+
+        refine 메시지("url 바꿔줘")로 검색한 후보엔 기존 노드가 없을 수 있어, 그대로면
+        drafter가 기존 노드를 직렬화 못 해 fresh로 폴백한다. get_schema로 복원해 보존을 보장.
+        """
+        existing_ids = {c.node_id for c in candidates}
+        merged = list(candidates)
+        for node in prior.nodes:
+            if node.node_id in existing_ids:
+                continue
+            try:
+                cfg = await self._node_registry.get_schema(node.node_id)
+            except Exception as exc:
+                _logger.warning("refine: 노드 스키마 조회 실패 node_id=%s: %s", node.node_id, exc)
+                continue
+            merged.append(cfg)
+            existing_ids.add(node.node_id)
+        return merged
 
     # 8. validator_node — 그래프 구조 검증 + RiskLevel 강제
     async def _validator_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
         workflow = state["workflow_draft"]
         if workflow is None:
             return {}
         try:
             await self._graph_validator.validate(workflow)
         except Exception as exc:
-            return {"error": f"validator 실패: {exc}"}
+            return {"pass_flag": False, "validation_issues": str(exc)}
 
         # RiskLevel 강제 — PermissionResolver 주입 + department_id 있을 때만
         if self._permission_resolver is not None and state.get("department_id"):
@@ -747,7 +1232,14 @@ class LangGraphOrchestrator:
                 except Exception:
                     continue  # 스키마 조회 실패 시 스킵
 
-        return {}
+        return {
+            "pass_flag": True,
+            "validation_issues": None,
+            "collected_frames": [
+                RationaleDeltaFrame(delta="✅ 그래프 구조 검증 통과 — DAG, 사이클, 고립 노드, 필수 파라미터 이상 없음"),
+                PipelineStatusFrame(service_name="validator", status="completed", elapsed_ms=int((time.monotonic() - t0) * 1000)),
+            ],
+        }
 
     # 9. qa_evaluator_node — LLM-as-a-Judge 품질 평가
     async def _qa_evaluator_node(self, state: _State) -> dict:
@@ -762,12 +1254,14 @@ class LangGraphOrchestrator:
             return {"error": f"qa_evaluator 실패: {exc}"}
         elapsed = int((time.monotonic() - t0) * 1000)
         attempt = state["qa_attempts"] + 1
+        status_text = "통과" if result.pass_flag else "재시도 필요"
         return {
             "qa_attempts": attempt,
             "qa_score": result.score,
             "pass_flag": result.pass_flag,
             "qa_feedback": result.feedback,
             "collected_frames": [
+                RationaleDeltaFrame(delta=f"⭐ 품질 평가 완료 — 점수: {result.score}/10 ({status_text}) | {result.reason or ''}"),
                 QAMetricFrame(
                     score=result.score,
                     attempt=attempt,
@@ -778,17 +1272,20 @@ class LangGraphOrchestrator:
             ],
         }
 
-    # 10. qa_retry_node — QA 실패 시 재시도 준비 (drafter로 돌아감)
+    # 10. qa_retry_node — validate/QA 실패 시 재시도 준비 (draft_workflow로 돌아감)
     async def _qa_retry_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         spec = state.get("draft_spec")
         feedback = state.get("qa_feedback", "")
-        if spec and feedback:
-            updated_intent = f"{spec.natural_language_intent}\n[QA 피드백: {feedback}]"
+        validation_issues = state.get("validation_issues") or ""
+        combined_feedback = " | ".join(filter(None, [feedback, validation_issues]))
+        if spec and combined_feedback:
+            updated_intent = f"{spec.natural_language_intent}\n[재시도 피드백: {combined_feedback}]"
             spec = spec.model_copy(update={"natural_language_intent": updated_intent})
         elapsed = int((time.monotonic() - t0) * 1000)
         return {
             "draft_spec": spec,
+            "retry_count": state.get("retry_count", 0) + 1,
             "collected_frames": [
                 PipelineStatusFrame(service_name="qa_retry", status="started", elapsed_ms=elapsed),
             ],
@@ -843,29 +1340,6 @@ class LangGraphOrchestrator:
     # 13. execute_node — 실행 엔진 호출 + 결과 폴링 (HITL 게이트: 사용자 명시 요청 필수)
     async def _execute_node(self, state: _State) -> dict:
         t0 = time.monotonic()
-
-        # HITL 게이트 — role==user 마지막 메시지에서 명시적 실행 요청 + 부정문 없을 때만 통과
-        _EXEC_KEYWORDS = ("실행", "execute", "run", "실행해", "실행해줘", "실행시켜", "돌려줘", "start", "launch")
-        _NEGATION_TOKENS = ("하지 마", "하지마", "말고", "안 해", "안해", "취소", "no", "don't", "stop", "말아줘")
-        user_msgs = [m for m in state["messages"] if m.get("role") == "user"]
-        user_message = (user_msgs[-1].get("content", "") if user_msgs else "").lower()
-        has_exec = any(kw in user_message for kw in _EXEC_KEYWORDS)
-        has_negation = any(neg in user_message for neg in _NEGATION_TOKENS)
-        if not has_exec or has_negation:
-            workflow_id_str = str(state["saved_workflow_id"]) if state.get("saved_workflow_id") else None
-            return {
-                "agent_done": True,
-                "collected_frames": [
-                    ResultFrame(
-                        intent="propose",
-                        payload={
-                            "workflow_id": workflow_id_str,
-                            "status": "ready_to_execute",
-                            "message": "워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.",
-                        },
-                    )
-                ],
-            }
 
         workflow_id = state.get("saved_workflow_id")
         if not workflow_id:
@@ -998,29 +1472,159 @@ class LangGraphOrchestrator:
             ],
         }
 
-    # 15. user_confirm_node — 실행 결과 사용자 제시 + 최종 ResultFrame emit
-    async def _user_confirm_node(self, state: _State) -> dict:
-        execution_result = state.get("execution_result") or {}
-        workflow_id = state.get("saved_workflow_id")
+    # 14-b. explain_node — WorkflowExplanation 생성 (컨펌 게이트 신뢰 매니페스트)
+    async def _explain_node(self, state: _State) -> dict:
+        t0 = time.monotonic()
+        workflow = state.get("workflow_draft")
+        spec = state.get("draft_spec")
+        if workflow is None or spec is None:
+            return {}
+        try:
+            explanation = self._workflow_explanation_svc.explain(
+                workflow=workflow,
+                spec=spec,
+                node_configs=state.get("node_candidates") or [],
+            )
+        except Exception as exc:
+            _logger.warning("explain_node 실패 (non-fatal): %s", exc)
+            return {}
+        elapsed = int((time.monotonic() - t0) * 1000)
+        return {
+            "workflow_explanation": explanation,
+            "collected_frames": [
+                PipelineStatusFrame(service_name="explain", status="completed", elapsed_ms=elapsed),
+            ],
+        }
 
+    @staticmethod
+    def _build_qa_checklist(state: _State) -> str:
+        """QA 통과 후 ConfirmCard 직전에 채팅창에 표시할 AI 검증 완료 보고서."""
+        intent = state.get("intent") or "알 수 없음"
+        entities = state.get("intent_analyzed_entities") or {}
+        candidates = state.get("node_candidates") or []
+        workflow = state.get("workflow_draft")
+        qa_score = state.get("qa_score", 0.0)
+        qa_feedback = state.get("qa_feedback", "")
+        spec = state.get("draft_spec")
+
+        intent_labels: dict[str, str] = {
+            "draft": "새 워크플로우 생성",
+            "refine": "워크플로우 수정",
+            "clarify": "추가 정보 요청",
+        }
+        intent_label = intent_labels.get(str(intent), str(intent))
+        entity_text = (
+            ", ".join(f"{k}: {v}" for k, v in list(entities.items())[:5])
+            if entities else "없음"
+        )
+
+        final_nodes = workflow.nodes if workflow else []
+        final_connections = workflow.connections if workflow else []
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        selected_types = ", ".join(
+            type_by_id.get(n.node_id, "알 수 없음") for n in final_nodes[:5]
+        )
+        if len(final_nodes) > 5:
+            selected_types += f" 외 {len(final_nodes) - 5}개"
+
+        intent_text = spec.natural_language_intent[:80] if spec else "없음"
+
+        lines = [
+            "📋 **AI 검증 완료 보고서**",
+            "",
+            "**① 의도 분석** ✅",
+            f"- 요청 유형: {intent_label}",
+            f"- 요청 내용: {intent_text}",
+            f"- 추출된 정보: {entity_text}",
+            "",
+            "**② 노드 선출** ✅",
+            f"- 후보 {len(candidates)}개 검색 완료",
+            f"- 최종 선정: {len(final_nodes)}개 노드 ({selected_types or '없음'})",
+            "",
+            "**③ 워크플로우 작성** ✅",
+            f"- 노드 {len(final_nodes)}개, 연결 {len(final_connections)}개",
+            "- DAG 구조 검증 완료 (사이클 없음, 고립 노드 없음)",
+            "",
+            f"**④ QA 품질 평가 통과** ✅ (점수: {qa_score:.1f}/10)",
+            "- 완성도: 사용자 의도가 노드로 완전히 표현됐는지 검증",
+            "- 안전성: 위험 노드 정당성 및 권한 적정성 검증",
+        ]
+        if qa_feedback:
+            lines.append(f"- 평가 의견: {qa_feedback}")
+
+        return "\n".join(lines)
+
+    # 15. user_confirm_node — 최종 ResultFrame emit (fixed DAG: 항상 ready_to_execute)
+    async def _user_confirm_node(self, state: _State) -> dict:
+        workflow_id = state.get("saved_workflow_id")
+        execution_result = state.get("execution_result")
+
+        if execution_result is not None:
+            return {
+                "collected_frames": [
+                    ResultFrame(
+                        intent="execution_review",
+                        payload={
+                            "workflow_id": str(workflow_id) if workflow_id else None,
+                            "execution_id": state.get("execution_id"),
+                            "execution_status": execution_result.get("status"),
+                            "output_quality_score": state.get("output_quality_score", 0.0),
+                            "output_quality_feedback": state.get("output_quality_feedback", ""),
+                            "session_id": str(state["session_id"]),
+                        },
+                    ),
+                ]
+            }
+
+        explanation = state.get("workflow_explanation")
+        qa_checklist = self._build_qa_checklist(state)
         return {
             "collected_frames": [
+                ChatMessageFrame(role="assistant", content=qa_checklist),
                 ResultFrame(
-                    intent="execution_review",
+                    intent="propose",
                     payload={
                         "workflow_id": str(workflow_id) if workflow_id else None,
-                        "execution_id": state.get("execution_id"),
-                        "execution_status": execution_result.get("status", "unknown"),
-                        "output_quality_score": state.get("output_quality_score", 0.0),
-                        "output_quality_feedback": state.get("output_quality_feedback", ""),
+                        "status": "ready_to_execute",
+                        "message": "워크플로우가 완성됐습니다. 저장하거나 편집 탭에서 편집 후 실행하세요.",
                         "session_id": str(state["session_id"]),
+                        "explanation": explanation.model_dump(mode="json") if explanation else None,
                     },
+                ),
+            ]
+        }
+
+    # 16-a. validation_failed_node — 검증 재시도 소진 시 종결
+    async def _validation_failed_node(self, state: _State) -> dict:
+        return {
+            "collected_frames": [
+                ErrorFrame(
+                    code="E_VALIDATION_EXHAUSTED",
+                    message=f"워크플로우 검증 {_QA_MAX_RETRY}회 실패 — 요청을 다시 말씀해 주세요.",
+                )
+            ]
+        }
+
+    # 16-b. qa_failed_node — QA 재시도 소진 시 종결
+    async def _qa_failed_node(self, state: _State) -> dict:
+        return {
+            "collected_frames": [
+                ErrorFrame(
+                    code="E_QA_EXHAUSTED",
+                    message=f"품질 평가 {_QA_MAX_RETRY}회 실패 — 요청을 다시 말씀해 주세요.",
                 )
             ]
         }
 
     # 16. memory_save_node — 워크플로우 생성 패턴을 GCS PersonalMemoryStore에 저장
     async def _memory_save_node(self, state: _State) -> dict:
+        # two-shot 2차 성공 종료 — 재개 상태 정리 (멱등, non-fatal)
+        if state.get("round", 1) == 2 and self._composer_state_store is not None:
+            try:
+                await self._composer_state_store.delete_state(state["session_id"])
+            except Exception as exc:
+                _logger.warning("composer 상태 정리 실패 (non-fatal): %s", exc)
+
         if self._personal_memory_store is None:
             return {}
 
@@ -1075,22 +1679,87 @@ class LangGraphOrchestrator:
     def _build(self):
         graph: StateGraph = StateGraph(_State)
 
-        # tool-calling 구조: compress → security → agent_loop
+        # two-shot DAG (REQ-013):
+        #   [1차] compress → security → intent → search_nodes → suggest_skill_select
+        #         → (옵션 emit) END  /  (옵션 없음·미주입 one-shot 폴백) draft_workflow → …
+        #   [2차] resume → draft_workflow → bind_skill → validate → qa → promote → save → confirm → memory → END
         graph.add_node("compress", self._compress_node)
         graph.add_node("security", self._security_node)
-        graph.add_node("agent", self._agent_node)
+        graph.add_node("intent", self._intent_node)
+        graph.add_node("consultant", self._consultant_node)
+        graph.add_node("slot_fill", self._slot_fill_node)
+        graph.add_node("search_nodes", self._retriever_node)
+        graph.add_node("suggest_skill_select", self._suggest_skill_select_node)  # two-shot 1차 종단
+        graph.add_node("resume", self._resume_node)                              # two-shot 2차 진입
+        graph.add_node("bind_skill", self._bind_skill_node)                      # 2차 skill_id 바인딩
+        graph.add_node("draft_workflow", self._drafter_node)
+        graph.add_node("validate_workflow", self._validator_node)
+        graph.add_node("retry_draft", self._qa_retry_node)
+        graph.add_node("qa_evaluator", self._qa_evaluator_node)
+        graph.add_node("validation_failed", self._validation_failed_node)
+        graph.add_node("qa_failed", self._qa_failed_node)
+        graph.add_node("promote", self._promote_node)
+        graph.add_node("save_workflow", self._handoff_node)
+        graph.add_node("explain", self._explain_node)
+        graph.add_node("confirm_result", self._user_confirm_node)
+        graph.add_node("save_memory", self._memory_save_node)
 
-        graph.set_entry_point("compress")
+        # 진입 분기 — round=2(선택 입력)는 resume부터, round=1은 compress(전처리)부터
+        graph.set_conditional_entry_point(
+            self._route_entry,
+            {"compress": "compress", "resume": "resume"},
+        )
+        # 2차 resume: 복원 성공 → draft, 실패 → 종료(E_SESSION_EXPIRED는 노드에서 emit)
+        graph.add_conditional_edges(
+            "resume",
+            self._route_after_resume,
+            {"draft": "draft_workflow", "end": END},
+        )
         graph.add_conditional_edges(
             "compress",
             self._should_compress,
             {"compress": "compress", "security": "security"},
         )
-        graph.add_edge("security", "agent")
         graph.add_conditional_edges(
-            "agent",
-            self._route_agent,
-            {"continue": "agent", "end": END},
+            "security",
+            self._route_after_security,
+            {"intent": "intent", "end": END},
         )
+        graph.add_conditional_edges(
+            "intent",
+            self._route_after_intent,
+            {"consultant": "consultant", "search_nodes": "search_nodes", "end": END},
+        )
+        graph.add_edge("consultant", "slot_fill")
+        graph.add_edge("slot_fill", END)
+        # 1차: 노드 검색 직후 스킬 옵션 제시 단계로 (draft는 아직 미생성)
+        graph.add_edge("search_nodes", "suggest_skill_select")
+        # 옵션 emit+중단(two-shot) → END / 옵션 없음·미주입(one-shot 폴백) → draft
+        graph.add_conditional_edges(
+            "suggest_skill_select",
+            self._route_after_suggest,
+            {"wait": END, "draft": "draft_workflow"},
+        )
+        # draft 직후 항상 bind_skill 경유 (1차 폴백=no-op, 2차=skill_id 주입)
+        graph.add_edge("draft_workflow", "bind_skill")
+        graph.add_edge("bind_skill", "validate_workflow")
+        graph.add_conditional_edges(
+            "validate_workflow",
+            self._route_after_validate,
+            {"qa_evaluator": "qa_evaluator", "retry_draft": "retry_draft", "validation_failed": "validation_failed"},
+        )
+        graph.add_edge("retry_draft", "draft_workflow")
+        graph.add_conditional_edges(
+            "qa_evaluator",
+            self._route_after_qa,
+            {"promote": "promote", "retry_draft": "retry_draft", "qa_failed": "qa_failed"},
+        )
+        graph.add_edge("validation_failed", END)
+        graph.add_edge("qa_failed", END)
+        graph.add_edge("promote", "save_workflow")
+        graph.add_edge("save_workflow", "explain")
+        graph.add_edge("explain", "confirm_result")
+        graph.add_edge("confirm_result", "save_memory")
+        graph.add_edge("save_memory", END)
 
         return graph.compile()

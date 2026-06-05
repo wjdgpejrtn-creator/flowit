@@ -171,7 +171,10 @@ module "skills_marketplace_bucket" {
     var.agent_secret_accessors,
     var.api_server_service_account != "" ? ["serviceAccount:${var.api_server_service_account}"] : [],
   ))
-  reader_members = []
+  # worker SA는 read-only — 워크플로우 실행 시 LLM 노드 바인딩 SkillDocument를 load()만 한다
+  # (REQ-013 런타임 주입). write는 api_server/skills_builder. 누락 시 load()가 403→무주입
+  # degrade로 silent fail하므로 명시적 reader 부여 필수.
+  reader_members = var.execution_engine_worker_service_account != "" ? ["serviceAccount:${var.execution_engine_worker_service_account}"] : []
 
   labels = merge(local.common_labels, { role = "skills-marketplace" })
 }
@@ -360,6 +363,14 @@ module "api_server" {
     GOOGLE_CLIENT_SECRET = { secret_id = "google-client-secret", version = "latest" }
     GOOGLE_REDIRECT_URI  = { secret_id = "google-redirect-uri", version = "latest" }
     ORCHESTRATOR_URL     = { secret_id = "orchestrator-url", version = "latest" }
+    # 문서→스킬 추출(extract) 직결 — POST /api/v1/skills/extract가 orchestrator 의도분류를
+    # 우회해 skills-builder `/v1/agent/route`(source_type=sop, step=extract)를 직접 호출(REQ-010/013).
+    # orchestrator가 sub-agent 라우팅에 쓰는 동일 `skills-builder-url` secret 재사용 — 값 일원화.
+    # 미설정 시 라우트가 503으로 graceful degrade(api_server boot는 안 깨짐).
+    SKILLS_BUILDER_URL = { secret_id = "skills-builder-url", version = "latest" }
+    # 스킬 게시(PublishSkillUseCase) 시 임베딩 누락 백필용 BGE-M3 endpoint(llm-base). 동일
+    # `embedding-base-url` secret 재사용. 미설정 시 embedder 미주입 → 기존 동작(임베딩 누락) 유지.
+    EMBEDDING_BASE_URL = { secret_id = "embedding-base-url", version = "latest" }
   }
 
   labels = merge(local.common_labels, { role = "api-server" })
@@ -443,6 +454,13 @@ module "execution_engine_worker" {
     # documents analyze task가 GCS에서 download → 로컬 tmpfile → doc_parser 실행 (REQ-006/009).
     # api_server upload 측과 동일 버킷 — Phase B analyze task에서 `os.getenv("DOCUMENTS_BUCKET")`로 읽음.
     DOCUMENTS_BUCKET = module.documents_bucket.bucket_name
+    # Gemma 4 멀티모달 vision(InterleavingParser) 활성화 토글 (REQ-007 ③, worker-vision-enable.md).
+    # `_build_vision_llm()`이 이 값+LLM_BASE_URL로 HttpVisionLLM 주입 → doc_parser vision 추출.
+    # off/누락 시 텍스트 전용 degrade. ①(#245 llm-base images) + ②(#247 doc_parser) 머지 완료 후 활성.
+    DOC_PARSER_VISION_ENABLED = "true"
+    # 워크플로우 실행 시 LLM 노드에 바인딩된 SkillDocument(지침서)를 GCS에서 로드 → system 주입 (REQ-013).
+    # CatalogNodeExecutor._build_skill_document_store()가 읽음. 누락 시 None=무주입 degrade(deploy-safe).
+    SKILLS_MARKETPLACE_BUCKET = module.skills_marketplace_bucket.bucket_name
   }
 
   # PR #80 GCP Secret Manager에서 직접 주입 — load_secrets_to_env 우회.
@@ -530,4 +548,24 @@ module "frontend" {
   labels = merge(local.common_labels, { role = "frontend" })
 
   depends_on = [module.networking]
+}
+
+# ---------------------------------------------------------------------------
+# 팀원 관측(observability) — staging 로그 조회 self-service
+# ---------------------------------------------------------------------------
+# 팀원이 직접 Cloud Run 로그/트레이스백을 조회(`gcloud logging read`)하도록 읽기 전용
+# logging.viewer 부여. 부여 전엔 PERMISSION_DENIED라 매번 조장이 대리 진단해야 했다
+# (스킬빌더 500 trace 329b1b68 사례). agent_secret_accessors의 사람 principal(user:)만
+# 대상 — SA(serviceAccount:)는 제외. logging.viewer는 읽기 전용(로그 쓰기/설정/data-access 불가).
+locals {
+  team_log_viewers = toset([
+    for m in var.agent_secret_accessors : m if startswith(m, "user:")
+  ])
+}
+
+resource "google_project_iam_member" "team_log_viewer" {
+  for_each = local.team_log_viewers
+  project  = var.project_id
+  role     = "roles/logging.viewer"
+  member   = each.value
 }

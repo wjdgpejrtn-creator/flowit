@@ -24,6 +24,7 @@ class GraphValidator:
     3. 노드 타입 불일치 (from_handle ↔ to_handle)
     4. 고립 노드 검출
     5. 필수 연결 누락 (required_connections)
+    6. 필수 파라미터 누락 (input_schema.required 중 NodeInstance.parameters에 없는 필드)
     """
 
     def __init__(self, node_def_repo: NodeDefinitionRepository) -> None:
@@ -37,6 +38,7 @@ class GraphValidator:
         errors.extend(self._check_type_compatibility(workflow.connections))
         errors.extend(self._detect_isolated_nodes(workflow.nodes, workflow.connections))
         errors.extend(await self._check_required_connections(workflow.nodes))
+        errors.extend(await self._check_required_parameters(workflow.nodes))
 
         return ValidationErrorResponse(
             validation_status="failed" if errors else "passed",
@@ -129,11 +131,51 @@ class GraphValidator:
             definition = await self._repo.get_by_id(node.node_id)
             if definition is None:
                 continue
-            if definition.required_connections and node.credential_id is None:
+            required = definition.required_connections
+            if not required:
+                continue
+            # provider별 바인딩 해소 — credential_ids(명시적) + legacy credential_id(단일).
+            # required에 있는데 바인딩 안 된 provider만 정확히 보고한다(멀티커넥션 부분
+            # 바인딩 시 어느 connection이 빠졌는지 식별 — REQ-012 credential 복수화).
+            resolved = node.resolve_credentials(required)
+            missing = [svc for svc in required if svc not in resolved]
+            if missing:
                 errors.append(ValidationErrorItem(
                     code=ErrorCode.E_MISSING_CONNECTION,
-                    message=f"Node requires external connection: {definition.required_connections}",
+                    message=f"Node requires external connection(s) not bound: {missing}",
                     node_ids=[str(node.instance_id)],
                     validator="SchemaValidation",
+                ))
+        return errors
+
+    async def _check_required_parameters(self, nodes: list[NodeInstance]) -> list[ValidationErrorItem]:
+        """input_schema.required 중 NodeInstance.parameters에 없거나 빈값인 필드를 보고한다.
+
+        ValidateGraphUseCase가 통과한 워크플로우는 execute 직전 worker `CatalogNodeExecutor`가
+        node.parameters를 dataclass kwargs로 unpack하므로, required 필드가 비어있으면
+        worker가 `__init__() missing positional argument` 런타임 에러를 던진다. 본 검사는
+        그 갭을 사전 차단한다.
+        """
+        errors: list[ValidationErrorItem] = []
+        for node in nodes:
+            definition = await self._repo.get_by_id(node.node_id)
+            if definition is None:
+                continue
+            input_schema = definition.input_schema or {}
+            required = input_schema.get("required") or []
+            if not required:
+                continue
+            params = node.parameters or {}
+            missing = [
+                field for field in required
+                if params.get(field) in (None, "")
+            ]
+            if missing:
+                errors.append(ValidationErrorItem(
+                    code=ErrorCode.E_MISSING_REQUIRED_PARAMETER,
+                    message=f"Required parameter(s) missing: {missing}",
+                    node_ids=[str(node.instance_id)],
+                    validator="SchemaValidation",
+                    hint="NodeConfigDrawer에서 노드를 선택해 누락된 필드를 입력하세요.",
                 ))
         return errors

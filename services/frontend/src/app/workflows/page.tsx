@@ -1,30 +1,13 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import Link from 'next/link';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
-import Btn from '@/components/common/Btn';
-import ScopePill from '@/components/common/ScopePill';
 import Skel from '@/components/common/Skel';
+import Icon from '@/components/common/Icon';
 import { listWorkflows } from '@/lib/api/workflowApi';
 import { useAuthStore } from '@/stores/authStore';
 import type { WorkflowSchema } from '@common/generated';
-
-const TABLE_HEAD = ['이름', 'SCOPE', '노드', '상태'];
-const ALL_TABS = [
-  { label: 'My', key: 'my' },
-  { label: 'Team', key: 'team' },
-  { label: 'Public', key: 'public' },
-] as const;
-
-type TabKey = (typeof ALL_TABS)[number]['key'];
-
-function visibleTabs(role: string): typeof ALL_TABS[number][] {
-  if (role === 'company_manager' || role === 'Admin') return [...ALL_TABS];
-  if (role === 'team_manager') return ALL_TABS.slice(0, 2);
-  return ALL_TABS.slice(0, 1);
-}
 
 function toErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : '';
@@ -34,16 +17,40 @@ function toErrorMessage(err: unknown): string {
   return '워크플로우 목록을 불러올 수 없습니다.';
 }
 
+/** 시안 scope 칩 — private→Personal, team→Team, public→Company */
+function ScopeChip({ scope }: { scope?: WorkflowSchema['scope'] }) {
+  const map: Record<string, [string, string]> = {
+    private: ['Personal', 'bg-paper2 text-ink3'],
+    team: ['Team', 'bg-hl text-accent'],
+    public: ['Company', 'bg-[#EAF1FB] text-[#3B73C4]'],
+  };
+  const [label, cls] = map[scope ?? 'private'] ?? map.private;
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${cls}`}>{label}</span>;
+}
+
+function StatusChip({ isDraft }: { isDraft?: boolean }) {
+  const color = isDraft ? '#9C8B7B' : '#10B981';
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-bold"
+      style={{ color, borderColor: color }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+      {isDraft ? '초안' : '활성'}
+    </span>
+  );
+}
+
 function WorkflowListContent() {
-  const searchParams = useSearchParams();
-  const { role } = useAuthStore();
-  const tabs = visibleTabs(role);
-  const activeTab = (searchParams.get('tab') as TabKey) ?? 'my';
+  const router = useRouter();
+  const { userName } = useAuthStore();
+  const displayName = userName || 'gawon.data';
 
   const [workflows, setWorkflows] = useState<WorkflowSchema[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fetchKey, setFetchKey] = useState(0);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     setLoading(true);
@@ -54,132 +61,136 @@ function WorkflowListContent() {
       .finally(() => setLoading(false));
   }, [fetchKey]);
 
-  const filtered =
-    activeTab === 'my'
-      ? workflows
-      : workflows.filter((w) => w.scope === activeTab);
+  // 시안: 단일 목록 + 검색창 필터만 (Scope 는 행 데이터). 권한별 분리 탭 없음.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? workflows.filter((w) => w.name.toLowerCase().includes(q)) : workflows;
+  }, [workflows, query]);
 
   return (
-    <div className="flex-1 flex flex-col gap-[10px] p-[14px]">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between">
-        {/* Tabs */}
-        <div className="flex gap-2">
-          {tabs.map(({ label, key }) => (
-            <Link
-              key={key}
-              href={`/workflows?tab=${key}`}
-              className={[
-                'text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-2 py-[3px] no-underline',
-                key === activeTab
-                  ? 'bg-[var(--color-ink)] text-[var(--color-paper)]'
-                  : 'bg-[var(--color-surface)] text-[var(--color-ink)] hover:bg-[var(--color-paper2)]',
-              ].join(' ')}
-            >
-              {label}{' '}
-              <span className="font-mono text-[11px] opacity-70">
-                {key === 'my' ? workflows.length : filtered.length}
-              </span>
-            </Link>
-          ))}
+    <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 md:p-6 space-y-4">
+      {/* 헤더/툴바 */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center space-x-3">
+          <span className="px-3 py-1.5 rounded-xl bg-accent text-white text-xs font-bold">
+            {displayName}님의 Workflows
+          </span>
+          <p className="text-xs text-ink3 font-bold">
+            내 워크플로우를 체계적으로 관리하고 자동화를 구성합니다.
+          </p>
         </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-2">
-          <div className="text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-[8px] py-[2px] bg-[var(--color-surface)] text-[var(--color-ink3)]">
-            🔍 검색…
+        <div className="flex items-center space-x-2">
+          <div className="relative">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="워크플로우 검색..."
+              aria-label="워크플로우 검색"
+              className="w-48 pl-8 pr-3 py-1.5 text-xs rounded-lg border border-line-soft focus:outline-none focus:border-accent-coral bg-white text-ink font-bold"
+            />
+            <Icon name="search" className="w-3.5 h-3.5 text-ink3 absolute left-2.5 top-2" />
           </div>
-          <Link href="/agent?mode=edit">
-            <Btn primary>＋ 빈 캔버스</Btn>
-          </Link>
-          <Link href="/agent">
-            <Btn>🤖 AI에게 요청</Btn>
-          </Link>
+          <button
+            type="button"
+            onClick={() => router.push('/agent?mode=edit')}
+            className="px-3 py-1.5 rounded-lg border border-line-soft text-xs font-bold text-ink hover:bg-paper flex items-center space-x-1"
+          >
+            <Icon name="plus" className="w-3.5 h-3.5" />
+            <span>빈 캔버스</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push('/agent')}
+            className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-bold shadow-sm hover:bg-accent3 flex items-center space-x-1"
+          >
+            <Icon name="sparkles" className="w-3.5 h-3.5" />
+            <span>AI에게 요청</span>
+          </button>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] bg-[var(--color-surface)] overflow-hidden">
-        {/* Header */}
-        <div
-          className="flex items-center font-mono text-[11px] text-[var(--color-ink4)] px-[10px] py-[6px] border-b border-[var(--color-ink4)]"
-          style={{ background: 'var(--color-paper2)' }}
-        >
-          <span style={{ flex: 2 }}>{TABLE_HEAD[0]}</span>
-          <span style={{ flex: 1 }}>{TABLE_HEAD[1]}</span>
-          <span style={{ flex: 0.7 }}>{TABLE_HEAD[2]}</span>
-          <span style={{ flex: 0.7 }}>{TABLE_HEAD[3]}</span>
+      {/* 테이블 */}
+      <div className="bg-white border border-line-soft rounded-2xl overflow-hidden shadow-sm">
+        <div className="grid grid-cols-12 px-4 py-2.5 border-b border-line-soft text-[11px] font-bold text-ink3 uppercase tracking-wide">
+          <div className="col-span-5">이름</div>
+          <div className="col-span-2">Scope</div>
+          <div className="col-span-2">노드</div>
+          <div className="col-span-2">상태</div>
+          <div className="col-span-1 text-right">동작</div>
         </div>
 
-        {/* Error */}
-        {error && (
-          <div className="px-[10px] py-[24px] text-center text-[13px] text-red-600 flex flex-col items-center gap-2">
-            <span>{error}</span>
+        {error ? (
+          <div className="px-4 py-8 text-center flex flex-col items-center gap-2">
+            <span className="text-xs font-bold text-danger">{error}</span>
             <button
               type="button"
               onClick={() => setFetchKey((k) => k + 1)}
-              className="text-[12px] px-3 py-1 border border-red-300 rounded bg-white text-red-600 hover:bg-red-50 cursor-pointer"
+              className="text-xs px-3 py-1 border border-danger/40 rounded-lg bg-white text-danger font-bold hover:bg-danger-soft"
             >
               다시 시도
             </button>
           </div>
-        )}
-
-        {/* Skeleton */}
-        {loading && !error && (
-          <div className="flex flex-col gap-[6px] p-[10px]">
+        ) : loading ? (
+          <div className="flex flex-col gap-1.5 p-4">
             {[1, 2, 3].map((i) => (
-              <Skel key={i} className="h-[32px] w-full" />
+              <Skel key={i} h={36} className="rounded-lg" />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="px-4 py-10 text-center">
+            {query ? (
+              <p className="text-xs font-bold text-ink3">검색 결과가 없습니다.</p>
+            ) : (
+              <>
+                <p className="text-xs font-bold text-ink3">워크플로우가 없습니다.</p>
+                <p className="text-xs text-ink3 font-bold mt-1">
+                  상단의 &apos;AI에게 요청&apos;으로 새로운 자동화 흐름을 만들 수 있어요.
+                </p>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="divide-y divide-line-soft">
+            {filtered.map((item) => (
+              <button
+                key={item.workflow_id}
+                type="button"
+                onClick={() => router.push(`/workflows/${item.workflow_id}`)}
+                className="w-full text-left grid grid-cols-12 px-4 py-4 items-center font-bold hover:bg-hl/40 transition-all cursor-pointer text-[13px]"
+              >
+                <div className="col-span-5 flex items-center space-x-2">
+                  <Icon name="workflow" className="w-4 h-4 text-accent flex-shrink-0" />
+                  <span className="text-ink truncate">{item.name}</span>
+                </div>
+                <div className="col-span-2">
+                  <ScopeChip scope={item.scope} />
+                </div>
+                <div className="col-span-2 text-ink3">{item.nodes.length}개</div>
+                <div className="col-span-2">
+                  <StatusChip isDraft={item.is_draft} />
+                </div>
+                <div className="col-span-1 text-right">
+                  <Icon name="more-horizontal" className="w-4 h-4 text-ink3 inline" />
+                </div>
+              </button>
             ))}
           </div>
         )}
-
-        {/* Empty */}
-        {!loading && !error && filtered.length === 0 && (
-          <div className="px-[10px] py-[24px] text-center text-[13px] text-[var(--color-ink3)]">
-            워크플로우가 없습니다.
-          </div>
-        )}
-
-        {/* Rows */}
-        {!loading && !error &&
-          filtered.map((item, i) => (
-            <Link
-              key={item.workflow_id}
-              href={`/workflows/${item.workflow_id}`}
-              className={[
-                'flex items-center px-[10px] py-[8px] no-underline text-[var(--color-ink)] hover:bg-[var(--color-paper2)]',
-                i < filtered.length - 1 ? 'border-b border-[var(--color-ink4)]' : '',
-              ].join(' ')}
-            >
-              <span className="font-bold" style={{ flex: 2 }}>
-                {item.name}
-              </span>
-              <span style={{ flex: 1 }}>
-                <ScopePill scope={item.scope} />
-              </span>
-              <span className="font-mono text-[11px]" style={{ flex: 0.7 }}>
-                {item.nodes.length}개
-              </span>
-              <span className="text-[11px] text-[var(--color-ink3)]" style={{ flex: 0.7 }}>
-                {item.is_draft ? '초안' : '활성'}
-              </span>
-            </Link>
-          ))}
       </div>
-    </div>
+    </main>
   );
 }
 
 export default function WorkflowListPage() {
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
+    <div className="min-h-screen flex flex-col">
       <AppBar />
       <Suspense
         fallback={
-          <div className="flex-1 flex flex-col gap-[10px] p-[14px]">
-            <Skel className="h-[32px] w-[200px]" />
-            <Skel className="h-[200px] w-full" />
+          <div className="flex-1 max-w-[1600px] w-full mx-auto p-4 md:p-6 space-y-4">
+            <Skel h={32} w="200px" />
+            <Skel h={200} />
           </div>
         }
       >

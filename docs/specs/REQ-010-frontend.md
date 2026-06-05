@@ -118,6 +118,8 @@ import {
 | `AgentChatPage` | `app/agent/page.tsx` | 에이전트 대화 인터페이스 |
 | `DocumentsPage` | `app/documents/page.tsx` | 문서 목록/업로드 |
 | `DocumentDetailPage` | `app/documents/[id]/page.tsx` | 문서 상세 + 분석 결과 |
+| `SkillBuilderPage` | `app/skills/builder/page.tsx` | 스킬빌더 — wizard 3단계(ADR-0020 Q8 + 옵션 1 2단계 분리, 2026-06-04). Step 2 `POST /skills/extract` SSE → `payload.skill_metas`(메타 5필드 카드 그리드) → 사용자 선택 → Step 4.5 `POST /skills/extract/detail` JSON → `payload.skill_detail`(폼 prefill) → 사용자 편집 → `POST /skills/personal`로 DRAFT 저장 |
+| `MarketplacePage` | `app/marketplace/page.tsx` | 스킬 마켓플레이스 목록/탐색 |
 | `DashboardPage` | `app/page.tsx` | 대시보드 메인 |
 | `LoginPage` | `app/login/page.tsx` | OAuth2 로그인 |
 
@@ -173,6 +175,7 @@ import {
 | `workflowApi` | `lib/api/workflowApi.ts` | /workflows 엔드포인트 호출 함수 |
 | `agentApi` | `lib/api/agentApi.ts` | /agents 엔드포인트 호출 함수 |
 | `documentApi` | `lib/api/documentApi.ts` | /documents 엔드포인트 호출 함수 |
+| `skillApi` | `lib/api/skillApi.ts` | /skills 엔드포인트 호출 함수 (개인 스킬 CRUD) |
 | `authApi` | `lib/api/authApi.ts` | /auth 엔드포인트 호출 함수 |
 
 ### 2.7 State Management

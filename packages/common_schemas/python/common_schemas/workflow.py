@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .enums import RiskLevel
 
@@ -30,8 +30,29 @@ class NodeInstance(BaseModel):
     instance_id: UUID
     node_id: UUID
     parameters: dict[str, Any]
+    # legacy 단일 바인딩 — provider 미지정(node 정의의 required_connections로 provider 추론).
+    # 멀티커넥션 노드는 credential_ids를 사용한다.
     credential_id: Optional[UUID] = None
+    # provider(service)별 credential 바인딩 — 멀티커넥션 노드(예: ["slack","google"]) 지원.
+    # key는 required_connections의 provider 문자열. (REQ-012 credential 복수화)
+    credential_ids: dict[str, UUID] = Field(default_factory=dict)
+    # 바인딩된 SkillDocument(도메인 지침서) — 실행 시 LLM 노드 system 프롬프트에 주입 (REQ-013)
+    skill_id: Optional[UUID] = None
     position: Position
+
+    def resolve_credentials(self, required_connections: list[str]) -> dict[str, UUID]:
+        """required provider별로 바인딩된 credential_id 매핑을 반환.
+
+        ``credential_ids``(명시적 provider 바인딩)를 우선하고, required가 단일 provider이며
+        legacy ``credential_id``만 있는 경우 그 provider에 매핑한다(하위호환). required에
+        없는 provider 키는 제외한다.
+        """
+        resolved = {
+            svc: cid for svc, cid in self.credential_ids.items() if svc in required_connections
+        }
+        if self.credential_id is not None and len(required_connections) == 1:
+            resolved.setdefault(required_connections[0], self.credential_id)
+        return resolved
 
 
 class NodeConfig(BaseModel):

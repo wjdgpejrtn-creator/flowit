@@ -4,23 +4,35 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppBar from '@/components/common/AppBar';
-import Btn from '@/components/common/Btn';
 import Skel from '@/components/common/Skel';
+import Icon from '@/components/common/Icon';
+import { showToast } from '@/stores/toastStore';
 import { useAuthStore } from '@/stores/authStore';
 import { listWorkflows } from '@/lib/api/workflowApi';
 import type { WorkflowSchema } from '@common/generated';
 
-const QUICK_CHIPS = ['📈 광고 리포트', '📄 PDF 처리', '💬 Slack 알림', '📅 캘린더 동기화'];
+const QUICK_CHIPS: { icon: string; label: string; prompt: string }[] = [
+  { icon: 'bar-chart-2', label: '광고 리포트', prompt: '광고 리포트 매주 월요일 자동 취합 및 발송' },
+  { icon: 'file-text', label: 'PDF 처리', prompt: '계약서 PDF 정보 자동 추출 및 ERP 등록' },
+  { icon: 'message-square', label: 'Slack 알림', prompt: 'Slack 채널로 일일 알림 보내기' },
+];
 const RECENT_LIMIT = 5;
+
+const SHORTCUTS: { href: string; icon: string; label: string }[] = [
+  { href: '/agent', icon: 'message-square', label: '새 대화 시작' },
+  { href: '/workflows', icon: 'folder', label: '워크플로우 목록' },
+  { href: '/marketplace', icon: 'store', label: '스킬 마켓플레이스' },
+];
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { userName, dept } = useAuthStore();
-  const userDisplay = userName ? `${userName}님${dept ? ` · ${dept}` : ''}` : '사용자님';
+  const { userName } = useAuthStore();
+  const displayName = userName || 'gawon.data';
 
   const [input, setInput] = useState('');
   const [recent, setRecent] = useState<WorkflowSchema[]>([]);
   const [recentLoading, setRecentLoading] = useState(true);
+  const [otterFailed, setOtterFailed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -45,131 +57,178 @@ export default function DashboardPage() {
     e.preventDefault();
     const text = input.trim();
     if (!text) {
-      router.push('/agent');
+      showToast('자동화할 작업을 입력해 주세요!');
+      inputRef.current?.focus();
       return;
     }
-    router.push(`/agent?q=${encodeURIComponent(text)}&autosend=1`);
+    showToast('자동화 설계를 시작합니다...');
+    // 시안 submitPrompt: 토스트 후 0.8초 연출 뒤 AI채팅 이동
+    setTimeout(() => {
+      router.push(`/agent?q=${encodeURIComponent(text)}&autosend=1`);
+    }, 800);
+  };
+
+  const autofill = (prompt: string) => {
+    setInput(prompt);
+    showToast('추천 템플릿이 입력되었습니다.');
+    inputRef.current?.focus();
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
+    <div className="min-h-screen flex flex-col">
       <AppBar />
 
-      {/* Hero area */}
-      <div
-        className="px-7 pt-[34px] pb-[18px] border-b-[1.5px] border-[var(--color-ink3)]"
-        style={{ background: 'var(--color-paper2)' }}
-      >
-        <h1 className="font-bold text-[30px] tracking-[-0.02em] mb-[6px]">
-          무엇을 <span className="bg-[var(--color-hl)] px-1">자동화</span>할까요?
-        </h1>
-        <p className="text-[var(--color-ink3)] text-[14px] mb-[14px]">
-          {userDisplay} · 자연어로 그냥 말씀해주세요.
-        </p>
-
-        {/* Large input */}
-        <form
-          onSubmit={handleSubmit}
-          className="flex items-center gap-3 border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] px-[18px] py-[10px] bg-[var(--color-surface)]"
-          style={{ boxShadow: '3px 4px 0 var(--color-ink)' }}
-        >
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="매주 월요일 9시에 광고 시트…"
-            className="flex-1 text-[18px] bg-transparent focus:outline-none placeholder:text-[var(--color-ink4)]"
-            aria-label="워크플로우 자연어 설명"
-          />
-          <span className="font-mono text-[var(--color-ink3)] text-[12px]">⌘ + K</span>
-          <Btn primary type="submit" className="text-[13px]">
-            전송 ↑
-          </Btn>
-        </form>
-
-        {/* Quick chips */}
-        <div className="flex gap-2 mt-3 flex-wrap">
-          {QUICK_CHIPS.map((chip) => (
-            <Link
-              key={chip}
-              href={`/agent?q=${encodeURIComponent(chip)}&autosend=1`}
-              className="text-[13px] border-[1.5px] border-[var(--color-ink)] rounded-[4px_8px_4px_8px] px-[8px] py-[3px] bg-[var(--color-surface)] hover:bg-[var(--color-paper2)] no-underline text-[var(--color-ink)]"
+      <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 md:p-6 space-y-6">
+        {/* Hero */}
+        <div className="py-8 text-center max-w-2xl mx-auto space-y-4 relative">
+          <div className="absolute top-[68px] right-10 md:right-24 z-10 w-14">
+            <span
+              className="absolute -top-3 right-0.5 font-black text-lg leading-none text-accent-coral"
+              aria-hidden="true"
             >
-              {chip}
-            </Link>
-          ))}
-          <Link
-            href="/marketplace"
-            className="text-[13px] text-[var(--color-ink4)] px-[8px] py-[3px] no-underline hover:text-[var(--color-ink3)]"
-          >
-            + 더 보기
-          </Link>
-        </div>
-      </div>
-
-      {/* Bottom 2-column content */}
-      <div className="flex-1 grid grid-cols-2 gap-3 p-5">
-        {/* Left: 이어서 작업 */}
-        <div>
-          <div className="text-[13px] text-[var(--color-ink3)] mb-[6px]">이어서 작업</div>
-          <div className="flex flex-col gap-2">
-            {recentLoading && (
-              <>
-                <Skel className="h-[36px] w-full" />
-                <Skel className="h-[36px] w-full" />
-              </>
+              ?
+            </span>
+            {otterFailed ? (
+              <span className="text-3xl block">🦦</span>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src="/images/otter-doc.png"
+                alt="수달"
+                className="w-14 h-auto block"
+                style={{ transform: 'scaleX(0.92)' }}
+                onError={() => setOtterFailed(true)}
+              />
             )}
-            {!recentLoading && recent.length === 0 && (
-              <div className="text-[13px] text-[var(--color-ink4)] border-[1.5px] border-dashed border-[var(--color-ink4)] rounded-[5px_11px_6px_10px] px-[10px] py-[14px] text-center">
-                아직 만든 워크플로우가 없어요.<br />
-                위 입력창에서 시작해보세요.
+          </div>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-ink pt-6 md:pt-2">
+            무엇을 <span className="text-accent-coral">자동화할까요?</span>
+          </h1>
+          <p className="text-sm text-ink3 font-bold">
+            <strong className="text-ink font-bold">{displayName}님</strong> · 자연어로 말씀해주세요.
+          </p>
+        </div>
+
+        {/* Input */}
+        <div className="max-w-4xl mx-auto">
+          <form
+            onSubmit={handleSubmit}
+            className="bg-white rounded-2xl border border-line-soft p-2.5 shadow-md focus-within:border-accent focus-within:ring-4 focus-within:ring-accent-coral/10 transition-all"
+          >
+            <div className="flex items-center space-x-3 px-3">
+              <Icon name="sparkles" className="w-5 h-5 text-accent-coral animate-pulse flex-shrink-0" />
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="매주 월요일 9시에 광고 시트 정리하고 Slack으로 리포트 보내줘..."
+                aria-label="워크플로우 자연어 설명"
+                className="flex-1 bg-transparent text-ink placeholder-ink4 border-none outline-none py-3 text-base font-bold min-w-[200px]"
+              />
+              <button
+                type="submit"
+                className="bg-accent hover:bg-accent3 text-white px-5 py-2.5 rounded-xl font-bold flex items-center space-x-1.5 transition-all shadow-md flex-shrink-0"
+              >
+                <span>전송</span>
+                <Icon name="arrow-up" className="w-4 h-4" />
+              </button>
+            </div>
+          </form>
+
+          {/* Quick chips */}
+          <div className="flex flex-wrap gap-2 mt-4 justify-center">
+            {QUICK_CHIPS.map((chip) => (
+              <button
+                key={chip.label}
+                type="button"
+                onClick={() => autofill(chip.prompt)}
+                className="px-4 py-2 rounded-full border border-line-soft bg-white text-xs font-bold text-ink hover:bg-hl hover:border-accent-coral transition-all flex items-center space-x-1.5 shadow-sm"
+              >
+                <Icon name={chip.icon} className="w-3.5 h-3.5 text-accent-coral" />
+                <span>{chip.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 2-column */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-5xl mx-auto pt-6">
+          {/* 이어서 작업 */}
+          <div className="lg:col-span-7 space-y-3">
+            <h3 className="text-sm font-bold text-ink flex items-center space-x-2">
+              <Icon name="clock" className="w-4 h-4 text-accent-coral" />
+              <span>이어서 작업</span>
+            </h3>
+
+            {recentLoading && (
+              <div className="space-y-2">
+                <Skel h={60} className="rounded-2xl" />
+                <Skel h={60} className="rounded-2xl" />
               </div>
             )}
-            {!recentLoading &&
-              recent.map((wf) => (
+
+            {!recentLoading && recent.length === 0 && (
+              <div className="flowit-card rounded-2xl p-8 text-center flex flex-col items-center justify-center min-h-[220px]">
+                <div className="w-14 h-14 rounded-full bg-paper text-accent flex items-center justify-center mb-3 shadow-inner flex-shrink-0">
+                  <Icon name="calendar-range" className="w-7 h-7" />
+                </div>
+                <p className="text-sm font-bold text-ink">진행 중인 자동화 워크플로우가 없습니다.</p>
+                <p className="text-xs text-ink3 font-bold mt-1">위 입력창에서 자연어로 시작해보세요.</p>
                 <Link
-                  key={wf.workflow_id}
-                  href={`/workflows/${wf.workflow_id}`}
-                  className="flex items-center justify-between border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] px-[10px] py-[6px] bg-[var(--color-surface)] no-underline hover:bg-[var(--color-paper2)]"
+                  href="/agent"
+                  className="mt-4 px-4 py-2 border border-accent text-accent hover:bg-accent hover:text-white text-xs font-bold rounded-xl transition-all no-underline"
                 >
-                  <span className="font-bold text-[var(--color-ink)]">{wf.name}</span>
-                  <span className="text-[11px] text-[var(--color-ink3)]">
-                    {wf.is_draft ? '초안' : '활성'}
-                  </span>
+                  예시 워크플로우 만들기
+                </Link>
+              </div>
+            )}
+
+            {!recentLoading && recent.length > 0 && (
+              <div className="space-y-2.5">
+                {recent.map((wf) => (
+                  <Link
+                    key={wf.workflow_id}
+                    href={`/workflows/${wf.workflow_id}`}
+                    className="flex items-center justify-between p-4 rounded-xl bg-white border border-line-soft hover:border-accent-coral hover:bg-hl transition-all shadow-sm no-underline"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Icon name="workflow" className="w-5 h-5 text-accent" />
+                      <span className="text-sm font-bold text-ink">{wf.name}</span>
+                    </div>
+                    <span className="text-[11px] text-ink3 font-bold">
+                      {wf.is_draft ? '초안' : '활성'}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 바로가기 */}
+          <div className="lg:col-span-5 space-y-3">
+            <h3 className="text-sm font-bold text-ink flex items-center space-x-2">
+              <Icon name="compass" className="w-4 h-4 text-accent-coral" />
+              <span>바로가기</span>
+            </h3>
+            <div className="space-y-2.5">
+              {SHORTCUTS.map((s) => (
+                <Link
+                  key={s.href}
+                  href={s.href}
+                  className="flex items-center justify-between p-4 rounded-xl bg-white border border-line-soft hover:border-accent-coral hover:bg-hl transition-all shadow-sm no-underline"
+                >
+                  <div className="flex items-center space-x-3">
+                    <Icon name={s.icon} className="w-5 h-5 text-accent" />
+                    <span className="text-sm font-bold text-ink">{s.label}</span>
+                  </div>
+                  <Icon name="arrow-right" className="w-4 h-4 text-ink3" />
                 </Link>
               ))}
+            </div>
           </div>
         </div>
-
-        {/* Right: 알림 */}
-        <div>
-          <div className="text-[13px] text-[var(--color-ink3)] mb-[6px]">바로가기</div>
-          <div className="flex flex-col gap-2">
-            <Link
-              href="/agent"
-              className="flex items-center justify-between border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] px-[10px] py-[6px] bg-[var(--color-surface)] no-underline hover:bg-[var(--color-paper2)]"
-            >
-              <span className="text-[var(--color-ink)]">💬 새 대화 시작</span>
-              <span className="font-mono text-[13px] text-[var(--color-ink3)]">→</span>
-            </Link>
-            <Link
-              href="/workflows"
-              className="flex items-center justify-between border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] px-[10px] py-[6px] bg-[var(--color-surface)] no-underline hover:bg-[var(--color-paper2)]"
-            >
-              <span className="text-[var(--color-ink)]">📂 워크플로우 목록</span>
-              <span className="font-mono text-[13px] text-[var(--color-ink3)]">→</span>
-            </Link>
-            <Link
-              href="/marketplace"
-              className="flex items-center justify-between border-[1.5px] border-[var(--color-ink)] rounded-[5px_11px_6px_10px] px-[10px] py-[6px] bg-[var(--color-surface)] no-underline hover:bg-[var(--color-paper2)]"
-            >
-              <span className="text-[var(--color-ink)]">🛒 스킬 마켓플레이스</span>
-              <span className="font-mono text-[13px] text-[var(--color-ink3)]">→</span>
-            </Link>
-          </div>
-        </div>
-      </div>
+      </main>
     </div>
   );
 }

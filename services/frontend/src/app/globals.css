@@ -1,35 +1,37 @@
+/* ───────── Inter + Noto Sans KR + JetBrains Mono 폰트 ───────── */
+/* @import 규칙은 다른 규칙보다 앞서야 함 — Tailwind 전개 전에 위치 */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @import "tailwindcss";
 
-/* ───────── Pretendard + JetBrains Mono 폰트 ───────── */
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
-
-/* ───────── Tailwind v4 디자인 토큰 ───────── */
+/* ───────── Tailwind v4 디자인 토큰 (Flowit — 크림/브라운/코랄) ───────── */
 @theme {
   /* 배경/표면 */
-  --color-paper: #F4F6F8;
-  --color-paper2: #EBEEF2;
+  --color-paper: #FBF8F2;       /* 더 환한 크림 배경 */
+  --color-paper2: #F3EDE3;      /* 옅은 표면 */
   --color-surface: #FFFFFF;
   --color-sidebar: #FFFFFF;
 
   /* 텍스트 (Ink) */
-  --color-ink: #1E293B;
-  --color-ink2: #334155;
-  --color-ink3: #64748B;
-  --color-ink4: #94A3B8;
+  --color-ink: #463A30;         /* 살짝 밝은 본문 갈색 */
+  --color-ink2: #685949;
+  --color-ink3: #766556;        /* 보조 텍스트 (AA 유지) */
+  --color-ink4: #A2917F;        /* 비활성/placeholder */
 
   /* 강조선 */
-  --color-line: #1E293B;
-  --color-line-soft: #CBD5E1;
+  --color-line: #463A30;
+  --color-line-soft: #ECE3D6;   /* 연한 카드 테두리 */
 
-  /* 하이라이트 (마커펜) */
-  --color-hl: #E0E7FF;
-  --color-hl2: #C7D2FE;
+  /* 하이라이트 (피치) */
+  --color-hl: #FBEBDA;          /* 밝은 피치 */
+  --color-hl2: #F2D7BE;
+  --color-coral-light: #FDEEE0;
 
-  /* 액센트 (Indigo) */
-  --color-accent: #4F46E5;
-  --color-accent2: #6366F1;
-  --color-accent3: #4338CA;
+  /* 액센트 (브라운/코랄) */
+  --color-accent: #8A6240;       /* 한 톤 가벼운 메인 갈색 */
+  --color-accent2: #9A7150;
+  --color-accent3: #6E4E33;      /* 진갈색도 살짝 밝게 */
+  --color-accent-coral: #E8945C;
 
   /* 위험도 */
   --color-risk-low: #10B981;
@@ -38,25 +40,29 @@
   --color-risk-restricted: #EF4444;
 
   /* 실행 상태 */
-  --color-status-running: #4F46E5;
+  --color-status-running: #E8945C;
   --color-status-succeeded: #10B981;
   --color-status-completed: #10B981;
-  --color-status-failed: #EF4444;
+  --color-status-failed: #C75146;
   --color-status-retrying: #F59E0B;
-  --color-status-paused: #64748B;
-  --color-status-cancelled: #94A3B8;
-  --color-status-pending: #94A3B8;
+  --color-status-paused: #A2917F;
+  --color-status-cancelled: #A2917F;
+  --color-status-pending: #A2917F;
 
   /* 공유 범위 */
-  --color-scope-private: #64748B;
-  --color-scope-team: #7C3AED;
-  --color-scope-public: #4F46E5;
+  --color-scope-private: #766556;
+  --color-scope-team: #8A6240;
+  --color-scope-public: #3B73C4;
 
   /* AI 에이전트 */
-  --color-agent: #4F46E5;
+  --color-agent: #8A6240;
 
-  /* 폰트 패밀리 */
-  --font-pretendard: 'Pretendard', 'Pretendard Variable', -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  /* 위험/경고 */
+  --color-danger: #C75146;
+  --color-danger-soft: #FBEAE8;
+
+  /* 폰트 패밀리 (var 이름은 유지, 값만 Inter/Noto 스택으로 교체) */
+  --font-pretendard: 'Inter', 'Noto Sans KR', -apple-system, 'Apple SD Gothic Neo', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 }
 
@@ -76,8 +82,13 @@ body {
   font-size: 14px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
-  letter-spacing: -0.01em;
 }
+
+/* ───────── 스크롤바 ───────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--color-paper2); }
+::-webkit-scrollbar-thumb { background: var(--color-hl2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-accent); }
 
 /* ───────── 키프레임 애니메이션 ───────── */
 @keyframes blink {
@@ -96,8 +107,22 @@ body {
 
 @keyframes wiggle {
   0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-2px); }
-  75% { transform: translateX(2px); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+@keyframes flow-dash {
+  to { stroke-dashoffset: -20; }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.7; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ───────── 커스텀 유틸리티 ───────── */
@@ -106,15 +131,139 @@ body {
 }
 
 .animate-pulse-dot {
-  animation: pulse 1.2s infinite;
+  animation: pulse-dot 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 .animate-shimmer {
-  background: linear-gradient(90deg, var(--color-paper2) 0%, #e6e2d2 40%, var(--color-paper2) 80%);
+  background: linear-gradient(90deg, var(--color-paper2) 0%, #efe6d6 40%, var(--color-paper2) 80%);
   background-size: 200% 100%;
   animation: shimmer 1.6s linear infinite;
 }
 
 .animate-wiggle {
-  animation: wiggle 0.4s 1;
+  animation: wiggle 0.2s ease-in-out 3;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out;
+}
+
+.flow-path-active {
+  stroke: var(--color-accent-coral);
+  stroke-dasharray: 6, 4;
+  animation: flow-dash 1s linear infinite;
+}
+
+.flowit-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line-soft);
+  box-shadow: 0 1px 2px rgba(70, 58, 48, 0.04);
+}
+
+/* ───────── AI 채팅(Composer) — "대화는 텍스트, 카드는 최소" ─────────
+   디자인 SSOT: docs/Flowit-채팅-레이아웃-구현-프롬프트.md
+   - 유저 입력만 말풍선, AI 출력은 카드 없이 본문 텍스트로 흐른다. */
+
+/* AI 본문 텍스트 흐름: 카드 없음, 문단 간격만 */
+.ai-prose p { margin: 0; }
+.ai-prose p + p { margin-top: 10px; }
+
+/* 본문 인라인 강조 토큰 (ConfirmCard 문장 안에서만 사용) */
+.em-perm { color: var(--color-accent3); font-weight: 700; }                                    /* 권한 */
+.em-risk { color: #C8860B; font-weight: 700; }                                                 /* 위험도 */
+.em-val  { color: var(--color-accent-coral); font-weight: 700; border-bottom: 1.5px solid var(--color-hl2); }  /* 확인 필요 값 */
+
+/* 진행 중 단계 한 줄 스피너 (13px 링, 코랄 상단) */
+@keyframes flowit-spin { to { transform: rotate(360deg); } }
+.flowit-spinner {
+  width: 13px; height: 13px;
+  border: 2px solid var(--color-hl2);
+  border-top-color: var(--color-accent-coral);
+  border-radius: 50%;
+  animation: flowit-spin .7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* 선택지 카드 옵션 — 스킬 선택 / 최종 결과 선택 두 순간에만 */
+.choice-opt { transition: all .15s ease; }
+.choice-opt:hover { border-color: var(--color-accent-coral); background: var(--color-hl); }
+.choice-opt.is-picked { border-color: var(--color-accent); background: var(--color-coral-light); }
+
+/* ───────── React Flow 노드 에디터 (시안 커스텀 카드) ───────── */
+/* custom 타입 노드 래퍼에서 라이브러리 기본 외형 제거 — 카드는 CustomNode 가 그린다 */
+.react-flow__node.react-flow__node-custom {
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  width: auto;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* 포트(핸들): 12px 흰 원 + ink4 테두리, hover 시 coral·1.3배 */
+.react-flow__handle.flowit-handle {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+  background: #fff;
+  border: 1.5px solid var(--color-ink4);
+  box-shadow: 0 1px 2px rgba(70, 58, 48, 0.25);
+  transition: transform 0.12s, background 0.12s, border-color 0.12s;
+}
+.react-flow__handle.flowit-handle:hover,
+.react-flow__handle.flowit-handle.connectionindicator:hover {
+  background: var(--color-accent-coral);
+  border-color: var(--color-accent-coral);
+}
+/* hover 확대 — 위치별 기본 translate 를 유지한 채 scale 만 추가 */
+.react-flow__handle-top.flowit-handle:hover {
+  transform: translate(-50%, -50%) scale(1.3);
+}
+.react-flow__handle-bottom.flowit-handle:hover {
+  transform: translate(-50%, 50%) scale(1.3);
+}
+.react-flow__handle-left.flowit-handle:hover {
+  transform: translate(-50%, -50%) scale(1.3);
+}
+.react-flow__handle-right.flowit-handle:hover {
+  transform: translate(50%, -50%) scale(1.3);
+}
+
+/* 로그인 배경 그라데이션 */
+.login-bg {
+  background: radial-gradient(130% 120% at 50% 0%, var(--color-surface) 0%, var(--color-paper) 45%, var(--color-coral-light) 100%);
+}
+
+/* 설정 토글 스위치 */
+.settings-toggle {
+  appearance: none;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--color-line-soft);
+  position: relative;
+  cursor: pointer;
+  transition: background .2s;
+  flex-shrink: 0;
+}
+.settings-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(70, 58, 48, .3);
+  transition: transform .2s;
+}
+.settings-toggle:checked {
+  background: var(--color-accent);
+}
+.settings-toggle:checked::after {
+  transform: translateX(16px);
 }

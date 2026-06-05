@@ -12,15 +12,16 @@ from app.dependencies.celery_client import init_celery
 from app.dependencies.clients import (
     dispose_orchestrator_http,
     dispose_redis,
+    dispose_skills_builder_http,
     init_orchestrator_http,
     init_redis,
+    init_skills_builder_http,
 )
 from app.dependencies.database import dispose_db_engine, init_db_engine
 from app.middleware.auth import API_SERVER_PUBLIC_PATHS, AuthMiddleware
 from app.middleware.cors import install_cors
 from app.middleware.error_handler import install_error_handlers
 from app.middleware.request_id import RequestIdMiddleware
-from app.routers.agents import agents_router, ai_sessions_router
 from app.routers import auth as auth_router
 from app.routers import documents as documents_router
 from app.routers import exec_control as exec_control_router
@@ -28,6 +29,7 @@ from app.routers import health
 from app.routers import nodes as nodes_router
 from app.routers import skills as skills_router
 from app.routers import workflows as workflows_router
+from app.routers.agents import agents_router, ai_sessions_router
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ async def _lifespan(app: FastAPI):
 
     app.state.redis = await init_redis(settings)
     app.state.orchestrator_http = init_orchestrator_http(settings)
+    app.state.skills_builder_http = init_skills_builder_http(settings)
     app.state.celery = init_celery(settings)
 
     logger.info("api_server lifespan: ready")
@@ -49,6 +52,7 @@ async def _lifespan(app: FastAPI):
         yield
     finally:
         await dispose_orchestrator_http(app.state.orchestrator_http)
+        await dispose_skills_builder_http(app.state.skills_builder_http)
         await dispose_redis(app.state.redis)
         await dispose_db_engine(app.state.db_handle)
         logger.info("api_server lifespan: shutdown complete")
