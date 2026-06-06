@@ -24,7 +24,7 @@ RETURN n.node_type AS node_type,
 # 데이터 없으면 빈 리스트 반환(정상 동작 — 시드 전까지 모티프 없음).
 _MATCH_PATTERNS_CYPHER = """
 MATCH (p:Pattern)
-WHERE toLower(p.intent) CONTAINS toLower($intent)
+WHERE toLower($intent) CONTAINS toLower(p.intent)
 OPTIONAL MATCH (p)-[r:USES_ROLE]->(n:Node)
 WITH p, collect({slot: r.slot, node_type: n.node_type}) AS role_rows
 RETURN p.name AS name,

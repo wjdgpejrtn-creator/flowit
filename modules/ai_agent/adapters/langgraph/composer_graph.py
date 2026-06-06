@@ -745,18 +745,20 @@ class LangGraphOrchestrator:
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
 
-        # GraphRAG — ADR-0026 Phase 2: pgvector seed → ontology graph expand → constrained generation.
+        # GraphRAG — ADR-0026 Phase 2: pgvector seed → ontology graph expand → subgraph 저장.
         # OntologyRetrieverPort 미주입 시 기존 pgvector 단독 경로로 폴백(non-fatal).
+        # ⚠️ subtract 필터(pgvector 결과를 allowed로 거름) 미적용 — ETL stale 시 "Neo4j 미투영
+        # 유효 노드"가 정상 후보임에도 조용히 제거되는 역효과 방지. constrained generation은
+        # 후보 목록 자체("Only use nodes from the provided candidate list" 프롬프트)가 1차 가드.
+        # CAN_FOLLOW 기반 호환 필터(박아름 §4.2) 머지 후 ADD 방식으로 보강 예정.
         ontology_subgraph: Any = None
         if self._ontology_retriever is not None:
             try:
                 seed_types = [c.node_type for c in raw_candidates]
                 ontology_subgraph = await self._ontology_retriever.expand_candidates(seed_types)
-                allowed = ontology_subgraph.allowed_node_types()
-                # 시드는 항상 allowed에 포함. 시드 외 후보(환각 노드)를 차단하는 가드.
-                raw_candidates = [c for c in raw_candidates if c.node_type in allowed]
                 _logger.debug(
-                    "GraphRAG expand: seeds=%d → allowed=%d", len(seed_types), len(allowed)
+                    "GraphRAG expand: seeds=%d → subgraph nodes=%d",
+                    len(seed_types), len(ontology_subgraph.nodes),
                 )
             except Exception as exc:
                 _logger.warning("OntologyRetriever expand_candidates 실패 (pgvector 폴백): %s", exc)

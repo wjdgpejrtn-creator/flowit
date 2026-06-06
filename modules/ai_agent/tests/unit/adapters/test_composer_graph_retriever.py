@@ -336,23 +336,28 @@ class TestRetrieverGraphRAG:
         ontology_retriever.expand_candidates.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_hallucinated_node_filtered_out(self):
-        """allowed_node_types에 없는 후보는 candidates에서 제거된다."""
-        allowed_candidate = _node_config(name="slack_send")
-        allowed_candidate.__dict__["node_type"] = "slack_send"
-        hallucinated = _node_config(name="phantom_node")
-        hallucinated.__dict__["node_type"] = "phantom_node"
+    async def test_subgraph_stored_candidates_not_filtered(self):
+        """expand_candidates 결과는 state에 저장되나 pgvector 후보를 subtract 필터링하지 않는다.
 
-        subgraph = self._make_subgraph({"slack_send"})  # phantom_node 제외
+        ETL stale 시 "Neo4j 미투영 유효 노드"가 조용히 제거되는 역효과 방지.
+        constrained generation은 "Only use nodes from the provided candidate list" 프롬프트가 담당.
+        """
+        candidate_a = _node_config(name="slack_send")
+        candidate_a.__dict__["node_type"] = "slack_send"
+        candidate_b = _node_config(name="new_node_not_in_neo4j")
+        candidate_b.__dict__["node_type"] = "new_node_not_in_neo4j"
+
+        # subgraph가 slack_send만 포함해도(new_node_not_in_neo4j는 ETL stale) 필터링 안 함.
+        subgraph = self._make_subgraph({"slack_send"})
         ontology_retriever = AsyncMock()
         ontology_retriever.expand_candidates = AsyncMock(return_value=subgraph)
 
-        oc = self._orchestrator_with_retriever([allowed_candidate, hallucinated], ontology_retriever)
+        oc = self._orchestrator_with_retriever([candidate_a, candidate_b], ontology_retriever)
         result = await oc._retriever_node(_make_state())
 
         types_in_result = {c.node_type for c in result["node_candidates"]}
         assert "slack_send" in types_in_result
-        assert "phantom_node" not in types_in_result
+        assert "new_node_not_in_neo4j" in types_in_result  # stale여도 보존
 
     @pytest.mark.asyncio
     async def test_expand_failure_fallback_to_pgvector(self):
