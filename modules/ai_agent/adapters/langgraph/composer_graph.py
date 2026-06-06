@@ -169,6 +169,7 @@ class _State(TypedDict):
     offered_skill_ids: list[str]            # 1차에 제시한 옵션 skill_id 집합 (2차 bind 멤버십 검증 — IDOR 차단)
     # GraphRAG — ADR-0026 Phase 2
     ontology_subgraph: Any | None           # OntologySubgraph (순환 import 회피 위해 Any)
+    pattern_templates: list[Any] | None     # list[PatternTemplate] — 모티프 그라운딩 (ADR-0026 Phase 2)
 
 
 class LangGraphOrchestrator:
@@ -764,6 +765,21 @@ class LangGraphOrchestrator:
                 _logger.warning("OntologyRetriever expand_candidates 실패 (pgvector 폴백): %s", exc)
                 ontology_subgraph = None
 
+        # 모티프 그라운딩 — match_patterns로 :Pattern 모티프를 회수해 drafter 프롬프트에 주입.
+        # ETL 시드 전까지는 빈 리스트가 정상(non-fatal). expand_candidates와 동일한 per-request driver.
+        pattern_templates: list[Any] | None = None
+        if self._ontology_retriever is not None:
+            try:
+                pattern_templates = await self._ontology_retriever.match_patterns(query)
+                if pattern_templates:
+                    _logger.debug(
+                        "GraphRAG 모티프 %d건 매칭: %s",
+                        len(pattern_templates), [pt.name for pt in pattern_templates],
+                    )
+            except Exception as exc:
+                _logger.warning("OntologyRetriever match_patterns 실패 (패턴 미적용): %s", exc)
+                pattern_templates = None
+
         # 구조 노드(트리거/제어흐름)는 사용자 문장에 자연어로 녹아(예: "매주 월요일 9시") 의미검색
         # top-k에 안 떠서 drafter가 `후보 목록에 없는 node_type: schedule_trigger`로 하드페일했다
         # (#378 후속 A). 관련성 무관하게 항상 후보에 선제 합산해 첫 초안부터 사용 가능하게 한다.
@@ -797,6 +813,7 @@ class LangGraphOrchestrator:
             "node_candidates": candidates,
             "personal_patterns": personal_patterns,
             "ontology_subgraph": ontology_subgraph,
+            "pattern_templates": pattern_templates,
             "collected_frames": frames,
         }
 
@@ -1064,6 +1081,7 @@ class LangGraphOrchestrator:
                 skill_selected=instruct_skill_binding,
                 retry_feedback=state.get("retry_feedback"),
                 dropped_node_types=dropped,
+                pattern_templates=state.get("pattern_templates"),
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:

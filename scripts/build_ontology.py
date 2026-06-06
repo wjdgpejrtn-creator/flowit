@@ -40,10 +40,52 @@ MERGE (c:Connection {provider: $provider})
 MERGE (n)-[:REQUIRES]->(c)
 """
 
+_MERGE_PATTERN = """
+MERGE (p:Pattern {name: $name})
+SET p.intent = $intent
+"""
+
+_MERGE_USES_ROLE = """
+MATCH (p:Pattern {name: $pattern_name})
+MATCH (n:Node) WHERE n.category = $category
+MERGE (p)-[:USES_ROLE {slot: $slot}]->(n)
+"""
+
+# Phase 2 모티프 시드 — 카탈로그 category 기반(DB 불필요, catalog_registry read-only).
+# 슬롯은 "generator"(AI 노드)·"evaluator"(condition 노드)로 고정.
+# intent는 match_patterns CONTAINS 매칭 대상 — 사용자 문장에서 이 키워드가 검출되면 패턴 활성.
+_PATTERNS: tuple[dict, ...] = (
+    {
+        "name": "quality_gate_loop",
+        "intent": "검증",
+        "roles": [
+            {"slot": "generator", "category": "ai"},
+            {"slot": "evaluator", "category": "condition"},
+        ],
+    },
+)
+
 
 async def apply_constraints(session: Any) -> None:
     for ddl in CONSTRAINTS:
         await session.run(ddl)
+
+
+async def project_patterns(session: Any) -> int:
+    """_PATTERNS 시드를 (:Pattern)/(:USES_ROLE) 엣지로 투영.
+
+    반환: 투영한 패턴 수.
+    """
+    for p in _PATTERNS:
+        await session.run(_MERGE_PATTERN, name=p["name"], intent=p["intent"])
+        for role in p["roles"]:
+            await session.run(
+                _MERGE_USES_ROLE,
+                pattern_name=p["name"],
+                category=role["category"],
+                slot=role["slot"],
+            )
+    return len(_PATTERNS)
 
 
 async def project_catalog(session: Any, node_defs: list[Any]) -> int:
@@ -86,11 +128,12 @@ async def main() -> None:
         async with driver.session() as session:
             await apply_constraints(session)
             count = await project_catalog(session, node_defs)
+            pattern_count = await project_patterns(session)
     finally:
         await driver.close()
 
-    print(f"[build_ontology] 제약 {len(CONSTRAINTS)}건 적용 + 노드 {count}건 투영 완료")
-    print("[build_ontology] TODO(Phase 2/박아름): 스킬 BINDS incremental upsert + CAN_FOLLOW 추론")
+    print(f"[build_ontology] 제약 {len(CONSTRAINTS)}건 적용 + 노드 {count}건 + 패턴 {pattern_count}건 투영 완료")
+    print("[build_ontology] TODO(박아름): 스킬 BINDS incremental upsert + CAN_FOLLOW 추론")
 
 
 if __name__ == "__main__":
