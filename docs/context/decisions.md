@@ -43,3 +43,7 @@
 | 0020 | [Skills Builder 산출물 게시 lifecycle 게이트 + scope별 진입 (Option B)](./adr/ADR-0020-skills-builder-publish-lifecycle-gate.md) | Accepted | 2026-05-21 |
 | 0021 | [프론트엔드 인증 — OAuth backend-callback + 단일 출처 토폴로지](./adr/ADR-0021-frontend-auth-single-origin-topology.md) | Accepted | 2026-05-22 |
 | 0022 | [CI/CD WIF 신규 셋업 (dedicated SA) — 옵션 B 재사용 폐기](./adr/ADR-0022-cicd-wif-dedicated-sa-setup.md) | Accepted | 2026-05-29 |
+| 0023 | [사용자 워크플로우 control-flow 엔진 (데이터 흐름 · 조건 분기 · 유한 순환)](./adr/ADR-0023-workflow-control-flow-engine.md) | Proposed | 2026-06-04 |
+| 0024 | [SkillDocument 2-md 디렉토리 (SKILL.md + COMPOSER.md) — 스킬 사용 모델 단일화](./adr/ADR-0024-skill-document-dual-md-directory.md) | Proposed | 2026-06-05 |
+| 0025 | [재개 가능한 실행 — 협조적 pause + 체크포인트 resume](./adr/ADR-0025-resumable-execution-cooperative-pause.md) | Proposed | 2026-06-05 |
+| 0026 | [온톨로지 기반 그래프 DB (Neo4j AuraDB) + GraphRAG — composer/skill-builder 품질 향상](./adr/ADR-0026-ontology-graph-db-graphrag.md) | Proposed | 2026-06-06 |
