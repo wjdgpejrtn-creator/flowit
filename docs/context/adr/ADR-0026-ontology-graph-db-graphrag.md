@@ -20,13 +20,13 @@ composer와 skill builder의 생성 품질이 떨어진다. 두 가지 갈래의
 품질 게이트 루프 모티프는 **ADR-0023의 다음 후속이 선행되지 않으면 무의미하다**:
 
 - **엔진 실행기**(`CyclicScheduler`)는 ✅ 완료·staging 배포됨 (PR #359, `origin/release` ancestor 확인).
-- 그러나 composer `validator_node`가 쓰는 **`nodes_graph` `GraphValidator._detect_cycles`(graph_validator.py:65-94)는 현재도 모든 순환을 무조건 `E_CYCLE_DETECTED`로 거부**한다 (마지막 수정 #349, L3과 무관 — 미착수, OPEN PR 0건). **엔진은 루프를 돌릴 수 있는데 composer가 자기 검증에서 루프 드래프트를 삭제한다.**
+- composer `validator_node`가 쓰는 **`nodes_graph` `GraphValidator._detect_cycles`가 모든 순환을 무조건 `E_CYCLE_DETECTED`로 거부**했다 — **엔진은 루프를 돌릴 수 있는데 composer가 자기 검증에서 루프 드래프트를 삭제하던** 비대칭. **PR #392(황대원 선반영, OPEN)로 완화**: non-trivial SCC가 condition 노드를 ≥1개 포함하면 허용(엔진 `CyclicScheduler` 수용 기준 1:1 미러), 박아름 sign-off 대기.
 
-따라서 그래프 DB로 모티프를 아무리 잘 retrieve해도, **validator 완화(ADR-0023 §L3 후속, 박아름)가 먼저 들어오지 않으면 composer는 루프 워크플로우를 절대 출력할 수 없다.** 본 ADR은 이 의존성을 1급으로 못박는다.
+따라서 그래프 DB로 모티프를 아무리 잘 retrieve해도, **validator 완화(ADR-0023 §L3 후속 — PR #392로 선반영)가 먼저 들어오지 않으면 composer는 루프 워크플로우를 절대 출력할 수 없다.** 본 ADR은 이 의존성을 1급으로 못박는다.
 
 ## Decision
 
-**온톨로지 기반 그래프 DB로 Neo4j AuraDB(매니지드)를 채택**하고, composer/skill-builder의 검색을 평탄 벡터 RAG에서 **GraphRAG(벡터 seed → 그래프 확장 → 제약된 후보 서브그래프)** 로 전환한다. 온톨로지는 노드·연결·스킬뿐 아니라 **검증된 워크플로우 모티프(`:Pattern`)** 를 1급 엔티티로 포함하며, `quality_gate_loop` 모티프는 ADR-0023의 `CyclicScheduler` 계약(조건 있는 back-edge + exit-edge)과 1:1로 정합한다.
+**온톨로지 기반 그래프 DB로 Neo4j AuraDB(매니지드)를 채택**하고, composer/skill-builder의 검색을 평탄 벡터 RAG에서 **GraphRAG(벡터 seed → 그래프 확장 → 제약된 후보 서브그래프)** 로 전환한다. 온톨로지는 노드·연결·스킬뿐 아니라 **검증된 워크플로우 모티프(`:Pattern`)** 를 1급 엔티티로 포함하며, `quality_gate_loop` 모티프(gen → eval condition → back-edge/exit-edge 구조)는 ADR-0023의 `CyclicScheduler` 수용 계약(루프에 condition 노드 ≥1개 존재 — 유한성은 엔진 max-iter 가드가 보장)과 1:1로 정합한다.
 
 도입은 **3개 Phase로 점진**하며, L3 validator 완화가 Phase 2의 하드 선행이다.
 
@@ -81,7 +81,7 @@ vector seed (pgvector top-k)
 
 | Phase | 내용 | 소유 | 선행 |
 |------|------|------|------|
-| **0 (하드 선행)** | `GraphValidator._detect_cycles` 완화 — 조건+exit-edge 있는 유한 순환 허용 (ADR-0023 §L3 후속) | 박아름 (nodes_graph) | #359 ✅ |
+| **0 (하드 선행)** | `GraphValidator._detect_cycles` 완화 — non-trivial SCC가 condition 노드 ≥1개면 허용(유한성은 엔진 max-iter 가드), ADR-0023 §L3 후속 | 황대원 선반영 **PR #392** (박아름 sign-off) | #359 ✅ |
 | **1** | Neo4j AuraDB 셋업 + 온톨로지 무손실 edge(노드/연결/스킬) + `OntologyRetrieverPort`/어댑터 + `build_ontology.py` + GraphRAG seed→expand | 황대원 (ai_agent 어댑터) | — |
 | **2** | `:Pattern` 모티프(`quality_gate_loop` 포함) + `CAN_FOLLOW` + drafter grounding | 황대원 + 신정혜 (drafter) | Phase 0, 1 |
 | **3** | Neo4j 네이티브 벡터 인덱스로 하이브리드 단일쿼리 (선택) | 황대원 | Phase 2 |
@@ -101,7 +101,7 @@ vector seed (pgvector top-k)
 - 3개 owner 모듈(ai_agent/nodes_graph/skills_marketplace) 동시 터치 → 협의 오버헤드.
 
 ### Follow-ups
-- **Phase 0(validator 완화)는 본 ADR과 독립적으로도 필요** — 박아름 협의·PR 선행. 미완 시 Phase 2 전체 블록.
+- **Phase 0(validator 완화)는 본 ADR과 독립적으로도 필요** — **PR #392(황대원 선반영)로 완료, 박아름 sign-off 대기**. 미완 시 Phase 2 전체 블록. 파리티 가드(validator↔CyclicScheduler 수용 계약)는 #392에 조립-계층 테스트로 동봉.
 - **Modal per-request driver**: composer가 Modal ASGI라 neo4j async driver를 `@enter`에서 1회 생성하면 asyncpg와 동일하게 boot≠request 루프 미스매치로 hang 위험(`composer_modal_per_request_engine` 사고 재연). 요청마다 드라이버 생성 패턴 강제.
 - **Secret/terraform**: AuraDB 자격은 dedicated secret(공유 금지, `secret_latency_bomb`) + terraform이 env 소유(deploy.yml은 이미지만). Modal 3종에도 매핑.
 - **ETL 훅**: 기존 스킬 publish 경로에 Neo4j incremental upsert 배선.

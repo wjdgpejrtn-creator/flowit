@@ -10,12 +10,12 @@
 | 작업 영역 | 소유 | 비고 |
 |----------|------|------|
 | **그래프 DB 초기 인프라** (AuraDB provisioning, secret/terraform, `OntologyRetrieverPort` ABC, `Neo4jOntologyAdapter` 연결 스캐폴드, `build_ontology.py` ETL 골격, 온톨로지 스키마 제약/인덱스) | **황대원 (조장)** | 본 문서 §1·§3 — *구축 범위 끝* |
-| **validator 순환 완화** (Phase 0, 하드 선행) | **박아름** | 본 문서 §2 — 상세 스펙 핸드오프 |
+| **validator 순환 완화** (Phase 0, 하드 선행) | **황대원 선반영 (PR #392)** / 박아름 sign-off | 본 문서 §2 — 구현 완료, nodes_graph 교차소유 검토 대기 |
 | **GraphRAG retrieval + 모티프 + drafter grounding** (Phase 2) | **신정혜** | 본 문서 §4 |
 | **CAN_FOLLOW 휴리스틱 + 스킬 그래프 ETL 강화** (Phase 2) | **박아름** | 본 문서 §4 |
 | **하이브리드 벡터 + 고도화 레버** (Phase 3) | 신정혜·박아름 | 본 문서 §5·§6 |
 
-> 황대원은 **§1·§3까지만** 직접 구현한다. §2·§4·§5·§6은 설계·계약·테스트 기준만 제공하고 실행은 담당자에게 넘긴다.
+> 황대원은 인프라(§1·§3) + **Phase 0 validator 완화(§2)를 선반영**(PR #392, 위임이 결국 되돌아오는 패턴이라 직접 처리)했다. §4·§5·§6은 설계·계약·테스트 기준만 제공하고 실행은 담당자에게 넘긴다.
 
 ---
 
@@ -78,12 +78,12 @@ MERGE (:Skill {id}) ; (:Skill)-[:BINDS]->(:Node)
 
 ---
 
-## 2. Phase 0 — validator 순환 완화 스펙 (박아름 핸드오프, 하드 선행)
+## 2. Phase 0 — validator 순환 완화 스펙 (✅ PR #392 황대원 선반영, 박아름 sign-off 대기, 하드 선행)
 
 > **이게 안 들어오면 §4 모티프가 무의미하다.** 엔진은 루프를 돌릴 수 있는데(PR #359 ✅) composer `validator_node`가 쓰는 `GraphValidator`가 모든 순환을 삭제한다. 그래프 DB와 **독립적으로 필요**.
 
-### 2.1 현 상태 (블로커)
-`modules/nodes_graph/domain/services/graph_validator.py:65-94` — `_detect_cycles`가 Kahn 알고리즘으로 **순환이면 무조건** `E_CYCLE_DETECTED`. 마지막 수정 #349(L3 무관). 관련 OPEN PR 0건.
+### 2.1 현 상태 (✅ PR #392로 해소)
+기존: `_detect_cycles`가 Kahn 알고리즘으로 **순환이면 무조건** `E_CYCLE_DETECTED`. **PR #392(황대원 선반영, OPEN)에서 아래 §2.3 스펙대로 SCC 기반 완화 + §2.4 테스트 + 조립-계층 파리티 가드를 구현 완료**. 박아름 nodes_graph sign-off 대기.
 
 ### 2.2 엔진 수용 기준 (반드시 미러할 계약)
 `CyclicScheduler`(execution_engine)의 실측 수용 규칙:
@@ -216,7 +216,7 @@ MERGE (:Skill {id}) ; (:Skill)-[:BINDS]->(:Node)
 1. **Modal per-request driver** — `@enter` 1회 생성 금지(loop-binding hang). 요청마다 생성·close.
 2. **dedicated secret + terraform** — `ontology-neo4j-auradb` 공유 금지, `terraform apply`로 env 바인딩(deploy.yml은 이미지만).
 3. **ETL 동기화** — 정적 카탈로그 deploy 1회 + 스킬 publish incremental. 재시드 레시피(`staging_node_catalog_reseed`)와 정합.
-4. **3-owner 협의** — Phase 0(박아름)·Phase 2(신정혜+박아름) 동시 진행 전 ownership 통지(`cross_owner_module_etiquette`).
+4. **3-owner 협의** — Phase 0은 황대원이 nodes_graph(박아름 소유)에 선반영(PR #392, 사후 통지 완료) → 박아름 sign-off 대기. Phase 2(신정혜+박아름) 동시 진행 전 ownership 통지(`cross_owner_module_etiquette`).
 5. **프로젝트 일정** — 2026-06-30 staging 종료와 별개의 **장기 제품 방향**. staging 검증은 Phase 1 한정, Phase 2+는 일정 합의 후.
 
 ---
@@ -224,7 +224,7 @@ MERGE (:Skill {id}) ; (:Skill)-[:BINDS]->(:Node)
 ## 8. 진행 순서 요약
 ```
 [황대원] §1 인프라 구축 (AuraDB + Port ABC + 어댑터 스캐폴드 + ETL 골격)   ─┐ 병렬 가능
-[박아름] §2 Phase 0 validator 완화 (하드 선행, 그래프 DB 무관)            ─┘
+[황대원] §2 Phase 0 validator 완화 ✅ PR #392 (박아름 sign-off 대기)        ─┘
         ↓ (둘 다 완료)
 [신정혜+박아름] §4 Phase 2 GraphRAG + 모티프 + drafter grounding
         ↓
