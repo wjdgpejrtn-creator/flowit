@@ -21,7 +21,7 @@
 
 ## 1. Phase 1 — 그래프 DB 초기 인프라 (황대원 구축 범위) — ✅ 완료 (PR #393, 라이브 검증)
 
-> **상태(2026-06-06)**: 코드 스캐폴드 + ETL = PR #393. **실제 AuraDB Free 인스턴스로 라이브 검증 완료** — `build_ontology.py`가 제약 5건 + 노드 56건 투영, `expand_candidates` 어댑터 스모크 통과. GCP secret 3종 + Modal SA IAM 부여 완료(아래 §1.1). 남은 건 Phase 2 소비자 배선뿐.
+> **상태(2026-06-06)**: 코드 스캐폴드 + ETL = PR #393. **실제 AuraDB Free 인스턴스로 라이브 검증 완료** — `build_ontology.py`가 제약 5건 + 노드 53건 투영, `expand_candidates` 어댑터 스모크 통과. GCP secret 3종 + Modal SA IAM 부여 완료(아래 §1.1). 남은 건 Phase 2 소비자 배선뿐.
 
 ### 1.1 AuraDB provisioning — ✅ 완료
 - Neo4j **AuraDB Free** 인스턴스 1개 생성·운영 중. (AuraDB = 매니지드 Neo4j. self-host로 바꿔도 코드 무변경, secret 값만.)
@@ -63,13 +63,13 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 - `match_patterns`는 **`NotImplementedError`** — Phase 2 신정혜가 `:Pattern` Cypher로 채움(§4.1).
 
 ### 1.5 `scripts/build_ontology.py` (멱등 ETL) — ✅ 빌드+검증됨
-- 노드 소스: **`nodes_graph.application.catalog_registry.get_all_node_definitions()`** (import-only, DB 불필요) → 56노드. Neo4j는 직접 모름 — ETL이 투영.
+- 노드 소스: **`nodes_graph.application.catalog_registry.get_all_node_definitions()`** (import-only, DB 불필요) → **53노드**(executable 카탈로그). *CLAUDE.md "56종"은 toolset 14를 포함한 별개 집계 — ETL 투영 수와 다름.* Neo4j는 직접 모름 — ETL이 투영.
 - 멱등 MERGE: `apply_constraints`(제약 5건) + `project_catalog`(Node/Category/Connection + REQUIRES/IN_CATEGORY).
 - **스킬 `(:Skill)-[:BINDS]->(:Node)`는 미투영 (Phase 2 TODO, 박아름)** — DB 의존이라 publish 훅으로 incremental(§4.2).
 - **벡터 복제 안 함** — pgvector(BGE-M3) seed 검색 유지(`skill_embedding_pipeline_gap` staleness 회피).
 - 로컬 실행: `NEO4J_* env + .venv\Scripts\python.exe scripts\build_ontology.py`.
 
-> **인프라 검증 종료선 ✅ 달성**: AuraDB 연결 + 제약 5건 생성 + 56노드 투영 + `expand_candidates` 동작 라이브 확인. **여기까지가 황대원 구축 범위(완료)** — 이후는 §4 Phase 2 소비.
+> **인프라 검증 종료선 ✅ 달성**: AuraDB 연결 + 제약 5건 생성 + 53노드 투영 + `expand_candidates` 동작 라이브 확인. **여기까지가 황대원 구축 범위(완료)** — 이후는 §4 Phase 2 소비.
 
 ---
 
