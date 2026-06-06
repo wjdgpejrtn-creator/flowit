@@ -74,7 +74,7 @@ def _load_node_definitions() -> list[Any]:
 async def main() -> None:
     uri = os.getenv("NEO4J_URI")
     if not uri:
-        raise SystemExit("NEO4J_URI 미설정 — ontology-neo4j-auradb secret 바인딩 필요 (ADR-0026)")
+        raise SystemExit("NEO4J_URI 미설정 — neo4j-uri secret(또는 로컬 env) 필요 (ADR-0026)")
 
     from neo4j import AsyncGraphDatabase  # lazy — neo4j는 선택 의존
 

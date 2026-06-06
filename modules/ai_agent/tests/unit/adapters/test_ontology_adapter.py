@@ -85,8 +85,10 @@ async def test_match_patterns_not_implemented_phase1():
         await adapter.match_patterns("검증/재생성")
 
 
-def test_missing_uri_raises_on_driver_creation():
-    # driver_factory 없고 NEO4J_URI 없으면 실제 호출 시 RuntimeError (lazy)
+def test_missing_uri_raises_on_driver_creation(monkeypatch):
+    # driver_factory 없고 NEO4J_URI 없으면 실제 호출 시 RuntimeError (lazy).
+    # CI에 NEO4J_URI가 셋돼 있으면 os.getenv 폴백으로 false-pass하므로 명시적으로 제거.
+    monkeypatch.delenv("NEO4J_URI", raising=False)
     adapter = Neo4jOntologyAdapter(uri=None)
     with pytest.raises(RuntimeError, match="NEO4J_URI"):
         adapter._new_driver()

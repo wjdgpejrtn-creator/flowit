@@ -162,8 +162,8 @@ Downstream (이 모듈에 의존):
 | `LLM_BASE_URL` | Y | Gemma 4 Modal endpoint URL |
 | `EMBEDDING_BASE_URL` | Y | BGE-M3 임베딩 Modal endpoint URL |
 | `SKILLS_BUILDER_URL` | Y | Skills Builder sub-agent Modal endpoint URL |
-| `NEO4J_URI` | N | 온톨로지 Neo4j AuraDB URI (`neo4j+s://...`). `Neo4jOntologyAdapter` 사용 시 필수 (ADR-0026, secret `ontology-neo4j-auradb`) |
-| `NEO4J_USERNAME` / `NEO4J_PASSWORD` | N | 온톨로지 Neo4j 인증 (위와 동일 secret) |
+| `NEO4J_URI` | N | 온톨로지 Neo4j AuraDB URI (`neo4j+s://...`). `Neo4jOntologyAdapter` 사용 시 필수 (ADR-0026, GCP secret `neo4j-uri` → Modal `load_secrets_to_env`) |
+| `NEO4J_USERNAME` / `NEO4J_PASSWORD` | N | 온톨로지 Neo4j 인증 (GCP secret `neo4j-username`/`neo4j-password`) |
 | `LLM_MODEL_NAME` | N | 사용 모델명 (기본: gemma-4) |
 | `AGENT_MAX_TURNS` | N | 최대 턴 수 (기본: 25) |
 | `QA_PASS_THRESHOLD` | N | QA 통과 점수 (기본: 8) |

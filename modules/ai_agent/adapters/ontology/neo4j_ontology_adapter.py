@@ -29,8 +29,9 @@ class Neo4jOntologyAdapter(OntologyRetrieverPort):
     hang한다(memory: composer_modal_per_request_engine). worker 패턴대로 호출 단위로
     엔진을 만든다.
 
-    연결 정보는 `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` 환경변수(= dedicated
-    secret `ontology-neo4j-auradb`, terraform 바인딩)에서 읽는다. 하드코딩 금지.
+    연결 정보는 `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` 환경변수에서 읽는다
+    (하드코딩 금지). 값은 GCP secret `neo4j-uri`/`neo4j-username`/`neo4j-password`로,
+    Modal `boot()`의 `load_secrets_to_env`가 런타임 주입한다(terraform 아님 — Cloud Run 전용).
     """
 
     def __init__(
@@ -54,7 +55,7 @@ class Neo4jOntologyAdapter(OntologyRetrieverPort):
         # 설정 누락이 ImportError가 아닌 명확한 RuntimeError로 드러나게 한다.
         if not self._uri:
             raise RuntimeError(
-                "NEO4J_URI 미설정 — ontology-neo4j-auradb secret/terraform 바인딩 필요 (ADR-0026)"
+                "NEO4J_URI 미설정 — neo4j-uri secret을 load_secrets_to_env로 주입 필요 (ADR-0026)"
             )
         # neo4j는 선택 의존(extras). 모듈 import 시점에 하드 요구하지 않도록 lazy import.
         from neo4j import AsyncGraphDatabase  # noqa: PLC0415
