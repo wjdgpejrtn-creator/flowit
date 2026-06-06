@@ -3,6 +3,7 @@ from uuid import uuid4
 import pytest
 from common_schemas import Edge, NodeInstance, Position, WorkflowSchema
 from common_schemas.enums import ErrorCode, RiskLevel
+
 from nodes_graph.domain.entities.node_definition import NodeDefinition
 from nodes_graph.domain.services.graph_validator import GraphValidator
 
@@ -19,10 +20,10 @@ class _InMemoryRepo:
     async def search_by_embedding(self, q, limit=10): return list(self._store.values())[:limit]
 
 
-def _make_node_def(required_connections=None, input_schema=None):
+def _make_node_def(required_connections=None, input_schema=None, category="x"):
     from uuid import uuid4
     return NodeDefinition(
-        node_id=uuid4(), node_type="x", name="x", category="x", version="1.0.0",
+        node_id=uuid4(), node_type="x", name="x", category=category, version="1.0.0",
         input_schema=input_schema or {}, output_schema={}, parameter_schema={},
         risk_level=RiskLevel.LOW, required_connections=required_connections or [],
         description="x", is_mvp=True,
@@ -65,6 +66,84 @@ async def test_cycle_detected():
     result = await GraphValidator(_InMemoryRepo()).validate(_wf([n1, n2, n3], edges))
     assert result.validation_status == "failed"
     assert any(e.code == ErrorCode.E_CYCLE_DETECTED for e in result.errors)
+
+
+# ── ADR-0023 L3: 유한 순환(품질게이트 루프) 완화 ──────────────────────────
+# 엔진 CyclicScheduler 수용 기준 미러: non-trivial SCC는 condition 노드 ≥1개면 허용,
+# 없으면 E_CYCLE_DETECTED. (진짜 파리티 테스트 — validate() passed ⟺ CyclicScheduler
+# .plan() non-raise — 는 둘 다 import 가능한 조립 계층(execution_engine/api_server)에 둔다.)
+
+
+def _condition_node(repo_def):
+    """repo에 등록된 condition NodeDefinition을 참조하는 NodeInstance."""
+    return _node(node_id=repo_def.node_id)
+
+
+@pytest.mark.asyncio
+async def test_cycle_with_condition_node_passes():
+    """gen → cond, cond → gen(back-edge). cond가 category='condition'이면 탈출 가능 → 통과."""
+    repo = _InMemoryRepo()
+    cond_def = _make_node_def(category="condition")
+    await repo.upsert(cond_def)
+    gen, cond = _node(), _condition_node(cond_def)
+    edges = [_edge(gen.instance_id, cond.instance_id), _edge(cond.instance_id, gen.instance_id)]
+    result = await GraphValidator(repo).validate(_wf([gen, cond], edges))
+    assert not any(e.code == ErrorCode.E_CYCLE_DETECTED for e in result.errors)
+    assert result.validation_status == "passed"
+
+
+@pytest.mark.asyncio
+async def test_cycle_without_condition_node_rejected():
+    """2-노드 순환에 condition 노드 없음 → 탈출 불가 → E_CYCLE_DETECTED."""
+    a, b = _node(), _node()
+    edges = [_edge(a.instance_id, b.instance_id), _edge(b.instance_id, a.instance_id)]
+    result = await GraphValidator(_InMemoryRepo()).validate(_wf([a, b], edges))
+    assert any(e.code == ErrorCode.E_CYCLE_DETECTED for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_condition_self_loop_passes():
+    """condition 노드 self-loop → 탈출 조건 보유 → 통과."""
+    repo = _InMemoryRepo()
+    cond_def = _make_node_def(category="condition")
+    await repo.upsert(cond_def)
+    cond = _condition_node(cond_def)
+    other = _node()
+    edges = [_edge(cond.instance_id, cond.instance_id), _edge(cond.instance_id, other.instance_id)]
+    result = await GraphValidator(repo).validate(_wf([cond, other], edges))
+    assert not any(e.code == ErrorCode.E_CYCLE_DETECTED for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_non_condition_self_loop_rejected():
+    """비-condition 노드 self-loop → 탈출 불가 → E_CYCLE_DETECTED."""
+    a = _node()
+    other = _node()
+    edges = [_edge(a.instance_id, a.instance_id), _edge(a.instance_id, other.instance_id)]
+    result = await GraphValidator(_InMemoryRepo()).validate(_wf([a, other], edges))
+    assert any(e.code == ErrorCode.E_CYCLE_DETECTED for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_two_cycles_one_missing_condition_rejected():
+    """SCC 2개 — 하나는 condition 보유, 하나는 누락 → 누락된 쪽 때문에 E_CYCLE_DETECTED."""
+    repo = _InMemoryRepo()
+    cond_def = _make_node_def(category="condition")
+    await repo.upsert(cond_def)
+    # 루프1: gen↔cond (탈출 가능)
+    gen, cond = _node(), _condition_node(cond_def)
+    # 루프2: x↔y (탈출 불가)
+    x, y = _node(), _node()
+    bridge = _edge(cond.instance_id, x.instance_id)  # 두 SCC 연결 (고립 방지)
+    edges = [
+        _edge(gen.instance_id, cond.instance_id), _edge(cond.instance_id, gen.instance_id),
+        bridge,
+        _edge(x.instance_id, y.instance_id), _edge(y.instance_id, x.instance_id),
+    ]
+    result = await GraphValidator(repo).validate(_wf([gen, cond, x, y], edges))
+    cyc = next(e for e in result.errors if e.code == ErrorCode.E_CYCLE_DETECTED)
+    assert str(x.instance_id) in cyc.node_ids
+    assert str(gen.instance_id) not in cyc.node_ids  # 탈출 가능한 루프는 보고 안 함
 
 
 @pytest.mark.asyncio
