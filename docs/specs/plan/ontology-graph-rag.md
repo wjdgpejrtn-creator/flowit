@@ -9,7 +9,7 @@
 
 | 작업 영역 | 소유 | 비고 |
 |----------|------|------|
-| **그래프 DB 초기 인프라** (AuraDB provisioning, secret/terraform, `OntologyRetrieverPort` ABC, `Neo4jOntologyAdapter` 연결 스캐폴드, `build_ontology.py` ETL 골격, 온톨로지 스키마 제약/인덱스) | **황대원 (조장)** | 본 문서 §1·§3 — *구축 범위 끝* |
+| **그래프 DB 초기 인프라** (AuraDB provisioning, GCP secret 3종+IAM, `OntologyRetrieverPort` ABC, `Neo4jOntologyAdapter`, `build_ontology.py` ETL, 스키마 제약) | **황대원 (조장)** | 본 문서 §1·§3 — ✅ 완료(PR #393) |
 | **validator 순환 완화** (Phase 0, 하드 선행) | **황대원 선반영 (PR #392)** / 박아름 sign-off | 본 문서 §2 — 구현 완료, nodes_graph 교차소유 검토 대기 |
 | **GraphRAG retrieval + 모티프 + drafter grounding** (Phase 2) | **신정혜** | 본 문서 §4 |
 | **CAN_FOLLOW 휴리스틱 + 스킬 그래프 ETL 강화** (Phase 2) | **박아름** | 본 문서 §4 |
@@ -19,12 +19,15 @@
 
 ---
 
-## 1. Phase 1 — 그래프 DB 초기 인프라 (황대원 구축 범위)
+## 1. Phase 1 — 그래프 DB 초기 인프라 (황대원 구축 범위) — ✅ 완료 (PR #393, 라이브 검증)
 
-### 1.1 AuraDB provisioning
-- Neo4j **AuraDB Free**(staging) 인스턴스 1개. region은 GCP staging과 근접(europe-west/us 중 api Cloud Run과 동일 권역).
-- 연결 정보(`NEO4J_URI` `neo4j+s://...`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`)는 **dedicated secret** `ontology-neo4j-auradb`로 GCP Secret Manager에 저장. **공유 금지**(`secret_latency_bomb` 교훈).
-- terraform이 env 바인딩 소유 — composer Modal app + (필요 시) api_server에 secret_env 주입. **deploy.yml은 이미지만**이므로 `terraform apply` 필수(`deploy_image_only_terraform_owns_env`).
+> **상태(2026-06-06)**: 코드 스캐폴드 + ETL = PR #393. **실제 AuraDB Free 인스턴스로 라이브 검증 완료** — `build_ontology.py`가 제약 5건 + 노드 53건 투영, `expand_candidates` 어댑터 스모크 통과. GCP secret 3종 + Modal SA IAM 부여 완료(아래 §1.1). 남은 건 Phase 2 소비자 배선뿐.
+
+### 1.1 AuraDB provisioning — ✅ 완료
+- Neo4j **AuraDB Free** 인스턴스 1개 생성·운영 중. (AuraDB = 매니지드 Neo4j. self-host로 바꿔도 코드 무변경, secret 값만.)
+- 연결 정보는 GCP Secret Manager에 **secret 3종**으로 저장(✅ 생성됨): `neo4j-uri`(`neo4j+s://...`) / `neo4j-username` / `neo4j-password`. Modal 런타임 SA `<MODAL_SA>@<GCP_PROJECT_ID>.iam.gserviceaccount.com`에 `secretmanager.secretAccessor` 부여 완료.
+- **⚠️ env 바인딩은 terraform이 아니라 Modal `load_secrets_to_env`**: composer/skills-builder는 Modal 앱이라 `boot()`에서 `services.common.gcp_secrets.load_secrets_to_env({"neo4j-uri":"NEO4J_URI", ...})`로 런타임 pull한다. terraform `secret_env`는 **Cloud Run(api/worker) 전용**이며 Modal 경로엔 안 쓴다(`deploy_image_only_terraform_owns_env`는 Cloud Run 한정). → 매핑 추가 + 재배포는 Phase 2 소비 시(§4.1).
+- **AuraDB Free 운영 주의**: 72h 미사용 시 auto-pause(콘솔 resume, 데이터 보존). secret을 `:latest`로 복수 서비스가 공유하면 `secret_latency_bomb` → 버전 핀 권장.
 
 ### 1.2 온톨로지 스키마 제약/인덱스 (멱등 DDL)
 ```cypher
@@ -38,43 +41,35 @@ CREATE CONSTRAINT pattern_name_unique IF NOT EXISTS
   FOR (p:Pattern) REQUIRE p.name IS UNIQUE;
 ```
 
-### 1.3 `OntologyRetrieverPort` (ABC — ai_agent/domain/ports)
-신정혜가 소비할 **계약만** 정의(구현 비움). 도메인 레이어이므로 neo4j import 금지.
+### 1.3 `OntologyRetrieverPort` (ABC) + VO — ✅ 빌드됨 (실제 시그니처)
+`modules/ai_agent/domain/ports/ontology_retriever.py` (도메인, neo4j import 없음):
 ```python
-# modules/ai_agent/domain/ports/ontology_retriever.py
-from abc import ABC, abstractmethod
-from common_schemas import NodeCandidate  # 또는 기존 후보 VO 재사용
-
 class OntologyRetrieverPort(ABC):
-    @abstractmethod
-    async def expand_candidates(
-        self, seed_node_types: list[str], hops: int = 1
-    ) -> "OntologySubgraph": ...
-    """벡터 seed(node_type)들을 그래프로 1~2홉 확장해 제약된 후보 서브그래프 반환."""
-
-    @abstractmethod
-    async def match_patterns(self, intent: str) -> list["PatternTemplate"]: ...
-    """의도 문자열에 맞는 검증된 워크플로우 모티프(:Pattern) 템플릿 반환."""
+    async def expand_candidates(self, seed_node_types: list[str], hops: int = 1) -> OntologySubgraph: ...
+    async def match_patterns(self, intent: str) -> list[PatternTemplate]: ...
 ```
-> `OntologySubgraph`/`PatternTemplate`은 ai_agent 도메인 VO(또는 common_schemas 승격은 신정혜 협의). 황대원은 **빈 dataclass 골격**만 제공.
-
-### 1.4 `Neo4jOntologyAdapter` (어댑터 — ai_agent/adapters/ontology)
-- **요청마다 driver 생성** 패턴 강제 — composer가 Modal ASGI라 `@modal.enter`에서 driver 1회 생성 시 asyncpg와 동일하게 boot≠request 루프 미스매치로 hang(`composer_modal_per_request_engine`). worker 패턴(요청마다 생성·close)을 따른다.
-- Phase 1 쿼리만 구현: seed→expand(`REQUIRES`/`BINDS`/`IN_CATEGORY`). `CAN_FOLLOW`/`match_patterns`는 **`NotImplementedError`** 로 두고 §4에서 박아름·신정혜가 채움.
-
-### 1.5 `scripts/build_ontology.py` (ETL 골격 — 멱등)
-- 소스: `NodeDefinitionRepository.list_all()`(노드) + skills(`SkillRepository`). Neo4j는 직접 모름 — ETL이 투영.
-- Phase 1 무손실 MERGE만:
+VO는 `modules/ai_agent/domain/value_objects/ontology.py` (frozen dataclass, **신정혜 소비 시 이 필드를 씀**):
+```python
+OntologyNode(node_type, category, risk_level, requires: tuple[str,...])
+OntologySubgraph(seeds, nodes: tuple[OntologyNode,...], adjacency: dict[str, tuple[str,...]])
+    .allowed_node_types() -> frozenset[str]   # constrained generation 화이트리스트
+PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 ```
-MERGE (:Node {node_type})  SET category/risk_level/service_type
-MERGE (:Connection {provider}) ; (:Node)-[:REQUIRES]->(:Connection)
-MERGE (:Category {name}) ; (:Node)-[:IN_CATEGORY]->(:Category)
-MERGE (:Skill {id}) ; (:Skill)-[:BINDS]->(:Node)
-```
-- **벡터 복제 안 함** — pgvector(BGE-M3)를 seed 검색에 그대로 사용(`skill_embedding_pipeline_gap` staleness 회피).
-- 실행 시점: 정적 카탈로그는 deploy 훅 1회. **스킬 publish 경로 incremental upsert**는 §4(박아름).
+> common_schemas 승격이 필요하면 신정혜 협의(현재는 ai_agent 도메인 VO).
 
-> **인프라 검증 종료선**: AuraDB 연결됨 + 제약 생성됨 + `build_ontology.py`로 56노드+연결+스킬 무손실 투영됨 + `expand_candidates` Phase 1 쿼리 동작. 여기까지가 황대원 구축 범위.
+### 1.4 `Neo4jOntologyAdapter` — ✅ 빌드됨 (`ai_agent/adapters/ontology/`)
+- **요청마다 driver 생성·close** 패턴 강제(`composer_modal_per_request_engine` — Modal boot≠request 루프 hang 회피). neo4j는 lazy import(extras 미설치여도 모듈 로드 가능), `NEO4J_*` env에서 연결정보, `driver_factory` 주입 훅으로 테스트.
+- **Phase 1 expand_candidates 실제 범위 = seed + category sibling 1-hop** (REQUIRES/IN_CATEGORY 메타 포함). **`CAN_FOLLOW`는 아직 없음**(Phase 2 박아름). `hops` 인자는 forward-compat 예약.
+- `match_patterns`는 **`NotImplementedError`** — Phase 2 신정혜가 `:Pattern` Cypher로 채움(§4.1).
+
+### 1.5 `scripts/build_ontology.py` (멱등 ETL) — ✅ 빌드+검증됨
+- 노드 소스: **`nodes_graph.application.catalog_registry.get_all_node_definitions()`** (import-only, DB 불필요) → **53노드**(executable 카탈로그). *CLAUDE.md "56종"은 toolset 14를 포함한 별개 집계 — ETL 투영 수와 다름.* Neo4j는 직접 모름 — ETL이 투영.
+- 멱등 MERGE: `apply_constraints`(제약 5건) + `project_catalog`(Node/Category/Connection + REQUIRES/IN_CATEGORY).
+- **스킬 `(:Skill)-[:BINDS]->(:Node)`는 미투영 (Phase 2 TODO, 박아름)** — DB 의존이라 publish 훅으로 incremental(§4.2).
+- **벡터 복제 안 함** — pgvector(BGE-M3) seed 검색 유지(`skill_embedding_pipeline_gap` staleness 회피).
+- 로컬 실행: `NEO4J_* env + .venv\Scripts\python.exe scripts\build_ontology.py`.
+
+> **인프라 검증 종료선 ✅ 달성**: AuraDB 연결 + 제약 5건 생성 + 53노드 투영 + `expand_candidates` 동작 라이브 확인. **여기까지가 황대원 구축 범위(완료)** — 이후는 §4 Phase 2 소비.
 
 ---
 
@@ -147,20 +142,37 @@ MERGE (:Skill {id}) ; (:Skill)-[:BINDS]->(:Node)
 ## 4. Phase 2 — GraphRAG + 모티프 (신정혜·박아름 핸드오프)
 
 ### 4.1 신정혜 — composer `retriever_node` 교체 + 모티프 grounding
-**GraphRAG 흐름**:
+
+**착수 진입점 (구체 파일):**
+- 소비 지점: `ai_agent/adapters/langgraph/composer_graph.py`(`LangGraphOrchestrator`)의 retriever 노드. 현재 `NodeRegistry.search`(pgvector)만 씀 → 그 뒤에 `OntologyRetrieverPort.expand_candidates`를 붙인다.
+- DI 주입: `services/agents/agent-composer/main.py`의 `boot()`에서 `Neo4jOntologyAdapter()`를 생성해 orchestrator에 주입. **현재 미배선**(Phase 1은 dangling 방지로 안 함).
+
+**런타임 secret 배선 (secret은 이미 생성됨 — §1.1):**
+1. `agent-composer/main.py`의 `load_secrets_to_env({...})`에 추가:
+   `"neo4j-uri":"NEO4J_URI", "neo4j-username":"NEO4J_USERNAME", "neo4j-password":"NEO4J_PASSWORD"`
+2. `neo4j` 드라이버를 composer Modal `image.pip_install(...)`에 추가.
+3. `PYTHONUTF8=1 modal deploy services/agents/agent-composer/main.py` 재배포(매핑 추가는 재배포해야 반영 — `code_change_deploy_verify`).
+
+**GraphRAG 흐름:**
 ```
-1. vector seed:   pgvector top-k (BGE-M3) → seed node_type 집합
-2. graph expand:  OntologyRetrieverPort.expand_candidates(seed, hops=1~2)
-                  → REQUIRES/CAN_FOLLOW/BINDS 1~2홉 제약 서브그래프
-3. drafter:       서브그래프 내부 엣지만 생성 (constrained generation)
-4. 모티프:        intent가 "검증/재생성/품질"이면
-                  OntologyRetrieverPort.match_patterns(intent) → quality_gate_loop 템플릿
-                  → USES_ROLE 슬롯에 구체 node_type 바인딩
+1. vector seed:   NodeRegistry.search (pgvector top-k, BGE-M3) → seed node_type
+2. graph expand:  OntologyRetrieverPort.expand_candidates(seed)
+                  → 현재(Phase 1 어댑터): seed + category sibling 1-hop (REQUIRES 메타 포함)
+                  → CAN_FOLLOW 호환 확장은 박아름 §4.2 머지 후 자동 강화
+3. drafter:       OntologySubgraph.allowed_node_types() 밖 node_type/엣지 생성 금지 (constrained generation)
+4. 모티프:        intent가 "검증/재생성/품질"이면 match_patterns(intent) → quality_gate_loop 템플릿
+                  → role_slots(generator/evaluator)에 구체 node_type 바인딩
                   → back-edge(condition→generator) + exit-edge + condition.parameters.max_iterations 생성
 ```
-- **L3b** (ADR-0023 §L3 line 47): drafter가 back-edge + condition 노드를 생성하는 책임. 모티프 템플릿이 `CyclicScheduler` 계약(condition ≥1개)을 보장 → §2 validator 통과 → 엔진 실행.
-- **constrained generation이 환각 억제의 본질**: drafter가 서브그래프 밖 node_type/엣지를 만들지 못하게 프롬프트+후처리로 강제.
-- 모티프 템플릿 예(quality_gate_loop): `generator(LLM 노드) → evaluator(condition: score<θ) --retry--> generator / --done--> 하류`. `max_iterations`는 evaluator 파라미터.
+
+**`match_patterns` 구현(신정혜)** — 현재 `NotImplementedError`:
+- `:Pattern`/`:Template`/`USES_ROLE` 노드를 먼저 시드해야 함(USES_ROLE 큐레이션은 박아름 §4.2). 시드 후 어댑터에 Cypher 추가: `MATCH (p:Pattern) WHERE intent 매칭 → role_slots 반환`.
+- 반환 `PatternTemplate.role_slots`를 drafter가 구체 node_type으로 채워 루프 생성.
+
+**핵심 원칙:**
+- **L3b** (ADR-0023 §L3): drafter가 back-edge + condition 노드 생성. 모티프가 `CyclicScheduler` 계약(condition ≥1개) 보장 → §2 validator(PR #392) 통과 → 엔진 실행. **Phase 0 머지가 선행**.
+- **constrained generation이 환각 억제의 본질** — `allowed_node_types()`를 프롬프트+후처리 가드로 강제.
+- 모티프 예(quality_gate_loop): `generator(LLM) → evaluator(condition: score<θ) --retry--> generator / --done--> 하류`, `max_iterations`는 evaluator 파라미터.
 
 ### 4.2 박아름 — CAN_FOLLOW 추론 + 스킬 그래프 ETL
 - **CAN_FOLLOW 휴리스틱**: 노드 I/O가 JSON Schema dict(`node_definition.py:24-25`)라 무손실 불가. 추론 알고리즘 가이드:
@@ -214,7 +226,7 @@ MERGE (:Skill {id}) ; (:Skill)-[:BINDS]->(:Node)
 
 ## 7. 지뢰 / 운영 체크리스트
 1. **Modal per-request driver** — `@enter` 1회 생성 금지(loop-binding hang). 요청마다 생성·close.
-2. **dedicated secret + terraform** — `ontology-neo4j-auradb` 공유 금지, `terraform apply`로 env 바인딩(deploy.yml은 이미지만).
+2. **secret 경로 = Modal `load_secrets_to_env` (terraform 아님)** — composer/skills-builder는 Modal 앱이라 `boot()`에서 GCP secret(`neo4j-uri`/`username`/`password`)을 런타임 pull. terraform `secret_env`는 Cloud Run(api/worker) 전용. secret `:latest` 복수 공유 시 `secret_latency_bomb` → 버전 핀.
 3. **ETL 동기화** — 정적 카탈로그 deploy 1회 + 스킬 publish incremental. 재시드 레시피(`staging_node_catalog_reseed`)와 정합.
 4. **3-owner 협의** — Phase 0은 황대원이 nodes_graph(박아름 소유)에 선반영(PR #392, 사후 통지 완료) → 박아름 sign-off 대기. Phase 2(신정혜+박아름) 동시 진행 전 ownership 통지(`cross_owner_module_etiquette`).
 5. **프로젝트 일정** — 2026-06-30 staging 종료와 별개의 **장기 제품 방향**. staging 검증은 Phase 1 한정, Phase 2+는 일정 합의 후.
@@ -223,10 +235,10 @@ MERGE (:Skill {id}) ; (:Skill)-[:BINDS]->(:Node)
 
 ## 8. 진행 순서 요약
 ```
-[황대원] §1 인프라 구축 (AuraDB + Port ABC + 어댑터 스캐폴드 + ETL 골격)   ─┐ 병렬 가능
+[황대원] §1 인프라 ✅ PR #393 (AuraDB 라이브검증 + secret 3종 + IAM)        ─┐
 [황대원] §2 Phase 0 validator 완화 ✅ PR #392 (박아름 sign-off 대기)        ─┘
-        ↓ (둘 다 완료)
+        ↓ (PR #391/#392/#393 머지 후)
 [신정혜+박아름] §4 Phase 2 GraphRAG + 모티프 + drafter grounding
-        ↓
+        ↓  (신정혜: §4.1 retriever 교체+런타임 secret 배선+재배포 / 박아름: §4.2 CAN_FOLLOW+BINDS)
 [공통] §6.5 평가 하니스로 측정 → §6 고도화 레버 반복
 ```

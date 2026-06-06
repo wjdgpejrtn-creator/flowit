@@ -82,8 +82,8 @@ vector seed (pgvector top-k)
 | Phase | 내용 | 소유 | 선행 |
 |------|------|------|------|
 | **0 (하드 선행)** | `GraphValidator._detect_cycles` 완화 — non-trivial SCC가 condition 노드 ≥1개면 허용(유한성은 엔진 max-iter 가드), ADR-0023 §L3 후속 | 황대원 선반영 **PR #392** (박아름 sign-off) | #359 ✅ |
-| **1** | Neo4j AuraDB 셋업 + 온톨로지 무손실 edge(노드/연결/스킬) + `OntologyRetrieverPort`/어댑터 + `build_ontology.py` + GraphRAG seed→expand | 황대원 (ai_agent 어댑터) | — |
-| **2** | `:Pattern` 모티프(`quality_gate_loop` 포함) + `CAN_FOLLOW` + drafter grounding | 황대원 + 신정혜 (drafter) | Phase 0, 1 |
+| **1** | Neo4j AuraDB + 온톨로지 무손실 edge(노드/연결) + `OntologyRetrieverPort`/어댑터 + `build_ontology.py` + expand 1-hop | ✅ 황대원 **PR #393** (AuraDB 라이브검증·53노드·secret 3종·IAM) | — |
+| **2** | `:Pattern` 모티프(`quality_gate_loop`) + `CAN_FOLLOW` + 스킬 `BINDS` + drafter grounding + retriever 배선 | 신정혜(composer) + 박아름(CAN_FOLLOW/BINDS) | Phase 0, 1 |
 | **3** | Neo4j 네이티브 벡터 인덱스로 하이브리드 단일쿼리 (선택) | 황대원 | Phase 2 |
 
 ## Consequences
@@ -95,7 +95,7 @@ vector seed (pgvector top-k)
 - LangGraph/LangChain 생태계와 Neo4j GraphRAG 통합이 턴키(`neo4j-graphrag-python`, LlamaIndex) → 통합 비용 최소.
 
 ### Negative / Trade-offs
-- **신규 인프라 1종** + dedicated secret(AuraDB URI/credential) + terraform env 바인딩. 운영 표면 증가.
+- **신규 인프라 1종**(AuraDB) + GCP secret 3종 + Modal `load_secrets_to_env` 매핑. 운영 표면 증가.
 - 온톨로지 ETL(`build_ontology.py`)이 Postgres 카탈로그·스킬과 **동기화 부채**를 만든다 — 정적 카탈로그는 deploy 시 1회, 스킬은 publish마다 incremental upsert 필요.
 - `CAN_FOLLOW`가 JSON Schema 휴리스틱이라 **무손실이 아님** — 오탐/누락 가능, Phase 2에서 정밀화 비용.
 - 3개 owner 모듈(ai_agent/nodes_graph/skills_marketplace) 동시 터치 → 협의 오버헤드.
@@ -103,7 +103,7 @@ vector seed (pgvector top-k)
 ### Follow-ups
 - **Phase 0(validator 완화)는 본 ADR과 독립적으로도 필요** — **PR #392(황대원 선반영)로 완료, 박아름 sign-off 대기**. 미완 시 Phase 2 전체 블록. 파리티 가드(validator↔CyclicScheduler 수용 계약)는 #392에 조립-계층 테스트로 동봉.
 - **Modal per-request driver**: composer가 Modal ASGI라 neo4j async driver를 `@enter`에서 1회 생성하면 asyncpg와 동일하게 boot≠request 루프 미스매치로 hang 위험(`composer_modal_per_request_engine` 사고 재연). 요청마다 드라이버 생성 패턴 강제.
-- **Secret/terraform**: AuraDB 자격은 dedicated secret(공유 금지, `secret_latency_bomb`) + terraform이 env 소유(deploy.yml은 이미지만). Modal 3종에도 매핑.
+- **Secret 경로 = Modal `load_secrets_to_env` (terraform 아님)**: AuraDB 자격은 GCP secret 3종(`neo4j-uri`/`neo4j-username`/`neo4j-password`, ✅ 생성 + `cloudsql-iam-modal` SA IAM 부여). composer/skills-builder는 Modal 앱이라 `boot()`에서 런타임 pull — terraform `secret_env`는 Cloud Run 전용이라 본 경로엔 안 씀. secret `:latest` 복수 공유 시 `secret_latency_bomb` 주의(버전 핀).
 - **ETL 훅**: 기존 스킬 publish 경로에 Neo4j incremental upsert 배선.
 - 프로젝트 종료(2026-06-30) 일정과 별개의 **장기 제품 방향** 결정임 — staging 검증 범위는 Phase 1로 한정.
 
