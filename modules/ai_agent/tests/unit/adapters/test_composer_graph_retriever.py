@@ -146,6 +146,69 @@ class TestRetrieverNodeIgnoresSkills:
         assert names == ["slack_trigger"]
 
 
+class TestRetrieverStructuralUnion:
+    """#378 후속 A — 구조 노드(트리거/제어흐름)는 의미검색 top-k에 안 떠도 항상 후보에 합산.
+
+    "매주 월요일 9시에 …" 같은 요청에서 schedule_trigger가 검색에 안 잡혀 drafter가
+    `후보 목록에 없는 node_type: schedule_trigger`로 하드페일하던 문제를 해소한다.
+    """
+
+    def _orchestrator(self, search_result, structural_result):
+        from nodes_graph.domain.services.graph_validator import GraphValidator
+
+        node_registry = AsyncMock(spec=NodeRegistry)
+        node_registry.search = AsyncMock(return_value=search_result)
+        node_registry.list_structural = AsyncMock(return_value=structural_result)
+        return LangGraphOrchestrator(
+            intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
+            drafter=AsyncMock(spec=DrafterService),
+            qa_evaluator=AsyncMock(spec=QAEvaluatorService),
+            slot_filler=SlotFillingService(),
+            node_registry=node_registry,
+            workflow_repo=AsyncMock(spec=WorkflowRepository),
+            graph_validator=AsyncMock(spec=GraphValidator),
+        )
+
+    @pytest.mark.asyncio
+    async def test_structural_nodes_appended_to_candidates(self):
+        """검색이 schedule_trigger를 놓쳐도 구조 노드로 후보에 들어온다."""
+        content = _node_config(name="slack_post_message")
+        trigger = _node_config(name="schedule_trigger")
+        oc = self._orchestrator(search_result=[content], structural_result=[trigger])
+
+        result = await oc._retriever_node(_make_state())
+
+        names = {c.name for c in result["node_candidates"]}
+        assert "slack_post_message" in names
+        assert "schedule_trigger" in names
+
+    @pytest.mark.asyncio
+    async def test_dedup_by_node_id(self):
+        """검색 결과와 구조 노드가 겹치면(같은 node_id) 중복 없이 한 번만."""
+        shared_id = uuid4()
+        in_search = _node_config(node_id=shared_id, name="schedule_trigger")
+        in_structural = _node_config(node_id=shared_id, name="schedule_trigger")
+        oc = self._orchestrator(search_result=[in_search], structural_result=[in_structural])
+
+        result = await oc._retriever_node(_make_state())
+
+        ids = [c.node_id for c in result["node_candidates"]]
+        assert ids.count(shared_id) == 1
+
+    @pytest.mark.asyncio
+    async def test_structural_fetch_failure_is_non_fatal(self):
+        """구조 노드 조회 실패해도 검색 후보는 정상 반환(비치명적)."""
+        content = _node_config(name="slack_post_message")
+        oc = self._orchestrator(search_result=[content], structural_result=[])
+        oc._node_registry.list_structural = AsyncMock(side_effect=Exception("repo 오류"))
+
+        result = await oc._retriever_node(_make_state())
+
+        assert result.get("error") is None
+        names = {c.name for c in result["node_candidates"]}
+        assert names == {"slack_post_message"}
+
+
 class TestRetrieverPersonalRecall:
     """REQ-004 개인화 배선 — retriever가 RAG로 사용자 패턴을 회수해 state에 싣는다."""
 
