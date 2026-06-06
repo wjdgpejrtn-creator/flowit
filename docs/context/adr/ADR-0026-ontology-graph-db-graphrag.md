@@ -83,7 +83,8 @@ vector seed (pgvector top-k)
 |------|------|------|------|
 | **0 (하드 선행)** | `GraphValidator._detect_cycles` 완화 — non-trivial SCC가 condition 노드 ≥1개면 허용(유한성은 엔진 max-iter 가드), ADR-0023 §L3 후속 | 황대원 선반영 **PR #392** (박아름 sign-off) | #359 ✅ |
 | **1** | Neo4j AuraDB + 온톨로지 무손실 edge(노드/연결) + `OntologyRetrieverPort`/어댑터 + `build_ontology.py` + expand 1-hop | ✅ 황대원 **PR #393** (AuraDB 라이브검증·53노드·secret 3종·IAM) | — |
-| **2** | `:Pattern` 모티프(`quality_gate_loop`) + `CAN_FOLLOW` + 스킬 `BINDS` + drafter grounding + retriever 배선 | 신정혜(composer) + 박아름(CAN_FOLLOW/BINDS) | Phase 0, 1 |
+| **2a** | `:Pattern` 모티프(`quality_gate_loop`) + `CAN_FOLLOW`(노드 I/O 파생) + drafter grounding + retriever 배선 | **신정혜** (composer grounding — 박아름 비의존, 자력 완결) | Phase 0, 1 |
+| **2b** | 스킬 `(:Skill)-[:BINDS]->(:Node)` ETL + publish 훅 | **박아름** (skill-builder grounding, 별개 소비자) | Phase 1 |
 | **3** | Neo4j 네이티브 벡터 인덱스로 하이브리드 단일쿼리 (선택) | 황대원 | Phase 2 |
 
 ## Consequences
