@@ -20,6 +20,18 @@ RETURN n.node_type AS node_type,
        collect(DISTINCT sib.node_type) AS siblings
 """
 
+# Phase 2 모티프 질의 — intent 문자열에 CONTAINS 매칭. :Pattern/USES_ROLE 시드는 박아름 §4.2.
+# 데이터 없으면 빈 리스트 반환(정상 동작 — 시드 전까지 모티프 없음).
+_MATCH_PATTERNS_CYPHER = """
+MATCH (p:Pattern)
+WHERE toLower(p.intent) CONTAINS toLower($intent)
+OPTIONAL MATCH (p)-[r:USES_ROLE]->(n:Node)
+WITH p, collect({slot: r.slot, node_type: n.node_type}) AS role_rows
+RETURN p.name AS name,
+       p.intent AS intent,
+       role_rows
+"""
+
 
 class Neo4jOntologyAdapter(OntologyRetrieverPort):
     """OntologyRetrieverPort 구현 — Neo4j AuraDB GraphRAG 검색 (ADR-0026 Phase 1).
@@ -80,9 +92,36 @@ class Neo4jOntologyAdapter(OntologyRetrieverPort):
         return self._to_subgraph(seeds, records)
 
     async def match_patterns(self, intent: str) -> list[PatternTemplate]:
-        raise NotImplementedError(
-            "Phase 2 — :Pattern 모티프 retrieval (신정혜, ADR-0026 §4.1)"
-        )
+        """의도 문자열과 매칭되는 :Pattern 모티프를 반환한다 (ADR-0026 Phase 2).
+
+        :Pattern/:USES_ROLE 시드는 박아름 §4.2 ETL 완료 전까지 빈 리스트 반환이 정상 동작.
+        """
+        driver = self._new_driver()
+        try:
+            async with driver.session() as session:
+                result = await session.run(_MATCH_PATTERNS_CYPHER, intent=intent)
+                records = [record async for record in result]
+        finally:
+            await driver.close()
+
+        templates: list[PatternTemplate] = []
+        for rec in records:
+            role_rows = rec["role_rows"] or []
+            role_slots: dict[str, tuple[str, ...]] = {}
+            for row in role_rows:
+                slot = row.get("slot")
+                node_type = row.get("node_type")
+                if slot and node_type:
+                    role_slots.setdefault(slot, ())
+                    role_slots[slot] = role_slots[slot] + (node_type,)
+            templates.append(
+                PatternTemplate(
+                    name=rec["name"],
+                    intent=rec["intent"],
+                    role_slots=role_slots,
+                )
+            )
+        return templates
 
     @staticmethod
     def _to_subgraph(seeds: tuple[str, ...], records: list[Any]) -> OntologySubgraph:

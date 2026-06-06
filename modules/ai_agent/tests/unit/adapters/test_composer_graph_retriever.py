@@ -1,4 +1,4 @@
-"""retriever_node 단위 테스트 — 기본 노드 검색 + 개인 패턴 RAG 회수 + 스킬 미합산(#372 결함 B)."""
+"""retriever_node 단위 테스트 — 기본 노드 검색 + 개인 패턴 RAG 회수 + 스킬 미합산(#372 결함 B) + GraphRAG(ADR-0026)."""
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -289,3 +289,93 @@ class TestRetrieverPersonalRecall:
         assert result.get("error") is None
         assert result["personal_patterns"] == []
         assert len(result["node_candidates"]) == 1
+
+
+class TestRetrieverGraphRAG:
+    """ADR-0026 Phase 2 — OntologyRetrieverPort.expand_candidates 연동 테스트."""
+
+    def _make_subgraph(self, allowed_types: set[str]):
+        from ai_agent.domain.value_objects.ontology import OntologyNode, OntologySubgraph
+
+        nodes = tuple(
+            OntologyNode(node_type=t, category="test", risk_level="", requires=()) for t in allowed_types
+        )
+        return OntologySubgraph(seeds=tuple(allowed_types), nodes=nodes, adjacency={})
+
+    def _orchestrator_with_retriever(self, search_result, ontology_retriever):
+        from nodes_graph.domain.services.graph_validator import GraphValidator
+
+        node_registry = AsyncMock(spec=NodeRegistry)
+        node_registry.search = AsyncMock(return_value=search_result)
+        node_registry.list_structural = AsyncMock(return_value=[])
+        return LangGraphOrchestrator(
+            intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
+            drafter=AsyncMock(spec=DrafterService),
+            qa_evaluator=AsyncMock(spec=QAEvaluatorService),
+            slot_filler=SlotFillingService(),
+            node_registry=node_registry,
+            workflow_repo=AsyncMock(spec=WorkflowRepository),
+            graph_validator=AsyncMock(spec=GraphValidator),
+            ontology_retriever=ontology_retriever,
+        )
+
+    @pytest.mark.asyncio
+    async def test_subgraph_stored_in_state(self):
+        """expand_candidates 결과가 state에 ontology_subgraph로 저장된다."""
+        candidate = _node_config(name="slack_send")
+        candidate.__dict__["node_type"] = "slack_send"
+
+        subgraph = self._make_subgraph({"slack_send"})
+        ontology_retriever = AsyncMock()
+        ontology_retriever.expand_candidates = AsyncMock(return_value=subgraph)
+
+        oc = self._orchestrator_with_retriever([candidate], ontology_retriever)
+        result = await oc._retriever_node(_make_state())
+
+        assert result["ontology_subgraph"] is subgraph
+        ontology_retriever.expand_candidates.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_hallucinated_node_filtered_out(self):
+        """allowed_node_types에 없는 후보는 candidates에서 제거된다."""
+        allowed_candidate = _node_config(name="slack_send")
+        allowed_candidate.__dict__["node_type"] = "slack_send"
+        hallucinated = _node_config(name="phantom_node")
+        hallucinated.__dict__["node_type"] = "phantom_node"
+
+        subgraph = self._make_subgraph({"slack_send"})  # phantom_node 제외
+        ontology_retriever = AsyncMock()
+        ontology_retriever.expand_candidates = AsyncMock(return_value=subgraph)
+
+        oc = self._orchestrator_with_retriever([allowed_candidate, hallucinated], ontology_retriever)
+        result = await oc._retriever_node(_make_state())
+
+        types_in_result = {c.node_type for c in result["node_candidates"]}
+        assert "slack_send" in types_in_result
+        assert "phantom_node" not in types_in_result
+
+    @pytest.mark.asyncio
+    async def test_expand_failure_fallback_to_pgvector(self):
+        """OntologyRetriever 호출 실패 시 pgvector 결과만으로 폴백 — 에러 없음."""
+        candidate = _node_config(name="slack_send")
+        candidate.__dict__["node_type"] = "slack_send"
+
+        ontology_retriever = AsyncMock()
+        ontology_retriever.expand_candidates = AsyncMock(side_effect=Exception("Neo4j 연결 실패"))
+
+        oc = self._orchestrator_with_retriever([candidate], ontology_retriever)
+        result = await oc._retriever_node(_make_state())
+
+        assert result.get("error") is None
+        assert result["ontology_subgraph"] is None
+        assert len(result["node_candidates"]) >= 1
+
+    @pytest.mark.asyncio
+    async def test_no_ontology_retriever_uses_pgvector_only(self):
+        """ontology_retriever 미주입 시 기존 pgvector 단독 경로 — subgraph None."""
+        candidate = _node_config(name="slack_send")
+        oc = self._orchestrator_with_retriever([candidate], ontology_retriever=None)
+        result = await oc._retriever_node(_make_state())
+
+        assert result["ontology_subgraph"] is None
+        assert len(result["node_candidates"]) >= 1

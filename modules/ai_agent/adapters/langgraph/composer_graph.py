@@ -60,6 +60,7 @@ from ...domain.ports.composer_state_store import ComposerStateStore
 from ...domain.ports.connection_resolver import ConnectionResolver
 from ...domain.ports.llm_port import LLMPort
 from ...domain.ports.node_registry import NodeRegistry
+from ...domain.ports.ontology_retriever import OntologyRetrieverPort
 from ...domain.ports.personal_memory_store import PersonalMemoryStore
 from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.workflow_draft_store import WorkflowDraftStore
@@ -166,6 +167,8 @@ class _State(TypedDict):
     # 컨펌 게이트 신뢰 매니페스트 (영역 C)
     workflow_explanation: WorkflowExplanation | None
     offered_skill_ids: list[str]            # 1차에 제시한 옵션 skill_id 집합 (2차 bind 멤버십 검증 — IDOR 차단)
+    # GraphRAG — ADR-0026 Phase 2
+    ontology_subgraph: Any | None           # OntologySubgraph (순환 import 회피 위해 Any)
 
 
 class LangGraphOrchestrator:
@@ -195,6 +198,7 @@ class LangGraphOrchestrator:
         composer_state_store: ComposerStateStore | None = None,
         workflow_explanation_svc: WorkflowExplanationService | None = None,
         connection_resolver: ConnectionResolver | None = None,
+        ontology_retriever: OntologyRetrieverPort | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -214,6 +218,7 @@ class LangGraphOrchestrator:
         self._composer_state_store = composer_state_store
         self._workflow_explanation_svc = workflow_explanation_svc or WorkflowExplanationService()
         self._connection_resolver = connection_resolver
+        self._ontology_retriever = ontology_retriever
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -736,15 +741,32 @@ class LangGraphOrchestrator:
         spec = state["draft_spec"]
         query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
         try:
-            candidates = await self._node_registry.search(query)
+            raw_candidates = await self._node_registry.search(query)
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
+
+        # GraphRAG — ADR-0026 Phase 2: pgvector seed → ontology graph expand → constrained generation.
+        # OntologyRetrieverPort 미주입 시 기존 pgvector 단독 경로로 폴백(non-fatal).
+        ontology_subgraph: Any = None
+        if self._ontology_retriever is not None:
+            try:
+                seed_types = [c.node_type for c in raw_candidates]
+                ontology_subgraph = await self._ontology_retriever.expand_candidates(seed_types)
+                allowed = ontology_subgraph.allowed_node_types()
+                # 시드는 항상 allowed에 포함. 시드 외 후보(환각 노드)를 차단하는 가드.
+                raw_candidates = [c for c in raw_candidates if c.node_type in allowed]
+                _logger.debug(
+                    "GraphRAG expand: seeds=%d → allowed=%d", len(seed_types), len(allowed)
+                )
+            except Exception as exc:
+                _logger.warning("OntologyRetriever expand_candidates 실패 (pgvector 폴백): %s", exc)
+                ontology_subgraph = None
 
         # 구조 노드(트리거/제어흐름)는 사용자 문장에 자연어로 녹아(예: "매주 월요일 9시") 의미검색
         # top-k에 안 떠서 drafter가 `후보 목록에 없는 node_type: schedule_trigger`로 하드페일했다
         # (#378 후속 A). 관련성 무관하게 항상 후보에 선제 합산해 첫 초안부터 사용 가능하게 한다.
         # node_id 기준 dedup. 조회 실패는 비치명적 — 검색 후보만으로 진행한다.
-        candidates = self._dedup_union(candidates, await self._fetch_structural_candidates())
+        candidates = self._dedup_union(raw_candidates, await self._fetch_structural_candidates())
 
         # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
         # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는
@@ -772,6 +794,7 @@ class LangGraphOrchestrator:
         return {
             "node_candidates": candidates,
             "personal_patterns": personal_patterns,
+            "ontology_subgraph": ontology_subgraph,
             "collected_frames": frames,
         }
 
