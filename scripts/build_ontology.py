@@ -8,7 +8,9 @@
         .venv/Scripts/python.exe scripts/build_ontology.py
 
 노드 소스는 `nodes_graph.application.catalog_registry.get_all_node_definitions()` — import-only
-(DB 불필요)로 전체 카탈로그를 준다. 스킬(BINDS)은 DB 의존이라 Phase 1에서는 미투영(TODO).
+(DB 불필요)로 전체 카탈로그를 준다. 스킬(BINDS, ADR-0026 Phase 2b)은 게시 시 publish 훅이
+incremental upsert로 라이브 투영하며(`PublishSkillUseCase` → `Neo4jSkillProjector`), 본
+스크립트는 동일 Cypher의 배치 backfill 헬퍼(`project_skill`/`project_skills`)를 제공한다.
 """
 from __future__ import annotations
 
@@ -40,6 +42,30 @@ MERGE (c:Connection {provider: $provider})
 MERGE (n)-[:REQUIRES]->(c)
 """
 
+# ── 스킬 BINDS 투영 (ADR-0026 Phase 2b) ────────────────────────────────────────
+# 라이브 경로는 publish 훅(skills_marketplace.PublishSkillUseCase → Neo4jSkillProjector)
+# incremental upsert. 본 헬퍼는 동일 Cypher로 배치 backfill(스킬 소스 주입 시)을 지원한다.
+# Cypher는 ai_agent/adapters/ontology/neo4j_skill_projector.py와 동일 의미를 유지한다.
+_RESET_SKILL_BINDS = """
+MERGE (s:Skill {id: $skill_id})
+SET s.tier = $tier, s.audience = $tier
+WITH s
+OPTIONAL MATCH (s)-[b:BINDS]->()
+DELETE b
+"""
+
+_BIND_SKILL_AI_NODES = """
+MATCH (s:Skill {id: $skill_id})
+MATCH (n:Node {category: 'ai'})
+MERGE (s)-[:BINDS]->(n)
+"""
+
+_BIND_SKILL_CONNECTION_NODES = """
+MATCH (s:Skill {id: $skill_id})
+MATCH (n:Node)-[:REQUIRES]->(:Connection {provider: $provider})
+MERGE (s)-[:BINDS]->(n)
+"""
+
 
 async def apply_constraints(session: Any) -> None:
     for ddl in CONSTRAINTS:
@@ -63,6 +89,36 @@ async def project_catalog(session: Any, node_defs: list[Any]) -> int:
         for provider in d.required_connections or []:
             await session.run(_MERGE_REQUIRES, node_type=d.node_type, provider=provider)
     return len(node_defs)
+
+
+async def project_skill(
+    session: Any, skill_id: str, tier: str, required_connections: list[str] | None = None
+) -> None:
+    """게시 스킬 1건을 (:Skill)-[:BINDS]->(:Node)로 멱등 upsert (ADR-0026 Phase 2b).
+
+    모델 A(ADR-0024 D2): 스킬은 ai 카테고리 LLM 노드에 BINDS. 추가로 required_connections가
+    있으면 해당 connection을 요구하는 노드에도 BINDS. 재호출 시 기존 BINDS를 재계산(stale 제거).
+    """
+    await session.run(_RESET_SKILL_BINDS, skill_id=skill_id, tier=tier)
+    await session.run(_BIND_SKILL_AI_NODES, skill_id=skill_id)
+    for provider in dict.fromkeys(required_connections or []):
+        if provider:
+            await session.run(_BIND_SKILL_CONNECTION_NODES, skill_id=skill_id, provider=provider)
+
+
+async def project_skills(session: Any, skills: list[Any]) -> int:
+    """게시 스킬 목록을 BINDS로 투영(배치 backfill). 반환: 투영한 스킬 수.
+
+    각 skill은 `skill_id`, `scope`(또는 tier 문자열), `node_spec_staging.required_connections`를
+    노출하는 객체. 라이브 incremental upsert는 publish 훅이 담당하므로 본 함수는 backfill 전용.
+    """
+    for skill in skills:
+        scope = getattr(skill, "scope", None)
+        tier = getattr(scope, "value", None) or str(scope) if scope is not None else "personal"
+        staging = getattr(skill, "node_spec_staging", None)
+        required = list(getattr(staging, "required_connections", []) or [])
+        await project_skill(session, str(skill.skill_id), tier, required)
+    return len(skills)
 
 
 def _load_node_definitions() -> list[Any]:
@@ -90,7 +146,10 @@ async def main() -> None:
         await driver.close()
 
     print(f"[build_ontology] 제약 {len(CONSTRAINTS)}건 적용 + 노드 {count}건 투영 완료")
-    print("[build_ontology] TODO(Phase 2/박아름): 스킬 BINDS incremental upsert + CAN_FOLLOW 추론")
+    # 스킬 BINDS는 publish 훅(PublishSkillUseCase → Neo4jSkillProjector)이 incremental upsert로
+    # 라이브 처리한다(ADR-0026 Phase 2b 완료). 배치 backfill이 필요하면 project_skills()에 DB
+    # 스킬 소스를 주입한다(본 import-only main은 DB 비의존이라 미수행). CAN_FOLLOW/모티프는 신정혜(#396).
+    print("[build_ontology] 스킬 BINDS = publish 훅 라이브 / 배치 backfill은 project_skills() 사용")
 
 
 if __name__ == "__main__":
