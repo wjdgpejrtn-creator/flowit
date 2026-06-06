@@ -142,6 +142,8 @@ class _State(TypedDict):
     qa_feedback: str
     # validate/QA 실패 후 재시도 교정 피드백 — drafter에 별도 전달(intent 오염·UI 누출 방지, #378)
     retry_feedback: str
+    # drafter degrade로 버린 node_type(후보 미존재) — 재시도 retriever가 결정적으로 재검색(리뷰 #2)
+    dropped_node_types: list[str]
     collected_frames: Annotated[list[AnySSEFrame], operator.add]
     error: str | None
     # tool-calling agent 제어
@@ -282,6 +284,7 @@ class LangGraphOrchestrator:
             "pass_flag": False,
             "qa_feedback": "",
             "retry_feedback": "",
+            "dropped_node_types": [],
             "collected_frames": [],
             "error": None,
             "agent_done": False,
@@ -1118,12 +1121,16 @@ class LangGraphOrchestrator:
         )
         if skill_selected and not instruct_skill_binding:
             _logger.warning("스킬 선택됐으나 LLM 노드 후보 확보 실패 — 바인딩 skip 예상")
+        # degrade로 버린 node_type을 수집할 요청-로컬 sink(동시 요청 안전). 재시도 retriever가
+        # 이 ground-truth로 재검색하도록 state에 실어 보낸다(리뷰 #2 — QA-LLM 재인지 의존 제거).
+        dropped: list[str] = []
         try:
             workflow = await self._drafter.draft(
                 spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow,
                 personal_patterns=state.get("personal_patterns"),
                 skill_selected=instruct_skill_binding,
                 retry_feedback=state.get("retry_feedback"),
+                dropped_node_types=dropped,
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:
@@ -1158,6 +1165,7 @@ class LangGraphOrchestrator:
         ])
         return {
             "workflow_draft": workflow,
+            "dropped_node_types": dropped,
             "collected_frames": frames,
         }
 
@@ -1317,12 +1325,14 @@ class LangGraphOrchestrator:
             "retry_feedback": combined_feedback,
             "retry_count": state.get("retry_count", 0) + 1,
         }
-        # B(#378 후속): 재시도 시 retriever 재검색 — 직전 후보로 충족 못 한 능력(QA가 feedback에
-        # 적은 missing_capabilities)을 원 intent에 보강해 새 노드를 끌어온다. 직전 후보는 보존하고
-        # 합집합(node_id dedup) — 쓰던 노드를 잃지 않게. 재검색 실패는 비치명적(피드백만 전달).
+        # B(#378 후속): 재시도 시 retriever 재검색 — 직전 후보로 충족 못 한 능력을 원 intent에
+        # 보강해 새 노드를 끌어온다. 보강 신호 2종: (1) drafter가 degrade로 버린 node_type
+        # (ground-truth, 리뷰 #2 — QA-LLM 재인지에 의존하지 않는 결정적 신호) (2) QA가 feedback에
+        # 적은 missing_capabilities. 직전 후보는 보존하고 합집합(node_id dedup). 재검색 실패는 비치명적.
         spec = state.get("draft_spec")
         base_query = spec.natural_language_intent if spec else ""
-        search_query = " ".join(filter(None, [base_query, combined_feedback])).strip()
+        dropped = " ".join(state.get("dropped_node_types") or [])
+        search_query = " ".join(filter(None, [base_query, dropped, combined_feedback])).strip()
         if search_query:
             try:
                 fresh = await self._node_registry.search(search_query)

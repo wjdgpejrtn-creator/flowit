@@ -59,7 +59,7 @@ def _orchestrator(search_result):
     )
 
 
-def _state(existing_candidates, feedback="누락된 필수 노드/채널: 이메일 발송"):
+def _state(existing_candidates, feedback="누락된 필수 노드/채널: 이메일 발송", dropped=None):
     return {
         "session_id": uuid4(),
         "user_id": uuid4(),
@@ -73,6 +73,7 @@ def _state(existing_candidates, feedback="누락된 필수 노드/채널: 이메
         "node_candidates": existing_candidates,
         "qa_feedback": feedback,
         "validation_issues": None,
+        "dropped_node_types": dropped or [],
         "qa_attempts": 1,
         "retry_count": 0,
     }
@@ -109,6 +110,19 @@ class TestQARetryReSearch:
         (query,), _ = oc._node_registry.search.call_args
         assert "이메일 발송" in query
         assert "광고 시트" in query  # 원 intent도 포함
+
+    @pytest.mark.asyncio
+    async def test_research_query_includes_dropped_node_types(self):
+        """drafter가 버린 node_type(ground-truth)이 재검색 쿼리에 직접 들어간다 — QA-LLM
+        재인지에 의존하지 않고 결정적으로 그 노드를 재검색(#378 후속 리뷰 #2)."""
+        oc = _orchestrator(search_result=[])
+        await oc._qa_retry_node(
+            _state(existing_candidates=[], feedback="", dropped=["email_send"])
+        )
+
+        oc._node_registry.search.assert_called_once()
+        (query,), _ = oc._node_registry.search.call_args
+        assert "email_send" in query
 
     @pytest.mark.asyncio
     async def test_research_dedup_no_duplicate(self):

@@ -130,6 +130,34 @@ class TestDrafterServiceBuild:
         assert "schedule_trigger" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_dropped_node_types_reported_to_sink(self):
+        """degrade 시 버린 node_type을 dropped_node_types sink에 기록 — 재시도 retriever가
+        그 ground-truth로 재검색하게 한다(#378 후속, QA-LLM 재인지 의존 제거)."""
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A"), _NodeDraft(node_type="email_send")],
+            connections=[],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A")]  # email_send는 후보에 없음 → drop
+        sink: list[str] = []
+        await svc.draft(_spec(), candidates, self.owner_id, dropped_node_types=sink)
+        assert sink == ["email_send"]
+
+    @pytest.mark.asyncio
+    async def test_no_drop_leaves_sink_empty(self):
+        """전부 후보에 있으면 sink는 비어 있다."""
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A")],
+            connections=[],
+        )
+        svc = self._svc(response)
+        sink: list[str] = []
+        await svc.draft(_spec(), [_node_config("A")], self.owner_id, dropped_node_types=sink)
+        assert sink == []
+
+    @pytest.mark.asyncio
     async def test_connections_included_in_workflow_schema(self):
         response = _DraftResponse(
             name="W",
