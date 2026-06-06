@@ -719,7 +719,30 @@ class LangGraphOrchestrator:
             patterns.append(f"[{label}] {snippet}" if label else snippet)
         return patterns
 
-    # 6. retriever_node — 노드 후보 검색 + 커스텀 스킬 합산 + 개인 패턴 RAG 회수
+    async def _fetch_structural_candidates(self) -> list[NodeConfig]:
+        """구조 노드(트리거/제어흐름) 후보를 회수 — 실패·미구현 시 빈 리스트(비치명적).
+
+        ``NodeRegistry.list_structural``이 없거나(구버전 mock) 조회가 실패해도 워크플로우
+        생성을 막지 않는다. ``list()``로 강제 평가해 mock이 비-iterable을 돌려줘도 안전하게
+        빈 리스트로 degrade한다.
+        """
+        lister = getattr(self._node_registry, "list_structural", None)
+        if lister is None:
+            return []
+        try:
+            result = await lister()
+            return list(result) if result else []
+        except Exception as exc:
+            _logger.warning("구조 노드 후보 합산 실패 (non-fatal): %s", exc)
+            return []
+
+    @staticmethod
+    def _dedup_union(base: list[NodeConfig], extra: list[NodeConfig]) -> list[NodeConfig]:
+        """node_id 기준 dedup 합집합 — base를 우선 보존하고 새 항목만 뒤에 덧붙인다."""
+        seen = {c.node_id for c in base}
+        return base + [e for e in extra if e.node_id not in seen]
+
+    # 6. retriever_node — 노드 후보 검색 + 구조 노드 합산 + 개인 패턴 RAG 회수
     async def _retriever_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         spec = state["draft_spec"]
@@ -728,6 +751,12 @@ class LangGraphOrchestrator:
             candidates = await self._node_registry.search(query)
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
+
+        # 구조 노드(트리거/제어흐름)는 사용자 문장에 자연어로 녹아(예: "매주 월요일 9시") 의미검색
+        # top-k에 안 떠서 drafter가 `후보 목록에 없는 node_type: schedule_trigger`로 하드페일했다
+        # (#378 후속 A). 관련성 무관하게 항상 후보에 선제 합산해 첫 초안부터 사용 가능하게 한다.
+        # node_id 기준 dedup. 조회 실패는 비치명적 — 검색 후보만으로 진행한다.
+        candidates = self._dedup_union(candidates, await self._fetch_structural_candidates())
 
         # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
         # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는
@@ -1284,14 +1313,32 @@ class LangGraphOrchestrator:
         combined_feedback = " | ".join(filter(None, [feedback, validation_issues]))
         # 피드백은 natural_language_intent에 섞지 않는다 — 그러면 영어 교정문이 워크플로우
         # 이름/설명으로 누출된다(#378 부차). 별도 state 필드로 전달해 drafter가 교정에만 쓴다.
-        elapsed = int((time.monotonic() - t0) * 1000)
-        return {
+        updates: dict = {
             "retry_feedback": combined_feedback,
             "retry_count": state.get("retry_count", 0) + 1,
-            "collected_frames": [
-                PipelineStatusFrame(service_name="qa_retry", status="started", elapsed_ms=elapsed),
-            ],
         }
+        # B(#378 후속): 재시도 시 retriever 재검색 — 직전 후보로 충족 못 한 능력(QA가 feedback에
+        # 적은 missing_capabilities)을 원 intent에 보강해 새 노드를 끌어온다. 직전 후보는 보존하고
+        # 합집합(node_id dedup) — 쓰던 노드를 잃지 않게. 재검색 실패는 비치명적(피드백만 전달).
+        spec = state.get("draft_spec")
+        base_query = spec.natural_language_intent if spec else ""
+        search_query = " ".join(filter(None, [base_query, combined_feedback])).strip()
+        if search_query:
+            try:
+                fresh = await self._node_registry.search(search_query)
+            except Exception as exc:
+                _logger.warning("재시도 retriever 재검색 실패 (non-fatal): %s", exc)
+                fresh = []
+            if fresh:
+                existing = state.get("node_candidates") or []
+                merged = self._dedup_union(existing, list(fresh))
+                if len(merged) != len(existing):
+                    updates["node_candidates"] = merged
+        elapsed = int((time.monotonic() - t0) * 1000)
+        updates["collected_frames"] = [
+            PipelineStatusFrame(service_name="qa_retry", status="started", elapsed_ms=elapsed),
+        ]
+        return updates
 
     # 11. promote_node — QA 통과 후 확정 + WorkflowDraftStore에 AI 초안 보관
     async def _promote_node(self, state: _State) -> dict:

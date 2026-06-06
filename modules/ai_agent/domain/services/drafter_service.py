@@ -461,10 +461,12 @@ class DrafterService:
             for raw in draft.nodes:
                 nc = node_map.get(raw.node_type)
                 if nc is None:
-                    raise ExecutionError(
-                        f"후보 목록에 없는 node_type: {raw.node_type}",
-                        code="E_UNKNOWN_NODE_TYPE",
-                    )
+                    # 후보에 없는 node_type은 하드페일(E_UNKNOWN_NODE_TYPE) 대신 drop+경고로 degrade
+                    # (#378 후속 B). 즉시 죽으면 재시도 루프(retriever 재검색)가 돌 기회가 없다.
+                    # 떨군 노드를 참조하는 엣지는 아래 instance_id_map 미존재로 자연히 스킵되고,
+                    # 누락된 능력은 QA 의도-노드 게이트(missing_capabilities)가 잡아 재시도를 유발한다.
+                    _logger.warning("후보 목록에 없는 node_type drop (degrade): %s", raw.node_type)
+                    continue
                 if raw.node_type in instance_id_map:
                     raise ExecutionError(
                         f"node_type 중복 사용 불가: {raw.node_type}",
