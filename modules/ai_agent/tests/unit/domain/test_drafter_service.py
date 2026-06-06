@@ -107,6 +107,57 @@ class TestDrafterServiceBuild:
         assert "UNKNOWN" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_unknown_node_type_dropped_not_raised(self, caplog):
+        """후보에 없는 node_type은 하드페일(E_UNKNOWN_NODE_TYPE) 대신 drop+경고로 degrade.
+
+        #378 후속 B — 재시도 루프(retriever 재검색)가 돌 기회를 주려면 drafter가 미상
+        node_type에서 즉시 죽으면 안 된다. 해당 노드를 떨구고 진행, QA 게이트가 누락을 잡는다.
+        """
+        import logging
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A"), _NodeDraft(node_type="schedule_trigger")],
+            connections=[_EdgeDraft(from_node_type="schedule_trigger", to_node_type="A")],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A")]  # schedule_trigger는 후보에 없음
+        with caplog.at_level(logging.WARNING):
+            schema = await svc.draft(_spec(), candidates, self.owner_id)
+        # 하드페일 안 함, 알려진 노드만 남고 미상 노드 참조 엣지는 스킵
+        node_ids = {n.node_id for n in schema.nodes}
+        assert node_ids == {candidates[0].node_id}
+        assert len(schema.connections) == 0
+        assert "schedule_trigger" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_dropped_node_types_reported_to_sink(self):
+        """degrade 시 버린 node_type을 dropped_node_types sink에 기록 — 재시도 retriever가
+        그 ground-truth로 재검색하게 한다(#378 후속, QA-LLM 재인지 의존 제거)."""
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A"), _NodeDraft(node_type="email_send")],
+            connections=[],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A")]  # email_send는 후보에 없음 → drop
+        sink: list[str] = []
+        await svc.draft(_spec(), candidates, self.owner_id, dropped_node_types=sink)
+        assert sink == ["email_send"]
+
+    @pytest.mark.asyncio
+    async def test_no_drop_leaves_sink_empty(self):
+        """전부 후보에 있으면 sink는 비어 있다."""
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A")],
+            connections=[],
+        )
+        svc = self._svc(response)
+        sink: list[str] = []
+        await svc.draft(_spec(), [_node_config("A")], self.owner_id, dropped_node_types=sink)
+        assert sink == []
+
+    @pytest.mark.asyncio
     async def test_connections_included_in_workflow_schema(self):
         response = _DraftResponse(
             name="W",

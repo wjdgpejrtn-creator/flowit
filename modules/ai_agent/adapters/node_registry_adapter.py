@@ -14,6 +14,12 @@ from ..domain.ports.node_registry import NodeRegistry
 # NodeDefinition 오염 등 비실행 항목이 top-k를 잠식하는 경우 대비, #378).
 _OVERFETCH_FACTOR = 4
 
+# 구조 노드 = 트리거 + 제어흐름. 사용자 문장에 자연어로 녹아(예: "매주 월요일 9시") 의미검색
+# top-k에 안 떠서 항상 후보로 노출해야 하는 카테고리(#378 후속 A). category로 자동판별 —
+# 새 트리거/제어 노드가 추가돼도 별도 유지보수 없이 포함된다. (제어흐름 노드의 category는
+# 디렉토리명 'control'이 아니라 실제 필드값 'condition'임에 유의 — nodes_graph 카탈로그 기준.)
+_STRUCTURAL_CATEGORIES = frozenset({"trigger", "condition"})
+
 
 class NodeRegistryAdapter(NodeRegistry):
     """NodeRegistry 구현 — nodes_graph.NodeDefinitionRepository + EmbedderPort Facade.
@@ -45,6 +51,17 @@ class NodeRegistryAdapter(NodeRegistry):
         if definition is None:
             raise KeyError(f"NodeDefinition not found: {node_id}")
         return self._to_config(definition)
+
+    async def list_structural(self) -> list[NodeConfig]:
+        # 카탈로그 전체에서 트리거/제어흐름 category만 추린다. search()와 동일하게 실행 클래스가
+        # 있는 node_type만 통과시켜(오염 행 가드) drafter가 실행 불가 노드를 못 쓰게 한다(#378).
+        definitions = await self._repo.list_all()
+        structural = [
+            d
+            for d in definitions
+            if d.category in _STRUCTURAL_CATEGORIES and d.node_type in EXECUTABLE_NODE_TYPES
+        ]
+        return [self._to_config(d) for d in structural]
 
     @staticmethod
     def _to_config(d: NodeDefinition) -> NodeConfig:

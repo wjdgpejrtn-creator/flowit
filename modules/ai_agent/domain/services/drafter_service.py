@@ -209,6 +209,7 @@ class DrafterService:
         skill_selected: bool = False,
         skill_composer_instructions: str | None = None,
         retry_feedback: str | None = None,
+        dropped_node_types: list[str] | None = None,
     ) -> WorkflowSchema:
         """워크플로우 초안 생성. ``prior_workflow``가 주어지면(대화형 refine) 처음부터
         재생성하지 않고 그 워크플로우를 편집 컨텍스트로 주어 지시한 부분만 수정한다.
@@ -227,6 +228,11 @@ class DrafterService:
         ``retry_feedback``(validate/QA 실패 후 재시도 시, 선택)가 주어지면 별도 블록으로
         주입해 다음 초안을 교정한다. **`spec.natural_language_intent`에 섞지 않는다** — 그러면
         피드백 영어 텍스트가 워크플로우 이름/설명으로 누출되기 때문(#378 부차 — UI 누출).
+
+        ``dropped_node_types``(선택, 출력용 리스트)가 주어지면 degrade로 버린 node_type
+        (후보에 없어 떨군 것)을 거기에 append한다. 재시도 retriever가 QA-LLM 재인지가 아니라
+        이 ground-truth로 직접 재검색하도록 결정화한다(#378 후속 리뷰 #2). 호출부가 요청마다
+        새 리스트를 넘기므로 동시 요청 안전(서비스 인스턴스 공유 무관).
         """
         catalog = [
             {
@@ -280,7 +286,7 @@ class DrafterService:
             draft_resp = await self._llm.generate_structured(prompt, _DraftResponse)
         except Exception as e:
             raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
-        return self._build(draft_resp, candidates, owner_user_id)
+        return self._build(draft_resp, candidates, owner_user_id, dropped_sink=dropped_node_types)
 
     @staticmethod
     def _personal_patterns_block(personal_patterns: list[str] | None) -> str:
@@ -453,7 +459,13 @@ class DrafterService:
         except Exception as e:
             raise ExecutionError(f"WorkflowSchema 빌드 실패: {e}", code="E_DRAFT_PARSE")
 
-    def _build(self, draft: _DraftResponse, candidates: list[NodeConfig], owner_user_id: UUID) -> WorkflowSchema:
+    def _build(
+        self,
+        draft: _DraftResponse,
+        candidates: list[NodeConfig],
+        owner_user_id: UUID,
+        dropped_sink: list[str] | None = None,
+    ) -> WorkflowSchema:
         try:
             node_map = {n.node_type: n for n in candidates}
             nodes: list[NodeInstance] = []
@@ -461,10 +473,15 @@ class DrafterService:
             for raw in draft.nodes:
                 nc = node_map.get(raw.node_type)
                 if nc is None:
-                    raise ExecutionError(
-                        f"후보 목록에 없는 node_type: {raw.node_type}",
-                        code="E_UNKNOWN_NODE_TYPE",
-                    )
+                    # 후보에 없는 node_type은 하드페일(E_UNKNOWN_NODE_TYPE) 대신 drop+경고로 degrade
+                    # (#378 후속 B). 즉시 죽으면 재시도 루프(retriever 재검색)가 돌 기회가 없다.
+                    # 떨군 노드를 참조하는 엣지는 아래 instance_id_map 미존재로 자연히 스킵되고,
+                    # 누락된 능력은 QA 의도-노드 게이트(missing_capabilities)가 잡아 재시도를 유발한다.
+                    # 버린 node_type은 sink에 기록 → 재시도 retriever가 결정적으로 재검색(리뷰 #2).
+                    _logger.warning("후보 목록에 없는 node_type drop (degrade): %s", raw.node_type)
+                    if dropped_sink is not None:
+                        dropped_sink.append(raw.node_type)
+                    continue
                 if raw.node_type in instance_id_map:
                     raise ExecutionError(
                         f"node_type 중복 사용 불가: {raw.node_type}",

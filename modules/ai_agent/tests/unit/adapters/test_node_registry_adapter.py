@@ -10,12 +10,14 @@ from nodes_graph.domain.entities.node_definition import NodeDefinition
 from ai_agent.adapters.node_registry_adapter import NodeRegistryAdapter
 
 
-def _make_node_def(is_mvp: bool, node_type: str = "test_node") -> NodeDefinition:
+def _make_node_def(
+    is_mvp: bool, node_type: str = "test_node", category: str = "test"
+) -> NodeDefinition:
     return NodeDefinition(
         node_id=uuid4(),
         node_type=node_type,
         name=node_type,
-        category="test",
+        category=category,
         version="1.0.0",
         input_schema={},
         output_schema={},
@@ -27,9 +29,13 @@ def _make_node_def(is_mvp: bool, node_type: str = "test_node") -> NodeDefinition
     )
 
 
-def _make_adapter(search_results: list[NodeDefinition]) -> NodeRegistryAdapter:
+def _make_adapter(
+    search_results: list[NodeDefinition],
+    list_all_results: list[NodeDefinition] | None = None,
+) -> NodeRegistryAdapter:
     repo = MagicMock()
     repo.search_by_embedding = AsyncMock(return_value=search_results)
+    repo.list_all = AsyncMock(return_value=list_all_results or [])
 
     embedder = MagicMock()
     embedder.embed = AsyncMock(return_value=[0.1] * 768)
@@ -98,3 +104,51 @@ async def test_search_slices_to_limit_after_filter():
     adapter = _make_adapter(nodes)
     results = await adapter.search("테스트", limit=2)
     assert len(results) == 2
+
+
+class TestListStructural:
+    """구조 노드(트리거/제어흐름)는 사용자 문장에 자연어로 녹아 의미검색 top-k에 안 떠서
+    (#378 후속) category로 자동판별해 항상 후보로 노출한다."""
+
+    @pytest.mark.asyncio
+    async def test_returns_trigger_and_condition_categories(self):
+        """category가 'trigger'/'condition'인 실행가능 노드만 구조 노드로 반환한다."""
+        catalog = [
+            _make_node_def(is_mvp=True, node_type="schedule_trigger", category="trigger"),
+            _make_node_def(is_mvp=True, node_type="if_condition", category="condition"),
+            _make_node_def(is_mvp=True, node_type="slack_post_message", category="communication"),
+            _make_node_def(is_mvp=True, node_type="gmail_send", category="communication"),
+        ]
+        adapter = _make_adapter(search_results=[], list_all_results=catalog)
+        results = await adapter.list_structural()
+
+        node_types = {r.node_type for r in results}
+        assert node_types == {"schedule_trigger", "if_condition"}
+
+    @pytest.mark.asyncio
+    async def test_excludes_non_executable_even_if_category_matches(self):
+        """category가 trigger여도 실행 클래스 없는 node_type(오염 행)은 제외한다."""
+        catalog = [
+            _make_node_def(is_mvp=True, node_type="schedule_trigger", category="trigger"),
+            # 오염: category는 trigger인데 실행 카탈로그(EXECUTABLE_NODE_TYPES)에 없음
+            _make_node_def(is_mvp=False, node_type="marketing_cron_skill", category="trigger"),
+        ]
+        adapter = _make_adapter(search_results=[], list_all_results=catalog)
+        results = await adapter.list_structural()
+
+        node_types = {r.node_type for r in results}
+        assert "schedule_trigger" in node_types
+        assert "marketing_cron_skill" not in node_types
+
+    @pytest.mark.asyncio
+    async def test_returns_node_config_instances(self):
+        """반환은 NodeConfig — drafter 후보로 바로 합산 가능해야 한다."""
+        from common_schemas import NodeConfig
+
+        catalog = [_make_node_def(is_mvp=True, node_type="loop_count", category="condition")]
+        adapter = _make_adapter(search_results=[], list_all_results=catalog)
+        results = await adapter.list_structural()
+
+        assert len(results) == 1
+        assert isinstance(results[0], NodeConfig)
+        assert results[0].node_type == "loop_count"
