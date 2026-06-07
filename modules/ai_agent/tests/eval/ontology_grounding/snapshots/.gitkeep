@@ -1,0 +1,5 @@
+# snapshots
+
+라이브 캡처 산출물이 여기 쌓인다.
+- composer_grounding.json — 최신 캡처(run_eval 산출). 커밋 선택.
+- baseline.json — 승격된 베이스라인 집계(--promote-baseline). 회귀 게이트 기준이므로 커밋 권장.
