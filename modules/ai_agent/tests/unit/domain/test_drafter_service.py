@@ -551,6 +551,64 @@ class TestDrafterRefGeneration:
         assert "VERBATIM" in prompt
 
 
+class TestDrafterMotifBlock:
+    """ADR-0026 Phase 2 — pattern_templates가 drafter 프롬프트에 모티프 블록으로 주입되는지."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    def _pattern(self, name: str, role_slots: dict):
+        from ai_agent.domain.value_objects.ontology import PatternTemplate
+
+        return PatternTemplate(name=name, intent="검증", role_slots=role_slots)
+
+    @pytest.mark.asyncio
+    async def test_motif_block_injected_when_pattern_provided(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        patterns = [self._pattern("quality_gate_loop", {"generator": ("llm_generate",), "evaluator": ("if_condition",)})]
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("slack")], self.owner_id, pattern_templates=patterns,
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "WORKFLOW MOTIFS" in prompt
+        assert "quality_gate_loop" in prompt
+        assert "generator" in prompt
+
+    @pytest.mark.asyncio
+    async def test_no_motif_block_when_no_patterns(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "WORKFLOW MOTIFS" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_motif_block_injected_in_edit_path_too(self):
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        patterns = [self._pattern("quality_gate_loop", {"generator": ("llm_generate",)})]
+        llm = _mock_llm(_EditResponse(
+            name="W",
+            nodes=[_EditNodeDraft(ref="n0", node_type="http"), _EditNodeDraft(ref="n1", node_type="slack")],
+            connections=[],
+        ))
+        await DrafterService(llm).draft(
+            _spec(), [cfg_a, cfg_b], self.owner_id, prior_workflow=prior, pattern_templates=patterns,
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "WORKFLOW MOTIFS" in prompt
+        assert "quality_gate_loop" in prompt
+
+    def test_motif_block_static_empty_when_no_slots(self):
+        patterns = [self._pattern("no_slots_pattern", {})]
+        block = DrafterService._motif_block(patterns)
+        assert block == ""
+
+    def test_motif_block_static_empty_when_none(self):
+        assert DrafterService._motif_block(None) == ""
+
+
 @pytest.mark.asyncio
 async def test_refine_rewrites_ref_token_to_instance_id():
     """L1b refine 경로 — _build_from_edit가 ${<ref>.<field>}를 instance_id로 재작성."""

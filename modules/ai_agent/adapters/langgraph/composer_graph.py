@@ -60,6 +60,7 @@ from ...domain.ports.composer_state_store import ComposerStateStore
 from ...domain.ports.connection_resolver import ConnectionResolver
 from ...domain.ports.llm_port import LLMPort
 from ...domain.ports.node_registry import NodeRegistry
+from ...domain.ports.ontology_retriever import OntologyRetrieverPort
 from ...domain.ports.personal_memory_store import PersonalMemoryStore
 from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.workflow_draft_store import WorkflowDraftStore
@@ -166,6 +167,9 @@ class _State(TypedDict):
     # 컨펌 게이트 신뢰 매니페스트 (영역 C)
     workflow_explanation: WorkflowExplanation | None
     offered_skill_ids: list[str]            # 1차에 제시한 옵션 skill_id 집합 (2차 bind 멤버십 검증 — IDOR 차단)
+    # GraphRAG — ADR-0026 Phase 2a (모티프 그라운딩). expand_candidates(서브그래프) 소비는
+    # CAN_FOLLOW 호환 필터(박아름 §4.2) 머지 후 ADD 방식으로 배선 예정 — 그 전까지 호출 보류.
+    pattern_templates: list[Any] | None     # list[PatternTemplate] — 모티프 그라운딩 (ADR-0026 Phase 2a)
 
 
 class LangGraphOrchestrator:
@@ -195,6 +199,7 @@ class LangGraphOrchestrator:
         composer_state_store: ComposerStateStore | None = None,
         workflow_explanation_svc: WorkflowExplanationService | None = None,
         connection_resolver: ConnectionResolver | None = None,
+        ontology_retriever: OntologyRetrieverPort | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -214,6 +219,7 @@ class LangGraphOrchestrator:
         self._composer_state_store = composer_state_store
         self._workflow_explanation_svc = workflow_explanation_svc or WorkflowExplanationService()
         self._connection_resolver = connection_resolver
+        self._ontology_retriever = ontology_retriever
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -736,15 +742,35 @@ class LangGraphOrchestrator:
         spec = state["draft_spec"]
         query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
         try:
-            candidates = await self._node_registry.search(query)
+            raw_candidates = await self._node_registry.search(query)
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
+
+        # GraphRAG — ADR-0026 Phase 2a: match_patterns로 :Pattern 모티프를 회수해 drafter
+        # 프롬프트에 주입한다(per-request driver). OntologyRetrieverPort 미주입/실패 시 기존
+        # pgvector 단독 경로로 폴백(non-fatal). ETL 시드 전까지는 빈 리스트가 정상.
+        # ⚠️ expand_candidates(서브그래프)는 호출하지 않는다 — 후보를 subtract 필터링하면
+        # ETL stale 시 "Neo4j 미투영 유효 노드"가 조용히 제거되는 역효과가 있고, ADD 방식
+        # 보강은 CAN_FOLLOW 호환 edge(박아름 §4.2)가 있어야 의미가 있다. 소비처가 생기기
+        # 전까지 매 compose Neo4j 왕복을 만들지 않기 위해 호출 자체를 보류한다.
+        pattern_templates: list[Any] | None = None
+        if self._ontology_retriever is not None:
+            try:
+                pattern_templates = await self._ontology_retriever.match_patterns(query)
+                if pattern_templates:
+                    _logger.debug(
+                        "GraphRAG 모티프 %d건 매칭: %s",
+                        len(pattern_templates), [pt.name for pt in pattern_templates],
+                    )
+            except Exception as exc:
+                _logger.warning("OntologyRetriever match_patterns 실패 (패턴 미적용): %s", exc)
+                pattern_templates = None
 
         # 구조 노드(트리거/제어흐름)는 사용자 문장에 자연어로 녹아(예: "매주 월요일 9시") 의미검색
         # top-k에 안 떠서 drafter가 `후보 목록에 없는 node_type: schedule_trigger`로 하드페일했다
         # (#378 후속 A). 관련성 무관하게 항상 후보에 선제 합산해 첫 초안부터 사용 가능하게 한다.
         # node_id 기준 dedup. 조회 실패는 비치명적 — 검색 후보만으로 진행한다.
-        candidates = self._dedup_union(candidates, await self._fetch_structural_candidates())
+        candidates = self._dedup_union(raw_candidates, await self._fetch_structural_candidates())
 
         # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
         # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는
@@ -772,6 +798,7 @@ class LangGraphOrchestrator:
         return {
             "node_candidates": candidates,
             "personal_patterns": personal_patterns,
+            "pattern_templates": pattern_templates,
             "collected_frames": frames,
         }
 
@@ -1039,6 +1066,7 @@ class LangGraphOrchestrator:
                 skill_selected=instruct_skill_binding,
                 retry_feedback=state.get("retry_feedback"),
                 dropped_node_types=dropped,
+                pattern_templates=state.get("pattern_templates"),
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:

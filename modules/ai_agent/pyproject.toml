@@ -13,6 +13,11 @@ dependencies = [
 gcs = [
     "google-cloud-storage>=2.0",
 ]
+ontology = [
+    # ADR-0026: Neo4j AuraDB GraphRAG. lazy import라 미설치여도 모듈 로드는 가능,
+    # 실제 Neo4jOntologyAdapter 사용 시 필요. Composer Modal app 빌드에 포함.
+    "neo4j>=5.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

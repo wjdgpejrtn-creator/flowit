@@ -210,6 +210,7 @@ class DrafterService:
         skill_composer_instructions: str | None = None,
         retry_feedback: str | None = None,
         dropped_node_types: list[str] | None = None,
+        pattern_templates: list[Any] | None = None,
     ) -> WorkflowSchema:
         """워크플로우 초안 생성. ``prior_workflow``가 주어지면(대화형 refine) 처음부터
         재생성하지 않고 그 워크플로우를 편집 컨텍스트로 주어 지시한 부분만 수정한다.
@@ -254,6 +255,7 @@ class DrafterService:
         patterns_block = self._personal_patterns_block(personal_patterns)
         binding_block = self._skill_binding_block(skill_selected, skill_composer_instructions)
         retry_block = self._retry_feedback_block(retry_feedback)
+        motif_block = self._motif_block(pattern_templates)
         # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
         # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
         if prior_workflow is not None:
@@ -263,6 +265,7 @@ class DrafterService:
                     _EDIT_SYSTEM_PROMPT
                     + patterns_block
                     + binding_block
+                    + motif_block
                     + retry_block
                     + f"\nDraftSpec: {spec_json}"
                     + f"\nAvailable nodes: {catalog_json}"
@@ -278,6 +281,7 @@ class DrafterService:
             _SYSTEM_PROMPT
             + patterns_block
             + binding_block
+            + motif_block
             + retry_block
             + f"\nDraftSpec: {spec_json}"
             + f"\nAvailable nodes: {catalog_json}"
@@ -321,6 +325,34 @@ class DrafterService:
             "\nRETRY FEEDBACK (the previous draft failed validation/QA — fix these issues in "
             "this attempt; this is internal guidance, do NOT echo it into the workflow name or "
             f"description):\n{retry_feedback}\n"
+        )
+
+    @staticmethod
+    def _motif_block(pattern_templates: list[Any] | None) -> str:
+        """GraphRAG :Pattern 모티프를 drafter 프롬프트 주입용 블록으로 직렬화 (ADR-0026 Phase 2).
+
+        ETL 시드 전(빈 리스트) 또는 role_slots가 없으면 빈 문자열 반환(무영향).
+        "가이드이지 강제 아님"을 명시해 무관한 노드가 추가되는 것을 막는다.
+        """
+        if not pattern_templates:
+            return ""
+        lines: list[str] = []
+        for pt in pattern_templates:
+            slots: dict[str, Any] = getattr(pt, "role_slots", {}) or {}
+            if not slots:
+                continue
+            slot_desc = ", ".join(
+                f'{slot}={"|".join(types)}' for slot, types in slots.items() if types
+            )
+            lines.append(f"- {pt.name}: {slot_desc}")
+        if not lines:
+            return ""
+        joined = "\n".join(lines)
+        return (
+            "\nWORKFLOW MOTIFS (structural patterns from the knowledge graph matching this "
+            "intent — use as a guide for which node categories to combine; do NOT add nodes "
+            "solely to satisfy a motif, only include nodes the request actually needs):\n"
+            f"{joined}\n"
         )
 
     @staticmethod

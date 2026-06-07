@@ -88,7 +88,20 @@ def get_publish_skill_use_case(
         from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
 
         embedder = ModalEmbeddingAdapter()
-    return PublishSkillUseCase(repo=repo, node_def_repo=node_def_repo, embedder=embedder)
+    # NEO4J_URI 설정 시에만 온톨로지 projector 주입 — 게시 시 (:Skill)-[:BINDS]->(:Node)를
+    # Neo4j에 incremental upsert(ADR-0026 Phase 2b). 미설정이면 None → 게시는 정상, GraphRAG만
+    # 미투영(non-fatal, 하위호환). Neo4jSkillProjector는 요청마다 driver 생성/close.
+    ontology_projector = None
+    if os.getenv("NEO4J_URI"):
+        from ai_agent.adapters.ontology import Neo4jSkillProjector
+
+        ontology_projector = Neo4jSkillProjector()
+    return PublishSkillUseCase(
+        repo=repo,
+        node_def_repo=node_def_repo,
+        embedder=embedder,
+        ontology_projector=ontology_projector,
+    )
 
 
 # ── personal skills CRUD (REQ-013, 가원 요청) ─────────────────────────────────

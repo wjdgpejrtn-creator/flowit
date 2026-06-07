@@ -87,6 +87,8 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 | | `find_by_id(workflow_id: UUID) → Optional[WorkflowSchema]` | |
 | `NodeRegistry` | `search(query: str, limit: int) → list[NodeConfig]` | `ai_agent/adapters/node_registry.py` (Facade) |
 | | `get_schema(node_id: UUID) → NodeConfig` | |
+| `OntologyRetrieverPort` | `expand_candidates(seed_node_types, hops) → OntologySubgraph` | `ai_agent/adapters/ontology/` (Neo4jOntologyAdapter, ADR-0026) |
+| | `match_patterns(intent) → list[PatternTemplate]` | (Phase 2 — NotImplementedError) |
 
 ### application/agents (Sprint 3 멀티 에이전트)
 
@@ -132,6 +134,8 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 | `NodeRegistryAdapter` | `nodes_graph`의 `NodeDefinitionRepository`를 감싸는 Facade. `NodeRegistry` 구현 |
 | `LangGraphOrchestrator` | LangGraph StateGraph 기반 내부 오케스트레이션 (13노드). 내부용, Port 아님 |
 | `GCSMemoryStore` | GCS `gs://workflow-automation-personal/users/{user_id}/` 읽기/쓰기. `claim_debounce_window()`로 `.debounce.json` blob을 `if_generation_match` CAS 선점 (debounce 5분). `PersonalMemoryStore` 구현 |
+| `Neo4jOntologyAdapter` | Neo4j AuraDB GraphRAG 검색 (ADR-0026 Phase 1). seed node_type → 그래프 1-hop 구조 확장(`OntologySubgraph`). **요청마다 driver 생성·close**(Modal loop-binding hang 회피). `neo4j` extras + `NEO4J_*` 환경변수. `OntologyRetrieverPort` 구현 |
+| `Neo4jSkillProjector` | 게시 스킬 온톨로지 투영 (ADR-0026 Phase 2b). `(:Skill)-[:BINDS]->(:Node)` incremental upsert(ai 노드 + `required_connections` 노드, 모델 A). **요청마다 driver 생성·close** + `NEO4J_*`. **skills_marketplace의 `SkillOntologyProjector` 구현** — Neo4j 호출 어댑터는 호출 모듈 보유(ADR-0013 예외 패턴). `PublishSkillUseCase`가 non-fatal 주입 |
 
 ## 의존 관계
 
@@ -159,6 +163,8 @@ Downstream (이 모듈에 의존):
 | `LLM_BASE_URL` | Y | Gemma 4 Modal endpoint URL |
 | `EMBEDDING_BASE_URL` | Y | BGE-M3 임베딩 Modal endpoint URL |
 | `SKILLS_BUILDER_URL` | Y | Skills Builder sub-agent Modal endpoint URL |
+| `NEO4J_URI` | N | 온톨로지 Neo4j AuraDB URI (`neo4j+s://...`). `Neo4jOntologyAdapter`(검색)·`Neo4jSkillProjector`(게시 투영) 사용 시 필수 (ADR-0026, GCP secret `neo4j-uri`). Modal 앱은 `load_secrets_to_env`, api_server(Cloud Run, publish 훅)는 terraform `secret_env` 경로 |
+| `NEO4J_USERNAME` / `NEO4J_PASSWORD` | N | 온톨로지 Neo4j 인증 (GCP secret `neo4j-username`/`neo4j-password`) |
 | `LLM_MODEL_NAME` | N | 사용 모델명 (기본: gemma-4) |
 | `AGENT_MAX_TURNS` | N | 최대 턴 수 (기본: 25) |
 | `QA_PASS_THRESHOLD` | N | QA 통과 점수 (기본: 8) |
@@ -167,7 +173,7 @@ Downstream (이 모듈에 의존):
 
 - LangGraph는 `adapters/langgraph/`에만 존재 (프레임워크는 어댑터 레이어)
 - 비즈니스 로직은 `domain/services/`의 순수 함수로 구현
-- ChromaDB 사용 금지 — 모든 RAG 검색은 pgvector 단일화
+- ChromaDB 사용 금지 — **벡터** RAG 검색은 pgvector 단일화 (의미 유사도 = BGE-M3 + pgvector). ADR-0026이 추가하는 Neo4j 온톨로지는 **구조적 그래프 확장/모티프** 전용이며 벡터를 복제하지 않는다(Phase 1) — "벡터 검색 pgvector 단일화" 원칙과 직교
 - 외부 LLM (OpenAI / Anthropic) 사용 금지 — 자체 호스팅 Gemma 4만 사용
 
 ## 비기능 제약
