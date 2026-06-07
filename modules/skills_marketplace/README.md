@@ -91,8 +91,9 @@ from skills_marketplace.application.use_cases import (
 |------------|--------|----------|
 | `SkillRepository` | `async save_personal/save_team/save_company`, `async get_personal/get_team/get_company`, `async search(query_embedding, scope, limit, include_promoted=False, lifecycle_state=None)`, `async save_approval(approval)`, `async list_personal_by_user(user_id, lifecycle_state?, limit=50, offset=0)`, `async delete_personal(skill_id)` | `storage/repositories/PgMarketplaceSkillRepository` (PR #147; `list_personal_by_user`/`delete_personal` = PR #192) |
 | `SkillDocumentStore` | `async save(skill_id, document)`, `async load(skill_id)`, `async delete(skill_id)` | `storage/adapters/gcs_skill_document_store.py` (PR #160). SkillDocument(markdown) GCS 저장. `delete` = 개인 스킬 삭제 시 GCS SKILL.md 정리(PR #192, 멱등) |
+| `SkillOntologyProjector` | `async project_skill(*, skill_id, scope, required_connections=())` | `ai_agent/adapters/ontology/Neo4jSkillProjector` (ADR-0026 Phase 2b). 게시 시 `(:Skill)-[:BINDS]->(:Node)` Neo4j incremental upsert. **구현 위치 예외** — storage가 아닌 ai_agent(Neo4j 호출 어댑터는 호출 모듈 보유, ADR-0013 EmbedderPort 패턴). 모델 A(D2): ai 노드 + `required_connections` 노드 BINDS. `PublishSkillUseCase`가 non-fatal로 호출 |
 
-> **Port 소유권** (ADR-0017 + 5/20 박아름·조장 합의): Port 정의는 skills_marketplace(소비 모듈)가 소유, 구현체는 storage가 제공 (auth/nodes_graph 일반 패턴). CLAUDE.md L146 정정 반영.
+> **Port 소유권** (ADR-0017 + 5/20 박아름·조장 합의): Port 정의는 skills_marketplace(소비 모듈)가 소유, 구현체는 storage가 제공 (auth/nodes_graph 일반 패턴). CLAUDE.md L146 정정 반영. **예외**: `SkillOntologyProjector` 구현은 ai_agent — Neo4j 외부 호출 어댑터는 호출 모듈이 보유(ADR-0013 EmbedderPort 예외 패턴, ADR-0026).
 
 ### application/use_cases
 

@@ -135,6 +135,7 @@ from ai_agent.application.agents.personalization import SaveMemoryUseCase
 | `LangGraphOrchestrator` | LangGraph StateGraph 기반 내부 오케스트레이션 (13노드). 내부용, Port 아님 |
 | `GCSMemoryStore` | GCS `gs://workflow-automation-personal/users/{user_id}/` 읽기/쓰기. `claim_debounce_window()`로 `.debounce.json` blob을 `if_generation_match` CAS 선점 (debounce 5분). `PersonalMemoryStore` 구현 |
 | `Neo4jOntologyAdapter` | Neo4j AuraDB GraphRAG 검색 (ADR-0026 Phase 1). seed node_type → 그래프 1-hop 구조 확장(`OntologySubgraph`). **요청마다 driver 생성·close**(Modal loop-binding hang 회피). `neo4j` extras + `NEO4J_*` 환경변수. `OntologyRetrieverPort` 구현 |
+| `Neo4jSkillProjector` | 게시 스킬 온톨로지 투영 (ADR-0026 Phase 2b). `(:Skill)-[:BINDS]->(:Node)` incremental upsert(ai 노드 + `required_connections` 노드, 모델 A). **요청마다 driver 생성·close** + `NEO4J_*`. **skills_marketplace의 `SkillOntologyProjector` 구현** — Neo4j 호출 어댑터는 호출 모듈 보유(ADR-0013 예외 패턴). `PublishSkillUseCase`가 non-fatal 주입 |
 
 ## 의존 관계
 
@@ -162,7 +163,7 @@ Downstream (이 모듈에 의존):
 | `LLM_BASE_URL` | Y | Gemma 4 Modal endpoint URL |
 | `EMBEDDING_BASE_URL` | Y | BGE-M3 임베딩 Modal endpoint URL |
 | `SKILLS_BUILDER_URL` | Y | Skills Builder sub-agent Modal endpoint URL |
-| `NEO4J_URI` | N | 온톨로지 Neo4j AuraDB URI (`neo4j+s://...`). `Neo4jOntologyAdapter` 사용 시 필수 (ADR-0026, GCP secret `neo4j-uri` → Modal `load_secrets_to_env`) |
+| `NEO4J_URI` | N | 온톨로지 Neo4j AuraDB URI (`neo4j+s://...`). `Neo4jOntologyAdapter`(검색)·`Neo4jSkillProjector`(게시 투영) 사용 시 필수 (ADR-0026, GCP secret `neo4j-uri`). Modal 앱은 `load_secrets_to_env`, api_server(Cloud Run, publish 훅)는 terraform `secret_env` 경로 |
 | `NEO4J_USERNAME` / `NEO4J_PASSWORD` | N | 온톨로지 Neo4j 인증 (GCP secret `neo4j-username`/`neo4j-password`) |
 | `LLM_MODEL_NAME` | N | 사용 모델명 (기본: gemma-4) |
 | `AGENT_MAX_TURNS` | N | 최대 턴 수 (기본: 25) |

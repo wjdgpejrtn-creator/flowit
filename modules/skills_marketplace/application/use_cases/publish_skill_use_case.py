@@ -9,6 +9,7 @@ from common_schemas.exceptions import NotFoundError
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRepository
 
+from ...domain.ports.skill_ontology_projector import SkillOntologyProjector
 from ...domain.ports.skill_repository import SkillRepository
 from ...domain.services.skill_approval_policy import SkillApprovalPolicy
 from ...domain.services.skill_lifecycle import SkillLifecycle
@@ -36,12 +37,16 @@ class PublishSkillUseCase:
         repo: SkillRepository,
         node_def_repo: NodeDefinitionRepository | None = None,
         embedder: EmbedderPort | None = None,
+        ontology_projector: SkillOntologyProjector | None = None,
     ) -> None:
         self._repo = repo
         # ADR-0024 D2: deprecated — 게시 시 NodeDef를 만들지 않으므로 미사용. 호출부 시그니처
         # 하위호환을 위해 파라미터만 유지(후속 정리). 신규 조립부는 주입하지 않아도 된다.
         self._node_def_repo = node_def_repo
         self._embedder = embedder
+        # ADR-0026 Phase 2b: 게시 시 온톨로지(Neo4j)에 (:Skill)-[:BINDS]->(:Node) incremental
+        # upsert. 미주입(하위호환)·실패 시 non-fatal — 게시 자체는 막지 않는다(임베딩 백필과 동일).
+        self._ontology_projector = ontology_projector
 
     async def execute(
         self,
@@ -90,6 +95,27 @@ class PublishSkillUseCase:
         # `node_definition_id`는 None으로 유지. (기존에 등록된 NodeDef 정리는 별도 DB 마이그레이션.)
         updated = skill.model_copy(update=changes)
         await self._save(updated, scope)
+
+        await self._project_to_ontology(updated, scope)
+
+    async def _project_to_ontology(self, skill, scope: SkillScope) -> None:
+        """게시 스킬을 온톨로지에 투영 (ADR-0026 Phase 2b). non-fatal — 실패해도 게시 유지.
+
+        모델 A(D2): 스킬은 ai 노드에 BINDS. 추가로 staging의 `required_connections`가 있으면
+        해당 connection을 요구하는 노드에도 BINDS(역량 신호). projector 미주입 시 no-op.
+        """
+        if self._ontology_projector is None:
+            return
+        staging = getattr(skill, "node_spec_staging", None)
+        required_connections = list(getattr(staging, "required_connections", []) or [])
+        try:
+            await self._ontology_projector.project_skill(
+                skill_id=skill.skill_id,
+                scope=scope,
+                required_connections=required_connections,
+            )
+        except Exception as exc:
+            _logger.warning("publish 온톨로지 투영 실패 (non-fatal, GraphRAG 누락 가능): %s", exc)
 
     async def _get(self, skill_id: UUID, scope: SkillScope):
         if scope == SkillScope.PERSONAL:
