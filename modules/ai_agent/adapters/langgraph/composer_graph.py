@@ -53,7 +53,6 @@ from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.services.graph_validator import GraphValidator
 from pydantic import BaseModel
 from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
-from skills_marketplace.domain.value_objects.skill_scope import SkillScope
 
 from ...domain.entities.memory_file import MemoryFile, MemoryFileRef
 from ...domain.entities.session_ref import SessionRef
@@ -61,6 +60,7 @@ from ...domain.ports.composer_state_store import ComposerStateStore
 from ...domain.ports.connection_resolver import ConnectionResolver
 from ...domain.ports.llm_port import LLMPort
 from ...domain.ports.node_registry import NodeRegistry
+from ...domain.ports.ontology_retriever import OntologyRetrieverPort
 from ...domain.ports.personal_memory_store import PersonalMemoryStore
 from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.workflow_draft_store import WorkflowDraftStore
@@ -97,8 +97,6 @@ class _NextAction(BaseModel):
         "ask_clarification",
         "fill_slots",
         "search_nodes",
-        "suggest_skill",
-        "use_suggested_skill",
         "draft_workflow",
         "validate_workflow",
         "evaluate_quality",
@@ -140,6 +138,10 @@ class _State(TypedDict):
     qa_score: float
     pass_flag: bool
     qa_feedback: str
+    # validate/QA 실패 후 재시도 교정 피드백 — drafter에 별도 전달(intent 오염·UI 누출 방지, #378)
+    retry_feedback: str
+    # drafter degrade로 버린 node_type(후보 미존재) — 재시도 retriever가 결정적으로 재검색(리뷰 #2)
+    dropped_node_types: list[str]
     collected_frames: Annotated[list[AnySSEFrame], operator.add]
     error: str | None
     # tool-calling agent 제어
@@ -152,8 +154,7 @@ class _State(TypedDict):
     execution_result: dict[str, Any] | None  # execute_node에서 실행 결과
     output_quality_score: float             # evaluate_output_node에서 설정
     output_quality_feedback: str            # evaluate_output_node에서 설정
-    # skill suggest 필드
-    skill_suggested: bool                   # suggest_skill 툴 실행 여부 (재중복 방지)
+    # skill suggest 필드 (two-shot 경로)
     suggested_skills: list[dict[str, Any]]  # 제안된 스킬 후보 목록
     # fixed DAG 필드
     validation_issues: str | None           # validator 실패 사유 (non-fatal — error 필드와 분리)
@@ -166,6 +167,9 @@ class _State(TypedDict):
     # 컨펌 게이트 신뢰 매니페스트 (영역 C)
     workflow_explanation: WorkflowExplanation | None
     offered_skill_ids: list[str]            # 1차에 제시한 옵션 skill_id 집합 (2차 bind 멤버십 검증 — IDOR 차단)
+    # GraphRAG — ADR-0026 Phase 2a (모티프 그라운딩). expand_candidates(서브그래프) 소비는
+    # CAN_FOLLOW 호환 필터(박아름 §4.2) 머지 후 ADD 방식으로 배선 예정 — 그 전까지 호출 보류.
+    pattern_templates: list[Any] | None     # list[PatternTemplate] — 모티프 그라운딩 (ADR-0026 Phase 2a)
 
 
 class LangGraphOrchestrator:
@@ -195,6 +199,7 @@ class LangGraphOrchestrator:
         composer_state_store: ComposerStateStore | None = None,
         workflow_explanation_svc: WorkflowExplanationService | None = None,
         connection_resolver: ConnectionResolver | None = None,
+        ontology_retriever: OntologyRetrieverPort | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -214,6 +219,7 @@ class LangGraphOrchestrator:
         self._composer_state_store = composer_state_store
         self._workflow_explanation_svc = workflow_explanation_svc or WorkflowExplanationService()
         self._connection_resolver = connection_resolver
+        self._ontology_retriever = ontology_retriever
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -279,11 +285,12 @@ class LangGraphOrchestrator:
             "qa_score": 0.0,
             "pass_flag": False,
             "qa_feedback": "",
+            "retry_feedback": "",
+            "dropped_node_types": [],
             "collected_frames": [],
             "error": None,
             "agent_done": False,
             "agent_iterations": 0,
-            "skill_suggested": False,
             "suggested_skills": [],
             "saved_workflow_id": None,
             "execution_id": None,
@@ -393,14 +400,11 @@ class LangGraphOrchestrator:
             f"- 워크플로우 초안: {'있음' if has_draft else '없음'}\n"
             f"- QA: 점수={qa_score}, 시도={qa_attempts}회, 통과={pass_flag}\n"
             f"- DB 저장: {saved}, 실행 완료: {executed}\n"
-            f"- 스킬 제안 완료: {state.get('skill_suggested', False)}\n\n"
             "사용 가능한 툴:\n"
             "- analyze_intent: 사용자 의도 분석\n"
             "- ask_clarification: 추가 정보 요청 (슬롯 미완성)\n"
             "- fill_slots: 슬롯 채우기\n"
             "- search_nodes: 노드 카탈로그 검색\n"
-            "- suggest_skill: 스킬 마켓플레이스 후보 제시 (스킬 제안 완료=False일 때만)\n"
-            "- use_suggested_skill: 제안된 스킬을 워크플로우에 추가 (사용자 수락 시)\n"
             "- draft_workflow: 워크플로우 초안 생성\n"
             "- validate_workflow: 워크플로우 구조 검증\n"
             "- evaluate_quality: 워크플로우 품질 평가\n"
@@ -441,8 +445,6 @@ class LangGraphOrchestrator:
             "ask_clarification": self._consultant_node,
             "fill_slots":       self._slot_fill_node,
             "search_nodes":         self._retriever_node,
-            "suggest_skill":        self._suggest_skill_node,
-            "use_suggested_skill":  self._use_suggested_skill_node,
             "draft_workflow":       self._drafter_node,
             "validate_workflow": self._validator_node,
             "evaluate_quality": self._qa_evaluator_node,
@@ -464,11 +466,6 @@ class LangGraphOrchestrator:
                     PipelineStatusFrame(service_name="agent", status="completed", elapsed_ms=elapsed)
                 ],
             }
-
-        # suggest_skill 하드 가드 — 이미 제안했으면 LLM 선택 무시
-        if action.tool_name == "suggest_skill" and state.get("skill_suggested"):
-            _logger.info("suggest_skill 재호출 차단 (skill_suggested=True)")
-            return {"agent_iterations": iterations}
 
         tool_fn = tool_map.get(action.tool_name)
         if tool_fn is None:
@@ -716,15 +713,64 @@ class LangGraphOrchestrator:
             patterns.append(f"[{label}] {snippet}" if label else snippet)
         return patterns
 
-    # 6. retriever_node — 노드 후보 검색 + 커스텀 스킬 합산 + 개인 패턴 RAG 회수
+    async def _fetch_structural_candidates(self) -> list[NodeConfig]:
+        """구조 노드(트리거/제어흐름) 후보를 회수 — 실패·미구현 시 빈 리스트(비치명적).
+
+        ``NodeRegistry.list_structural``이 없거나(구버전 mock) 조회가 실패해도 워크플로우
+        생성을 막지 않는다. ``list()``로 강제 평가해 mock이 비-iterable을 돌려줘도 안전하게
+        빈 리스트로 degrade한다.
+        """
+        lister = getattr(self._node_registry, "list_structural", None)
+        if lister is None:
+            return []
+        try:
+            result = await lister()
+            return list(result) if result else []
+        except Exception as exc:
+            _logger.warning("구조 노드 후보 합산 실패 (non-fatal): %s", exc)
+            return []
+
+    @staticmethod
+    def _dedup_union(base: list[NodeConfig], extra: list[NodeConfig]) -> list[NodeConfig]:
+        """node_id 기준 dedup 합집합 — base를 우선 보존하고 새 항목만 뒤에 덧붙인다."""
+        seen = {c.node_id for c in base}
+        return base + [e for e in extra if e.node_id not in seen]
+
+    # 6. retriever_node — 노드 후보 검색 + 구조 노드 합산 + 개인 패턴 RAG 회수
     async def _retriever_node(self, state: _State) -> dict:
         t0 = time.monotonic()
         spec = state["draft_spec"]
         query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
         try:
-            candidates = await self._node_registry.search(query)
+            raw_candidates = await self._node_registry.search(query)
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
+
+        # GraphRAG — ADR-0026 Phase 2a: match_patterns로 :Pattern 모티프를 회수해 drafter
+        # 프롬프트에 주입한다(per-request driver). OntologyRetrieverPort 미주입/실패 시 기존
+        # pgvector 단독 경로로 폴백(non-fatal). ETL 시드 전까지는 빈 리스트가 정상.
+        # ⚠️ expand_candidates(서브그래프)는 호출하지 않는다 — 후보를 subtract 필터링하면
+        # ETL stale 시 "Neo4j 미투영 유효 노드"가 조용히 제거되는 역효과가 있고, ADD 방식
+        # 보강은 CAN_FOLLOW 호환 edge(박아름 §4.2)가 있어야 의미가 있다. 소비처가 생기기
+        # 전까지 매 compose Neo4j 왕복을 만들지 않기 위해 호출 자체를 보류한다.
+        pattern_templates: list[Any] | None = None
+        if self._ontology_retriever is not None:
+            try:
+                pattern_templates = await self._ontology_retriever.match_patterns(query)
+                if pattern_templates:
+                    _logger.debug(
+                        "GraphRAG 모티프 %d건 매칭: %s",
+                        len(pattern_templates), [pt.name for pt in pattern_templates],
+                    )
+            except Exception as exc:
+                _logger.warning("OntologyRetriever match_patterns 실패 (패턴 미적용): %s", exc)
+                pattern_templates = None
+
+        # 구조 노드(트리거/제어흐름)는 사용자 문장에 자연어로 녹아(예: "매주 월요일 9시") 의미검색
+        # top-k에 안 떠서 drafter가 `후보 목록에 없는 node_type: schedule_trigger`로 하드페일했다
+        # (#378 후속 A). 관련성 무관하게 항상 후보에 선제 합산해 첫 초안부터 사용 가능하게 한다.
+        # node_id 기준 dedup. 조회 실패는 비치명적 — 검색 후보만으로 진행한다.
+        candidates = self._dedup_union(raw_candidates, await self._fetch_structural_candidates())
 
         # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
         # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는
@@ -752,87 +798,11 @@ class LangGraphOrchestrator:
         return {
             "node_candidates": candidates,
             "personal_patterns": personal_patterns,
+            "pattern_templates": pattern_templates,
             "collected_frames": frames,
         }
 
-    # 6.5. suggest_skill_node — 스킬 마켓플레이스 후보 제시
-    async def _suggest_skill_node(self, state: _State) -> dict:
-        if self._skill_search is None or self._embedder is None:
-            return {"skill_suggested": True}  # 미주입 시 건너뜀
-
-        t0 = time.monotonic()
-        spec = state.get("draft_spec")
-        query = spec.natural_language_intent if spec else state["messages"][-1].get("content", "")
-        try:
-            query_embedding = await self._embedder.embed(query)
-            skill_results = await self._skill_search.execute(
-                query_embedding=query_embedding,
-                scope=SkillScope.COMPANY,
-                limit=5,
-            )
-        except Exception as exc:
-            _logger.warning("suggest_skill 검색 실패: %s", exc)
-            return {"skill_suggested": True}
-
-        skill_list: list[dict[str, Any]] = []
-        for skill in skill_results:
-            if skill.node_definition_id is None:
-                continue
-            skill_list.append({
-                "node_definition_id": str(skill.node_definition_id),
-                "name": getattr(skill, "name", ""),
-                "description": getattr(skill, "description", ""),
-            })
-
-        if not skill_list:
-            return {"skill_suggested": True}
-
-        options = "\n".join(f"- {s['name']}: {s['description']}" for s in skill_list)
-        elapsed = int((time.monotonic() - t0) * 1000)
-        return {
-            "skill_suggested": True,
-            "suggested_skills": skill_list,
-            "collected_frames": [
-                SlotFillQuestionFrame(
-                    question=f"아래 스킬을 워크플로우에 포함할까요?\n{options}\n포함하려면 스킬 이름을 말씀해 주세요.",
-                    field_name="suggested_skill",
-                ),
-                PipelineStatusFrame(service_name="suggest_skill", status="completed", elapsed_ms=elapsed),
-            ],
-        }
-
-    # 6.6. use_suggested_skill_node — 제안된 스킬을 node_candidates에 추가 (사용자 수락 시)
-    async def _use_suggested_skill_node(self, state: _State) -> dict:
-        suggested = state.get("suggested_skills") or []
-        if not suggested:
-            return {}
-
-        t0 = time.monotonic()
-        candidates = list(state.get("node_candidates") or [])
-        existing_ids = {c.node_id for c in candidates}
-
-        for skill in suggested:
-            nd_id_str = skill.get("node_definition_id")
-            if not nd_id_str:
-                continue
-            try:
-                nd_id = UUID(nd_id_str)
-                node_cfg = await self._node_registry.get_schema(nd_id)
-                if node_cfg.node_id not in existing_ids:
-                    candidates.append(node_cfg)
-                    existing_ids.add(node_cfg.node_id)
-            except Exception:
-                continue
-
-        elapsed = int((time.monotonic() - t0) * 1000)
-        return {
-            "node_candidates": candidates,
-            "collected_frames": [
-                PipelineStatusFrame(service_name="use_suggested_skill", status="completed", elapsed_ms=elapsed),
-            ],
-        }
-
-    # 6.7. suggest_skill_select_node — two-shot 1차: 스킬 옵션 제시 + 상태 영속 후 중단 (REQ-013)
+    # 6.6. suggest_skill_select_node — two-shot 1차: 스킬 옵션 제시 + 상태 영속 후 중단 (REQ-013)
     async def _suggest_skill_select_node(self, state: _State) -> dict:
         """스킬 검색 후 SkillSelectionFrame으로 옵션 제시하고 1차 라운드를 종료한다.
 
@@ -1086,11 +1056,17 @@ class LangGraphOrchestrator:
         )
         if skill_selected and not instruct_skill_binding:
             _logger.warning("스킬 선택됐으나 LLM 노드 후보 확보 실패 — 바인딩 skip 예상")
+        # degrade로 버린 node_type을 수집할 요청-로컬 sink(동시 요청 안전). 재시도 retriever가
+        # 이 ground-truth로 재검색하도록 state에 실어 보낸다(리뷰 #2 — QA-LLM 재인지 의존 제거).
+        dropped: list[str] = []
         try:
             workflow = await self._drafter.draft(
                 spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow,
                 personal_patterns=state.get("personal_patterns"),
                 skill_selected=instruct_skill_binding,
+                retry_feedback=state.get("retry_feedback"),
+                dropped_node_types=dropped,
+                pattern_templates=state.get("pattern_templates"),
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:
@@ -1125,6 +1101,7 @@ class LangGraphOrchestrator:
         ])
         return {
             "workflow_draft": workflow,
+            "dropped_node_types": dropped,
             "collected_frames": frames,
         }
 
@@ -1275,21 +1252,39 @@ class LangGraphOrchestrator:
     # 10. qa_retry_node — validate/QA 실패 시 재시도 준비 (draft_workflow로 돌아감)
     async def _qa_retry_node(self, state: _State) -> dict:
         t0 = time.monotonic()
-        spec = state.get("draft_spec")
         feedback = state.get("qa_feedback", "")
         validation_issues = state.get("validation_issues") or ""
         combined_feedback = " | ".join(filter(None, [feedback, validation_issues]))
-        if spec and combined_feedback:
-            updated_intent = f"{spec.natural_language_intent}\n[재시도 피드백: {combined_feedback}]"
-            spec = spec.model_copy(update={"natural_language_intent": updated_intent})
-        elapsed = int((time.monotonic() - t0) * 1000)
-        return {
-            "draft_spec": spec,
+        # 피드백은 natural_language_intent에 섞지 않는다 — 그러면 영어 교정문이 워크플로우
+        # 이름/설명으로 누출된다(#378 부차). 별도 state 필드로 전달해 drafter가 교정에만 쓴다.
+        updates: dict = {
+            "retry_feedback": combined_feedback,
             "retry_count": state.get("retry_count", 0) + 1,
-            "collected_frames": [
-                PipelineStatusFrame(service_name="qa_retry", status="started", elapsed_ms=elapsed),
-            ],
         }
+        # B(#378 후속): 재시도 시 retriever 재검색 — 직전 후보로 충족 못 한 능력을 원 intent에
+        # 보강해 새 노드를 끌어온다. 보강 신호 2종: (1) drafter가 degrade로 버린 node_type
+        # (ground-truth, 리뷰 #2 — QA-LLM 재인지에 의존하지 않는 결정적 신호) (2) QA가 feedback에
+        # 적은 missing_capabilities. 직전 후보는 보존하고 합집합(node_id dedup). 재검색 실패는 비치명적.
+        spec = state.get("draft_spec")
+        base_query = spec.natural_language_intent if spec else ""
+        dropped = " ".join(state.get("dropped_node_types") or [])
+        search_query = " ".join(filter(None, [base_query, dropped, combined_feedback])).strip()
+        if search_query:
+            try:
+                fresh = await self._node_registry.search(search_query)
+            except Exception as exc:
+                _logger.warning("재시도 retriever 재검색 실패 (non-fatal): %s", exc)
+                fresh = []
+            if fresh:
+                existing = state.get("node_candidates") or []
+                merged = self._dedup_union(existing, list(fresh))
+                if len(merged) != len(existing):
+                    updates["node_candidates"] = merged
+        elapsed = int((time.monotonic() - t0) * 1000)
+        updates["collected_frames"] = [
+            PipelineStatusFrame(service_name="qa_retry", status="started", elapsed_ms=elapsed),
+        ]
+        return updates
 
     # 11. promote_node — QA 통과 후 확정 + WorkflowDraftStore에 AI 초안 보관
     async def _promote_node(self, state: _State) -> dict:

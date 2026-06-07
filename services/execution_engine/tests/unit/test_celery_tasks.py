@@ -69,6 +69,51 @@ class TestCancelTask:
             celery_tasks.cancel_execution_task.run(str(uuid4()))
 
 
+class TestPauseTask:
+    def test_returns_skipped_on_invalid_transition(self, monkeypatch):
+        """이미 종료된 execution을 pause → ExecutionError를 graceful skip으로 변환."""
+        exc = ExecutionError(
+            "Cannot transition from completed to paused",
+            code="E_INVALID_STATE_TRANSITION",
+        )
+        _patch_container(monkeypatch, _container(execute_side_effect=exc))
+        execution_id = str(uuid4())
+
+        result = celery_tasks.pause_execution_task.run(execution_id)
+
+        assert result["status"] == "skipped"
+        assert result["action"] == "pause"
+        assert result["execution_id"] == execution_id
+        assert "Cannot transition" in result["reason"]
+
+    def test_returns_paused_on_success(self, monkeypatch):
+        _patch_container(monkeypatch, _container())
+        execution_id = str(uuid4())
+
+        result = celery_tasks.pause_execution_task.run(execution_id)
+
+        assert result["status"] == "paused"
+        assert result["action"] == "pause"
+
+    def test_returns_skipped_on_missing_execution(self, monkeypatch):
+        """존재하지 않는 execution_id → NotFoundError도 graceful skip."""
+        exc = NotFoundError("ExecutionResult abc not found")
+        _patch_container(monkeypatch, _container(execute_side_effect=exc))
+        execution_id = str(uuid4())
+
+        result = celery_tasks.pause_execution_task.run(execution_id)
+
+        assert result["status"] == "skipped"
+        assert result["action"] == "pause"
+        assert "not found" in result["reason"]
+
+    def test_non_domain_error_still_propagates(self, monkeypatch):
+        _patch_container(monkeypatch, _container(execute_side_effect=RuntimeError("broker down")))
+
+        with pytest.raises(RuntimeError, match="broker down"):
+            celery_tasks.pause_execution_task.run(str(uuid4()))
+
+
 class TestResumeTask:
     def test_returns_skipped_on_invalid_transition(self, monkeypatch):
         exc = ExecutionError(

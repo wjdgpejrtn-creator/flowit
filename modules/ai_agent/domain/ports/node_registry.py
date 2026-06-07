@@ -18,3 +18,13 @@ class NodeRegistry(ABC):
 
     @abstractmethod
     async def get_schema(self, node_id: UUID) -> NodeConfig: ...
+
+    @abstractmethod
+    async def list_structural(self) -> list[NodeConfig]:
+        """구조 노드(트리거/제어흐름)를 관련성 무관하게 전부 반환한다.
+
+        트리거("매주 월요일 9시")·분기·루프는 사용자 문장에 자연어로 녹아 노드 이름/설명
+        임베딩과 매칭이 약해 ``search`` top-k에서 누락되곤 한다(#378 후속). Composer가 이
+        목록을 검색 후보와 합집합해 drafter가 첫 초안부터 schedule_trigger 등을 쓸 수 있게 한다.
+        """
+        ...

@@ -1,4 +1,4 @@
-"""retriever_node 단위 테스트 — 기본 노드 검색 + 개인 패턴 RAG 회수 + 스킬 미합산(#372 결함 B)."""
+"""retriever_node 단위 테스트 — 기본 노드 검색 + 개인 패턴 RAG 회수 + 스킬 미합산(#372 결함 B) + GraphRAG(ADR-0026)."""
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -146,6 +146,69 @@ class TestRetrieverNodeIgnoresSkills:
         assert names == ["slack_trigger"]
 
 
+class TestRetrieverStructuralUnion:
+    """#378 후속 A — 구조 노드(트리거/제어흐름)는 의미검색 top-k에 안 떠도 항상 후보에 합산.
+
+    "매주 월요일 9시에 …" 같은 요청에서 schedule_trigger가 검색에 안 잡혀 drafter가
+    `후보 목록에 없는 node_type: schedule_trigger`로 하드페일하던 문제를 해소한다.
+    """
+
+    def _orchestrator(self, search_result, structural_result):
+        from nodes_graph.domain.services.graph_validator import GraphValidator
+
+        node_registry = AsyncMock(spec=NodeRegistry)
+        node_registry.search = AsyncMock(return_value=search_result)
+        node_registry.list_structural = AsyncMock(return_value=structural_result)
+        return LangGraphOrchestrator(
+            intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
+            drafter=AsyncMock(spec=DrafterService),
+            qa_evaluator=AsyncMock(spec=QAEvaluatorService),
+            slot_filler=SlotFillingService(),
+            node_registry=node_registry,
+            workflow_repo=AsyncMock(spec=WorkflowRepository),
+            graph_validator=AsyncMock(spec=GraphValidator),
+        )
+
+    @pytest.mark.asyncio
+    async def test_structural_nodes_appended_to_candidates(self):
+        """검색이 schedule_trigger를 놓쳐도 구조 노드로 후보에 들어온다."""
+        content = _node_config(name="slack_post_message")
+        trigger = _node_config(name="schedule_trigger")
+        oc = self._orchestrator(search_result=[content], structural_result=[trigger])
+
+        result = await oc._retriever_node(_make_state())
+
+        names = {c.name for c in result["node_candidates"]}
+        assert "slack_post_message" in names
+        assert "schedule_trigger" in names
+
+    @pytest.mark.asyncio
+    async def test_dedup_by_node_id(self):
+        """검색 결과와 구조 노드가 겹치면(같은 node_id) 중복 없이 한 번만."""
+        shared_id = uuid4()
+        in_search = _node_config(node_id=shared_id, name="schedule_trigger")
+        in_structural = _node_config(node_id=shared_id, name="schedule_trigger")
+        oc = self._orchestrator(search_result=[in_search], structural_result=[in_structural])
+
+        result = await oc._retriever_node(_make_state())
+
+        ids = [c.node_id for c in result["node_candidates"]]
+        assert ids.count(shared_id) == 1
+
+    @pytest.mark.asyncio
+    async def test_structural_fetch_failure_is_non_fatal(self):
+        """구조 노드 조회 실패해도 검색 후보는 정상 반환(비치명적)."""
+        content = _node_config(name="slack_post_message")
+        oc = self._orchestrator(search_result=[content], structural_result=[])
+        oc._node_registry.list_structural = AsyncMock(side_effect=Exception("repo 오류"))
+
+        result = await oc._retriever_node(_make_state())
+
+        assert result.get("error") is None
+        names = {c.name for c in result["node_candidates"]}
+        assert names == {"slack_post_message"}
+
+
 class TestRetrieverPersonalRecall:
     """REQ-004 개인화 배선 — retriever가 RAG로 사용자 패턴을 회수해 state에 싣는다."""
 
@@ -226,3 +289,132 @@ class TestRetrieverPersonalRecall:
         assert result.get("error") is None
         assert result["personal_patterns"] == []
         assert len(result["node_candidates"]) == 1
+
+
+class TestRetrieverExpandDeferred:
+    """ADR-0026 Phase 2a — expand_candidates(서브그래프)는 소비처(CAN_FOLLOW 필터, 박아름 §4.2)가
+    생기기 전까지 호출 보류한다. retriever는 모티프만 그라운딩하고, 매 compose Neo4j 왕복을
+    만들지 않는다(dead round-trip 제거)."""
+
+    def _orchestrator_with_retriever(self, search_result, ontology_retriever):
+        from nodes_graph.domain.services.graph_validator import GraphValidator
+
+        node_registry = AsyncMock(spec=NodeRegistry)
+        node_registry.search = AsyncMock(return_value=search_result)
+        node_registry.list_structural = AsyncMock(return_value=[])
+        return LangGraphOrchestrator(
+            intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
+            drafter=AsyncMock(spec=DrafterService),
+            qa_evaluator=AsyncMock(spec=QAEvaluatorService),
+            slot_filler=SlotFillingService(),
+            node_registry=node_registry,
+            workflow_repo=AsyncMock(spec=WorkflowRepository),
+            graph_validator=AsyncMock(spec=GraphValidator),
+            ontology_retriever=ontology_retriever,
+        )
+
+    @pytest.mark.asyncio
+    async def test_expand_candidates_not_called(self):
+        """ontology_retriever가 주입돼도 expand_candidates는 호출하지 않는다 (defer)."""
+        candidate = _node_config(name="slack_send")
+        candidate.__dict__["node_type"] = "slack_send"
+
+        ontology_retriever = AsyncMock()
+        ontology_retriever.expand_candidates = AsyncMock()
+        ontology_retriever.match_patterns = AsyncMock(return_value=[])
+
+        oc = self._orchestrator_with_retriever([candidate], ontology_retriever)
+        result = await oc._retriever_node(_make_state())
+
+        ontology_retriever.expand_candidates.assert_not_called()
+        # 서브그래프는 state에 더 이상 저장되지 않는다(소비처 없음).
+        assert "ontology_subgraph" not in result
+
+    @pytest.mark.asyncio
+    async def test_candidates_never_filtered(self):
+        """pgvector 후보는 온톨로지로 subtract 필터링되지 않는다 — ETL stale 노드도 보존."""
+        candidate_a = _node_config(name="slack_send")
+        candidate_a.__dict__["node_type"] = "slack_send"
+        candidate_b = _node_config(name="new_node_not_in_neo4j")
+        candidate_b.__dict__["node_type"] = "new_node_not_in_neo4j"
+
+        ontology_retriever = AsyncMock()
+        ontology_retriever.match_patterns = AsyncMock(return_value=[])
+
+        oc = self._orchestrator_with_retriever([candidate_a, candidate_b], ontology_retriever)
+        result = await oc._retriever_node(_make_state())
+
+        types_in_result = {c.node_type for c in result["node_candidates"]}
+        assert "slack_send" in types_in_result
+        assert "new_node_not_in_neo4j" in types_in_result  # stale여도 보존
+
+
+class TestRetrieverMotifGrounding:
+    """ADR-0026 Phase 2 — OntologyRetrieverPort.match_patterns 연동 테스트."""
+
+    def _make_pattern(self, name: str, slots: dict):
+        from ai_agent.domain.value_objects.ontology import PatternTemplate
+
+        return PatternTemplate(name=name, intent="검증", role_slots=slots)
+
+    def _orchestrator_with_retriever(self, ontology_retriever):
+        from nodes_graph.domain.services.graph_validator import GraphValidator
+
+        node_registry = AsyncMock(spec=NodeRegistry)
+        node_registry.search = AsyncMock(return_value=[_node_config(name="slack_send")])
+        node_registry.list_structural = AsyncMock(return_value=[])
+        return LangGraphOrchestrator(
+            intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
+            drafter=AsyncMock(spec=DrafterService),
+            qa_evaluator=AsyncMock(spec=QAEvaluatorService),
+            slot_filler=SlotFillingService(),
+            node_registry=node_registry,
+            workflow_repo=AsyncMock(spec=WorkflowRepository),
+            graph_validator=AsyncMock(spec=GraphValidator),
+            ontology_retriever=ontology_retriever,
+        )
+
+    @pytest.mark.asyncio
+    async def test_pattern_templates_stored_in_state(self):
+        """match_patterns 결과가 state에 pattern_templates로 저장된다."""
+        pattern = self._make_pattern("quality_gate_loop", {"generator": ("llm_generate",)})
+        ontology_retriever = AsyncMock()
+        ontology_retriever.match_patterns = AsyncMock(return_value=[pattern])
+
+        oc = self._orchestrator_with_retriever(ontology_retriever)
+        result = await oc._retriever_node(_make_state("검증 후 재생성"))
+
+        ontology_retriever.match_patterns.assert_called_once()
+        assert result["pattern_templates"] == [pattern]
+
+    @pytest.mark.asyncio
+    async def test_match_patterns_failure_is_non_fatal(self):
+        """match_patterns 실패 시 pattern_templates=None, 노드 후보는 정상 반환."""
+        ontology_retriever = AsyncMock()
+        ontology_retriever.match_patterns = AsyncMock(side_effect=Exception("Neo4j 오류"))
+
+        oc = self._orchestrator_with_retriever(ontology_retriever)
+        result = await oc._retriever_node(_make_state())
+
+        assert result.get("error") is None
+        assert result["pattern_templates"] is None
+        assert len(result["node_candidates"]) >= 1
+
+    @pytest.mark.asyncio
+    async def test_no_ontology_retriever_pattern_templates_none(self):
+        """ontology_retriever 미주입 시 pattern_templates=None."""
+        oc = self._orchestrator_with_retriever(ontology_retriever=None)
+        result = await oc._retriever_node(_make_state())
+
+        assert result["pattern_templates"] is None
+
+    @pytest.mark.asyncio
+    async def test_empty_patterns_stored_as_empty_list(self):
+        """:Pattern 노드 없으면 빈 리스트가 저장된다 (ETL 시드 전 정상 동작)."""
+        ontology_retriever = AsyncMock()
+        ontology_retriever.match_patterns = AsyncMock(return_value=[])
+
+        oc = self._orchestrator_with_retriever(ontology_retriever)
+        result = await oc._retriever_node(_make_state())
+
+        assert result["pattern_templates"] == []

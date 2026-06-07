@@ -107,6 +107,57 @@ class TestDrafterServiceBuild:
         assert "UNKNOWN" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_unknown_node_type_dropped_not_raised(self, caplog):
+        """후보에 없는 node_type은 하드페일(E_UNKNOWN_NODE_TYPE) 대신 drop+경고로 degrade.
+
+        #378 후속 B — 재시도 루프(retriever 재검색)가 돌 기회를 주려면 drafter가 미상
+        node_type에서 즉시 죽으면 안 된다. 해당 노드를 떨구고 진행, QA 게이트가 누락을 잡는다.
+        """
+        import logging
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A"), _NodeDraft(node_type="schedule_trigger")],
+            connections=[_EdgeDraft(from_node_type="schedule_trigger", to_node_type="A")],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A")]  # schedule_trigger는 후보에 없음
+        with caplog.at_level(logging.WARNING):
+            schema = await svc.draft(_spec(), candidates, self.owner_id)
+        # 하드페일 안 함, 알려진 노드만 남고 미상 노드 참조 엣지는 스킵
+        node_ids = {n.node_id for n in schema.nodes}
+        assert node_ids == {candidates[0].node_id}
+        assert len(schema.connections) == 0
+        assert "schedule_trigger" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_dropped_node_types_reported_to_sink(self):
+        """degrade 시 버린 node_type을 dropped_node_types sink에 기록 — 재시도 retriever가
+        그 ground-truth로 재검색하게 한다(#378 후속, QA-LLM 재인지 의존 제거)."""
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A"), _NodeDraft(node_type="email_send")],
+            connections=[],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A")]  # email_send는 후보에 없음 → drop
+        sink: list[str] = []
+        await svc.draft(_spec(), candidates, self.owner_id, dropped_node_types=sink)
+        assert sink == ["email_send"]
+
+    @pytest.mark.asyncio
+    async def test_no_drop_leaves_sink_empty(self):
+        """전부 후보에 있으면 sink는 비어 있다."""
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A")],
+            connections=[],
+        )
+        svc = self._svc(response)
+        sink: list[str] = []
+        await svc.draft(_spec(), [_node_config("A")], self.owner_id, dropped_node_types=sink)
+        assert sink == []
+
+    @pytest.mark.asyncio
     async def test_connections_included_in_workflow_schema(self):
         response = _DraftResponse(
             name="W",
@@ -498,6 +549,64 @@ class TestDrafterRefGeneration:
         prompt = llm.generate_structured.call_args.args[0]
         assert "google_sheets_read.values" not in prompt
         assert "VERBATIM" in prompt
+
+
+class TestDrafterMotifBlock:
+    """ADR-0026 Phase 2 — pattern_templates가 drafter 프롬프트에 모티프 블록으로 주입되는지."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    def _pattern(self, name: str, role_slots: dict):
+        from ai_agent.domain.value_objects.ontology import PatternTemplate
+
+        return PatternTemplate(name=name, intent="검증", role_slots=role_slots)
+
+    @pytest.mark.asyncio
+    async def test_motif_block_injected_when_pattern_provided(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        patterns = [self._pattern("quality_gate_loop", {"generator": ("llm_generate",), "evaluator": ("if_condition",)})]
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("slack")], self.owner_id, pattern_templates=patterns,
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "WORKFLOW MOTIFS" in prompt
+        assert "quality_gate_loop" in prompt
+        assert "generator" in prompt
+
+    @pytest.mark.asyncio
+    async def test_no_motif_block_when_no_patterns(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "WORKFLOW MOTIFS" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_motif_block_injected_in_edit_path_too(self):
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        patterns = [self._pattern("quality_gate_loop", {"generator": ("llm_generate",)})]
+        llm = _mock_llm(_EditResponse(
+            name="W",
+            nodes=[_EditNodeDraft(ref="n0", node_type="http"), _EditNodeDraft(ref="n1", node_type="slack")],
+            connections=[],
+        ))
+        await DrafterService(llm).draft(
+            _spec(), [cfg_a, cfg_b], self.owner_id, prior_workflow=prior, pattern_templates=patterns,
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "WORKFLOW MOTIFS" in prompt
+        assert "quality_gate_loop" in prompt
+
+    def test_motif_block_static_empty_when_no_slots(self):
+        patterns = [self._pattern("no_slots_pattern", {})]
+        block = DrafterService._motif_block(patterns)
+        assert block == ""
+
+    def test_motif_block_static_empty_when_none(self):
+        assert DrafterService._motif_block(None) == ""
 
 
 @pytest.mark.asyncio

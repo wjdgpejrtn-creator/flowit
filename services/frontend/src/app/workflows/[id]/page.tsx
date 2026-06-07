@@ -11,7 +11,9 @@ import { useWorkflowStore } from '@/stores/workflowStore';
 import WorkflowEditPane from '@/components/workflow/WorkflowEditPane';
 import {
   getLatestExecution,
+  executeWorkflow,
   cancelExecution,
+  pauseExecution,
   resumeExecution,
   type WorkflowLatestExecution,
   type NodeResultEntry,
@@ -62,7 +64,12 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
   const [nowMs, setNowMs] = useState(Date.now());
   const [controlBusy, setControlBusy] = useState(false);
   const [controlError, setControlError] = useState<string | null>(null);
+  // 실행 트리거 직후 worker가 RUNNING row를 INSERT하기 전까지의 대기 상태. 새 execution이
+  // 폴링에 나타나거나(=expectedRunIdRef 일치) 30s 타임아웃 시 해제.
+  const [preparing, setPreparing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const expectedRunIdRef = useRef<string | null>(null);
+  const runFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     void loadWorkflow(id);
@@ -96,20 +103,38 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
     void fetchExecution();
   }, [fetchExecution, mode]);
 
-  // active 상태일 때만 polling (view 모드일 때만)
+  // active 상태이거나 실행 준비 중(새 run row 대기)일 때만 polling (view 모드일 때만)
   useEffect(() => {
     if (pollRef.current) {
       clearTimeout(pollRef.current);
       pollRef.current = null;
     }
     if (mode === 'edit') return;
-    if (execution && ACTIVE_STATUSES.has(execution.status)) {
+    const active = execution && ACTIVE_STATUSES.has(execution.status);
+    if (active || preparing) {
       pollRef.current = setTimeout(() => void fetchExecution(), POLL_INTERVAL_MS);
     }
     return () => {
       if (pollRef.current) clearTimeout(pollRef.current);
     };
-  }, [execution, fetchExecution, mode]);
+  }, [execution, fetchExecution, mode, preparing]);
+
+  // 실행 트리거로 기대한 새 execution이 폴링에 나타나면 준비 상태 해제.
+  useEffect(() => {
+    if (preparing && execution && execution.execution_id === expectedRunIdRef.current) {
+      expectedRunIdRef.current = null;
+      setPreparing(false);
+      if (runFallbackRef.current) clearTimeout(runFallbackRef.current);
+    }
+  }, [execution, preparing]);
+
+  // 언마운트 시 실행-준비 폴백 타이머 정리 (실행 직후 30s 내 페이지 이탈 시
+  // unmounted setState 경고 방지, #385 리뷰 LOW).
+  useEffect(() => {
+    return () => {
+      if (runFallbackRef.current) clearTimeout(runFallbackRef.current);
+    };
+  }, []);
 
   // live 경과 시간
   useEffect(() => {
@@ -128,6 +153,46 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
       void fetchExecution();
     } catch (e) {
       setControlError(e instanceof Error ? e.message : '취소 실패');
+    } finally {
+      setControlBusy(false);
+    }
+  };
+
+  const handleRun = async () => {
+    if (!workflow) return;
+    setControlBusy(true);
+    setControlError(null);
+    try {
+      const resp = await executeWorkflow(id);
+      // worker가 RUNNING row를 INSERT하기 전까지 "준비 중" — 새 execution_id가 폴링에
+      // 나타나면 해제(아래 effect), 30s 내 안 나타나면 타임아웃 해제(실행 미시작 안내).
+      expectedRunIdRef.current = resp.execution_id;
+      setPreparing(true);
+      if (runFallbackRef.current) clearTimeout(runFallbackRef.current);
+      runFallbackRef.current = setTimeout(() => {
+        if (expectedRunIdRef.current === resp.execution_id) {
+          expectedRunIdRef.current = null;
+          setPreparing(false);
+          setControlError('실행이 시작되지 않았습니다. 워크플로우가 유효한지 확인 후 다시 시도하세요.');
+        }
+      }, 30000);
+      void fetchExecution();
+    } catch (e) {
+      setControlError(e instanceof Error ? e.message : '실행 실패');
+    } finally {
+      setControlBusy(false);
+    }
+  };
+
+  const handlePause = async () => {
+    if (!execution) return;
+    setControlBusy(true);
+    setControlError(null);
+    try {
+      await pauseExecution(execution.execution_id);
+      void fetchExecution();
+    } catch (e) {
+      setControlError(e instanceof Error ? e.message : '일시정지 실패');
     } finally {
       setControlBusy(false);
     }
@@ -233,7 +298,35 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
   const workflowName = workflow?.name ?? (wfLoading ? '' : '워크플로우');
   const execStatus = execution?.status ?? 'pending';
   const isActive = execution && ACTIVE_STATUSES.has(execution.status);
+  const isRunning = execution?.status === 'running';
   const isPaused = execution?.status === 'paused';
+
+  // 버튼 disabled 사유 툴팁 — 무반응처럼 보이지 않도록 이유를 명시 (#364).
+  const pauseTitle = !execution
+    ? '실행 중인 워크플로우가 없습니다'
+    : isRunning
+      ? '실행을 일시정지합니다 (현재 단계 완료 후 멈춤)'
+      : isPaused
+        ? '이미 일시정지 상태입니다'
+        : '실행 중일 때만 일시정지할 수 있습니다';
+  const resumeTitle = !execution
+    ? '실행 중인 워크플로우가 없습니다'
+    : isPaused
+      ? '완료된 단계는 건너뛰고 이어서 실행합니다'
+      : '일시정지 상태일 때만 재개할 수 있습니다';
+  const cancelTitle = !execution
+    ? '실행 중인 워크플로우가 없습니다'
+    : isActive
+      ? '실행을 취소합니다'
+      : '진행 중인 실행이 없습니다';
+  const noNodes = !workflow || workflow.nodes.length === 0;
+  const runTitle = noNodes
+    ? '노드가 없는 워크플로우입니다. ✎ 편집에서 노드를 추가하세요.'
+    : preparing
+      ? '실행을 시작하는 중입니다…'
+      : execution
+        ? '워크플로우를 다시 실행합니다'
+        : '워크플로우를 실행합니다';
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-paper)]">
@@ -265,13 +358,31 @@ export default function WorkflowDetailPage({ params }: { params: { id: string } 
 
         {mode === 'view' ? (
           <>
-            <Btn ghost onClick={handleResume} disabled={!isPaused || controlBusy}>
-              ▶ 재개
-            </Btn>
-            <Btn danger onClick={handleCancel} disabled={!isActive || controlBusy}>
-              ⏹ 취소
-            </Btn>
-            <Btn primary onClick={handleToggleMode} disabled={!workflow}>
+            {/* 상태 기반 주 버튼: 일시정지됨→재개 / 실행 중→일시정지 / 그 외→실행 (#364) */}
+            {isPaused ? (
+              <Btn ghost onClick={handleResume} disabled={controlBusy} title={resumeTitle}>
+                ▶ 재개
+              </Btn>
+            ) : isRunning ? (
+              <Btn ghost onClick={handlePause} disabled={controlBusy} title={pauseTitle}>
+                ⏸ 일시정지
+              </Btn>
+            ) : (
+              <Btn
+                primary
+                onClick={handleRun}
+                disabled={noNodes || controlBusy || preparing}
+                title={runTitle}
+              >
+                {preparing ? '⏳ 실행 준비 중' : execution ? '↻ 다시 실행' : '▶ 실행'}
+              </Btn>
+            )}
+            {(isActive || isPaused) && (
+              <Btn danger onClick={handleCancel} disabled={controlBusy} title={cancelTitle}>
+                ⏹ 취소
+              </Btn>
+            )}
+            <Btn onClick={handleToggleMode} disabled={!workflow}>
               ✎ 편집
             </Btn>
           </>

@@ -48,6 +48,7 @@ image = (
         "jsonschema>=4.0",
         "google-cloud-secret-manager>=2.20",
         "google-cloud-storage>=2.0",
+        "neo4j>=5.0",
     )
     .env({
         "PYTHONPATH": "/app/modules:/app/common_schemas_src:/repo",
@@ -95,6 +96,9 @@ class AgentComposer:
             "embedding-base-url":    "EMBEDDING_BASE_URL",
             "gcs-session-bucket":    "GCS_SESSION_BUCKET",
             "execution-engine-url":  "EXECUTION_ENGINE_URL",
+            "neo4j-uri":             "NEO4J_URI",
+            "neo4j-username":        "NEO4J_USERNAME",
+            "neo4j-password":        "NEO4J_PASSWORD",
         })
         # gcs-personal-bucket: secret 미등록이어도 composer boot 실패 방지 (PR #171 패턴)
         try:
@@ -118,6 +122,7 @@ class AgentComposer:
         from ai_agent.adapters.memory.gcs_memory_store import GCSMemoryStore
         from ai_agent.adapters.node_registry_adapter import NodeRegistryAdapter
         from ai_agent.adapters.connection_resolver_adapter import OAuthConnectionResolver
+        from ai_agent.adapters.ontology.neo4j_ontology_adapter import Neo4jOntologyAdapter
         from ai_agent.adapters.langgraph.composer_graph import LangGraphOrchestrator
         from ai_agent.application.agents.workflow_composer.approve_workflow_use_case import ApproveWorkflowUseCase
         from ai_agent.domain.services.intent_analyzer_service import IntentAnalyzerService
@@ -136,6 +141,8 @@ class AgentComposer:
         embedder = ModalEmbeddingAdapter()
         self._llm = llm
         self._embedder = embedder
+        # Neo4j AuraDB GraphRAG (ADR-0026 Phase 2). per-request driver — boot()에서 생성 안 함.
+        self._ontology_retriever = Neo4jOntologyAdapter()
 
         self._node_repo_cls = PgNodeDefinitionRepository
         self._workflow_repo_cls = PgWorkflowRepository
@@ -253,6 +260,7 @@ class AgentComposer:
                             embedder=self._embedder,
                             composer_state_store=self._composer_state_store,
                             connection_resolver=connection_resolver,
+                            ontology_retriever=self._ontology_retriever,
                         )
                         async for frame in await graph.stream(
                             user_id=req.user_id,

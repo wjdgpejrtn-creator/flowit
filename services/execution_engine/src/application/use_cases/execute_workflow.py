@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from common_schemas.enums import ExecutionStatus
+from common_schemas.exceptions import NotFoundError
 from common_schemas.workflow import Edge
 
 from ...domain.entities.execution_context import ExecutionContext
@@ -21,6 +23,20 @@ from ...domain.services.cyclic_scheduler import CyclicScheduler
 from ...domain.services.execution_orchestrator import ExecutionOrchestrator
 from ...domain.services.reference_resolver import ReferenceResolver
 from .dispatch_node import DispatchNodeUseCase
+
+
+@dataclass
+class _Checkpoint:
+    """resume 시 복원하는 직전 실행 상태 (ADR-0025 체크포인트 재개).
+
+    step 경계에서만 pause하므로 step은 원자적으로 완료된다 — 따라서 저장된
+    node_results는 "완전히 끝난 step"의 결과만 담긴다. 부분 완료 step은 없다.
+    """
+
+    results: list[NodeResult] = field(default_factory=list)
+    node_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    reachable: dict[UUID, bool] = field(default_factory=dict)
+    completed_ids: set[UUID] = field(default_factory=set)
 
 
 class ExecuteWorkflowUseCase:
@@ -52,6 +68,14 @@ class ExecuteWorkflowUseCase:
             user_id=context.user_id,
             started_at=context.started_at,
             task_queue_id=context.task_queue_id,
+        )
+
+        # resume 트리거면 직전 실행의 완료 노드를 복원한다 — 성공 노드는 재디스패치하지
+        # 않고 하류 ${ref}/reachability 컨텍스트만 시드한다 (ADR-0025 체크포인트 재개).
+        checkpoint = (
+            self._load_checkpoint(context.execution_id)
+            if context.trigger_type == "resume"
+            else None
         )
 
         try:
@@ -89,8 +113,36 @@ class ExecuteWorkflowUseCase:
             reachable: dict[UUID, bool] = {}
             # 가드 초과로 강제 탈출한 루프의 exit 엣지 — 하류 reachability에서 강제 live (L3).
             forced_live: set[Edge] = set()
+            # 이미 완료된(succeeded/skipped) 노드 — resume 시 재디스패치 skip 판정용.
+            completed_ids: set[UUID] = set()
+
+            if checkpoint is not None:
+                result.node_results.extend(checkpoint.results)
+                node_outputs.update(checkpoint.node_outputs)
+                reachable.update(checkpoint.reachable)
+                completed_ids = checkpoint.completed_ids
+                for nr in checkpoint.results:
+                    self._events.publish_node_complete(context.execution_id, nr)
+
+            # 실행 시작 시점에 RUNNING row를 영속화한다 — 폴링/pause 조회/협조적 재확인의
+            # 전제. (직전엔 종료 시점에만 save해 실행 중 row가 없어 pause가 불가능했다.)
+            result.status = ExecutionStatus.RUNNING
+            self._execution_repo.save(result)
 
             for step in steps:
+                # 협조적 pause — step 경계에서 DB status를 재조회해 PAUSED면 부분 결과를
+                # 보존한 채 중단한다 (완료/실패 마킹 없이). 다음 step 진입 전에만 체크하므로
+                # step은 원자적으로 끝난다(부분 완료 step 없음 → 체크포인트 granularity=step).
+                if self._is_pause_requested(context.execution_id):
+                    result.status = ExecutionStatus.PAUSED
+                    break
+
+                # resume: 이미 완전히 끝난 step은 재실행하지 않는다. 위 시드로 하류
+                # 컨텍스트(node_outputs/reachable)는 이미 복원돼 있다.
+                step_ids = self._step_node_ids(step)
+                if completed_ids and step_ids and all(nid in completed_ids for nid in step_ids):
+                    continue
+
                 if step.kind == "level":
                     level_results = self._execute_level(
                         step.level, context, configs, node_outputs, reachable,
@@ -113,6 +165,18 @@ class ExecuteWorkflowUseCase:
                         result.mark_failed("루프 바디에서 노드 실패")
                         break
 
+                # step 완료마다 부분 결과를 체크포인트로 저장 — 폴링 진행률 노출 +
+                # pause/crash 시 resume이 끝난 step부터 이어가게 한다. status는 쓰지
+                # 않는다(save_checkpoint) — 협조적 pause가 쓴 PAUSED를 덮어쓰지 않기 위함.
+                self._execution_repo.save_checkpoint(result)
+
+            # 마지막 step 실행 도중 도착한 pause는 위 top-check가 못 잡는다(다음 step 없음).
+            # 루프 종료 후 한 번 더 재확인해 PAUSED면 완료로 마킹하지 않는다.
+            if result.status == ExecutionStatus.RUNNING and self._is_pause_requested(
+                context.execution_id
+            ):
+                result.status = ExecutionStatus.PAUSED
+
             if result.status == ExecutionStatus.RUNNING:
                 result.mark_completed()
 
@@ -122,6 +186,44 @@ class ExecuteWorkflowUseCase:
         self._execution_repo.save(result)
         self._events.publish_status(context.execution_id, result.status)
         return result
+
+    def _load_checkpoint(self, execution_id: UUID) -> _Checkpoint | None:
+        """직전 실행의 node_results에서 완료 노드를 복원한다 (resume 전용).
+
+        row이 아직 없으면(최초 실행이 save 전이었거나 미존재) None — 체크포인트 없이
+        처음부터 실행한다. 일시적 DB 오류·역직렬화 실패 등은 **삼키지 않고 전파**한다 —
+        조용히 None을 반환하면 resume이 완료 노드를 전부 재실행해 외부 부작용(Slack/시트
+        등)을 중복시키므로(이 PR의 존재 이유를 무력화), 차라리 task를 실패시켜 PAUSED를
+        유지하고 사용자가 재시도하게 한다 (ADR-0025, #380 리뷰 MED).
+        """
+        try:
+            prior = self._execution_repo.get(execution_id)
+        except NotFoundError:
+            return None
+        cp = _Checkpoint()
+        for nr in getattr(prior, "node_results", []):
+            if nr.status not in ("succeeded", "skipped"):
+                continue
+            cp.results.append(nr)
+            cp.completed_ids.add(nr.node_instance_id)
+            cp.reachable[nr.node_instance_id] = nr.status == "succeeded"
+            if nr.status == "succeeded" and isinstance(nr.output, dict):
+                cp.node_outputs[str(nr.node_instance_id)] = nr.output
+        return cp
+
+    def _is_pause_requested(self, execution_id: UUID) -> bool:
+        """DB status가 PAUSED면 True. 조회 실패 시 보수적으로 False(중단 안 함)."""
+        try:
+            current = self._execution_repo.get(execution_id)
+        except Exception:
+            return False
+        return getattr(current, "status", None) == ExecutionStatus.PAUSED
+
+    @staticmethod
+    def _step_node_ids(step) -> list[UUID]:
+        if step.kind == "level":
+            return [n.instance_id for n in step.level.nodes]
+        return [n.instance_id for lvl in step.loop.levels for n in lvl.nodes]
 
     def _execute_loop(
         self,

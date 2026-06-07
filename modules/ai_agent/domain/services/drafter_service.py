@@ -208,6 +208,9 @@ class DrafterService:
         personal_patterns: list[str] | None = None,
         skill_selected: bool = False,
         skill_composer_instructions: str | None = None,
+        retry_feedback: str | None = None,
+        dropped_node_types: list[str] | None = None,
+        pattern_templates: list[Any] | None = None,
     ) -> WorkflowSchema:
         """워크플로우 초안 생성. ``prior_workflow``가 주어지면(대화형 refine) 처음부터
         재생성하지 않고 그 워크플로우를 편집 컨텍스트로 주어 지시한 부분만 수정한다.
@@ -222,6 +225,15 @@ class DrafterService:
         노드 system 프롬프트에 주입되는 지침서라 주입 대상 LLM 노드가 없으면 바인딩 불가).
         ``skill_composer_instructions``(COMPOSER.md 본문, 선택)가 주어지면 어떤 노드를 어떻게
         엮을지 구체 지침으로 함께 주입한다(미주어지면 LLM 노드 포함 기준선만 지시).
+
+        ``retry_feedback``(validate/QA 실패 후 재시도 시, 선택)가 주어지면 별도 블록으로
+        주입해 다음 초안을 교정한다. **`spec.natural_language_intent`에 섞지 않는다** — 그러면
+        피드백 영어 텍스트가 워크플로우 이름/설명으로 누출되기 때문(#378 부차 — UI 누출).
+
+        ``dropped_node_types``(선택, 출력용 리스트)가 주어지면 degrade로 버린 node_type
+        (후보에 없어 떨군 것)을 거기에 append한다. 재시도 retriever가 QA-LLM 재인지가 아니라
+        이 ground-truth로 직접 재검색하도록 결정화한다(#378 후속 리뷰 #2). 호출부가 요청마다
+        새 리스트를 넘기므로 동시 요청 안전(서비스 인스턴스 공유 무관).
         """
         catalog = [
             {
@@ -242,6 +254,8 @@ class DrafterService:
         catalog_json = json.dumps(catalog, ensure_ascii=False)
         patterns_block = self._personal_patterns_block(personal_patterns)
         binding_block = self._skill_binding_block(skill_selected, skill_composer_instructions)
+        retry_block = self._retry_feedback_block(retry_feedback)
+        motif_block = self._motif_block(pattern_templates)
         # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
         # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
         if prior_workflow is not None:
@@ -251,6 +265,8 @@ class DrafterService:
                     _EDIT_SYSTEM_PROMPT
                     + patterns_block
                     + binding_block
+                    + motif_block
+                    + retry_block
                     + f"\nDraftSpec: {spec_json}"
                     + f"\nAvailable nodes: {catalog_json}"
                     + f"\nCURRENT WORKFLOW: {json.dumps(current, ensure_ascii=False)}"
@@ -265,6 +281,8 @@ class DrafterService:
             _SYSTEM_PROMPT
             + patterns_block
             + binding_block
+            + motif_block
+            + retry_block
             + f"\nDraftSpec: {spec_json}"
             + f"\nAvailable nodes: {catalog_json}"
         )
@@ -272,7 +290,7 @@ class DrafterService:
             draft_resp = await self._llm.generate_structured(prompt, _DraftResponse)
         except Exception as e:
             raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
-        return self._build(draft_resp, candidates, owner_user_id)
+        return self._build(draft_resp, candidates, owner_user_id, dropped_sink=dropped_node_types)
 
     @staticmethod
     def _personal_patterns_block(personal_patterns: list[str] | None) -> str:
@@ -290,6 +308,50 @@ class DrafterService:
             "workflows — apply ONLY the ones relevant to THIS request, e.g. a preferred "
             "notification channel, summary language, or output format. Ignore patterns that "
             "do not fit, and NEVER add a node solely to satisfy a pattern):\n"
+            f"{joined}\n"
+        )
+
+    @staticmethod
+    def _retry_feedback_block(retry_feedback: str | None) -> str:
+        """validate/QA 실패 후 재시도 교정 피드백을 시스템 프롬프트 주입용 블록으로.
+
+        피드백이 없으면 빈 문자열. **`natural_language_intent`와 분리**해 두므로 이 텍스트가
+        워크플로우 이름/설명으로 새지 않는다(#378 부차 — UI 누출 차단). 직전 시도가 왜
+        미달했는지를 알려 다음 초안을 고치게 하되, 워크플로우 산출물에는 노출되지 않는다.
+        """
+        if not retry_feedback:
+            return ""
+        return (
+            "\nRETRY FEEDBACK (the previous draft failed validation/QA — fix these issues in "
+            "this attempt; this is internal guidance, do NOT echo it into the workflow name or "
+            f"description):\n{retry_feedback}\n"
+        )
+
+    @staticmethod
+    def _motif_block(pattern_templates: list[Any] | None) -> str:
+        """GraphRAG :Pattern 모티프를 drafter 프롬프트 주입용 블록으로 직렬화 (ADR-0026 Phase 2).
+
+        ETL 시드 전(빈 리스트) 또는 role_slots가 없으면 빈 문자열 반환(무영향).
+        "가이드이지 강제 아님"을 명시해 무관한 노드가 추가되는 것을 막는다.
+        """
+        if not pattern_templates:
+            return ""
+        lines: list[str] = []
+        for pt in pattern_templates:
+            slots: dict[str, Any] = getattr(pt, "role_slots", {}) or {}
+            if not slots:
+                continue
+            slot_desc = ", ".join(
+                f'{slot}={"|".join(types)}' for slot, types in slots.items() if types
+            )
+            lines.append(f"- {pt.name}: {slot_desc}")
+        if not lines:
+            return ""
+        joined = "\n".join(lines)
+        return (
+            "\nWORKFLOW MOTIFS (structural patterns from the knowledge graph matching this "
+            "intent — use as a guide for which node categories to combine; do NOT add nodes "
+            "solely to satisfy a motif, only include nodes the request actually needs):\n"
             f"{joined}\n"
         )
 
@@ -429,7 +491,13 @@ class DrafterService:
         except Exception as e:
             raise ExecutionError(f"WorkflowSchema 빌드 실패: {e}", code="E_DRAFT_PARSE")
 
-    def _build(self, draft: _DraftResponse, candidates: list[NodeConfig], owner_user_id: UUID) -> WorkflowSchema:
+    def _build(
+        self,
+        draft: _DraftResponse,
+        candidates: list[NodeConfig],
+        owner_user_id: UUID,
+        dropped_sink: list[str] | None = None,
+    ) -> WorkflowSchema:
         try:
             node_map = {n.node_type: n for n in candidates}
             nodes: list[NodeInstance] = []
@@ -437,10 +505,15 @@ class DrafterService:
             for raw in draft.nodes:
                 nc = node_map.get(raw.node_type)
                 if nc is None:
-                    raise ExecutionError(
-                        f"후보 목록에 없는 node_type: {raw.node_type}",
-                        code="E_UNKNOWN_NODE_TYPE",
-                    )
+                    # 후보에 없는 node_type은 하드페일(E_UNKNOWN_NODE_TYPE) 대신 drop+경고로 degrade
+                    # (#378 후속 B). 즉시 죽으면 재시도 루프(retriever 재검색)가 돌 기회가 없다.
+                    # 떨군 노드를 참조하는 엣지는 아래 instance_id_map 미존재로 자연히 스킵되고,
+                    # 누락된 능력은 QA 의도-노드 게이트(missing_capabilities)가 잡아 재시도를 유발한다.
+                    # 버린 node_type은 sink에 기록 → 재시도 retriever가 결정적으로 재검색(리뷰 #2).
+                    _logger.warning("후보 목록에 없는 node_type drop (degrade): %s", raw.node_type)
+                    if dropped_sink is not None:
+                        dropped_sink.append(raw.node_type)
+                    continue
                 if raw.node_type in instance_id_map:
                     raise ExecutionError(
                         f"node_type 중복 사용 불가: {raw.node_type}",
