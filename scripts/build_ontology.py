@@ -18,6 +18,18 @@ import asyncio
 import os
 from typing import Any
 
+# 스킬 BINDS Cypher는 라이브 경로(neo4j_skill_projector.py)를 단일 출처로 재사용 — 복붙 drift 방지
+# (ADR-0026 Phase 2b). 배치 backfill 헬퍼와 publish 훅이 동일 Cypher를 공유한다.
+from ai_agent.adapters.ontology.neo4j_skill_projector import (
+    _BIND_AI_NODES as _BIND_SKILL_AI_NODES,
+)
+from ai_agent.adapters.ontology.neo4j_skill_projector import (
+    _BIND_CONNECTION_NODES as _BIND_SKILL_CONNECTION_NODES,
+)
+from ai_agent.adapters.ontology.neo4j_skill_projector import (
+    _RESET_BINDS as _RESET_SKILL_BINDS,
+)
+
 # 멱등 스키마 제약/인덱스 (ADR-0026 §1.2). CREATE ... IF NOT EXISTS 라 반복 안전.
 CONSTRAINTS: tuple[str, ...] = (
     "CREATE CONSTRAINT node_type_unique IF NOT EXISTS FOR (n:Node) REQUIRE n.node_type IS UNIQUE",
@@ -42,29 +54,9 @@ MERGE (c:Connection {provider: $provider})
 MERGE (n)-[:REQUIRES]->(c)
 """
 
-# ── 스킬 BINDS 투영 (ADR-0026 Phase 2b) ────────────────────────────────────────
-# 라이브 경로는 publish 훅(skills_marketplace.PublishSkillUseCase → Neo4jSkillProjector)
-# incremental upsert. 본 헬퍼는 동일 Cypher로 배치 backfill(스킬 소스 주입 시)을 지원한다.
-# Cypher는 ai_agent/adapters/ontology/neo4j_skill_projector.py와 동일 의미를 유지한다.
-_RESET_SKILL_BINDS = """
-MERGE (s:Skill {id: $skill_id})
-SET s.tier = $tier, s.audience = $tier
-WITH s
-OPTIONAL MATCH (s)-[b:BINDS]->()
-DELETE b
-"""
-
-_BIND_SKILL_AI_NODES = """
-MATCH (s:Skill {id: $skill_id})
-MATCH (n:Node {category: 'ai'})
-MERGE (s)-[:BINDS]->(n)
-"""
-
-_BIND_SKILL_CONNECTION_NODES = """
-MATCH (s:Skill {id: $skill_id})
-MATCH (n:Node)-[:REQUIRES]->(:Connection {provider: $provider})
-MERGE (s)-[:BINDS]->(n)
-"""
+# 스킬 BINDS 투영 (ADR-0026 Phase 2b) — Cypher 상수는 위에서 라이브 경로(neo4j_skill_projector)
+# 를 단일 출처로 import. 라이브는 publish 훅(PublishSkillUseCase → Neo4jSkillProjector) incremental
+# upsert, 본 헬퍼는 동일 Cypher로 배치 backfill(스킬 소스 주입 시)을 지원한다.
 
 
 async def apply_constraints(session: Any) -> None:

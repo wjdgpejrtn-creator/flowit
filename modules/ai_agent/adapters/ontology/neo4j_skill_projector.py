@@ -38,8 +38,10 @@ class Neo4jSkillProjector(SkillOntologyProjector):
     `Neo4jOntologyAdapter`(읽기)와 동일하게 **요청마다 driver 생성·close** 한다 — Modal ASGI
     앱에서 driver를 `@modal.enter`에 1회 만들면 boot≠request 이벤트루프 미스매치로 hang하는
     사고(composer_modal_per_request_engine)를 피하기 위함. 연결 정보는 `NEO4J_URI` /
-    `NEO4J_USERNAME` / `NEO4J_PASSWORD` 환경변수에서 읽는다(하드코딩 금지, GCP secret
-    `neo4j-*` → Modal `load_secrets_to_env` 런타임 주입).
+    `NEO4J_USERNAME` / `NEO4J_PASSWORD` 환경변수에서 읽는다(하드코딩 금지). 이 어댑터의
+    소비자(publish 훅)는 api_server=Cloud Run에서 돌므로 GCP secret `neo4j-*`는 terraform
+    `secret_env`로 주입된다(composer/skills-builder Modal 앱의 `load_secrets_to_env` 경로와
+    구분 — ADR-0026 secret 2갈래).
 
     skills_marketplace 도메인 포트를 구현하지만 Neo4j 호출 어댑터라 ai_agent가 보유한다
     (ADR-0013 EmbedderPort 예외 패턴). `ai_agent → skills_marketplace.domain.value_objects`
@@ -64,7 +66,8 @@ class Neo4jSkillProjector(SkillOntologyProjector):
             return self._driver_factory()
         if not self._uri:
             raise RuntimeError(
-                "NEO4J_URI 미설정 — neo4j-uri secret을 load_secrets_to_env로 주입 필요 (ADR-0026)"
+                "NEO4J_URI 미설정 — neo4j-uri secret을 주입 필요"
+                " (api_server=Cloud Run terraform secret_env, ADR-0026)"
             )
         from neo4j import AsyncGraphDatabase  # noqa: PLC0415 — neo4j는 선택 의존(extras), lazy import
 
