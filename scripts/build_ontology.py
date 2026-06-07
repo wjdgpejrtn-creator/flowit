@@ -79,6 +79,23 @@ _PATTERNS: tuple[dict, ...] = (
     },
 )
 
+# CAN_FOLLOW 노드 호환 엣지 (ADR-0026 §4.2a) — output↔input 휴리스틱.
+# (A)-[:CAN_FOLLOW]->(B) ⟺ A의 output 속성명 ∩ B의 **required** input 속성명 ≠ ∅ 且 B≠trigger.
+# 근거: B의 required 입력 = 본질적 데이터 의존. output명 일치 = A가 B가 꼭 필요로 하는 걸 생산.
+#   - "required"로 좁혀 우연한 비필수 명칭 충돌(예: 공통 'headers')을 배제(실측 95→55 엣지).
+#   - 트리거는 워크플로우 진입점이라 선행자가 없으므로 타깃에서 제외.
+# 한계(의도적): 명칭 기반이라 필드명이 다른 의미 흐름(ai 'content'→email 'body')은 누락. expand의
+# 타깃은 의미검색이 놓치는 글루/transform/control 노드 갭이라 OK. confidence(겹친 required 수)는
+# §6.3 큐레이션·실행로그 마이닝 후속 보정의 시드. 전 재계산이므로 투영 전 기존 CAN_FOLLOW를 리셋.
+_RESET_CAN_FOLLOW = "MATCH (:Node)-[r:CAN_FOLLOW]->(:Node) DELETE r"
+
+_MERGE_CAN_FOLLOW = """
+MATCH (a:Node {node_type: $from_type})
+MATCH (b:Node {node_type: $to_type})
+MERGE (a)-[r:CAN_FOLLOW]->(b)
+SET r.confidence = $confidence
+"""
+
 # 스킬 BINDS 투영 (ADR-0026 Phase 2b) — Cypher 상수는 위에서 라이브 경로(neo4j_skill_projector)
 # 를 단일 출처로 import. 라이브는 publish 훅(PublishSkillUseCase → Neo4jSkillProjector) incremental
 # upsert, 본 헬퍼는 동일 Cypher로 배치 backfill(스킬 소스 주입 시)을 지원한다.
@@ -104,6 +121,47 @@ async def project_patterns(session: Any) -> int:
                 slot=role["slot"],
             )
     return len(_PATTERNS)
+
+
+def _output_prop_names(defn: Any) -> set[str]:
+    return set((getattr(defn, "output_schema", None) or {}).get("properties", {}).keys())
+
+
+def _required_input_names(defn: Any) -> set[str]:
+    return set((getattr(defn, "input_schema", None) or {}).get("required", []))
+
+
+def compute_can_follow_edges(node_defs: list[Any]) -> list[tuple[str, str, int]]:
+    """CAN_FOLLOW 엣지 (from_type, to_type, confidence)를 휴리스틱으로 계산 (순수, DB 불필요).
+
+    confidence = A.output 속성명 ∩ B.required-input 속성명의 크기. B가 trigger면 제외.
+    """
+    edges: list[tuple[str, str, int]] = []
+    for a in node_defs:
+        out_names = _output_prop_names(a)
+        if not out_names:
+            continue
+        for b in node_defs:
+            if a.node_type == b.node_type or b.category == "trigger":
+                continue
+            overlap = out_names & _required_input_names(b)
+            if overlap:
+                edges.append((a.node_type, b.node_type, len(overlap)))
+    return edges
+
+
+async def project_can_follow(session: Any, node_defs: list[Any]) -> int:
+    """카탈로그 CAN_FOLLOW 호환 엣지를 투영 (ADR-0026 §4.2a). 반환: 투영한 엣지 수.
+
+    정적 카탈로그 전 재계산이므로 기존 CAN_FOLLOW를 먼저 리셋(stale 제거) 후 MERGE.
+    """
+    edges = compute_can_follow_edges(node_defs)
+    await session.run(_RESET_CAN_FOLLOW)
+    for from_type, to_type, confidence in edges:
+        await session.run(
+            _MERGE_CAN_FOLLOW, from_type=from_type, to_type=to_type, confidence=confidence
+        )
+    return len(edges)
 
 
 async def project_catalog(session: Any, node_defs: list[Any]) -> int:
@@ -177,10 +235,14 @@ async def main() -> None:
             await apply_constraints(session)
             count = await project_catalog(session, node_defs)
             pattern_count = await project_patterns(session)
+            can_follow_count = await project_can_follow(session, node_defs)
     finally:
         await driver.close()
 
-    print(f"[build_ontology] 제약 {len(CONSTRAINTS)}건 적용 + 노드 {count}건 + 패턴 {pattern_count}건 투영 완료")
+    print(
+        f"[build_ontology] 제약 {len(CONSTRAINTS)}건 적용 + 노드 {count}건 + 패턴 {pattern_count}건 "
+        f"+ CAN_FOLLOW {can_follow_count}엣지 투영 완료"
+    )
     # 스킬 BINDS는 publish 훅(PublishSkillUseCase → Neo4jSkillProjector)이 incremental upsert로
     # 라이브 처리한다(ADR-0026 Phase 2b 완료). 배치 backfill이 필요하면 project_skills()에 DB
     # 스킬 소스를 주입한다(본 import-only main은 DB 비의존이라 미수행). CAN_FOLLOW 추론은 박아름 §4.2.

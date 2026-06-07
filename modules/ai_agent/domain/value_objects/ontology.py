@@ -21,15 +21,15 @@ class OntologyNode:
 class OntologySubgraph:
     """seed node_type들을 그래프로 확장한 제약된 후보 서브그래프 (ADR-0026 §4.1).
 
-    Phase 1: seed 노드 + 1-hop 구조 이웃(같은 category sibling). drafter가 이 집합
-    **밖의** node_type을 생성하지 못하게 제약하는 데 쓴다(constrained generation =
-    환각 억제). Phase 2에서 CAN_FOLLOW 호환 edge로 확장된다.
+    seed 노드 + 1-hop CAN_FOLLOW 후행 노드(ADR-0026 §4.2a). Composer가 이 후행 노드를
+    검색 후보에 **ADD 보강**해(retriever `_expand_can_follow`) 의미검색이 놓치는 글루/
+    transform/control 노드를 drafter가 첫 초안부터 쓰게 한다(환각·누락 억제). Phase 1의
+    category sibling 근사를 CAN_FOLLOW 호환 edge로 교체했다.
     """
 
     seeds: tuple[str, ...]
     nodes: tuple[OntologyNode, ...]
-    # node_type → 그래프상 후행 가능 node_type (Phase 1은 category sibling, Phase 2에서
-    # CAN_FOLLOW로 대체/보강). drafter 엣지 제약의 화이트리스트.
+    # node_type → 그래프상 후행 가능 node_type (CAN_FOLLOW 1-hop 순방향 이웃).
     adjacency: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def allowed_node_types(self) -> frozenset[str]:

@@ -736,6 +736,36 @@ class LangGraphOrchestrator:
         seen = {c.node_id for c in base}
         return base + [e for e in extra if e.node_id not in seen]
 
+    async def _expand_can_follow(self, candidates: list[NodeConfig]) -> list[NodeConfig]:
+        """검색 후보의 CAN_FOLLOW 후행 노드를 온톨로지에서 회수해 NodeConfig로 그라운딩 (§4.2a).
+
+        ADD 보강 전용 — 반환값은 호출부 ``_dedup_union``으로 기존 후보에 합쳐진다(이미 있는
+        node_type은 자연 dedup). 온톨로지 미주입/실패/미투영은 전부 빈 리스트로 비치명적 degrade
+        (매 compose가 Neo4j 왕복 1회를 더 하지만, 캐시 없는 per-request driver 비용은 수십 ms).
+        """
+        if self._ontology_retriever is None or not candidates:
+            return []
+        grounder = getattr(self._node_registry, "list_by_node_types", None)
+        if grounder is None:  # 구버전 NodeRegistry — 그라운딩 불가
+            return []
+        seeds = [c.node_type for c in candidates]
+        seed_set = set(seeds)
+        # 확장 전 과정을 best-effort로 감싼다 — Neo4j 미투영·왕복 실패·그라운딩 실패는 전부
+        # 빈 리스트로 비치명적 degrade(검색 후보만으로 진행). ADD 보강이라 누락돼도 무해.
+        try:
+            subgraph = await self._ontology_retriever.expand_candidates(seeds)
+            # adjacency 값(후행 node_type)에서 이미 후보인 것을 빼고 그라운딩 대상만 추린다.
+            successors = sorted(
+                {nt for succ in subgraph.adjacency.values() for nt in succ if nt not in seed_set}
+            )
+            if not successors:
+                return []
+            grounded = await grounder(successors)
+            return list(grounded) if grounded else []
+        except Exception as exc:
+            _logger.warning("CAN_FOLLOW 확장 실패 (후보 보강 생략): %s", exc)
+            return []
+
     # 6. retriever_node — 노드 후보 검색 + 구조 노드 합산 + 개인 패턴 RAG 회수
     async def _retriever_node(self, state: _State) -> dict:
         t0 = time.monotonic()
@@ -749,10 +779,6 @@ class LangGraphOrchestrator:
         # GraphRAG — ADR-0026 Phase 2a: match_patterns로 :Pattern 모티프를 회수해 drafter
         # 프롬프트에 주입한다(per-request driver). OntologyRetrieverPort 미주입/실패 시 기존
         # pgvector 단독 경로로 폴백(non-fatal). ETL 시드 전까지는 빈 리스트가 정상.
-        # ⚠️ expand_candidates(서브그래프)는 호출하지 않는다 — 후보를 subtract 필터링하면
-        # ETL stale 시 "Neo4j 미투영 유효 노드"가 조용히 제거되는 역효과가 있고, ADD 방식
-        # 보강은 CAN_FOLLOW 호환 edge(박아름 §4.2)가 있어야 의미가 있다. 소비처가 생기기
-        # 전까지 매 compose Neo4j 왕복을 만들지 않기 위해 호출 자체를 보류한다.
         pattern_templates: list[Any] | None = None
         if self._ontology_retriever is not None:
             try:
@@ -771,6 +797,12 @@ class LangGraphOrchestrator:
         # (#378 후속 A). 관련성 무관하게 항상 후보에 선제 합산해 첫 초안부터 사용 가능하게 한다.
         # node_id 기준 dedup. 조회 실패는 비치명적 — 검색 후보만으로 진행한다.
         candidates = self._dedup_union(raw_candidates, await self._fetch_structural_candidates())
+
+        # GraphRAG CAN_FOLLOW 확장 (ADR-0026 §4.2a) — 검색 후보의 후행 가능 노드를 온톨로지에서
+        # 회수해 **ADD 보강**한다. 의미검색이 놓치는 글루/transform/control 노드(예: csv_parse 뒤
+        # csv_build, file_read 뒤 json_extract)를 첫 초안부터 쓸 수 있게 해 환각·누락을 줄인다.
+        # ADD 전용(subtract 금지) — ETL stale 시에도 유효 후보를 지우지 않는다. 비치명적.
+        candidates = self._dedup_union(candidates, await self._expand_can_follow(candidates))
 
         # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
         # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는

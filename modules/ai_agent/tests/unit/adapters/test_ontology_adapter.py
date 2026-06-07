@@ -46,24 +46,29 @@ class _FakeDriver:
 
 @pytest.mark.asyncio
 async def test_expand_candidates_maps_records_to_subgraph():
+    # CAN_FOLLOW 순방향 이웃을 successors 맵으로 회수 (ADR-0026 §4.2a).
     records = [
         {
-            "node_type": "slack_send", "category": "messaging", "risk_level": "medium",
-            "requires": ["slack"], "siblings": ["discord_send", "slack_send"],
+            "node_type": "csv_parse", "category": "transform", "risk_level": "low",
+            "requires": [],
+            "successors": [
+                {"node_type": "csv_build", "category": "transform", "risk_level": "low"},
+                {"node_type": "csv_parse", "category": "transform", "risk_level": "low"},  # self
+                {"node_type": None, "category": None, "risk_level": None},  # null succ(이웃 없음)
+            ],
         }
     ]
     driver = _FakeDriver(records)
     adapter = Neo4jOntologyAdapter(uri="neo4j+s://x", driver_factory=lambda: driver)
 
-    sg = await adapter.expand_candidates(["slack_send"])
+    sg = await adapter.expand_candidates(["csv_parse"])
 
-    assert sg.seeds == ("slack_send",)
-    seed = next(n for n in sg.nodes if n.node_type == "slack_send")
-    assert seed.requires == ("slack",)
-    assert seed.category == "messaging"
-    # 자기 자신은 sibling에서 제거, discord는 후보로 포함
-    assert sg.adjacency["slack_send"] == ("discord_send",)
-    assert sg.allowed_node_types() == frozenset({"slack_send", "discord_send"})
+    assert sg.seeds == ("csv_parse",)
+    seed = next(n for n in sg.nodes if n.node_type == "csv_parse")
+    assert seed.category == "transform"
+    # 자기 자신·null succ는 제거, csv_build만 후행 노드로 포함
+    assert sg.adjacency["csv_parse"] == ("csv_build",)
+    assert sg.allowed_node_types() == frozenset({"csv_parse", "csv_build"})
     assert driver.closed is True  # per-request driver는 반드시 close
 
 
