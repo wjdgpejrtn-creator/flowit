@@ -99,7 +99,7 @@ from skills_marketplace.application.use_cases import (
 
 | 유스케이스 | Input → Output | 설명 |
 |-----------|----------------|------|
-| `CreateDraftSkillUseCase` | `owner_user_id, name, description, node_spec_staging, embedding?, skill_document_uri? → UUID` | Skills Builder(③)가 추출 결과를 personal DRAFT로 생성 (ADR-0020 ②e). NodeDefinition 미생성(① 무관) — 노드 스펙은 `node_spec_staging` 보관. wizard 확정 단계 / one-shot 공통 백엔드 |
+| `CreateDraftSkillUseCase` | `owner_user_id, name, description, node_spec_staging, embedding?, skill_document_uri?, instructions?, composer_instructions?, source_document_id? → UUID` | Skills Builder(③)가 추출 결과를 personal DRAFT로 생성 (ADR-0020 ②e). NodeDefinition 미생성(① 무관) — 노드 스펙은 `node_spec_staging` 보관. `instructions`(SKILL.md)·`composer_instructions`(COMPOSER.md) 중 하나라도 있으면 `doc_store`로 GCS 2-md 저장(ADR-0024 D3/D4). wizard 확정 단계 / one-shot 공통 백엔드 |
 | `PromoteToTeamUseCase` | `personal_skill_id, team_id → UUID` | 개인 → 팀 승격 (복제: 메타 승계 + DRAFT 재심사 + promoted_from 역추적 + 원본 promoted_to_team_id 마킹) |
 | `PromoteToCompanyUseCase` | `team_skill_id → UUID` | 팀 → 전사 승격 (복제: 동일 정책, 원본 promoted_to_company_id 마킹) |
 | `SearchSkillsUseCase` | `query_embedding, scope, limit, lifecycle_state=PUBLISHED → list[Skill]` | 하이브리드 검색 — ai_agent Composer 호출 (repo.search 위임). 기본 PUBLISHED만(ADR-0020 (b), 미검토 오염 방지) |
