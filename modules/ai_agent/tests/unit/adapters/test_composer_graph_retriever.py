@@ -291,16 +291,10 @@ class TestRetrieverPersonalRecall:
         assert len(result["node_candidates"]) == 1
 
 
-class TestRetrieverGraphRAG:
-    """ADR-0026 Phase 2 — OntologyRetrieverPort.expand_candidates 연동 테스트."""
-
-    def _make_subgraph(self, allowed_types: set[str]):
-        from ai_agent.domain.value_objects.ontology import OntologyNode, OntologySubgraph
-
-        nodes = tuple(
-            OntologyNode(node_type=t, category="test", risk_level="", requires=()) for t in allowed_types
-        )
-        return OntologySubgraph(seeds=tuple(allowed_types), nodes=nodes, adjacency={})
+class TestRetrieverExpandDeferred:
+    """ADR-0026 Phase 2a — expand_candidates(서브그래프)는 소비처(CAN_FOLLOW 필터, 박아름 §4.2)가
+    생기기 전까지 호출 보류한다. retriever는 모티프만 그라운딩하고, 매 compose Neo4j 왕복을
+    만들지 않는다(dead round-trip 제거)."""
 
     def _orchestrator_with_retriever(self, search_result, ontology_retriever):
         from nodes_graph.domain.services.graph_validator import GraphValidator
@@ -320,37 +314,32 @@ class TestRetrieverGraphRAG:
         )
 
     @pytest.mark.asyncio
-    async def test_subgraph_stored_in_state(self):
-        """expand_candidates 결과가 state에 ontology_subgraph로 저장된다."""
+    async def test_expand_candidates_not_called(self):
+        """ontology_retriever가 주입돼도 expand_candidates는 호출하지 않는다 (defer)."""
         candidate = _node_config(name="slack_send")
         candidate.__dict__["node_type"] = "slack_send"
 
-        subgraph = self._make_subgraph({"slack_send"})
         ontology_retriever = AsyncMock()
-        ontology_retriever.expand_candidates = AsyncMock(return_value=subgraph)
+        ontology_retriever.expand_candidates = AsyncMock()
+        ontology_retriever.match_patterns = AsyncMock(return_value=[])
 
         oc = self._orchestrator_with_retriever([candidate], ontology_retriever)
         result = await oc._retriever_node(_make_state())
 
-        assert result["ontology_subgraph"] is subgraph
-        ontology_retriever.expand_candidates.assert_called_once()
+        ontology_retriever.expand_candidates.assert_not_called()
+        # 서브그래프는 state에 더 이상 저장되지 않는다(소비처 없음).
+        assert "ontology_subgraph" not in result
 
     @pytest.mark.asyncio
-    async def test_subgraph_stored_candidates_not_filtered(self):
-        """expand_candidates 결과는 state에 저장되나 pgvector 후보를 subtract 필터링하지 않는다.
-
-        ETL stale 시 "Neo4j 미투영 유효 노드"가 조용히 제거되는 역효과 방지.
-        constrained generation은 "Only use nodes from the provided candidate list" 프롬프트가 담당.
-        """
+    async def test_candidates_never_filtered(self):
+        """pgvector 후보는 온톨로지로 subtract 필터링되지 않는다 — ETL stale 노드도 보존."""
         candidate_a = _node_config(name="slack_send")
         candidate_a.__dict__["node_type"] = "slack_send"
         candidate_b = _node_config(name="new_node_not_in_neo4j")
         candidate_b.__dict__["node_type"] = "new_node_not_in_neo4j"
 
-        # subgraph가 slack_send만 포함해도(new_node_not_in_neo4j는 ETL stale) 필터링 안 함.
-        subgraph = self._make_subgraph({"slack_send"})
         ontology_retriever = AsyncMock()
-        ontology_retriever.expand_candidates = AsyncMock(return_value=subgraph)
+        ontology_retriever.match_patterns = AsyncMock(return_value=[])
 
         oc = self._orchestrator_with_retriever([candidate_a, candidate_b], ontology_retriever)
         result = await oc._retriever_node(_make_state())
@@ -358,32 +347,6 @@ class TestRetrieverGraphRAG:
         types_in_result = {c.node_type for c in result["node_candidates"]}
         assert "slack_send" in types_in_result
         assert "new_node_not_in_neo4j" in types_in_result  # stale여도 보존
-
-    @pytest.mark.asyncio
-    async def test_expand_failure_fallback_to_pgvector(self):
-        """OntologyRetriever 호출 실패 시 pgvector 결과만으로 폴백 — 에러 없음."""
-        candidate = _node_config(name="slack_send")
-        candidate.__dict__["node_type"] = "slack_send"
-
-        ontology_retriever = AsyncMock()
-        ontology_retriever.expand_candidates = AsyncMock(side_effect=Exception("Neo4j 연결 실패"))
-
-        oc = self._orchestrator_with_retriever([candidate], ontology_retriever)
-        result = await oc._retriever_node(_make_state())
-
-        assert result.get("error") is None
-        assert result["ontology_subgraph"] is None
-        assert len(result["node_candidates"]) >= 1
-
-    @pytest.mark.asyncio
-    async def test_no_ontology_retriever_uses_pgvector_only(self):
-        """ontology_retriever 미주입 시 기존 pgvector 단독 경로 — subgraph None."""
-        candidate = _node_config(name="slack_send")
-        oc = self._orchestrator_with_retriever([candidate], ontology_retriever=None)
-        result = await oc._retriever_node(_make_state())
-
-        assert result["ontology_subgraph"] is None
-        assert len(result["node_candidates"]) >= 1
 
 
 class TestRetrieverMotifGrounding:
@@ -416,9 +379,6 @@ class TestRetrieverMotifGrounding:
         """match_patterns 결과가 state에 pattern_templates로 저장된다."""
         pattern = self._make_pattern("quality_gate_loop", {"generator": ("llm_generate",)})
         ontology_retriever = AsyncMock()
-        ontology_retriever.expand_candidates = AsyncMock(
-            return_value=AsyncMock(nodes=(), seeds=(), adjacency={})
-        )
         ontology_retriever.match_patterns = AsyncMock(return_value=[pattern])
 
         oc = self._orchestrator_with_retriever(ontology_retriever)
@@ -431,9 +391,6 @@ class TestRetrieverMotifGrounding:
     async def test_match_patterns_failure_is_non_fatal(self):
         """match_patterns 실패 시 pattern_templates=None, 노드 후보는 정상 반환."""
         ontology_retriever = AsyncMock()
-        ontology_retriever.expand_candidates = AsyncMock(
-            return_value=AsyncMock(nodes=(), seeds=(), adjacency={})
-        )
         ontology_retriever.match_patterns = AsyncMock(side_effect=Exception("Neo4j 오류"))
 
         oc = self._orchestrator_with_retriever(ontology_retriever)
@@ -455,9 +412,6 @@ class TestRetrieverMotifGrounding:
     async def test_empty_patterns_stored_as_empty_list(self):
         """:Pattern 노드 없으면 빈 리스트가 저장된다 (ETL 시드 전 정상 동작)."""
         ontology_retriever = AsyncMock()
-        ontology_retriever.expand_candidates = AsyncMock(
-            return_value=AsyncMock(nodes=(), seeds=(), adjacency={})
-        )
         ontology_retriever.match_patterns = AsyncMock(return_value=[])
 
         oc = self._orchestrator_with_retriever(ontology_retriever)

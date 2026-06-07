@@ -167,9 +167,9 @@ class _State(TypedDict):
     # 컨펌 게이트 신뢰 매니페스트 (영역 C)
     workflow_explanation: WorkflowExplanation | None
     offered_skill_ids: list[str]            # 1차에 제시한 옵션 skill_id 집합 (2차 bind 멤버십 검증 — IDOR 차단)
-    # GraphRAG — ADR-0026 Phase 2
-    ontology_subgraph: Any | None           # OntologySubgraph (순환 import 회피 위해 Any)
-    pattern_templates: list[Any] | None     # list[PatternTemplate] — 모티프 그라운딩 (ADR-0026 Phase 2)
+    # GraphRAG — ADR-0026 Phase 2a (모티프 그라운딩). expand_candidates(서브그래프) 소비는
+    # CAN_FOLLOW 호환 필터(박아름 §4.2) 머지 후 ADD 방식으로 배선 예정 — 그 전까지 호출 보류.
+    pattern_templates: list[Any] | None     # list[PatternTemplate] — 모티프 그라운딩 (ADR-0026 Phase 2a)
 
 
 class LangGraphOrchestrator:
@@ -746,27 +746,13 @@ class LangGraphOrchestrator:
         except Exception as exc:
             return {"error": f"retriever 실패: {exc}"}
 
-        # GraphRAG — ADR-0026 Phase 2: pgvector seed → ontology graph expand → subgraph 저장.
-        # OntologyRetrieverPort 미주입 시 기존 pgvector 단독 경로로 폴백(non-fatal).
-        # ⚠️ subtract 필터(pgvector 결과를 allowed로 거름) 미적용 — ETL stale 시 "Neo4j 미투영
-        # 유효 노드"가 정상 후보임에도 조용히 제거되는 역효과 방지. constrained generation은
-        # 후보 목록 자체("Only use nodes from the provided candidate list" 프롬프트)가 1차 가드.
-        # CAN_FOLLOW 기반 호환 필터(박아름 §4.2) 머지 후 ADD 방식으로 보강 예정.
-        ontology_subgraph: Any = None
-        if self._ontology_retriever is not None:
-            try:
-                seed_types = [c.node_type for c in raw_candidates]
-                ontology_subgraph = await self._ontology_retriever.expand_candidates(seed_types)
-                _logger.debug(
-                    "GraphRAG expand: seeds=%d → subgraph nodes=%d",
-                    len(seed_types), len(ontology_subgraph.nodes),
-                )
-            except Exception as exc:
-                _logger.warning("OntologyRetriever expand_candidates 실패 (pgvector 폴백): %s", exc)
-                ontology_subgraph = None
-
-        # 모티프 그라운딩 — match_patterns로 :Pattern 모티프를 회수해 drafter 프롬프트에 주입.
-        # ETL 시드 전까지는 빈 리스트가 정상(non-fatal). expand_candidates와 동일한 per-request driver.
+        # GraphRAG — ADR-0026 Phase 2a: match_patterns로 :Pattern 모티프를 회수해 drafter
+        # 프롬프트에 주입한다(per-request driver). OntologyRetrieverPort 미주입/실패 시 기존
+        # pgvector 단독 경로로 폴백(non-fatal). ETL 시드 전까지는 빈 리스트가 정상.
+        # ⚠️ expand_candidates(서브그래프)는 호출하지 않는다 — 후보를 subtract 필터링하면
+        # ETL stale 시 "Neo4j 미투영 유효 노드"가 조용히 제거되는 역효과가 있고, ADD 방식
+        # 보강은 CAN_FOLLOW 호환 edge(박아름 §4.2)가 있어야 의미가 있다. 소비처가 생기기
+        # 전까지 매 compose Neo4j 왕복을 만들지 않기 위해 호출 자체를 보류한다.
         pattern_templates: list[Any] | None = None
         if self._ontology_retriever is not None:
             try:
@@ -812,7 +798,6 @@ class LangGraphOrchestrator:
         return {
             "node_candidates": candidates,
             "personal_patterns": personal_patterns,
-            "ontology_subgraph": ontology_subgraph,
             "pattern_templates": pattern_templates,
             "collected_frames": frames,
         }
