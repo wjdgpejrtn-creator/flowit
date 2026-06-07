@@ -1,7 +1,7 @@
 # ADR-0026: 온톨로지 기반 그래프 DB (Neo4j AuraDB) + GraphRAG — composer/skill-builder 품질 향상 및 워크플로우 모티프 그라운딩
 
-- **Status**: Proposed
-- **Date**: 2026-06-06
+- **Status**: Accepted (Phase 0/1/2a/2b 구현·머지 + §6.5 하니스 검증 완료, 2026-06-08 — §6 후속 고도화 진행 중)
+- **Date**: 2026-06-06 (갱신 2026-06-08)
 - **Deciders**: @dhwang0803 (조장 — 발의, execution_engine/REQ-007) + 신정혜 (REQ-004 ai_agent Composer) + @billionaireahreum (박아름 — REQ-002/003 nodes_graph, REQ-013 skills_marketplace)
 - **Tags**: area/ai_agent, area/skills_marketplace, area/nodes_graph, layer/adapter, infra/graph-db, req/004, req/013
 
@@ -85,8 +85,10 @@ vector seed (pgvector top-k)
 |------|------|------|------|
 | **0 (하드 선행)** | `GraphValidator._detect_cycles` 완화 — non-trivial SCC가 condition 노드 ≥1개면 허용(유한성은 엔진 max-iter 가드), ADR-0023 §L3 후속 | 황대원 선반영 **PR #392** (박아름 sign-off) | #359 ✅ |
 | **1** | Neo4j AuraDB + 온톨로지 무손실 edge(노드/연결) + `OntologyRetrieverPort`/어댑터 + `build_ontology.py` + expand 1-hop | ✅ 황대원 **PR #393** (AuraDB 라이브검증·53노드·secret 3종·IAM) | — |
-| **2a** | `:Pattern` 모티프(`quality_gate_loop`) + `CAN_FOLLOW`(노드 I/O 파생) + drafter grounding + retriever 배선 | **신정혜** (composer grounding — 박아름 비의존, 자력 완결) | Phase 0, 1 |
+| **2a** | `:Pattern` 모티프(`quality_gate_loop`) + drafter grounding + retriever 배선 ✅ **신정혜 #395** / `CAN_FOLLOW`(노드 I/O 파생) + `expand_candidates` 소비 ✅ **황대원 #410**(capped, 하니스 검증 — 정혜 이관 대기) | 신정혜 + 황대원 선반영 | Phase 0, 1 |
 | **2b** | 스킬 `(:Skill)-[:BINDS]->(:Node)` ETL + publish 훅 — ✅ **박아름 구현**: `SkillOntologyProjector` Port(skills_marketplace) + `Neo4jSkillProjector`(ai_agent/ontology) + `PublishSkillUseCase` non-fatal 훅 + `build_ontology.project_skill(s)` 배치 backfill 헬퍼. D2 정합 모델 A(ai 노드 + connection 노드 BINDS) | **박아름** (skill-builder grounding, 별개 소비자) | Phase 1 |
+| **2.5 (하니스)** | §6.5 평가 하니스 — 골든셋 32건 + 순수 지표 + `run_eval`/`check_snapshot`(`/ontology-eval`) ✅ **황대원 #409** | 황대원 | Phase 1 |
+| **고도화 (후속, 진행 확정)** | §6.1 모티프 라이브러리 확장(branch/fan-out/retry/approval) + §6.2 retrieval 튜닝 + §6.3 CAN_FOLLOW 신뢰도(실행로그 마이닝) + §6.4 provenance. **의도된 고도화 = 다양한 control-flow 1급 생성** → 선택 아닌 커밋 후속(plan §6/§8) | 신정혜 주도(황대원 리뷰) | Phase 2a |
 | **3** | Neo4j 네이티브 벡터 인덱스로 하이브리드 단일쿼리 (선택) | 황대원 | Phase 2 |
 
 ## Consequences
@@ -96,6 +98,12 @@ vector seed (pgvector top-k)
 - 품질 게이트 루프 등 agentic 모티프를 **검증된 템플릿으로 grounding** → ADR-0023 control-flow 역량이 사용자에게 실제로 도달.
 - skills_marketplace 성장 시 `skill→node→connection→type` 멀티홉 추론으로 확장 가능(장기 제품 방향).
 - LangGraph/LangChain 생태계와 Neo4j GraphRAG 통합이 턴키(`neo4j-graphrag-python`, LlamaIndex) → 통합 비용 최소.
+
+### 측정 결과 (2026-06-08, §6.5 하니스 #409 — 위 Positive 주장의 실측 정정)
+A1 CAN_FOLLOW(#410)을 in-process before/after로 측정(골든셋 32건, Neo4j 엣지 0↔55 토글):
+- **"환각 감소" 주장은 본 규모에서 미실현** — hallucinated-edge가 **baseline 이미 0%**(`executable_node_types` #378이 진작 해결). CAN_FOLLOW가 더 줄일 헤드룸 자체가 없었다. 실현된 가치는 **motif-correctness 75→100% + 워크플로우 풍부화(3.0→3.25 노드)**.
+- **"validator retry 감소"는 단순하지 않음** — 순진한 ADD-all 확장은 **회귀**였다: 후보 풀 비대(~24→38)로 Gemma 드래프터의 structured JSON이 잘려(`Invalid JSON: EOF`) **drafter 실패 6→23, qa pass 64%→29%**. **cap**(seed=검색 상위 5 hit + 추가 ≤3)으로 수렴 → drafter 실패 9, qa pass 67.9%.
+- **교훈**: (1) 온톨로지 확장은 **ADD 무제한이 아니라 cap 필수**(작은 LLM은 후보 과다에 취약). (2) §6.5 하니스가 **배포 전 회귀를 잡음** — "측정 없는 고도화는 추측"(plan §6 방법론). (3) 단일 샘플이라 일부 개선은 LLM 노이즈 범위 — 반복 측정으로 de-noise 권장.
 
 ### Negative / Trade-offs
 - **신규 인프라 1종**(AuraDB) + GCP secret 3종 + Modal `load_secrets_to_env` 매핑. 운영 표면 증가.
@@ -108,6 +116,7 @@ vector seed (pgvector top-k)
 - **Modal per-request driver**: composer가 Modal ASGI라 neo4j async driver를 `@enter`에서 1회 생성하면 asyncpg와 동일하게 boot≠request 루프 미스매치로 hang 위험(`composer_modal_per_request_engine` 사고 재연). 요청마다 드라이버 생성 패턴 강제.
 - **Secret 경로 = 호스트별 분리**: AuraDB 자격은 GCP secret 3종(`neo4j-uri`/`neo4j-username`/`neo4j-password`, ✅ 생성 + `cloudsql-iam-modal` SA IAM 부여). **Modal 앱(composer/skills-builder)** 은 `boot()` `load_secrets_to_env`로 런타임 pull. **api_server(Cloud Run)** 는 terraform `secret_env` 바인딩 — PR #401에서 `NEO4J_*` 3종 + api SA `secretAccessor`(additive `iam_member`) 추가 완료. secret `:latest` 복수 공유 시 `secret_latency_bomb` 주의(버전 핀).
 - **ETL 훅**: ✅ 완료 — `PublishSkillUseCase`가 `SkillOntologyProjector`(미주입/실패 시 non-fatal)로 게시 시 `(:Skill)-[:BINDS]->(:Node)` incremental upsert. api_server DI는 `NEO4J_URI` 설정 시에만 `Neo4jSkillProjector` 주입(하위호환). **라이브 활성화(api 이미지 `ai_agent[ontology]` + `NEO4J_*` terraform 바인딩) = PR #401** — 머지+`terraform apply`+기존 스킬 `project_skills()` backfill 후 신규 게시분 자동 투영.
+- **§6 고도화 = 커밋된 후속 (선택 아님, 2026-06-08 확정)**: 의도된 고도화는 "품질검증 루프 하나"가 아니라 **retry·분기·fan-out 등 다양한 control-flow를 자연어로 1급 생성**이다. A1으로 핵심 2갈래는 충족됐으나 그것만으론 의도 미달 → **§6.1 모티프 라이브러리 확장이 능력 갭**이고 §6.2/6.3/6.4도 함께 진행한다(plan §6/§8 로드맵). 각 항목은 §6.5 하니스 before/after 게이트 통과 필수. 주도=신정혜(composer grounding), 황대원 A1 선반영분 이관 후 리뷰/하니스 조율.
 - 프로젝트 종료(2026-06-30) 일정과 별개의 **장기 제품 방향** 결정임 — staging 검증 범위는 Phase 1로 한정.
 
 ## Alternatives Considered
