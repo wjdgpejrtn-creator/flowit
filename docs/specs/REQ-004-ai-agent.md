@@ -432,6 +432,8 @@ embedding: [0.1, 0.2, ...]               # BGE-M3 768d (optional; P-2 이후 .em
 
 `RecallPersonalSkillsUseCase`는 query 임베딩과 각 entry의 description 임베딩 코사인 유사도로 top-k 반환.
 
+> **RAG 효용성 검증 기록**: 오프라인 골든·라이브 검색·주입 경로 A/B 실측은 `modules/ai_agent/tests/eval/rag_personalization/REPORT.md` 참조 (운영값 min_score 0.5 / top_k 3 근거 포함).
+
 `GCSMemoryStore`는 세션 스코프 내 중복 GCS 호출을 방지하기 위해 `_cache: dict[UUID, dict[str, bytes]]` 인메모리 캐시를 유지한다.
 
 **Debounce 정책**: `UpdateUserMemoryUseCase`는 LLM 호출 전 `.debounce.json` blob을 `if_generation_match` CAS로 원자적 선점한다 (claim-first). 마지막 claim으로부터 **5분** 이내면 선점 없이 즉시 반환. Modal 멀티 인스턴스 환경에서도 LLM 윈도우당 1회 호출을 보장하며, 루프 중간 부분쓰기 불일치를 원천 차단한다.

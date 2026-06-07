@@ -1,11 +1,12 @@
 # REQ-004 Personalization RAG 효용성 검증 — 실험 기록 종합
 
-> 이 문서는 두 개의 독립 실험으로 구성된다.
+> 이 문서는 세 개의 독립 실험으로 구성된다.
 > - **Part I (§1~7) — 오프라인 골든 스냅샷 검증**: 실제 BGE-M3(768차원) 벡터를 1회 캡처해 결정론적으로 재생, RAG 로직 자체의 효용(hit율·노이즈·게이트)을 측정. (2026-06-03)
 > - **Part II (§8) — 실적용(라이브) 테스트**: 가원 본인 user_id에 패턴을 실제 누적(GCS)하고, 라이브 `recall_skills`(Modal BGE-M3) 검색까지 end-to-end로 측정. (2026-06-05)
+> - **Part III (§9) — 주입 경로 검증**: 주입 배선(PR #373) staging 도달 후, 회수된 패턴이 composer 초안에 실제 반영되는지 ON/OFF A/B로 검증. (2026-06-07)
 >
 > 모든 수치는 실측치이며, 재현 코드는 본 디렉터리(`modules/ai_agent/tests/eval/rag_personalization/`)에 함께 있다.
-> 관련 PR: #335 (base `development`, MERGED) · 커밋 `0d66002`(harness 골격), `ef45133`(골든 스냅샷 + 점검 도구)
+> 관련 PR: #335 (base `development`, MERGED) · #371 (§8 라이브, MERGED) · 커밋 `0d66002`(harness 골격), `ef45133`(골든 스냅샷 + 점검 도구)
 
 ---
 
@@ -192,4 +193,61 @@ staging 버킷에 이미 존재하는 실유저(`bec5b780-…`, uuid5)의 누적
 
 > 라이브(실 GCS + 실 Modal BGE-M3) end-to-end 검색이 오프라인 골든과 **소수점까지 일치**(hit 100% / 노이즈 0.83 / 마진 +0.181 / distractor ∅), latency 0.32s/발화. 운영 설정 **min_score 0.5 / top_k 3**의 라이브 타당성이 확인됐다.
 
-**잔여(1번, 대원님 배선 후)**: 저장 트리거까지 거치는 실파이프라인 end-to-end 1회 → 본 절에 추가. 그 전까지 프론트 실적용 레그(RAG 주입 ON/OFF 비교)는 `supervisor.py`/`composer_graph.py` 배선이 선행돼야 측정 가능(§7 배선 현황 참조).
+**잔여(1번, 대원님 배선 후)**: 저장 트리거까지 거치는 실파이프라인 end-to-end 1회 → 본 절에 추가. ~~그 전까지 프론트 실적용 레그(RAG 주입 ON/OFF 비교)는 `supervisor.py`/`composer_graph.py` 배선이 선행돼야 측정 가능(§7 배선 현황 참조).~~ → **주입 배선은 PR #373(2026-06-05)으로 완료**됐고, 주입 ON/OFF 라이브 검증은 **§9(Part III)** 에서 수행·기록했다.
+
+---
+
+# Part III — 주입 경로 검증: 회수된 패턴이 초안에 실제 반영되는가 (§9)
+
+## 9.0 배경과 목적
+
+§8까지는 **검색(recall)** 의 라이브 충실도를 닫았다. 남은 질문은 "회수된 패턴이 composer의 **초안 프롬프트에 실제로 주입돼 결과물을 바꾸는가**"다. 주입 배선(PR #373, `composer_graph._recall_personal_patterns` → retriever 단계 회수 → `DrafterService.draft(personal_patterns=...)`)이 2026-06-07 release-sync #398로 staging에 도달했고, **agent-composer Modal v33**(commit `736aa8b`, 6/7 16:13 재배포)이 그 코드로 라이브임을 확인 후 측정했다.
+
+검증 설계는 **A/B 대조**: 동일 발화를 ①corpus 6종을 시드한 eval user(ON)와 ②corpus가 전혀 없는 무작위 user(OFF)로 각각 compose시켜, (a) 주입 관측 신호와 (b) 최종 초안 내용 차이를 본다.
+
+## 9.1 방법 (실측 환경)
+
+| 항목 | 값 |
+|------|------|
+| 호출 대상 | staging `agent-composer` Modal `/v1/agent/route` 직접 호출 (`AgentProtocolRequest`) |
+| composer 버전 | v33 = `736aa8b` (release tip, #398) — boot에서 `GCSMemoryStore`+`ModalEmbeddingAdapter` DI 확인 |
+| 발화 | "이번 주 주간 보고서 자동으로 작성해줘" (요일·시간·템플릿 언급 없음 — 의도적) |
+| ON user | eval user `1f69e012-…4c94` — §8과 동일 corpus 6종 시드 (시드 직후 라이브 recall 재실행 → §8.2 골든 수치와 재일치: hit 100% / 노이즈 0.83 / 마진 +0.181 / 0.36s/발화) |
+| OFF user | 무작위 uuid4 (`68a19083-…`) — GCS corpus 없음 |
+| 진행 | round 1(스킬 선택 대기서 정상 일시정지) → round 2 `selected_skill_id=null`(skip)로 초안 완주 |
+
+## 9.2 주입 관측 신호 (SSE, 실측)
+
+retriever 단계는 패턴 회수 시 `RationaleDeltaFrame`을 emit한다 — 외부 관측 가능한 결정적 신호.
+
+| 케이스 | round 1 SSE |
+|--------|------------|
+| **ON** | **"🧠 사용자 과거 패턴 1건 반영"** 프레임 출력 — recall 실측과 정합(해당 발화는 `report_schedule_weekly` 정확히 1건 회수) |
+| **OFF** | 🧠 프레임 **없음** (rationale은 "🔍 노드 검색 완료" 1건뿐) |
+
+→ 주입 신호가 "사용자의 GCS corpus 존재 여부"에 의해서만 발화함을 확인(상시 점등되는 가짜 신호 아님).
+
+## 9.3 초안 A/B 대조 (실측) — 패턴이 초안 내용을 바꿨다
+
+시드 패턴 원문(`report_schedule_weekly`): *"주간 업무 보고서는 **매주 금요일 오후**에 작성해 팀장에게 제출한다. 정해진 주간보고 템플릿(**이번 주 한 일 / 다음 주 계획 / 이슈**)을 사용한다."*
+
+| | **ON** (패턴 1건 주입) | **OFF** (대조군) |
+|---|---|---|
+| 스케줄 트리거 | `0 18 * * 5` = **금요일 18시** (Asia/Seoul) | `0 9 * * 1` = 월요일 9시 (일반 디폴트) |
+| 노드 구성 | schedule_trigger → google_sheets_read → **gemma_chat** → google_docs_write | schedule_trigger → http_request → rest_api → slack_notify |
+| LLM 노드 system | **"반드시 다음 템플릿을 사용해야 합니다: [이번 주 한 일 / 다음 주 계획 / 이슈]"** — 패턴 템플릿 **verbatim** | LLM 노드 자체가 없음 |
+| QA 경로 | 1차 3.0 → 2차 **10.0 통과** | 1차 2.0 → 2차 **10.0 통과** |
+
+발화에 요일·시간·템플릿이 전혀 없었으므로, ON 초안의 **금요일 18시 + 3단 템플릿 문구 verbatim**은 주입된 패턴에서만 올 수 있다. → **회수→주입→초안 반영의 전 구간이 라이브에서 입증됐다.**
+
+## 9.4 부수 관찰
+
+- **저장 실패는 의도된 격리의 부산물**: eval user가 `users` 테이블에 없어 `workflows` insert가 FK 위반(`E_COMPOSER`)으로 실패. 초안 생성·QA는 완주했고 staging DB에 잔류물이 남지 않아 검증 목적엔 오히려 적합. (eval user로 저장까지 검증하려면 users 시드가 필요 — 1번 실파이프라인 측정 때 실유저로 자연 커버됨.)
+- **OFF 초안의 QA 10/10은 미심쩍다**: "보고서 작성" 요청에 http_request+rest_api+slack_notify 조합이 통과 — #378에서 지적된 QA 관대함의 잔재 신호일 수 있음. Phase 2(GraphRAG) 반영분의 E2E 재점검에서 추적 예정(본 리포트 범위 밖).
+- retriever 단계 elapsed 25.3s(ON round 1)는 Modal 콜드스타트 포함 수치 — recall 자체는 §8.2대로 0.3~0.4s/발화.
+
+## 9.5 결론 / 잔여
+
+> **주입 경로 라이브 검증 완료(2026-06-07).** corpus가 있는 사용자만 "🧠 패턴 반영" 신호가 켜지고(A/B), 주입된 패턴의 스케줄(금 18시)·산출 형식(3단 템플릿 verbatim)이 최종 초안에 그대로 반영됐다. PR #373 배선 + composer v33 기준.
+
+**잔여**: ①실파이프라인(저장 트리거 경유, per-workflow 입도) end-to-end — 대원님 Phase D 통보 후 §8.4 변수 포함 측정. ②주입 효용 기반 게이트 튜닝(min_score 0.5 / top_k 3 유지 여부) 판단 — 본 절 A/B에서 1건 주입으로 충분한 품질 차이가 났으므로 현행 유지가 1차 결론, corpus 확장 실험은 후속.
