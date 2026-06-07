@@ -198,13 +198,25 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 
 품질을 단계적으로 끌어올리는 레버. 담당자가 측정하며 적용.
 
-### 6.1 모티프 라이브러리 확장 (신정혜·박아름)
-`quality_gate_loop` 외 검증된 모티프를 `:Pattern`으로 추가 → composer가 복합 패턴을 1급 생성:
-- **fan_out / map**: 리스트 입력을 노드별 병렬 처리 (control-flow L1 데이터흐름 위)
-- **retry_backoff**: 실패 시 지연 후 재시도 (유한 순환 + 조건)
-- **approval_gate**: 사람 컨펌 후 진행 (컨펌 게이트와 연계, ADR 컨펌 시리즈)
-- **branch_on_classification**: 분류 결과로 분기 (L2 조건 분기)
-> 각 모티프는 §2 validator 통과 + `CyclicScheduler`/`BranchEvaluator` 계약 정합이 필수. 추가 시 파리티 테스트 동반.
+### 6.1 모티프 라이브러리 확장 (신정혜) — **agentic 패턴 기반 시드 스펙**
+
+> **문제 인식(2026-06-07)**: 현재 `:Pattern`은 `quality_gate_loop` **1종뿐**이라 사실상 "패턴 라이브러리"라 부르기 어렵다. 온톨로지 그라운딩의 효익은 **검증된 모티프의 폭**에 비례하므로(§9 연구 근거), 아래 라이브러리를 1급으로 시드한다.
+>
+> **모티프 = 두 계보의 교집합** (§9.3): ① **van der Aalst control-flow 패턴**(프로세스 과학 정전, 20+종) ② **agentic workflow 패턴**(LLM 시대 — Anthropic/HF/Neo4j 합의: Prompt-Chaining·Routing·Parallelization·Orchestrator-Workers·Evaluator-Optimizer·Planning). 둘 다에서 검증된 패턴만 넣어야 환각을 **늘리지 않고** 억제한다(임의 패턴은 잘못된 구조를 강제).
+
+**시드 스펙** — `_PATTERNS`(build_ontology.py) 확장. `intent`는 `match_patterns`의 `CONTAINS` 매칭 키워드, `role_slots`는 슬롯→카탈로그 category 매핑(현 condition 노드 인벤토리: `if_condition`/`switch_case`/`loop_list`/`loop_count`/`delay`/`retry`/`merge_branch`/`stop_workflow`, ai 노드: `anthropic_chat`/`gemma_chat`):
+
+| 모티프 | van der Aalst | agentic | intent 키워드(예) | role_slots (slot→category/node) | 구조 | 엔진 계약 |
+|--------|---------------|---------|-------------------|--------------------------------|------|-----------|
+| `quality_gate_loop` ✅ | Structured Loop | Evaluator-Optimizer | 검증·품질·재생성 | generator→ai, evaluator→condition | gen→eval→(back-edge/exit-edge), `max_iterations` | CyclicScheduler(SCC당 condition≥1) + #392 validator |
+| `branch_on_classification` | Exclusive Choice (XOR) | Routing | 분류·조건·~이면·분기 | classifier→ai, router→condition(`if_condition`/`switch_case`) | classify→XOR 분기→합류 | BranchEvaluator (L2 조건분기) |
+| `fan_out_map` | Parallel Split + Sync | Orchestrator-Workers / Parallelization | 각각·목록·일괄·전부 | splitter→condition(`loop_list`), worker→ai/action, merger→condition(`merge_branch`) | split→병렬 worker→merge | L1 데이터흐름 + loop_list/merge_branch |
+| `retry_backoff` | Structured Loop + delay | (resilience) | 재시도·실패하면·반복 | action→action, delay→condition(`delay`/`retry`), gate→condition(`if_condition`) | try→실패?→delay→retry / →exit | CyclicScheduler(condition≥1) |
+| `approval_gate` | Deferred Choice / Milestone | Human-in-the-loop | 승인·검토 후·컨펌 | proposer→ai/action, gate→condition(`if_condition`), terminal→condition(`stop_workflow`) | propose→hold→approve/reject | 컨펌 게이트(ADR 컨펌 시리즈) |
+| `sequential_chain` (암묵) | Sequence | Prompt-Chaining | (명시 모티프 불요 — DAG 기본) | step→any | A→B→C 선형 | 기본 DAG (validator 무순환) |
+
+> **시드 원칙**: ① 슬롯 category는 **카탈로그에 실재하는 node_type**으로만(없는 슬롯은 시드 안 함 — 환각 유발). ② intent 키워드는 사용자 문장에서 실제 등장하는 한국어 표현으로(현 매칭이 `toLower CONTAINS p.intent`라 한 패턴에 복수 키워드가 필요하면 `:Pattern`을 키워드별 복수 시드하거나 매칭 Cypher를 `any()`로 확장). ③ `sequential_chain`은 LLM이 이미 잘 만드는 선형이라(§9.4 graph-planning 갭은 분기·루프에 집중) 시드 우선순위 최하.
+> **필수 가드**: 각 모티프는 §2 validator 통과 + `CyclicScheduler`/`BranchEvaluator` 수용 계약과 1:1 정합 + **파리티 테스트 동반**(composer가 통과시킨 모티프 draft가 엔진에서 죽으면 false accept). 신규 모티프 PR마다 골든셋에 해당 시나리오 1건 추가(§6.5).
 
 ### 6.2 retrieval 튜닝 (신정혜)
 - vector seed `k`, hop depth(1 vs 2)를 골든 셋으로 스윕. 1홉은 정밀/저지연, 2홉은 재현↑/노이즈↑.
@@ -248,3 +260,41 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 [박아름] §4.2b 스킬 BINDS ETL (skill-builder grounding)                    ─┘ (서로 비의존)
 [공통] §6.5 평가 하니스로 측정 → §6 고도화 레버 반복
 ```
+
+---
+
+## 9. 온톨로지 구조·패턴 설계 원칙 (연구 근거)
+
+> **목적**: 온톨로지 성능은 **그래프 구조·검색 패턴·모티프 라이브러리·평가 방법**에 크게 좌우된다(현장/논문 합의). 본 절은 §4.2a(신정혜)·§6 고도화·§6.5 하니스 설계의 **근거와 리뷰 기준**을 박제한다. (조사 2026-06-07, 출처 §9.6.)
+
+### 9.1 그래프 구조 설계 4원칙
+1. **"단순 그래프 + 강한 검색" > 복잡한 그래프** — 완벽히 풍부한 그래프보다 *싸고 빠르게 추출 가능한 핵심만 넣고 retrieval 파이프라인이 메우게* 하는 게 비용 대비 recall이 높다. → **우리 검증**: 53노드 최소 스키마 + 벡터 비복제 결정이 정합. 신정혜 §4.2a가 그래프를 과설계하면 경계.
+2. **타입드 + 가중(confidence) 엣지** — 추론(휴리스틱) 엣지엔 confidence를 달아 임계 필터. → **우리**: `CAN_FOLLOW {confidence}`(§4.2a)가 정확히 이 패턴. 임계 골든셋 튜닝 + 오탐쌍 블랙리스트(§6.3)가 품질을 결정.
+3. **경량 계층/커뮤니티** — GraphRAG 계열은 엔티티를 community(주제 클러스터)로 묶어 전역/지역 질의를 분리. → **우리**: `:Category`(IN_CATEGORY)가 경량 community 역할. 노드 53개라 본격 community detection(Leiden 등)은 과함.
+4. **⚠️ 과확장(over-expansion)이 정밀도를 희석** — 큰 이웃을 다 끌어오면 주제 밖 노드가 섞여 retrieval precision 저하. → **우리 직결**: `expand_candidates` hops(1 vs 2) 튜닝(§6.2) + #395의 **subtract 필터 제거(ADD-only)** 결정이 이 함정 회피. 하니스로 측정할 핵심 파라미터.
+
+### 9.2 검색(retrieval) 패턴
+- **vector seed → graph expand → constrained context** = GraphRAG 표준. 우리 `pgvector seed → expand_candidates → allowed_node_types()`가 교과서 흐름.
+- **schema/ontology-constrained generation = 환각 억제의 본질** — 논문 최강 합의. 스키마·공리를 프롬프트 주입하거나 디코딩 제약 시 사실오류 유의하게↓(임상 KG-RAG 등). → **우리**: `OntologySubgraph.allowed_node_types()` 화이트리스트가 이것. **현재 비활성**(expand 미호출) — **환각 억제 핵심 레버가 아직 안 켜짐**. §4.2a 최고가치 항목이고, 하니스의 hallucinated-edge는 이게 켜져야 움직인다.
+- **local vs global retrieval 분리** — entity-centric(호환 노드) vs motif(의도 패턴). 우리가 `expand_candidates`(local) / `match_patterns`(global) 두 Port 메서드로 이미 분리.
+
+### 9.3 모티프 라이브러리 = van der Aalst ∩ agentic
+- **van der Aalst control-flow 패턴**(2003~): Sequence, Parallel Split/Synchronization, Exclusive Choice(XOR), Simple Merge, Multi-Choice, Structured Loop, Deferred Choice, Milestone …
+- **agentic workflow 패턴**(LLM): Prompt-Chaining, Routing, Parallelization/Sectioning, Orchestrator-Workers, Evaluator-Optimizer, Planning.
+- **우리 §6.1 모티프가 두 계보의 교집합** — 검증된 패턴만 1급 시드(매핑 표는 §6.1). 임의 패턴 금지 + 엔진 계약 파리티 필수.
+
+### 9.4 평가 — "워크플로우 = 그래프"
+- 워크플로우 생성 벤치마크(WorFBench/WorFEval)는 **subsequence + subgraph matching**으로 평가 — 텍스트 일치가 아닌 **구조 일치**. → **우리 하니스(§6.5)**: motif-correctness를 "생성물에 generator→evaluator→back-edge→exit-edge **서브그래프**가 있나"로, hallucinated-edge를 "생성 엣지가 카탈로그/CAN_FOLLOW의 **그래프 멤버십**인가"로 측정(텍스트 아님).
+- **결정적 발견**: LLM은 **sequence planning ≫ graph planning** — GPT-4도 그래프(분기·병렬·루프) 생성에서 ~15% 갭. → 모티프 그라운딩의 정량적 정당화. 또한 **soft 프롬프트 주입의 한계**(graph 구조는 LLM 약점)를 시사 → 장기적으로 **결정적 모티프 합성**(템플릿 서브그래프 직접 생성)이 soft 주입보다 안정적일 수 있음. §4.2a 설계 선택(주입 vs 합성)의 근거.
+
+### 9.5 종합 — 리뷰/하니스 5원칙
+1. 그래프는 단순하게, 검색을 강하게 (과설계 경계).
+2. **constrained generation(allowed_node_types)이 환각 억제 본질** — 현재 비활성, 최고가치 레버.
+3. CAN_FOLLOW는 confidence-weighted + 임계 튜닝 (오탐 억제가 품질 결정).
+4. 모티프는 van der Aalst/agentic 검증 패턴만 + 엔진 계약 파리티.
+5. 평가는 **subgraph matching** (구조 일치), graph-planning이 LLM 약점이라 **N회 반복 통과율**로(soft 주입 비결정성).
+
+### 9.6 출처
+- GraphRAG 구조·검색: [Towards Data Science — GraphRAG in Practice](https://towardsdatascience.com/graphrag-in-practice-how-to-build-cost-efficient-high-recall-retrieval-systems/) · [Neo4j RAG tutorial](https://neo4j.com/blog/developer/rag-tutorial/) · [Survey of Graph RAG (arXiv 2501.13958)](https://arxiv.org/pdf/2501.13958) · [Survey on Knowledge-Oriented RAG (arXiv 2503.10677)](https://arxiv.org/pdf/2503.10677)
+- 온톨로지 그라운딩/제약 생성: [Ontology-grounded KGs for clinical QA hallucination (ScienceDirect)](https://www.sciencedirect.com/science/article/abs/pii/S1532046426000171) · [Ontology-Grounded LLM Construction (EmergentMind)](https://www.emergentmind.com/topics/ontology-grounded-llm-construction) · [Ontology-Constrained Generation (arXiv 2411.15666)](https://arxiv.org/pdf/2411.15666) · [API Hallucination via Hierarchical Dependency (arXiv 2505.05057)](https://arxiv.org/pdf/2505.05057)
+- 워크플로우 패턴/평가: [Design Patterns for Agentic Workflows (HF)](https://huggingface.co/blog/dcarpintero/design-patterns-for-building-agentic-workflows) · [Workflow Patterns — van der Aalst (Springer)](https://link.springer.com/rwe/10.1007/978-0-387-39940-9_826) · [Benchmarking Agentic Workflow Generation — WorFBench (arXiv 2410.07869)](https://arxiv.org/abs/2410.07869)
