@@ -14,13 +14,13 @@ from ...domain.value_objects.ontology import OntologyNode, OntologySubgraph, Pat
 _EXPAND_CYPHER = """
 MATCH (n:Node) WHERE n.node_type IN $seeds
 OPTIONAL MATCH (n)-[:REQUIRES]->(c:Connection)
-OPTIONAL MATCH (n)-[:CAN_FOLLOW]->(succ:Node)
+OPTIONAL MATCH (n)-[f:CAN_FOLLOW]->(succ:Node)
 RETURN n.node_type AS node_type,
        n.category AS category,
        n.risk_level AS risk_level,
        collect(DISTINCT c.provider) AS requires,
        collect(DISTINCT {node_type: succ.node_type, category: succ.category,
-                         risk_level: succ.risk_level}) AS successors
+                         risk_level: succ.risk_level, confidence: f.confidence}) AS successors
 """
 
 # Phase 2 모티프 질의 — intent 문자열에 CONTAINS 매칭. :Pattern/USES_ROLE 시드는 박아름 §4.2.
@@ -134,10 +134,15 @@ class Neo4jOntologyAdapter(OntologyRetrieverPort):
             node_type = rec["node_type"]
             requires = tuple(p for p in (rec["requires"] or []) if p)
             # CAN_FOLLOW 순방향 이웃 — null succ(이웃 없는 seed) 맵은 제외, self-loop 방지.
-            succ_rows = [
-                s for s in (rec["successors"] or [])
-                if s and s.get("node_type") and s["node_type"] != node_type
-            ]
+            # **confidence 내림차순 정렬**(동률은 node_type) — 소비측(`_expand_can_follow`) cap이
+            # collect 순서(Neo4j 비보장)가 아니라 **고신뢰 이웃을 결정적으로** 보존하게 한다(#410 리뷰 MED).
+            succ_rows = sorted(
+                (
+                    s for s in (rec["successors"] or [])
+                    if s and s.get("node_type") and s["node_type"] != node_type
+                ),
+                key=lambda s: (-(s.get("confidence") or 0), s["node_type"]),
+            )
             successors = tuple(dict.fromkeys(s["node_type"] for s in succ_rows))
             nodes[node_type] = OntologyNode(
                 node_type=node_type,

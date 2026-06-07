@@ -22,7 +22,7 @@
 
 ## 1. Phase 1 — 그래프 DB 초기 인프라 (황대원 구축 범위) — ✅ 완료 (PR #393, 라이브 검증)
 
-> **상태(2026-06-06)**: 코드 스캐폴드 + ETL = PR #393. **실제 AuraDB Free 인스턴스로 라이브 검증 완료** — `build_ontology.py`가 제약 5건 + 노드 53건 투영, `expand_candidates` 어댑터 스모크 통과. GCP secret 3종 + Modal SA IAM 부여 완료(아래 §1.1). 남은 건 Phase 2 소비자 배선뿐.
+> **상태(2026-06-06)**: 코드 스캐폴드 + ETL = PR #393. **실제 AuraDB Free 인스턴스로 라이브 검증 완료** — `build_ontology.py`가 제약 5건 + 노드 53건 투영, `expand_candidates` 어댑터 스모크 통과. GCP secret 3종 + Modal SA IAM 부여 완료(아래 §1.1). ~~남은 건 Phase 2 소비자 배선뿐.~~ → **Phase 2 소비자 배선 완료**(§4.2a #410: sibling→CAN_FOLLOW 교체 + retriever ADD 소비, capped).
 
 ### 1.1 AuraDB provisioning — ✅ 완료
 - Neo4j **AuraDB Free** 인스턴스 1개 생성·운영 중. (AuraDB = 매니지드 Neo4j. self-host로 바꿔도 코드 무변경, secret 값만.)
@@ -60,7 +60,7 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 
 ### 1.4 `Neo4jOntologyAdapter` — ✅ 빌드됨 (`ai_agent/adapters/ontology/`)
 - **요청마다 driver 생성·close** 패턴 강제(`composer_modal_per_request_engine` — Modal boot≠request 루프 hang 회피). neo4j는 lazy import(extras 미설치여도 모듈 로드 가능), `NEO4J_*` env에서 연결정보, `driver_factory` 주입 훅으로 테스트.
-- **Phase 1 expand_candidates 실제 범위 = seed + category sibling 1-hop** (REQUIRES/IN_CATEGORY 메타 포함). **`CAN_FOLLOW`는 아직 없음**(Phase 2 신정혜 — composer grounding). `hops` 인자는 forward-compat 예약.
+- ~~**Phase 1 expand_candidates 실제 범위 = seed + category sibling 1-hop**~~ → **Phase 2a(#410)에서 CAN_FOLLOW 1-hop traverse로 교체** + confidence 내림차순 정렬(소비측 cap 결정성). `hops` 인자는 forward-compat 예약.
 - `match_patterns`는 **`NotImplementedError`** — Phase 2 신정혜가 `:Pattern` Cypher로 채움(§4.1).
 
 ### 1.5 `scripts/build_ontology.py` (멱등 ETL) — ✅ 빌드+검증됨
@@ -271,7 +271,7 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 ## 7. 지뢰 / 운영 체크리스트
 1. **Modal per-request driver** — `@enter` 1회 생성 금지(loop-binding hang). 요청마다 생성·close.
 2. **secret 경로 = Modal `load_secrets_to_env` (terraform 아님)** — composer/skills-builder는 Modal 앱이라 `boot()`에서 GCP secret(`neo4j-uri`/`username`/`password`)을 런타임 pull. terraform `secret_env`는 Cloud Run(api/worker) 전용. secret `:latest` 복수 공유 시 `secret_latency_bomb` → 버전 핀.
-3. **ETL 동기화** — 정적 카탈로그 deploy 1회 + 스킬 publish incremental. 재시드 레시피(`staging_node_catalog_reseed`)와 정합.
+3. **ETL 동기화** — 정적 카탈로그 deploy 1회 + 스킬 publish incremental. 재시드 레시피(`staging_node_catalog_reseed`)와 정합. **CAN_FOLLOW 엣지는 `build_ontology.py` 재실행으로만 투영**(CI seed 자동화 없음) — **AuraDB Free 72h auto-pause 후 재개·재시드 시 엣지 유실 가능**. 유실되면 expand가 search-only로 조용히 degrade(non-fatal·환각無, 단 motif 품질이 baseline으로 후퇴) → 재투영 절차: `NEO4J_* env + python scripts/build_ontology.py`로 노드+패턴+CAN_FOLLOW 일괄 멱등 재투영. 배포 런북에 명문화.
 4. **소비자 분리 — Phase 2는 박아름 의존 아님**: composer grounding(§4.2a 모티프·CAN_FOLLOW)은 노드 I/O 스키마 파생이라 **신정혜 자력 완결**. 박아름 몫(§4.2b 스킬 BINDS)은 skill-builder grounding이라 **독립 병렬**. (Phase 0 validator만 nodes_graph 교차소유라 박아름 sign-off 필요 — PR #392.)
 5. **프로젝트 일정** — 2026-06-30 staging 종료와 별개의 **장기 제품 방향**. staging 검증은 Phase 1 한정, Phase 2+는 일정 합의 후.
 

@@ -52,9 +52,9 @@ async def test_expand_candidates_maps_records_to_subgraph():
             "node_type": "csv_parse", "category": "transform", "risk_level": "low",
             "requires": [],
             "successors": [
-                {"node_type": "csv_build", "category": "transform", "risk_level": "low"},
-                {"node_type": "csv_parse", "category": "transform", "risk_level": "low"},  # self
-                {"node_type": None, "category": None, "risk_level": None},  # null succ(이웃 없음)
+                {"node_type": "csv_build", "category": "transform", "risk_level": "low", "confidence": 1},
+                {"node_type": "csv_parse", "category": "transform", "risk_level": "low", "confidence": 1},  # self
+                {"node_type": None, "category": None, "risk_level": None, "confidence": None},  # null succ
             ],
         }
     ]
@@ -70,6 +70,25 @@ async def test_expand_candidates_maps_records_to_subgraph():
     assert sg.adjacency["csv_parse"] == ("csv_build",)
     assert sg.allowed_node_types() == frozenset({"csv_parse", "csv_build"})
     assert driver.closed is True  # per-request driver는 반드시 close
+
+
+@pytest.mark.asyncio
+async def test_expand_successors_sorted_by_confidence_desc():
+    # 소비측 cap이 고신뢰 이웃을 결정적으로 보존하도록 adjacency는 confidence 내림차순 (#410 MED).
+    records = [
+        {
+            "node_type": "a", "category": "transform", "risk_level": "low", "requires": [],
+            "successors": [
+                {"node_type": "low1", "category": "x", "risk_level": "low", "confidence": 1},
+                {"node_type": "high", "category": "x", "risk_level": "low", "confidence": 2},
+                {"node_type": "low2", "category": "x", "risk_level": "low", "confidence": 1},
+            ],
+        }
+    ]
+    adapter = Neo4jOntologyAdapter(uri="neo4j+s://x", driver_factory=lambda: _FakeDriver(records))
+    sg = await adapter.expand_candidates(["a"])
+    # confidence 2가 먼저, 동률(1)은 node_type 사전순으로 결정적
+    assert sg.adjacency["a"] == ("high", "low1", "low2")
 
 
 @pytest.mark.asyncio
