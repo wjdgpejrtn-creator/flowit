@@ -106,8 +106,8 @@ vector seed (pgvector top-k)
 ### Follow-ups
 - **Phase 0(validator 완화)는 본 ADR과 독립적으로도 필요** — **PR #392(황대원 선반영)로 완료, 박아름 sign-off 대기**. 미완 시 Phase 2 전체 블록. 파리티 가드(validator↔CyclicScheduler 수용 계약)는 #392에 조립-계층 테스트로 동봉.
 - **Modal per-request driver**: composer가 Modal ASGI라 neo4j async driver를 `@enter`에서 1회 생성하면 asyncpg와 동일하게 boot≠request 루프 미스매치로 hang 위험(`composer_modal_per_request_engine` 사고 재연). 요청마다 드라이버 생성 패턴 강제.
-- **Secret 경로 = Modal `load_secrets_to_env` (terraform 아님)**: AuraDB 자격은 GCP secret 3종(`neo4j-uri`/`neo4j-username`/`neo4j-password`, ✅ 생성 + `cloudsql-iam-modal` SA IAM 부여). composer/skills-builder는 Modal 앱이라 `boot()`에서 런타임 pull — terraform `secret_env`는 Cloud Run 전용이라 본 경로엔 안 씀. secret `:latest` 복수 공유 시 `secret_latency_bomb` 주의(버전 핀).
-- **ETL 훅**: ✅ 완료 — `PublishSkillUseCase`가 `SkillOntologyProjector`(미주입/실패 시 non-fatal)로 게시 시 `(:Skill)-[:BINDS]->(:Node)` incremental upsert. api_server DI는 `NEO4J_URI` 설정 시에만 `Neo4jSkillProjector` 주입(하위호환).
+- **Secret 경로 = 호스트별 분리**: AuraDB 자격은 GCP secret 3종(`neo4j-uri`/`neo4j-username`/`neo4j-password`, ✅ 생성 + `cloudsql-iam-modal` SA IAM 부여). **Modal 앱(composer/skills-builder)** 은 `boot()` `load_secrets_to_env`로 런타임 pull. **api_server(Cloud Run)** 는 terraform `secret_env` 바인딩 — PR #401에서 `NEO4J_*` 3종 + api SA `secretAccessor`(additive `iam_member`) 추가 완료. secret `:latest` 복수 공유 시 `secret_latency_bomb` 주의(버전 핀).
+- **ETL 훅**: ✅ 완료 — `PublishSkillUseCase`가 `SkillOntologyProjector`(미주입/실패 시 non-fatal)로 게시 시 `(:Skill)-[:BINDS]->(:Node)` incremental upsert. api_server DI는 `NEO4J_URI` 설정 시에만 `Neo4jSkillProjector` 주입(하위호환). **라이브 활성화(api 이미지 `ai_agent[ontology]` + `NEO4J_*` terraform 바인딩) = PR #401** — 머지+`terraform apply`+기존 스킬 `project_skills()` backfill 후 신규 게시분 자동 투영.
 - 프로젝트 종료(2026-06-30) 일정과 별개의 **장기 제품 방향** 결정임 — staging 검증 범위는 Phase 1로 한정.
 
 ## Alternatives Considered
