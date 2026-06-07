@@ -96,6 +96,80 @@ async def test_project_skills_backfill_counts_and_uses_scope_tier():
     assert {p["tier"] for p in reset_calls} == {"personal", "company"}
 
 
+@dataclass
+class _FakeSchemaDef:
+    node_type: str
+    category: str
+    output_schema: dict
+    input_schema: dict
+
+
+def _sdef(node_type, category, outputs=(), required=()):
+    return _FakeSchemaDef(
+        node_type=node_type,
+        category=category,
+        output_schema={"properties": {k: {} for k in outputs}},
+        input_schema={"properties": {k: {} for k in required}, "required": list(required)},
+    )
+
+
+def test_compute_can_follow_matches_output_to_required_input():
+    defs = [
+        _sdef("csv_parse", "transform", outputs=["rows", "headers"]),
+        _sdef("csv_build", "transform", required=["rows"]),       # rows 매칭 → 엣지
+        _sdef("email_send", "action", required=["subject", "body"]),  # 명칭 불일치 → 엣지 없음
+    ]
+    edges = build_ontology.compute_can_follow_edges(defs)
+    assert ("csv_parse", "csv_build", 1) in edges
+    assert not any(b == "email_send" for _, b, _ in edges)
+
+
+def test_compute_can_follow_excludes_trigger_targets():
+    # 트리거가 우연히 required 명칭이 겹쳐도 타깃으로 삼지 않는다(진입점이라 선행자 없음).
+    defs = [
+        _sdef("source", "transform", outputs=["cron"]),
+        _sdef("schedule_trigger", "trigger", required=["cron"]),
+    ]
+    assert build_ontology.compute_can_follow_edges(defs) == []
+
+
+def test_compute_can_follow_ignores_non_required_overlap():
+    # B가 'value'를 properties로 받지만 required가 아니면 엣지 없음(우연 충돌 배제).
+    a = _sdef("a", "transform", outputs=["value"])
+    b = _FakeSchemaDef(
+        node_type="b", category="transform",
+        output_schema={}, input_schema={"properties": {"value": {}}, "required": []},
+    )
+    assert build_ontology.compute_can_follow_edges([a, b]) == []
+
+
+def test_compute_can_follow_confidence_counts_overlap():
+    defs = [
+        _sdef("a", "transform", outputs=["x", "y", "z"]),
+        _sdef("b", "transform", required=["x", "y"]),  # 2개 겹침 → confidence 2
+    ]
+    edges = build_ontology.compute_can_follow_edges(defs)
+    assert edges == [("a", "b", 2)]
+
+
+@pytest.mark.asyncio
+async def test_project_can_follow_resets_then_merges():
+    session = _FakeSession()
+    defs = [
+        _sdef("csv_parse", "transform", outputs=["rows"]),
+        _sdef("csv_build", "transform", required=["rows"]),
+    ]
+    count = await build_ontology.project_can_follow(session, defs)
+
+    assert count == 1
+    queries = [q for q, _ in session.calls]
+    # 리셋이 MERGE보다 먼저
+    assert "DELETE r" in queries[0]
+    assert any("MERGE (a)-[r:CAN_FOLLOW]->(b)" in q for q in queries)
+    merge_call = next(p for q, p in session.calls if "CAN_FOLLOW" in q and "MERGE" in q)
+    assert merge_call == {"from_type": "csv_parse", "to_type": "csv_build", "confidence": 1}
+
+
 @pytest.mark.asyncio
 async def test_project_catalog_merges_node_and_requires():
     session = _FakeSession()

@@ -7,17 +7,20 @@ from typing import Any
 from ...domain.ports.ontology_retriever import OntologyRetrieverPort
 from ...domain.value_objects.ontology import OntologyNode, OntologySubgraph, PatternTemplate
 
-# Phase 1 확장 질의 — seed node_type의 자기 메타(REQUIRES) + 같은 category sibling 1-hop.
-# CAN_FOLLOW 호환 edge(Phase 2)는 아직 없으므로 구조 이웃은 category 공유로 근사한다.
+# 확장 질의 (ADR-0026 §4.2a) — seed node_type의 자기 메타(REQUIRES) + CAN_FOLLOW 1-hop
+# 순방향 이웃(후행 가능 노드). Phase 1의 category sibling 근사를 실제 CAN_FOLLOW 호환 edge로
+# **교체**한다 — sibling은 "같은 범주"라 노이즈가 크고, CAN_FOLLOW는 output↔input 휴리스틱으로
+# 만든 "다음에 올 수 있는 노드"라 그라운딩 정밀도가 높다(build_ontology.compute_can_follow_edges).
 _EXPAND_CYPHER = """
 MATCH (n:Node) WHERE n.node_type IN $seeds
 OPTIONAL MATCH (n)-[:REQUIRES]->(c:Connection)
-OPTIONAL MATCH (n)-[:IN_CATEGORY]->(:Category)<-[:IN_CATEGORY]-(sib:Node)
+OPTIONAL MATCH (n)-[f:CAN_FOLLOW]->(succ:Node)
 RETURN n.node_type AS node_type,
        n.category AS category,
        n.risk_level AS risk_level,
        collect(DISTINCT c.provider) AS requires,
-       collect(DISTINCT sib.node_type) AS siblings
+       collect(DISTINCT {node_type: succ.node_type, category: succ.category,
+                         risk_level: succ.risk_level, confidence: f.confidence}) AS successors
 """
 
 # Phase 2 모티프 질의 — intent 문자열에 CONTAINS 매칭. :Pattern/USES_ROLE 시드는 박아름 §4.2.
@@ -130,18 +133,34 @@ class Neo4jOntologyAdapter(OntologyRetrieverPort):
         for rec in records:
             node_type = rec["node_type"]
             requires = tuple(p for p in (rec["requires"] or []) if p)
-            siblings = tuple(s for s in (rec["siblings"] or []) if s and s != node_type)
+            # CAN_FOLLOW 순방향 이웃 — null succ(이웃 없는 seed) 맵은 제외, self-loop 방지.
+            # **confidence 내림차순 정렬**(동률은 node_type) — 소비측(`_expand_can_follow`) cap이
+            # collect 순서(Neo4j 비보장)가 아니라 **고신뢰 이웃을 결정적으로** 보존하게 한다(#410 리뷰 MED).
+            succ_rows = sorted(
+                (
+                    s for s in (rec["successors"] or [])
+                    if s and s.get("node_type") and s["node_type"] != node_type
+                ),
+                key=lambda s: (-(s.get("confidence") or 0), s["node_type"]),
+            )
+            successors = tuple(dict.fromkeys(s["node_type"] for s in succ_rows))
             nodes[node_type] = OntologyNode(
                 node_type=node_type,
                 category=rec["category"],
                 risk_level=rec["risk_level"],
                 requires=requires,
             )
-            adjacency[node_type] = siblings
-            # category sibling도 후보 노드 집합에 포함(메타는 후속 질의 없이 최소만).
-            for sib in siblings:
+            adjacency[node_type] = successors
+            # 후행 노드도 후보 집합에 포함(메타는 후속 질의 없이 그래프가 준 것만).
+            for s in succ_rows:
                 nodes.setdefault(
-                    sib, OntologyNode(node_type=sib, category=rec["category"], risk_level="", requires=())
+                    s["node_type"],
+                    OntologyNode(
+                        node_type=s["node_type"],
+                        category=s.get("category") or "",
+                        risk_level=s.get("risk_level") or "",
+                        requires=(),
+                    ),
                 )
 
         return OntologySubgraph(

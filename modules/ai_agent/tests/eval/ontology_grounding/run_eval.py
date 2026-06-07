@@ -48,7 +48,11 @@ async def _create_session_factory():
 
     db_url = os.getenv("DATABASE_URL")
     if db_url:
-        engine = create_async_engine(db_url, poolclass=NullPool)
+        # cloud-sql-proxy는 평문 로컬 소켓 — asyncpg가 SSL 협상하면 ConnectionReset로 끊긴다
+        # (staging_node_catalog_reseed 함정②). 로컬 proxy 경로는 ssl=False 강제.
+        engine = create_async_engine(
+            db_url, poolclass=NullPool, connect_args={"ssl": False}
+        )
         return None, engine, async_sessionmaker(engine, expire_on_commit=False)
 
     # Modal 환경 fallback (main.py._create_session와 동일)
@@ -86,6 +90,13 @@ def _build_orchestrator(session, ontology_retriever):
     from ai_agent.domain.services.qa_evaluator_service import QAEvaluatorService
     from ai_agent.domain.services.slot_filling_service import SlotFillingService
 
+    # 평가는 워크플로우를 DB에 저장하지 않는다 — composer save_workflow가 호출하는 save()를
+    # no-op(생성 id만 반환)로 둬 staging workflows 오염·FK 위반(랜덤 user_id)을 피한다.
+    # 측정 지표(node_types/edges/retry/qa)는 save 이전 프레임에서 이미 다 캡처된다.
+    class _NoSaveWorkflowRepo(PgWorkflowRepository):
+        async def save(self, workflow):  # type: ignore[override]
+            return workflow.workflow_id
+
     llm = ModalLLMAdapter()
     embedder = ModalEmbeddingAdapter()
     node_repo = PgNodeDefinitionRepository(session)
@@ -95,7 +106,7 @@ def _build_orchestrator(session, ontology_retriever):
         qa_evaluator=QAEvaluatorService(llm),
         slot_filler=SlotFillingService(),
         node_registry=NodeRegistryAdapter(node_repo, embedder),
-        workflow_repo=PgWorkflowRepository(session),
+        workflow_repo=_NoSaveWorkflowRepo(session),
         graph_validator=GraphValidator(node_repo),
         session_frame_store=None,
         llm=llm,
@@ -184,11 +195,15 @@ def _frames_to_record(scenario: Scenario, frames: list, node_type_by_id: dict[UU
     )
 
 
+# 평가용 user — DB users에 존재하는 system 계정(기본). EVAL_USER_ID로 override.
+_EVAL_USER_ID = UUID(os.getenv("EVAL_USER_ID", "00000000-0000-0000-0000-000000000001"))
+
+
 async def _capture_one(orchestrator, scenario: Scenario, node_type_by_id: dict[UUID, str]) -> RunRecord:
     frames: list = []
     try:
         async for frame in await orchestrator.stream(
-            user_id=uuid4(), session_id=uuid4(), message=scenario.utterance, round=1,
+            user_id=_EVAL_USER_ID, session_id=uuid4(), message=scenario.utterance, round=1,
         ):
             frames.append(frame)
     except Exception as exc:  # noqa: BLE001 — 캡처는 어떤 실패도 레코드로 남긴다
@@ -202,9 +217,10 @@ async def _capture_one(orchestrator, scenario: Scenario, node_type_by_id: dict[U
     return _frames_to_record(scenario, frames, node_type_by_id)
 
 
-async def run(label: str) -> Snapshot:
+async def run(label: str, limit: int | None = None) -> Snapshot:
     from ai_agent.adapters.ontology.neo4j_ontology_adapter import Neo4jOntologyAdapter
 
+    scenarios = SCENARIOS[:limit] if limit else SCENARIOS
     connector, engine, session_factory = await _create_session_factory()
     ontology_retriever = Neo4jOntologyAdapter()
     records: list[RunRecord] = []
@@ -213,11 +229,11 @@ async def run(label: str) -> Snapshot:
             orchestrator, node_repo = _build_orchestrator(session, ontology_retriever)
             defs = await node_repo.list_all()
             node_type_by_id = {d.node_id: d.node_type for d in defs}
-            print(f"카탈로그 {len(node_type_by_id)}종 로드. 시나리오 {len(SCENARIOS)}건 캡처 시작…")
-            for i, sc in enumerate(SCENARIOS, 1):
+            print(f"카탈로그 {len(node_type_by_id)}종 로드. 시나리오 {len(scenarios)}건 캡처 시작…")
+            for i, sc in enumerate(scenarios, 1):
                 rec = await _capture_one(orchestrator, sc, node_type_by_id)
                 flag = "✗" if rec.error else ("∅" if not rec.produced_workflow else "✓")
-                print(f"  [{i:>2}/{len(SCENARIOS)}] {flag} {sc.scenario_id} "
+                print(f"  [{i:>2}/{len(scenarios)}] {flag} {sc.scenario_id} "
                       f"(노드 {len(rec.node_types)}, retry {rec.retry_count}, qa {rec.qa_score})")
                 records.append(rec)
     finally:
@@ -254,12 +270,14 @@ def main() -> int:
     parser.add_argument("--label", default="capture", help="스냅샷 라벨(예: baseline-pgvector)")
     parser.add_argument("--promote-baseline", action="store_true",
                         help="캡처 대신 현재 스냅샷 집계를 baseline.json으로 승격")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="앞 N개 시나리오만 캡처(스모크/부분 측정용). 미지정=전체 32건")
     args = parser.parse_args()
 
     if args.promote_baseline:
         return _promote_baseline()
 
-    snap = asyncio.run(run(args.label))
+    snap = asyncio.run(run(args.label, limit=args.limit))
     path = save_snapshot(snap)
     print(f"\n스냅샷 저장 → {path} ({len(snap.records)}건)")
     print("이어서 점검: python -m ai_agent.tests.eval.ontology_grounding.check_snapshot")
