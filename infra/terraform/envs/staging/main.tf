@@ -371,11 +371,40 @@ module "api_server" {
     # 스킬 게시(PublishSkillUseCase) 시 임베딩 누락 백필용 BGE-M3 endpoint(llm-base). 동일
     # `embedding-base-url` secret 재사용. 미설정 시 embedder 미주입 → 기존 동작(임베딩 누락) 유지.
     EMBEDDING_BASE_URL = { secret_id = "embedding-base-url", version = "latest" }
+    # ADR-0026 Phase 2b 라이브 BINDS — 게시 시 (:Skill)-[:BINDS]->(:Node) Neo4j 투영
+    # (Neo4jSkillProjector). 미설정 시 projector=None(하위호환, 투영만 누락). neo4j secret 3종은
+    # Phase 1에서 수동 생성(terraform 밖) — accessor는 아래 api_neo4j_accessor가 부여.
+    NEO4J_URI      = { secret_id = "neo4j-uri", version = "latest" }
+    NEO4J_USERNAME = { secret_id = "neo4j-username", version = "latest" }
+    NEO4J_PASSWORD = { secret_id = "neo4j-password", version = "latest" }
   }
 
   labels = merge(local.common_labels, { role = "api-server" })
 
-  depends_on = [module.networking, module.redis, module.agent_secrets, module.skills_marketplace_bucket]
+  # api_neo4j_accessor 선행 — 신규 revision이 NEO4J_* secret을 읽을 때 SA에 accessor가 이미
+  # 부여돼 있어야 컨테이너 startup이 성공한다(미부여 시 revision unhealthy → apply 실패).
+  depends_on = [
+    module.networking, module.redis, module.agent_secrets, module.skills_marketplace_bucket,
+    google_secret_manager_secret_iam_member.api_neo4j_accessor,
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# ADR-0026 Phase 2b — api_server SA에 neo4j secret 3종 accessor 부여 (라이브 BINDS 활성화).
+# neo4j-uri/username/password는 Phase 1(PR #393)에서 콘솔/CLI로 수동 생성됐고 terraform 밖에서
+# 관리된다(Modal SA cloudsql-iam-modal에는 수동 grant 완료). 따라서 secret 리소스는 import하지
+# 않고(소유 분리 유지), api_server 전용 SA에 accessor만 standalone 부여한다. secret_id는 문자열
+# 참조 — terraform 관리 여부와 무관하게 기존 secret에 IAM binding을 추가한다.
+# ---------------------------------------------------------------------------
+resource "google_secret_manager_secret_iam_member" "api_neo4j_accessor" {
+  for_each = var.enable_cloud_run && var.api_server_service_account != "" ? toset([
+    "neo4j-uri", "neo4j-username", "neo4j-password",
+  ]) : toset([])
+
+  project   = var.project_id
+  secret_id = each.key
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${var.api_server_service_account}"
 }
 
 # ---------------------------------------------------------------------------

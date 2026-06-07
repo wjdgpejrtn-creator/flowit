@@ -185,6 +185,7 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 
 ### 4.2b 박아름 — 스킬 그래프 ETL (skill-builder grounding, 별개 소비자)
 - **스킬 `(:Skill)-[:BINDS]->(:Node)` ETL**: 기존 스킬 **publish 경로에 Neo4j incremental upsert 훅** 배선(`BINDS`, `:Skill` 속성). 정적 카탈로그와 달리 스킬은 자주 바뀜. 소비자는 skill-builder(+ 향후 composer 스킬 제시) — composer의 노드 grounding(§4.2a)과 독립.
+- ✅ **구현 완료**(#397 박아름) + **라이브 활성화**(#401 황대원): api 이미지 `ai_agent[ontology]` + api_server(Cloud Run) terraform `secret_env` `NEO4J_*` 바인딩 + api SA `secretAccessor`. 머지+`terraform apply`+기존 PUBLISHED 스킬 `project_skills()` backfill 후 신규 게시분이 자동 투영된다.
 
 ---
 
