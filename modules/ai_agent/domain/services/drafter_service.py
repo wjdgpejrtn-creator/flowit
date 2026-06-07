@@ -120,6 +120,16 @@ DATA FLOW between nodes: when a node's input should receive data PRODUCED by an 
 Also add a connection so the upstream node runs first. Use a literal string ONLY when the user
 provided the value directly. Do NOT put placeholder prose like "the sheet data" where an upstream
 output should flow in.
+
+LOOPS (quality-gate / retry patterns): when the intent requires "regenerate if quality fails",
+build a cycle using a back-edge:
+1. Pick ONE ai node as the generator — do NOT add a second ai node for evaluation (that causes
+   a duplicate node_type error). The same ai node is both the content producer and the retry target.
+2. Use a condition node (e.g. if_condition) as the evaluator/branching point.
+3. Add a forward connection generator → evaluator, then add a BACK-EDGE connection
+   evaluator → generator (from_node_type=evaluator, to_node_type=generator). This back-edge is
+   what creates the retry loop — it is valid and required for this pattern.
+4. Add a separate forward connection evaluator → next_node for the "pass" branch.
 """
 
 # refine(대화형 수정) 전용 — 이전 워크플로우를 주고 "지시한 부분만" 고치게 한다.
@@ -327,12 +337,16 @@ class DrafterService:
             f"description):\n{retry_feedback}\n"
         )
 
+    # quality_gate_loop처럼 generator+evaluator 슬롯 쌍이 있는 패턴은 루프 배선 지침을 추가 주입.
+    _LOOP_MOTIF_NAMES: frozenset[str] = frozenset({"quality_gate_loop"})
+
     @staticmethod
     def _motif_block(pattern_templates: list[Any] | None) -> str:
         """GraphRAG :Pattern 모티프를 drafter 프롬프트 주입용 블록으로 직렬화 (ADR-0026 Phase 2).
 
         ETL 시드 전(빈 리스트) 또는 role_slots가 없으면 빈 문자열 반환(무영향).
-        "가이드이지 강제 아님"을 명시해 무관한 노드가 추가되는 것을 막는다.
+        루프 패턴(quality_gate_loop)은 back-edge 배선 + 단일 ai 노드 규칙을 명시해
+        LLM이 역방향 연결을 생성하고 ai 노드 중복을 시도하지 않도록 유도한다(이슈 #406).
         """
         if not pattern_templates:
             return ""
@@ -341,17 +355,29 @@ class DrafterService:
             slots: dict[str, Any] = getattr(pt, "role_slots", {}) or {}
             if not slots:
                 continue
-            slot_desc = ", ".join(
-                f'{slot}={"|".join(types)}' for slot, types in slots.items() if types
-            )
-            lines.append(f"- {pt.name}: {slot_desc}")
+            generator_types = slots.get("generator", ())
+            evaluator_types = slots.get("evaluator", ())
+            is_loop = pt.name in DrafterService._LOOP_MOTIF_NAMES and generator_types and evaluator_types
+            if is_loop:
+                gen = "|".join(generator_types)
+                ev = "|".join(evaluator_types)
+                lines.append(
+                    f"- {pt.name} (LOOP pattern — follow the LOOPS rules above):\n"
+                    f"  generator slot: use ONE {gen} node (do NOT add a second {gen} for evaluation)\n"
+                    f"  evaluator slot: use a {ev} node as the branching point\n"
+                    f"  wiring: {gen} → {ev} (forward), then {ev} → {gen} (BACK-EDGE retry loop)"
+                )
+            else:
+                slot_desc = ", ".join(
+                    f'{slot}={"|".join(types)}' for slot, types in slots.items() if types
+                )
+                lines.append(f"- {pt.name}: {slot_desc}")
         if not lines:
             return ""
         joined = "\n".join(lines)
         return (
             "\nWORKFLOW MOTIFS (structural patterns from the knowledge graph matching this "
-            "intent — use as a guide for which node categories to combine; do NOT add nodes "
-            "solely to satisfy a motif, only include nodes the request actually needs):\n"
+            "intent — apply only if the request actually calls for it):\n"
             f"{joined}\n"
         )
 

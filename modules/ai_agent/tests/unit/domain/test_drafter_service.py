@@ -563,17 +563,31 @@ class TestDrafterMotifBlock:
         return PatternTemplate(name=name, intent="검증", role_slots=role_slots)
 
     @pytest.mark.asyncio
-    async def test_motif_block_injected_when_pattern_provided(self):
+    async def test_loop_motif_injects_back_edge_guidance(self):
+        """quality_gate_loop 패턴 시 BACK-EDGE + 단일 ai 노드 규칙이 프롬프트에 포함된다 (이슈 #406)."""
         response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
         llm = _mock_llm(response)
-        patterns = [self._pattern("quality_gate_loop", {"generator": ("llm_generate",), "evaluator": ("if_condition",)})]
+        patterns = [self._pattern("quality_gate_loop", {"generator": ("gemma_chat",), "evaluator": ("if_condition",)})]
         await DrafterService(llm).draft(
             _spec(), [_node_config("slack")], self.owner_id, pattern_templates=patterns,
         )
         prompt = llm.generate_structured.call_args.args[0]
         assert "WORKFLOW MOTIFS" in prompt
         assert "quality_gate_loop" in prompt
-        assert "generator" in prompt
+        assert "BACK-EDGE" in prompt
+        assert "LOOP" in prompt
+        # 단일 ai 노드 규칙 — 두 번째 gemma_chat 추가 금지 지시
+        assert "do NOT add a second" in prompt
+
+    @pytest.mark.asyncio
+    async def test_loop_prompt_also_has_loops_section(self):
+        """_SYSTEM_PROMPT에 LOOPS 섹션이 있어 back-edge 방법을 알려준다."""
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "LOOPS" in prompt
+        assert "back-edge" in prompt
 
     @pytest.mark.asyncio
     async def test_no_motif_block_when_no_patterns(self):
@@ -587,7 +601,7 @@ class TestDrafterMotifBlock:
     async def test_motif_block_injected_in_edit_path_too(self):
         cfg_a, cfg_b = _node_config("http"), _node_config("slack")
         prior = _prior_workflow(cfg_a, cfg_b)
-        patterns = [self._pattern("quality_gate_loop", {"generator": ("llm_generate",)})]
+        patterns = [self._pattern("quality_gate_loop", {"generator": ("gemma_chat",), "evaluator": ("if_condition",)})]
         llm = _mock_llm(_EditResponse(
             name="W",
             nodes=[_EditNodeDraft(ref="n0", node_type="http"), _EditNodeDraft(ref="n1", node_type="slack")],
@@ -598,7 +612,7 @@ class TestDrafterMotifBlock:
         )
         prompt = llm.generate_structured.call_args.args[0]
         assert "WORKFLOW MOTIFS" in prompt
-        assert "quality_gate_loop" in prompt
+        assert "BACK-EDGE" in prompt
 
     def test_motif_block_static_empty_when_no_slots(self):
         patterns = [self._pattern("no_slots_pattern", {})]
@@ -607,6 +621,16 @@ class TestDrafterMotifBlock:
 
     def test_motif_block_static_empty_when_none(self):
         assert DrafterService._motif_block(None) == ""
+
+    def test_non_loop_motif_uses_simple_slot_format(self):
+        """루프 패턴이 아닌 일반 모티프는 슬롯 목록만 출력한다."""
+        from ai_agent.domain.value_objects.ontology import PatternTemplate
+
+        pt = PatternTemplate(name="unknown_pattern", intent="기타", role_slots={"step": ("some_node",)})
+        block = DrafterService._motif_block([pt])
+        assert "BACK-EDGE" not in block
+        assert "unknown_pattern" in block
+        assert "step" in block
 
 
 @pytest.mark.asyncio
