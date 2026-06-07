@@ -17,10 +17,12 @@ RUN pip install --no-cache-dir -e /app/packages/common_schemas/python
 # 2) modules — api_server가 사용하는 4종(auth/ai_agent/nodes_graph/storage) + storage가
 #    transitively import하는 doc_parser/toolset domain ports까지 install. setuptools가
 #    inter-module 의존 (auth.domain → nodes_graph.domain 등) 자동 resolution.
+#    ai_agent[ontology]: 게시 시 (:Skill)-[:BINDS]->(:Node) Neo4j 투영(Neo4jSkillProjector)에
+#    neo4j 드라이버 필요 (ADR-0026 Phase 2b 라이브 활성화). 버전 핀은 ai_agent pyproject 단일 출처.
 COPY modules /app/modules
 RUN pip install --no-cache-dir \
     -e /app/modules/auth \
-    -e /app/modules/ai_agent \
+    -e "/app/modules/ai_agent[ontology]" \
     -e /app/modules/nodes_graph \
     -e /app/modules/doc_parser \
     -e /app/modules/toolset \
