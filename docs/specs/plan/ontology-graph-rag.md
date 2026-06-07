@@ -12,7 +12,8 @@
 | **그래프 DB 초기 인프라** (AuraDB provisioning, GCP secret 3종+IAM, `OntologyRetrieverPort` ABC, `Neo4jOntologyAdapter`, `build_ontology.py` ETL, 스키마 제약) | **황대원 (조장)** | 본 문서 §1·§3 — ✅ 완료(PR #393) |
 | **validator 순환 완화** (Phase 0, 하드 선행) | **황대원 선반영 (PR #392)** / 박아름 sign-off | 본 문서 §2 — 구현 완료, nodes_graph 교차소유 검토 대기 |
 | **GraphRAG retrieval + 모티프 + drafter grounding** (Phase 2) | **신정혜** | 본 문서 §4 |
-| **CAN_FOLLOW 휴리스틱 + 스킬 그래프 ETL 강화** (Phase 2) | **박아름** | 본 문서 §4 |
+| **CAN_FOLLOW 엣지(노드 호환) + 모티프 `:Pattern` 시드 + 소비** (Phase 2) | **신정혜** | §4.2a — 노드 I/O 스키마 파생(스킬 무관). **composer grounding이라 박아름 비의존·자력 완결** |
+| **스킬 그래프 ETL — `BINDS` + publish 훅** (Phase 2) | **박아름** | §4.2b — skill-builder grounding (별개 소비자) |
 | **하이브리드 벡터 + 고도화 레버** (Phase 3) | 신정혜·박아름 | 본 문서 §5·§6 |
 
 > 황대원은 인프라(§1·§3) + **Phase 0 validator 완화(§2)를 선반영**(PR #392, 위임이 결국 되돌아오는 패턴이라 직접 처리)했다. §4·§5·§6은 설계·계약·테스트 기준만 제공하고 실행은 담당자에게 넘긴다.
@@ -59,7 +60,7 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 
 ### 1.4 `Neo4jOntologyAdapter` — ✅ 빌드됨 (`ai_agent/adapters/ontology/`)
 - **요청마다 driver 생성·close** 패턴 강제(`composer_modal_per_request_engine` — Modal boot≠request 루프 hang 회피). neo4j는 lazy import(extras 미설치여도 모듈 로드 가능), `NEO4J_*` env에서 연결정보, `driver_factory` 주입 훅으로 테스트.
-- **Phase 1 expand_candidates 실제 범위 = seed + category sibling 1-hop** (REQUIRES/IN_CATEGORY 메타 포함). **`CAN_FOLLOW`는 아직 없음**(Phase 2 박아름). `hops` 인자는 forward-compat 예약.
+- **Phase 1 expand_candidates 실제 범위 = seed + category sibling 1-hop** (REQUIRES/IN_CATEGORY 메타 포함). **`CAN_FOLLOW`는 아직 없음**(Phase 2 신정혜 — composer grounding). `hops` 인자는 forward-compat 예약.
 - `match_patterns`는 **`NotImplementedError`** — Phase 2 신정혜가 `:Pattern` Cypher로 채움(§4.1).
 
 ### 1.5 `scripts/build_ontology.py` (멱등 ETL) — ✅ 빌드+검증됨
@@ -158,7 +159,7 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 1. vector seed:   NodeRegistry.search (pgvector top-k, BGE-M3) → seed node_type
 2. graph expand:  OntologyRetrieverPort.expand_candidates(seed)
                   → 현재(Phase 1 어댑터): seed + category sibling 1-hop (REQUIRES 메타 포함)
-                  → CAN_FOLLOW 호환 확장은 박아름 §4.2 머지 후 자동 강화
+                  → CAN_FOLLOW 호환 확장(신정혜 §4.2a) 추가 시 강화 — 박아름 비의존
 3. drafter:       OntologySubgraph.allowed_node_types() 밖 node_type/엣지 생성 금지 (constrained generation)
 4. 모티프:        intent가 "검증/재생성/품질"이면 match_patterns(intent) → quality_gate_loop 템플릿
                   → role_slots(generator/evaluator)에 구체 node_type 바인딩
@@ -166,7 +167,7 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 ```
 
 **`match_patterns` 구현(신정혜)** — 현재 `NotImplementedError`:
-- `:Pattern`/`:Template`/`USES_ROLE` 노드를 먼저 시드해야 함(USES_ROLE 큐레이션은 박아름 §4.2). 시드 후 어댑터에 Cypher 추가: `MATCH (p:Pattern) WHERE intent 매칭 → role_slots 반환`.
+- `:Pattern`/`:Template`/`USES_ROLE` 노드를 먼저 시드해야 함. **시드 = 카탈로그 node_type 기반(generator=LLM 노드, evaluator=condition 노드)이라 신정혜 자력 가능 — 박아름 비의존.** 시드 후 어댑터에 Cypher 추가: `MATCH (p:Pattern) WHERE intent 매칭 → role_slots 반환`.
 - 반환 `PatternTemplate.role_slots`를 drafter가 구체 node_type으로 채워 루프 생성.
 
 **핵심 원칙:**
@@ -174,12 +175,16 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 - **constrained generation이 환각 억제의 본질** — `allowed_node_types()`를 프롬프트+후처리 가드로 강제.
 - 모티프 예(quality_gate_loop): `generator(LLM) → evaluator(condition: score<θ) --retry--> generator / --done--> 하류`, `max_iterations`는 evaluator 파라미터.
 
-### 4.2 박아름 — CAN_FOLLOW 추론 + 스킬 그래프 ETL
-- **CAN_FOLLOW 휴리스틱**: 노드 I/O가 JSON Schema dict(`node_definition.py:24-25`)라 무손실 불가. 추론 알고리즘 가이드:
-  - `A.output_schema`의 properties(이름+JSON type) ↔ `B.input_schema.required`(이름+type) 매칭 → 일치 수/타입 호환으로 `confidence` 산출.
+### 4.2a 신정혜 — CAN_FOLLOW 엣지 + 모티프 시드 (composer grounding, 박아름 비의존)
+> **소비자 = composer**, 데이터 소스 = **노드 I/O 스키마**(nodes_graph 공개 스키마, read-only). 스킬과 무관하므로 박아름 작업에 묶이지 않는다 — 신정혜가 ETL 확장부터 소비까지 자력 완결. (박아름 consult는 스키마 의미 정확도 향상용 *옵션*, 비차단.)
+- **CAN_FOLLOW 휴리스틱**(`build_ontology.py` ETL 확장): 노드 I/O가 JSON Schema dict(`node_definition.py:24-25`)라 무손실 불가.
+  - `A.output_schema` properties(이름+JSON type) ↔ `B.input_schema.required`(이름+type) 매칭 → 일치 수/타입 호환으로 `confidence` 산출.
   - confidence < 임계는 edge 생성 안 함(오탐 억제). 임계·매칭 규칙은 골든 셋으로 튜닝.
-- **스킬 그래프 ETL 강화**: 기존 스킬 **publish 경로에 Neo4j incremental upsert 훅** 배선(`BINDS`, `:Skill` 속성). 정적 카탈로그와 달리 스킬은 자주 바뀜.
-- **USES_ROLE 시드**: 모티프 슬롯(generator=LLM 노드, evaluator=condition 노드)에 맞는 node_type을 카탈로그에서 큐레이션해 `:Pattern`에 연결.
+- **소비**: retriever에서 `expand_candidates` 결과의 CAN_FOLLOW로 후보를 **ADD 보강/랭킹**(subtract 필터 금지 — stale 역효과).
+- **USES_ROLE / `:Pattern` 시드**: 모티프 슬롯(generator=LLM 노드, evaluator=condition 노드)을 카탈로그 node_type으로 큐레이션 → `:Pattern`에 연결. 카탈로그 기반이라 박아름 비의존.
+
+### 4.2b 박아름 — 스킬 그래프 ETL (skill-builder grounding, 별개 소비자)
+- **스킬 `(:Skill)-[:BINDS]->(:Node)` ETL**: 기존 스킬 **publish 경로에 Neo4j incremental upsert 훅** 배선(`BINDS`, `:Skill` 속성). 정적 카탈로그와 달리 스킬은 자주 바뀜. 소비자는 skill-builder(+ 향후 composer 스킬 제시) — composer의 노드 grounding(§4.2a)과 독립.
 
 ---
 
@@ -204,7 +209,7 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 - vector seed `k`, hop depth(1 vs 2)를 골든 셋으로 스윕. 1홉은 정밀/저지연, 2홉은 재현↑/노이즈↑.
 - expand 시 `risk_level`·`required_connections` 미충족 노드 **사전 필터**(사용자 보유 connection 기반, PR #348 connection-aware와 연계)로 후보 오염 차단.
 
-### 6.3 CAN_FOLLOW 신뢰도 + 큐레이션 (박아름)
+### 6.3 CAN_FOLLOW 신뢰도 + 큐레이션 (신정혜 — composer grounding)
 - 휴리스틱 confidence에 **사람 큐레이션 레이어** — 자주 쓰이는 호환쌍은 수동 승격, 오탐쌍은 블랙리스트.
 - 실행 로그(`node_results`)에서 **실제로 성공한 A→B 연쇄**를 마이닝해 confidence 보정(실측 기반 강화).
 
@@ -228,7 +233,7 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 1. **Modal per-request driver** — `@enter` 1회 생성 금지(loop-binding hang). 요청마다 생성·close.
 2. **secret 경로 = Modal `load_secrets_to_env` (terraform 아님)** — composer/skills-builder는 Modal 앱이라 `boot()`에서 GCP secret(`neo4j-uri`/`username`/`password`)을 런타임 pull. terraform `secret_env`는 Cloud Run(api/worker) 전용. secret `:latest` 복수 공유 시 `secret_latency_bomb` → 버전 핀.
 3. **ETL 동기화** — 정적 카탈로그 deploy 1회 + 스킬 publish incremental. 재시드 레시피(`staging_node_catalog_reseed`)와 정합.
-4. **3-owner 협의** — Phase 0은 황대원이 nodes_graph(박아름 소유)에 선반영(PR #392, 사후 통지 완료) → 박아름 sign-off 대기. Phase 2(신정혜+박아름) 동시 진행 전 ownership 통지(`cross_owner_module_etiquette`).
+4. **소비자 분리 — Phase 2는 박아름 의존 아님**: composer grounding(§4.2a 모티프·CAN_FOLLOW)은 노드 I/O 스키마 파생이라 **신정혜 자력 완결**. 박아름 몫(§4.2b 스킬 BINDS)은 skill-builder grounding이라 **독립 병렬**. (Phase 0 validator만 nodes_graph 교차소유라 박아름 sign-off 필요 — PR #392.)
 5. **프로젝트 일정** — 2026-06-30 staging 종료와 별개의 **장기 제품 방향**. staging 검증은 Phase 1 한정, Phase 2+는 일정 합의 후.
 
 ---
@@ -238,7 +243,7 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 [황대원] §1 인프라 ✅ PR #393 (AuraDB 라이브검증 + secret 3종 + IAM)        ─┐
 [황대원] §2 Phase 0 validator 완화 ✅ PR #392 (박아름 sign-off 대기)        ─┘
         ↓ (PR #391/#392/#393 머지 후)
-[신정혜+박아름] §4 Phase 2 GraphRAG + 모티프 + drafter grounding
-        ↓  (신정혜: §4.1 retriever 교체+런타임 secret 배선+재배포 / 박아름: §4.2 CAN_FOLLOW+BINDS)
+[신정혜] §4.1+§4.2a composer grounding (retriever+모티프+CAN_FOLLOW+drafter) ─┐ 독립 병렬
+[박아름] §4.2b 스킬 BINDS ETL (skill-builder grounding)                    ─┘ (서로 비의존)
 [공통] §6.5 평가 하니스로 측정 → §6 고도화 레버 반복
 ```

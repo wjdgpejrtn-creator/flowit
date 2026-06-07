@@ -52,6 +52,50 @@ async def test_apply_constraints_runs_all_idempotent_ddl():
     assert all("IF NOT EXISTS" in q for q, _ in session.calls)
 
 
+@dataclass
+class _FakeStaging:
+    required_connections: list
+
+
+@dataclass
+class _FakeScope:
+    value: str
+
+
+@dataclass
+class _FakeSkill:
+    skill_id: str
+    scope: _FakeScope
+    node_spec_staging: _FakeStaging | None
+
+
+@pytest.mark.asyncio
+async def test_project_skill_resets_then_binds_ai_and_connections():
+    session = _FakeSession()
+    await build_ontology.project_skill(session, "sk-1", "team", ["slack", "slack", "", "gmail"])
+
+    queries = [q for q, _ in session.calls]
+    assert any("MERGE (s:Skill {id: $skill_id})" in q and "DELETE b" in q for q in queries)
+    assert any("MATCH (n:Node {category: 'ai'})" in q for q in queries)
+    conn = [p for q, p in session.calls if ":Connection {provider: $provider}" in q]
+    assert {p["provider"] for p in conn} == {"slack", "gmail"}  # dedup + 빈문자 제외
+    assert all(p["skill_id"] == "sk-1" for _, p in session.calls)
+
+
+@pytest.mark.asyncio
+async def test_project_skills_backfill_counts_and_uses_scope_tier():
+    session = _FakeSession()
+    skills = [
+        _FakeSkill("sk-1", _FakeScope("personal"), _FakeStaging(["slack"])),
+        _FakeSkill("sk-2", _FakeScope("company"), None),
+    ]
+    count = await build_ontology.project_skills(session, skills)
+
+    assert count == 2
+    reset_calls = [p for q, p in session.calls if "DELETE b" in q]
+    assert {p["tier"] for p in reset_calls} == {"personal", "company"}
+
+
 @pytest.mark.asyncio
 async def test_project_catalog_merges_node_and_requires():
     session = _FakeSession()
