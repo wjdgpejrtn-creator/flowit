@@ -54,6 +54,31 @@ MERGE (c:Connection {provider: $provider})
 MERGE (n)-[:REQUIRES]->(c)
 """
 
+# 모티프 시드 (ADR-0026 Phase 2a) — 카탈로그 category 기반(DB 불필요, catalog_registry read-only).
+# 슬롯은 "generator"(AI 노드)·"evaluator"(condition 노드)로 고정.
+# intent는 match_patterns CONTAINS 매칭 대상 — 사용자 문장에서 이 키워드가 검출되면 패턴 활성.
+_MERGE_PATTERN = """
+MERGE (p:Pattern {name: $name})
+SET p.intent = $intent
+"""
+
+_MERGE_USES_ROLE = """
+MATCH (p:Pattern {name: $pattern_name})
+MATCH (n:Node) WHERE n.category = $category
+MERGE (p)-[:USES_ROLE {slot: $slot}]->(n)
+"""
+
+_PATTERNS: tuple[dict, ...] = (
+    {
+        "name": "quality_gate_loop",
+        "intent": "검증",
+        "roles": [
+            {"slot": "generator", "category": "ai"},
+            {"slot": "evaluator", "category": "condition"},
+        ],
+    },
+)
+
 # 스킬 BINDS 투영 (ADR-0026 Phase 2b) — Cypher 상수는 위에서 라이브 경로(neo4j_skill_projector)
 # 를 단일 출처로 import. 라이브는 publish 훅(PublishSkillUseCase → Neo4jSkillProjector) incremental
 # upsert, 본 헬퍼는 동일 Cypher로 배치 backfill(스킬 소스 주입 시)을 지원한다.
@@ -62,6 +87,23 @@ MERGE (n)-[:REQUIRES]->(c)
 async def apply_constraints(session: Any) -> None:
     for ddl in CONSTRAINTS:
         await session.run(ddl)
+
+
+async def project_patterns(session: Any) -> int:
+    """_PATTERNS 시드를 (:Pattern)/(:USES_ROLE) 엣지로 투영.
+
+    반환: 투영한 패턴 수.
+    """
+    for p in _PATTERNS:
+        await session.run(_MERGE_PATTERN, name=p["name"], intent=p["intent"])
+        for role in p["roles"]:
+            await session.run(
+                _MERGE_USES_ROLE,
+                pattern_name=p["name"],
+                category=role["category"],
+                slot=role["slot"],
+            )
+    return len(_PATTERNS)
 
 
 async def project_catalog(session: Any, node_defs: list[Any]) -> int:
@@ -134,13 +176,14 @@ async def main() -> None:
         async with driver.session() as session:
             await apply_constraints(session)
             count = await project_catalog(session, node_defs)
+            pattern_count = await project_patterns(session)
     finally:
         await driver.close()
 
-    print(f"[build_ontology] 제약 {len(CONSTRAINTS)}건 적용 + 노드 {count}건 투영 완료")
+    print(f"[build_ontology] 제약 {len(CONSTRAINTS)}건 적용 + 노드 {count}건 + 패턴 {pattern_count}건 투영 완료")
     # 스킬 BINDS는 publish 훅(PublishSkillUseCase → Neo4jSkillProjector)이 incremental upsert로
     # 라이브 처리한다(ADR-0026 Phase 2b 완료). 배치 backfill이 필요하면 project_skills()에 DB
-    # 스킬 소스를 주입한다(본 import-only main은 DB 비의존이라 미수행). CAN_FOLLOW/모티프는 신정혜(#396).
+    # 스킬 소스를 주입한다(본 import-only main은 DB 비의존이라 미수행). CAN_FOLLOW 추론은 박아름 §4.2.
     print("[build_ontology] 스킬 BINDS = publish 훅 라이브 / 배치 backfill은 project_skills() 사용")
 
 

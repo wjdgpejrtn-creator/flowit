@@ -79,10 +79,36 @@ async def test_empty_seeds_short_circuits_without_driver():
 
 
 @pytest.mark.asyncio
-async def test_match_patterns_not_implemented_phase1():
-    adapter = Neo4jOntologyAdapter(uri="neo4j+s://x", driver_factory=lambda: None)
-    with pytest.raises(NotImplementedError):
-        await adapter.match_patterns("검증/재생성")
+async def test_match_patterns_returns_templates():
+    records = [
+        {
+            "name": "quality_gate_loop",
+            "intent": "검증 후 재생성",
+            "role_rows": [
+                {"slot": "generator", "node_type": "llm_generate"},
+                {"slot": "evaluator", "node_type": "if_condition"},
+            ],
+        }
+    ]
+    driver = _FakeDriver(records)
+    adapter = Neo4jOntologyAdapter(uri="neo4j+s://x", driver_factory=lambda: driver)
+
+    templates = await adapter.match_patterns("검증/재생성")
+
+    assert len(templates) == 1
+    t = templates[0]
+    assert t.name == "quality_gate_loop"
+    assert t.role_slots["generator"] == ("llm_generate",)
+    assert t.role_slots["evaluator"] == ("if_condition",)
+    assert driver.closed is True
+
+
+@pytest.mark.asyncio
+async def test_match_patterns_empty_when_no_pattern_nodes():
+    driver = _FakeDriver([])
+    adapter = Neo4jOntologyAdapter(uri="neo4j+s://x", driver_factory=lambda: driver)
+    templates = await adapter.match_patterns("품질 검증")
+    assert templates == []
 
 
 def test_missing_uri_raises_on_driver_creation(monkeypatch):
