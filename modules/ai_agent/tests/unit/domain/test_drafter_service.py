@@ -563,8 +563,8 @@ class TestDrafterMotifBlock:
         return PatternTemplate(name=name, intent="검증", role_slots=role_slots)
 
     @pytest.mark.asyncio
-    async def test_loop_motif_injects_back_edge_guidance(self):
-        """quality_gate_loop 패턴 시 BACK-EDGE + 단일 ai 노드 규칙이 프롬프트에 포함된다 (이슈 #406)."""
+    async def test_loop_motif_injects_back_edge_with_handles(self):
+        """quality_gate_loop 패턴 시 BACK-EDGE + from_handle 지시가 프롬프트에 포함된다 (이슈 #406 HIGH)."""
         response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
         llm = _mock_llm(response)
         patterns = [self._pattern("quality_gate_loop", {"generator": ("gemma_chat",), "evaluator": ("if_condition",)})]
@@ -576,18 +576,23 @@ class TestDrafterMotifBlock:
         assert "quality_gate_loop" in prompt
         assert "BACK-EDGE" in prompt
         assert "LOOP" in prompt
+        # false/true handle guidance — BranchEvaluator가 handle 값으로 루프 gate 결정
+        assert "false" in prompt
+        assert "true" in prompt
         # 단일 ai 노드 규칙 — 두 번째 gemma_chat 추가 금지 지시
         assert "do NOT add a second" in prompt
 
     @pytest.mark.asyncio
-    async def test_loop_prompt_also_has_loops_section(self):
-        """_SYSTEM_PROMPT에 LOOPS 섹션이 있어 back-edge 방법을 알려준다."""
+    async def test_loops_section_has_handle_guidance(self):
+        """_SYSTEM_PROMPT의 LOOPS 섹션에 from_handle="false"/"true" 지시가 포함된다 (HIGH fix)."""
         response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
         llm = _mock_llm(response)
         await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
         prompt = llm.generate_structured.call_args.args[0]
         assert "LOOPS" in prompt
         assert "back-edge" in prompt
+        assert 'from_handle="false"' in prompt
+        assert 'from_handle="true"' in prompt
 
     @pytest.mark.asyncio
     async def test_no_motif_block_when_no_patterns(self):
@@ -598,7 +603,8 @@ class TestDrafterMotifBlock:
         assert "WORKFLOW MOTIFS" not in prompt
 
     @pytest.mark.asyncio
-    async def test_motif_block_injected_in_edit_path_too(self):
+    async def test_edit_prompt_also_has_loops_section(self):
+        """편집 경로(_EDIT_SYSTEM_PROMPT)에도 LOOPS 섹션이 있다 (MED fix)."""
         cfg_a, cfg_b = _node_config("http"), _node_config("slack")
         prior = _prior_workflow(cfg_a, cfg_b)
         patterns = [self._pattern("quality_gate_loop", {"generator": ("gemma_chat",), "evaluator": ("if_condition",)})]
@@ -611,8 +617,23 @@ class TestDrafterMotifBlock:
             _spec(), [cfg_a, cfg_b], self.owner_id, prior_workflow=prior, pattern_templates=patterns,
         )
         prompt = llm.generate_structured.call_args.args[0]
-        assert "WORKFLOW MOTIFS" in prompt
+        assert _EDIT_SYSTEM_PROMPT in prompt
+        assert "LOOPS" in prompt
         assert "BACK-EDGE" in prompt
+        assert "WORKFLOW MOTIFS" in prompt
+
+    def test_parity_loop_edges_have_correct_handles(self):
+        """_motif_block()이 [false]/[true] handle을 명시한다 (parity — BranchEvaluator 계약)."""
+        from ai_agent.domain.value_objects.ontology import PatternTemplate
+
+        pt = PatternTemplate(
+            name="quality_gate_loop", intent="검증",
+            role_slots={"generator": ("gemma_chat",), "evaluator": ("if_condition",)},
+        )
+        block = DrafterService._motif_block([pt])
+        assert "[false]" in block
+        assert "[true]" in block
+        assert "BACK-EDGE" in block
 
     def test_motif_block_static_empty_when_no_slots(self):
         patterns = [self._pattern("no_slots_pattern", {})]
@@ -631,6 +652,29 @@ class TestDrafterMotifBlock:
         assert "BACK-EDGE" not in block
         assert "unknown_pattern" in block
         assert "step" in block
+
+    def test_any_generator_evaluator_pattern_treated_as_loop(self):
+        """이름에 무관하게 generator+evaluator 슬롯이 있으면 LOOP 패턴으로 취급한다 (LOW fix)."""
+        from ai_agent.domain.value_objects.ontology import PatternTemplate
+
+        pt = PatternTemplate(
+            name="some_custom_loop", intent="재시도",
+            role_slots={"generator": ("llm_node",), "evaluator": ("check_node",)},
+        )
+        block = DrafterService._motif_block([pt])
+        assert "LOOP" in block
+        assert "BACK-EDGE" in block
+        assert "some_custom_loop" in block
+
+    @pytest.mark.asyncio
+    async def test_or_condition_single_node_guidance_in_prompt(self):
+        """MULTIPLE CONDITIONS 지시가 SYSTEM_PROMPT에 있어 OR 조건 중복(if_condition 중복) 방지를 안내한다."""
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "MULTIPLE CONDITIONS" in prompt
+        assert "SINGLE" in prompt
 
 
 @pytest.mark.asyncio
