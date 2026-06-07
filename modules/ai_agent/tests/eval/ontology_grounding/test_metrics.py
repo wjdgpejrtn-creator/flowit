@@ -174,3 +174,50 @@ def test_golden_set_shape():
 
 def test_qa_threshold_constant():
     assert QA_PASS_THRESHOLD == 8.0  # ADR-0004 통과 기준
+
+
+# ── 카탈로그 드리프트 가드 (PR #409 리뷰 LOW #2/#4) ───────────────────────────
+
+
+def _catalog_condition_node_types() -> frozenset[str]:
+    """실측 카탈로그에서 category=="condition"인 node_type을 수집.
+
+    control/*.py만 importlib로 읽는다(외부 어댑터 heavy import 회피). condition
+    카테고리 노드는 control 패키지에만 존재 — drift 시 여기서 자연히 갱신된다.
+    """
+    import glob
+    import importlib
+    import os
+
+    import nodes_graph.domain.catalog.control as control_pkg
+
+    control_dir = os.path.dirname(control_pkg.__file__)
+    found: set[str] = set()
+    for path in glob.glob(os.path.join(control_dir, "*.py")):
+        name = os.path.splitext(os.path.basename(path))[0]
+        if name == "__init__":
+            continue
+        mod = importlib.import_module(f"nodes_graph.domain.catalog.control.{name}")
+        getter = getattr(mod, "get_node_definition", None)
+        if getter is None:
+            continue
+        defn = getter()
+        if getattr(defn, "category", None) == "condition":
+            found.add(defn.node_type)
+    return frozenset(found)
+
+
+def test_condition_node_types_match_catalog():
+    # CONDITION_NODE_TYPES가 실측 카탈로그(category=="condition")와 **동치**여야 한다.
+    # subset이 아니라 == 라서 9번째 condition 노드 추가도, 기존 노드 제거도 잡는다.
+    from ai_agent.tests.eval.ontology_grounding.metrics import CONDITION_NODE_TYPES
+
+    assert CONDITION_NODE_TYPES == _catalog_condition_node_types()
+
+
+def test_condition_subset_of_executable_catalog():
+    from nodes_graph.application.executable_node_types import EXECUTABLE_NODE_TYPES
+
+    from ai_agent.tests.eval.ontology_grounding.metrics import CONDITION_NODE_TYPES
+
+    assert CONDITION_NODE_TYPES <= EXECUTABLE_NODE_TYPES

@@ -23,7 +23,12 @@ QA_PASS_THRESHOLD = 8.0
 
 # category=="condition"인 카탈로그 node_type 8종. validator(_CONDITION_CATEGORY)와
 # CyclicScheduler(is_brancher = category=="condition")의 루프 탈출 판정 기준을 미러한다.
-# nodes_graph/domain/catalog/control/*.py(category="condition") 기준 — drift 시 갱신.
+# nodes_graph/domain/catalog/control/*.py(category="condition") 기준.
+#
+# 드리프트(카탈로그에 condition 노드 추가/제거)는 import-time assert가 아니라
+# test_metrics.test_condition_node_types_match_catalog가 **실측 카탈로그와 동치(==)**로
+# 잡는다. import 시 죽이지 않아(harness uncollectable 회피) fail-loud는 테스트 레이어로.
+# (PR #409 리뷰 LOW #2/#4.)
 CONDITION_NODE_TYPES: frozenset[str] = frozenset(
     {
         "if_condition",
@@ -36,8 +41,6 @@ CONDITION_NODE_TYPES: frozenset[str] = frozenset(
         "delay",
     }
 )
-# 안전망: condition 8종은 카탈로그(EXECUTABLE_NODE_TYPES)의 부분집합이어야 한다.
-assert CONDITION_NODE_TYPES <= EXECUTABLE_NODE_TYPES, "condition node_type이 카탈로그와 drift"
 
 
 # ── per-record 판정 ──────────────────────────────────────────────────────────
@@ -123,8 +126,8 @@ def distractor_verdict(rec: RunRecord) -> bool | None:
 class AggregateMetrics:
     n_total: int
     n_workflow: int               # 워크플로우를 만들어야 하는 시나리오 수(non-distractor)
-    validator_pass_rate: float    # n_workflow 대비
-    avg_retry: float              # n_workflow 대비 평균 재시도
+    validator_pass_rate: float    # 1차 초안 무재초안율(validator+QA), n_workflow 대비
+    avg_retry: float              # 평균 재초안 횟수(validator+QA), n_workflow 대비
     hallucinated_node_rate: float # 전체 노드 중 환각 노드 비율
     n_hallucinated_records: int   # 환각 노드를 1개 이상 가진 산출물 수
     motif_correctness: float      # expected_motif 있는 시나리오 대비
@@ -137,8 +140,8 @@ class AggregateMetrics:
     def as_table(self) -> str:
         rows = [
             ("시나리오 수", f"{self.n_total} (워크플로우 {self.n_workflow} / 잡담 {self.n_distractor})"),
-            ("validator-pass rate", f"{self.validator_pass_rate:.1%}"),
-            ("평균 retry 횟수", f"{self.avg_retry:.2f}"),
+            ("1차초안 무재초안율(val+QA)", f"{self.validator_pass_rate:.1%}"),
+            ("평균 재초안 횟수(val+QA)", f"{self.avg_retry:.2f}"),
             ("hallucinated-node rate", f"{self.hallucinated_node_rate:.1%} ({self.n_hallucinated_records}개 산출물)"),
             ("motif-correctness", f"{self.motif_correctness:.1%} (n={self.n_motif})"),
             ("qa score 평균", f"{self.qa_score_mean:.2f}"),

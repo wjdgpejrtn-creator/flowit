@@ -116,19 +116,20 @@ def _build_orchestrator(session, ontology_retriever):
 
 def _frames_to_record(scenario: Scenario, frames: list, node_type_by_id: dict[UUID, str]) -> RunRecord:
     """수집 프레임 + 카탈로그 맵으로 RunRecord 정규화."""
-    last_draft: WorkflowDraftFrame | None = None
+    draft_frames: list[WorkflowDraftFrame] = []
     last_qa: QAMetricFrame | None = None
     result: ResultFrame | None = None
     error_msg: str | None = None
     for f in frames:
         if isinstance(f, WorkflowDraftFrame):
-            last_draft = f
+            draft_frames.append(f)
         elif isinstance(f, QAMetricFrame):
             last_qa = f
         elif isinstance(f, ResultFrame):
             result = f
         elif isinstance(f, ErrorFrame):
             error_msg = f.message
+    last_draft = draft_frames[-1] if draft_frames else None
 
     node_types: list[str] = []
     edges: list[tuple[int, int]] = []
@@ -152,9 +153,13 @@ def _frames_to_record(scenario: Scenario, frames: list, node_type_by_id: dict[UU
             if a is not None and b is not None:
                 edges.append((a, b))
 
-    attempt = last_qa.attempt if last_qa else 0
+    # retry는 **재초안 횟수**로 센다 — composer는 validator 실패·QA 실패 양쪽 모두
+    # retry_draft → draft_workflow로 돌아가 WorkflowDraftFrame을 재emit한다(composer_graph
+    # add_edge "retry_draft"→"draft_workflow"). 따라서 draft 프레임 개수-1이 validator+QA
+    # 재시도를 모두 포착한다. (QAMetricFrame.attempt만 보면 validator 단독 재시도를 놓쳐
+    # avg_retry 과소·validator_pass 오보 — PR #409 리뷰 MED #1.)
     qa_score = last_qa.score if last_qa else 0.0
-    retry_count = max(0, attempt - 1)
+    retry_count = max(0, len(draft_frames) - 1)
 
     return RunRecord(
         scenario_id=scenario.scenario_id,
@@ -164,13 +169,15 @@ def _frames_to_record(scenario: Scenario, frames: list, node_type_by_id: dict[UU
         produced_workflow=bool(produced),
         node_types=node_types,
         edges=edges,
+        # 1차 초안이 재초안(validator+QA) 없이 살아남았는가.
         validator_passed_first=(retry_count == 0 and bool(produced)),
         retry_count=retry_count,
         qa_score=qa_score,
         error=error_msg,
         meta={
             "intent": result.intent if result else None,
-            "qa_attempt": attempt,
+            "qa_attempt": last_qa.attempt if last_qa else 0,
+            "n_drafts": len(draft_frames),
             "n_nodes": len(node_types),
             "n_edges": len(edges),
         },

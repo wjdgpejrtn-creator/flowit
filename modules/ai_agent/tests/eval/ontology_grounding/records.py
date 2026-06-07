@@ -36,8 +36,8 @@ class RunRecord:
     produced_workflow: bool          # composer가 워크플로우 초안을 만들었는가
     node_types: list[str]            # 노드별 해소된 node_type(미해소=UNKNOWN_NODE_TYPE)
     edges: list[tuple[int, int]]     # (from_idx, to_idx) — node_types 인덱스 기준
-    validator_passed_first: bool     # 1차 초안이 retry 없이 검증 통과(retry_count==0)
-    retry_count: int                 # draft/validate/qa 재시도 횟수
+    validator_passed_first: bool     # 1차 초안이 재초안(validator+QA) 없이 살아남음(retry_count==0)
+    retry_count: int                 # 재초안 횟수 = WorkflowDraftFrame 개수-1 (validator+QA 모두)
     qa_score: float                  # 최종 qa_evaluator 점수(≥8 통과)
     error: str | None = None         # 캡처 중 예외/에러 프레임(없으면 None)
     meta: dict = field(default_factory=dict)  # 자유 진단 필드(elapsed_ms, motif 매칭명 등)
