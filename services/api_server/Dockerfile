@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -e /app/packages/common_schemas/python
 COPY modules /app/modules
 RUN pip install --no-cache-dir \
     -e /app/modules/auth \
-    -e /app/modules/ai_agent[ontology] \
+    -e "/app/modules/ai_agent[ontology]" \
     -e /app/modules/nodes_graph \
     -e /app/modules/doc_parser \
     -e /app/modules/toolset \
