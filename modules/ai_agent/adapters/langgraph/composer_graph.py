@@ -77,6 +77,11 @@ _logger = logging.getLogger(__name__)
 
 _QA_MAX_RETRY = 3
 _MAX_AGENT_ITERATIONS = 15  # 무한 루프 방지
+# CAN_FOLLOW 확장 cap (ADR-0026 §4.2a) — ADD-all은 후보 풀을 부풀려 작은 LLM(Gemma) 드래프터의
+# structured JSON 생성을 잘리게 만든다(평가 하니스 실측: drafter 실패 6→23, qa pass 64%→29%).
+# seed를 검색 상위 hit으로 제한 + 추가 후보 상한으로 풀 비대를 억제한다.
+_EXPAND_SEED_LIMIT = 5   # 확장 seed = 검색 상위 N hit만(구조/개인 노드 제외)
+_EXPAND_ADD_LIMIT = 3    # CAN_FOLLOW로 추가하는 신규 후보 상한
 
 # 스킬 검색 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 상한. 이 거리 밖 후보는 제외해
 # 무관한 스킬이 옵션/노드 후보에 딸려 나오는 것을 막는다.
@@ -736,31 +741,44 @@ class LangGraphOrchestrator:
         seen = {c.node_id for c in base}
         return base + [e for e in extra if e.node_id not in seen]
 
-    async def _expand_can_follow(self, candidates: list[NodeConfig]) -> list[NodeConfig]:
-        """검색 후보의 CAN_FOLLOW 후행 노드를 온톨로지에서 회수해 NodeConfig로 그라운딩 (§4.2a).
+    async def _expand_can_follow(
+        self, seed_candidates: list[NodeConfig], existing_pool: list[NodeConfig]
+    ) -> list[NodeConfig]:
+        """검색 상위 hit의 CAN_FOLLOW 후행 노드를 회수해 NodeConfig로 ADD 보강 (§4.2a).
 
-        ADD 보강 전용 — 반환값은 호출부 ``_dedup_union``으로 기존 후보에 합쳐진다(이미 있는
-        node_type은 자연 dedup). 온톨로지 미주입/실패/미투영은 전부 빈 리스트로 비치명적 degrade
-        (매 compose가 Neo4j 왕복 1회를 더 하지만, 캐시 없는 per-request driver 비용은 수십 ms).
+        **풀 비대 가드(평가 하니스 실측 회귀 대응)**: seed는 검색 상위 ``_EXPAND_SEED_LIMIT``
+        hit으로 제한(구조/개인 노드는 제외 — 이들의 후행은 노이즈)하고, 추가 후보는
+        ``_EXPAND_ADD_LIMIT``개로 cap한다. ADD-all은 후보 풀을 부풀려 작은 LLM 드래프터의
+        structured JSON을 잘리게 해 품질을 떨어뜨렸다.
+
+        반환값은 호출부 ``_dedup_union``으로 합쳐진다. 온톨로지 미주입/실패/미투영은 전부 빈
+        리스트로 비치명적 degrade(검색 후보만으로 진행).
         """
-        if self._ontology_retriever is None or not candidates:
+        if self._ontology_retriever is None or not seed_candidates:
             return []
         grounder = getattr(self._node_registry, "list_by_node_types", None)
         if grounder is None:  # 구버전 NodeRegistry — 그라운딩 불가
             return []
-        seeds = [c.node_type for c in candidates]
-        seed_set = set(seeds)
-        # 확장 전 과정을 best-effort로 감싼다 — Neo4j 미투영·왕복 실패·그라운딩 실패는 전부
-        # 빈 리스트로 비치명적 degrade(검색 후보만으로 진행). ADD 보강이라 누락돼도 무해.
+        seeds = [c.node_type for c in seed_candidates[:_EXPAND_SEED_LIMIT]]
+        existing = {c.node_type for c in existing_pool}
         try:
             subgraph = await self._ontology_retriever.expand_candidates(seeds)
-            # adjacency 값(후행 node_type)에서 이미 후보인 것을 빼고 그라운딩 대상만 추린다.
-            successors = sorted(
-                {nt for succ in subgraph.adjacency.values() for nt in succ if nt not in seed_set}
-            )
-            if not successors:
+            # seed 관련도 순서를 보존(상위 hit의 후행 우선)하며 신규 후행만 cap까지 모은다.
+            picked: list[str] = []
+            seen: set[str] = set()
+            for seed in seeds:
+                for nt in subgraph.adjacency.get(seed, ()):
+                    if nt in existing or nt in seen:
+                        continue
+                    seen.add(nt)
+                    picked.append(nt)
+                    if len(picked) >= _EXPAND_ADD_LIMIT:
+                        break
+                if len(picked) >= _EXPAND_ADD_LIMIT:
+                    break
+            if not picked:
                 return []
-            grounded = await grounder(successors)
+            grounded = await grounder(picked)
             return list(grounded) if grounded else []
         except Exception as exc:
             _logger.warning("CAN_FOLLOW 확장 실패 (후보 보강 생략): %s", exc)
@@ -798,11 +816,14 @@ class LangGraphOrchestrator:
         # node_id 기준 dedup. 조회 실패는 비치명적 — 검색 후보만으로 진행한다.
         candidates = self._dedup_union(raw_candidates, await self._fetch_structural_candidates())
 
-        # GraphRAG CAN_FOLLOW 확장 (ADR-0026 §4.2a) — 검색 후보의 후행 가능 노드를 온톨로지에서
+        # GraphRAG CAN_FOLLOW 확장 (ADR-0026 §4.2a) — 검색 상위 hit의 후행 가능 노드를 온톨로지에서
         # 회수해 **ADD 보강**한다. 의미검색이 놓치는 글루/transform/control 노드(예: csv_parse 뒤
-        # csv_build, file_read 뒤 json_extract)를 첫 초안부터 쓸 수 있게 해 환각·누락을 줄인다.
+        # csv_build, file_read 뒤 json_extract)를 쓸 수 있게 해 누락을 줄인다. seed는 raw_candidates
+        # (검색 hit)만 — 구조/개인 노드의 후행은 노이즈라 제외. cap으로 풀 비대 억제(위 상수).
         # ADD 전용(subtract 금지) — ETL stale 시에도 유효 후보를 지우지 않는다. 비치명적.
-        candidates = self._dedup_union(candidates, await self._expand_can_follow(candidates))
+        candidates = self._dedup_union(
+            candidates, await self._expand_can_follow(raw_candidates, candidates)
+        )
 
         # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
         # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는

@@ -64,4 +64,28 @@ retry 0.5회), 없으면 현재 집계만 보고하고 통과한다.
 - 로컬 DB는 `DATABASE_URL`(cloud-sql-proxy, port 6544 ssl=False — `staging_node_catalog_reseed`
   레시피)로 붙는다. 평가용이라 GCS 영속 store는 None으로 둔다.
 - AuraDB Free는 72h auto-pause — 캡처 전 콘솔 resume 확인.
-- 캡처는 골든셋 32건 × (13~16 LLM 콜) = Modal 비용/시간 발생. 라벨로 캡처본을 구분 보관.
+- 캡처는 골든셋 32건 × (13~16 LLM 콜) = Modal 비용/시간 발생(시나리오당 ~2.5분). 라벨로 캡처본을 구분 보관.
+- run_eval는 평가용이라 워크플로우를 DB에 저장하지 않는다(save no-op) + `EVAL_USER_ID`(기본 system) 사용.
+- `--limit N`으로 앞 N개만 캡처(스모크/부분 측정).
+
+## 측정 결과 — A1 CAN_FOLLOW (ADR-0026 §4.2a), 2026-06-08
+
+CAN_FOLLOW expand 소비를 in-process로 before/after 측정(전체 32건 ×, Neo4j 엣지 0↔55 토글로 A/B).
+**하니스가 ADD-all 회귀를 잡아 cap 정밀화로 수렴시킨 사례** — 본 하니스의 존재 이유.
+
+| 지표 | baseline(엣지 0) | ADD-all | **capped(seed≤5·add≤3)** |
+|------|:---:|:---:|:---:|
+| drafter 실패 | 6 | 🔴 23 | ✅ 9 |
+| qa pass(≥8) | 64.3% | 🔴 28.6% | ✅ 67.9% |
+| qa 평균 | 7.93 | 🔴 5.64 | ✅ 8.07 |
+| motif-correctness | 75% | 75% | ✅ 100% (8/8) |
+| 평균 노드수(wf) | 3.00 | 2.50 | 3.25 |
+| hallucination | 0% | 0% | 0% |
+
+- **ADD-all = 명확한 회귀**: 후보 풀 비대(~24→38)로 Gemma 드래프터의 structured JSON이 잘림
+  (drafter 실패 전부 `Invalid JSON: EOF`). → 폐기.
+- **capped = 회귀 제거 + motif 직격 개선**: seed를 검색 상위 hit으로 제한 + 추가 ≤3개로 풀 비대 억제.
+  drafter 실패 정상화(9), qa baseline 동등~상회, **motif 75→100%**(control-flow 그라운딩↑), 워크플로우 풍부화.
+- **캐비엇**: 단일 샘플 A/B라 qa 소폭 개선은 LLM 노이즈 범위일 수 있음. 견고한 결론은 "ADD-all 회귀 + capped 무회귀+motif개선".
+- **distractor 0%는 측정 불가 아티팩트**: run_eval는 composer를 직접 호출하나 잡담 fast-path는 상위
+  Orchestrator에 있어 composer 단독엔 미적용. before/after 동일이라 A/B 결론엔 무영향.

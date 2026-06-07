@@ -365,6 +365,62 @@ class TestRetrieverExpandCanFollow:
         assert "new_node_not_in_neo4j" in types_in_result  # stale여도 보존
 
     @pytest.mark.asyncio
+    async def test_expansion_is_capped_and_seeds_from_search_hits_only(self):
+        """풀 비대 가드 — seed는 검색 hit만(구조노드 제외), 추가는 _EXPAND_ADD_LIMIT로 cap."""
+        from ai_agent.adapters.langgraph.composer_graph import (
+            _EXPAND_ADD_LIMIT,
+            _EXPAND_SEED_LIMIT,
+        )
+
+        # 검색 hit 6개(상위 seed 제한 검증) + 구조노드 1개(seed 제외 검증)
+        search_hits = []
+        for i in range(6):
+            c = _node_config(name=f"hit{i}")
+            c.__dict__["node_type"] = f"hit{i}"
+            search_hits.append(c)
+        structural = _node_config(name="schedule_trigger")
+        structural.__dict__["node_type"] = "schedule_trigger"
+
+        # 각 seed가 여러 후행을 갖게 해 cap 동작을 강제
+        adjacency = {f"hit{i}": (f"succ{i}a", f"succ{i}b") for i in range(6)}
+        adjacency["schedule_trigger"] = ("trig_succ",)  # 구조노드 후행 — seed면 잡힘
+
+        ontology_retriever = AsyncMock()
+        ontology_retriever.match_patterns = AsyncMock(return_value=[])
+        ontology_retriever.expand_candidates = AsyncMock(return_value=self._subgraph(adjacency))
+
+        ground_ret = [_node_config(name="g")]
+        ground_ret[0].__dict__["node_type"] = "g"
+
+        from nodes_graph.domain.services.graph_validator import GraphValidator
+
+        node_registry = AsyncMock(spec=NodeRegistry)
+        node_registry.search = AsyncMock(return_value=search_hits)
+        node_registry.list_structural = AsyncMock(return_value=[structural])
+        node_registry.list_by_node_types = AsyncMock(return_value=ground_ret)
+        oc = LangGraphOrchestrator(
+            intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
+            drafter=AsyncMock(spec=DrafterService),
+            qa_evaluator=AsyncMock(spec=QAEvaluatorService),
+            slot_filler=SlotFillingService(),
+            node_registry=node_registry,
+            workflow_repo=AsyncMock(spec=WorkflowRepository),
+            graph_validator=AsyncMock(spec=GraphValidator),
+            ontology_retriever=ontology_retriever,
+        )
+
+        await oc._retriever_node(_make_state())
+
+        # seed = 검색 상위 hit만, _EXPAND_SEED_LIMIT개로 제한(구조노드 schedule_trigger 미포함)
+        seeds_arg = ontology_retriever.expand_candidates.call_args.args[0]
+        assert "schedule_trigger" not in seeds_arg
+        assert len(seeds_arg) <= _EXPAND_SEED_LIMIT
+        assert seeds_arg == [f"hit{i}" for i in range(_EXPAND_SEED_LIMIT)]
+        # 그라운딩 대상(추가 후보)은 _EXPAND_ADD_LIMIT개로 cap
+        grounded_arg = node_registry.list_by_node_types.call_args.args[0]
+        assert len(grounded_arg) == _EXPAND_ADD_LIMIT
+
+    @pytest.mark.asyncio
     async def test_expand_failure_is_non_fatal(self):
         """expand_candidates 실패해도 검색 후보는 정상 반환(비치명적)."""
         seed = _node_config(name="slack_send")
