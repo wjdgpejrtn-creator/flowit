@@ -1,14 +1,15 @@
 {
   "n_total": 32,
   "n_workflow": 28,
-  "validator_pass_rate": 0.42857142857142855,
-  "avg_retry": 0.7857142857142857,
+  "validator_pass_rate": 0.47619,
+  "avg_retry": 0.535714,
   "hallucinated_node_rate": 0.0,
   "n_hallucinated_records": 0,
-  "motif_correctness": 0.75,
+  "motif_correctness": 0.791667,
   "n_motif": 8,
-  "qa_score_mean": 7.928571428571429,
-  "qa_pass_rate": 0.6428571428571429,
+  "qa_score_mean": 6.928571,
+  "qa_pass_rate": 0.5,
   "distractor_correct_rate": 0.0,
-  "n_distractor": 4
+  "n_distractor": 4,
+  "_note": "de-noised A1-ON arm mean (3 runs, 2026-06-08) — supersedes lucky single-sample. ADR-0026 §6 우선1."
 }

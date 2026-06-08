@@ -68,24 +68,39 @@ retry 0.5회), 없으면 현재 집계만 보고하고 통과한다.
 - run_eval는 평가용이라 워크플로우를 DB에 저장하지 않는다(save no-op) + `EVAL_USER_ID`(기본 system) 사용.
 - `--limit N`으로 앞 N개만 캡처(스모크/부분 측정).
 
-## 측정 결과 — A1 CAN_FOLLOW (ADR-0026 §4.2a), 2026-06-08
+## 측정 결과(권위) — A1 CAN_FOLLOW 양팔 de-noise (ADR-0026 §6 우선1), 2026-06-08
 
-CAN_FOLLOW expand 소비를 in-process로 before/after 측정(전체 32건 ×, Neo4j 엣지 0↔55 토글로 A/B).
-**하니스가 ADD-all 회귀를 잡아 cap 정밀화로 수렴시킨 사례** — 본 하니스의 존재 이유.
+**단일 샘플 A/B는 이 하니스의 LLM 노이즈에서 신뢰 불가**가 1차 결론. 따라서 양팔(A1-OFF
+엣지 0 / A1-ON 엣지 55) **각 3회 반복** 후 평균±std로 효과를 산출했다. 토글은 Neo4j
+CAN_FOLLOW 엣지만 0↔55(Pattern/Node/BINDS 불변), 측정 후 55 복원.
 
-| 지표 | baseline(엣지 0) | ADD-all | **capped(seed≤5·add≤3)** |
-|------|:---:|:---:|:---:|
-| drafter 실패 | 6 | 🔴 23 | ✅ 9 |
-| qa pass(≥8) | 64.3% | 🔴 28.6% | ✅ 67.9% |
-| qa 평균 | 7.93 | 🔴 5.64 | ✅ 8.07 |
-| motif-correctness | 75% | 75% | ✅ 100% (8/8) |
-| 평균 노드수(wf) | 3.00 | 2.50 | 3.25 |
-| hallucination | 0% | 0% | 0% |
+| 지표 | dir | OFF 평균±std (3run) | ON 평균±std (3run) | **A1 효과** | 유의성 |
+|------|:---:|:---:|:---:|:---:|:---:|
+| hallucination | ↓ | 0.000±0.000 | 0.000±0.000 | ±0 | · |
+| validator-pass | ↑ | 0.417±0.073 | 0.476±0.017 | +0.060 | · 노이즈내 |
+| **avg_retry** | ↓ | 0.798±0.236 | 0.536±0.077 | **−0.262** | ~ **robust** |
+| motif-correctness | ↑ | 0.667±0.212 | 0.792±0.118 | +0.125 | · 노이즈내 |
+| qa_score(평균) | ↑ | 7.048±0.485 | 6.929±0.823 | −0.119 | · 노이즈내 |
+| qa_pass(≥8) | ↑ | 0.512±0.045 | 0.500±0.105 | −0.012 | · 노이즈내 |
 
-- **ADD-all = 명확한 회귀**: 후보 풀 비대(~24→38)로 Gemma 드래프터의 structured JSON이 잘림
-  (drafter 실패 전부 `Invalid JSON: EOF`). → 폐기.
-- **capped = 회귀 제거 + motif 직격 개선**: seed를 검색 상위 hit으로 제한 + 추가 ≤3개로 풀 비대 억제.
-  drafter 실패 정상화(9), qa baseline 동등~상회, **motif 75→100%**(control-flow 그라운딩↑), 워크플로우 풍부화.
-- **캐비엇**: 단일 샘플 A/B라 qa 소폭 개선은 LLM 노이즈 범위일 수 있음. 견고한 결론은 "ADD-all 회귀 + capped 무회귀+motif개선".
-- **distractor 0%는 측정 불가 아티팩트**: run_eval는 composer를 직접 호출하나 잡담 fast-path는 상위
-  Orchestrator에 있어 composer 단독엔 미적용. before/after 동일이라 A/B 결론엔 무영향.
+유의성: ✓ |효과|>std합 / ~ |효과|>max(std) / · 노이즈내.
+
+- **A1 = 무회귀.** qa_pass −0.01(평평)·qa_score −0.12(노이즈내)로 회귀 없음.
+- **유일한 robust 이득 = retry 감소**(0.80→0.54, 효과>max std). 후보 그라운딩 개선 → 재초안 루프 ↓.
+- **motif·validator는 방향만 양(+)**, std 안에 묻혀 robust 아님. **직전 단일샘플의 "motif 75→100%"는 노이즈**였다.
+- **hallucination은 양팔 0** — A1 이전(EXECUTABLE_NODE_TYPES #378)부터 0이라 A1 공로 아님.
+
+### ⚠️ baseline.json 교정 (중요)
+직전 커밋된 `baseline.json`(qa_pass 0.643 / motif 0.75)은 **운 좋은 단일 샘플**이었다.
+de-noise한 진짜 A1-OFF는 qa_pass **0.512** / motif **0.667**. 이 오염된 baseline과 ON-only를
+비교하면 가짜 qa 회귀가 보인다(직전 세션 오판 원인). → 회귀 게이트의 baseline을 **de-noise한
+A1-ON arm 평균**(현 배포 상태)으로 교정해 향후 §6.1 모티프 작업이 현 상태 대비 측정되게 한다.
+
+### (참고) 직전 단일 샘플 A/B — superseded
+ADD-all이 후보 풀 비대(~24→38)로 Gemma structured JSON을 잘라 drafter 실패 폭증(6→23,
+qa pass 64→29%) → cap 정밀화(seed≤5·add≤3)로 폐기·수렴시킨 기록. **cap이 ADD-all 회귀를
+제거한다는 결론은 유효**(위 양팔 측정의 무회귀와 정합). 다만 그때의 "capped qa 67.9% / motif
+100%" 절대 수치는 단일 샘플 노이즈로, 위 양팔 평균이 대체한다.
+
+- **distractor 0%는 측정 아티팩트**: run_eval가 composer를 직접 호출하나 잡담 fast-path는 상위
+  Orchestrator 소관이라 composer 단독엔 미적용. 양팔 동일이라 A1 결론엔 무영향.
