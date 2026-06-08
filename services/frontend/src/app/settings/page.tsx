@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Icon from '@/components/common/Icon';
 import { showToast } from '@/stores/toastStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useAuth } from '@/hooks/useAuth';
+import { getConnections, type ConnectionResponse } from '@/lib/api/connectionApi';
 
 type Panel = 'profile' | 'integration' | 'alert' | 'security';
 
@@ -147,7 +148,7 @@ function IntegrationRow({
       ) : (
         <button
           type="button"
-          onClick={() => showToast('ERP 연동을 시작합니다.')}
+          onClick={() => showToast(`${name} 연동을 시작합니다.`)}
           className="px-3 py-1.5 rounded-lg bg-accent text-white text-[10px] font-bold shadow-sm hover:bg-accent3"
         >
           연결
@@ -157,17 +158,64 @@ function IntegrationRow({
   );
 }
 
+// 서비스 표시 메타(아이콘·이름)는 프론트 보유. 연결 여부/표시값은 GET /connections 응답에서.
+const INTEGRATION_SERVICES: { service: string; icon: string; iconBg: string; name: string }[] = [
+  { service: 'slack', icon: 'message-square', iconBg: '#4A154B', name: 'Slack' },
+  { service: 'google', icon: 'sheet', iconBg: '#0F9D58', name: 'Google Workspace' },
+  { service: 'erp', icon: 'database', iconBg: '#A2917F', name: '사내 ERP' },
+];
+
 function IntegrationPanel() {
+  const [connections, setConnections] = useState<ConnectionResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    getConnections()
+      .then((rows) => {
+        if (alive) setConnections(rows);
+      })
+      .catch(() => {
+        if (alive) setError(true);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const byService = new Map(connections.map((c) => [c.service, c]));
+
   return (
     <div className="space-y-5">
       <div className="border-b border-line-soft pb-2">
         <h3 className="text-sm font-bold text-ink">통합 연동</h3>
         <p className="text-[11px] text-ink3 font-bold">워크플로우에서 사용할 외부 서비스 계정을 연결하고 관리합니다.</p>
       </div>
+      {error && <p className="text-[11px] text-danger font-bold">연결 상태를 불러오지 못했습니다.</p>}
       <div className="space-y-2.5">
-        <IntegrationRow icon="message-square" iconBg="#4A154B" name="Slack" detail="workspace · flowit-team" connected />
-        <IntegrationRow icon="sheet" iconBg="#0F9D58" name="Google Workspace" detail="gawon.data@flowit.io" connected />
-        <IntegrationRow icon="database" iconBg="#A2917F" name="사내 ERP" detail="연결되지 않음" connected={false} />
+        {INTEGRATION_SERVICES.map((s) => {
+          const conn = byService.get(s.service);
+          const connected = conn?.connected ?? false;
+          const detail = loading
+            ? '불러오는 중…'
+            : connected
+              ? conn?.display || '연결됨'
+              : '연결되지 않음';
+          return (
+            <IntegrationRow
+              key={s.service}
+              icon={s.icon}
+              iconBg={s.iconBg}
+              name={s.name}
+              detail={detail}
+              connected={connected}
+            />
+          );
+        })}
       </div>
       <button
         type="button"
