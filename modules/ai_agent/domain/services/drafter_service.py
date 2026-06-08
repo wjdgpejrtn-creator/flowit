@@ -19,6 +19,12 @@ _MAX_CANDIDATES = 20   # 후보 노드 최대 수
 _MAX_PATTERNS = 5      # 개인화 패턴 최대 수
 _MAX_MOTIFS = 3        # 모티프 패턴 최대 수
 
+# 캡에서 전수 보존할 우선 카테고리 — 스킬 바인딩 대상 LLM 노드(ai, #372)와 구조 노드
+# (trigger/condition, #389). 호출부(composer)가 이들을 후보 풀 '끝'에 덧붙이므로 순서
+# 무지하게 앞 N개만 자르면 풀>N일 때 보장 노드가 1순위로 드롭돼 바인딩이 조용히 실패한다.
+# node_registry_adapter._STRUCTURAL_CATEGORIES({trigger,condition}) + ai를 미러 (도메인 정책).
+_PRIORITY_CATEGORIES = frozenset({"ai", "trigger", "condition"})
+
 # 데이터 흐름 참조 ${<token>.<field>} — LLM은 token으로 node_type(fresh)/ref(edit)를 쓰고,
 # 빌드 시 instance_id로 재작성한다(token엔 점 없음 → 첫 '.'로 분리, ADR-0023 L1).
 _REF_TOKEN_RE = re.compile(r"\$\{([^.}]+)\.([^}]+)\}")
@@ -281,10 +287,21 @@ class DrafterService:
         이 ground-truth로 직접 재검색하도록 결정화한다(#378 후속 리뷰 #2). 호출부가 요청마다
         새 리스트를 넘기므로 동시 요청 안전(서비스 인스턴스 공유 무관).
         """
-        # 프롬프트 다이어트 — 컨텍스트 윈도우 초과 방지 (#413)
+        # 프롬프트 다이어트 — 컨텍스트 윈도우 초과 방지 (#413). 단 순서 무지하게 앞에서
+        # 자르면 풀 끝에 붙은 보장 노드(ai 바인딩 대상·구조 노드)가 1순위로 드롭되므로
+        # (리뷰 MED #1), 우선 카테고리는 전수 보존하고 나머지에서만 잘라 합을 캡 이하로 맞춘다.
+        # 우선 노드만으로 캡을 넘으면 정확성(바인딩) 우선으로 전수 유지한다.
         if len(candidates) > _MAX_CANDIDATES:
-            _logger.warning("후보 %d건 → %d건 캡 적용 (prompt diet)", len(candidates), _MAX_CANDIDATES)
-            candidates = candidates[:_MAX_CANDIDATES]
+            priority = [c for c in candidates if getattr(c, "category", None) in _PRIORITY_CATEGORIES]
+            rest = [c for c in candidates if getattr(c, "category", None) not in _PRIORITY_CATEGORIES]
+            capped = priority + rest[: max(0, _MAX_CANDIDATES - len(priority))]
+            _logger.warning(
+                "후보 %d건 → %d건 캡 적용 (prompt diet; 우선 카테고리 %d건 보존)",
+                len(candidates),
+                len(capped),
+                len(priority),
+            )
+            candidates = capped
         capped_patterns = (personal_patterns or [])[:_MAX_PATTERNS]
         capped_motifs = (pattern_templates or [])[:_MAX_MOTIFS] if pattern_templates else pattern_templates
 
