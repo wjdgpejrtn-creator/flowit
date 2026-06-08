@@ -217,6 +217,8 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 
 ### 6.1 모티프 라이브러리 확장 (신정혜) — **agentic 패턴 기반 시드 스펙**
 
+> **⚠️ 측정으로 폐기 (2026-06-08) → §6.6으로 대체**: §6.1의 전제는 "검증된 모티프를 `:Pattern` soft 시드 → drafter 프롬프트에 motif block 주입"이었으나, **양팔 라이브 측정에서 효과 0**으로 판명되었다(`branch_on_classification` motif-correctness ABSENT 0.500 → PRESENT 0.500, robust null; PR #416). **작은 LLM(Gemma)은 프롬프트 soft 힌트로 구조를 안 바꾼다** — 잘 만드는 건 힌트 없이도 만들고, 못 만드는 건 힌트로도 안 만든다. 게다가 발화에 명시된 도메인 노드(예: "광고 시트"→`google_sheets_read`)가 의미검색에 안 잡혀 후보 미진입→drafter가 누락→qa 루프만 반복하는 실패가 별도로 발생(e2e 실측). → **soft 힌트가 아니라 코드가 구조를 결정적으로 조립하는 §6.6 스켈레톤 라이브러리로 전환.** 아래 §6.1 시드 스펙은 **role_slot 매핑·엔진 계약 표로서 §6.6에 재사용**된다(역할 정의는 유효, 소비 방식만 soft→deterministic).
+
 > **문제 인식(2026-06-07)**: 현재 `:Pattern`은 `quality_gate_loop` **1종뿐**이라 사실상 "패턴 라이브러리"라 부르기 어렵다. 온톨로지 그라운딩의 효익은 **검증된 모티프의 폭**에 비례하므로(§9 연구 근거), 아래 라이브러리를 1급으로 시드한다.
 >
 > **모티프 = 두 계보의 교집합** (§9.3): ① **van der Aalst control-flow 패턴**(프로세스 과학 정전, 20+종) ② **agentic workflow 패턴**(LLM 시대 — Anthropic/HF/Neo4j 합의: Prompt-Chaining·Routing·Parallelization·Orchestrator-Workers·Evaluator-Optimizer·Planning). 둘 다에서 검증된 패턴만 넣어야 환각을 **늘리지 않고** 억제한다(임의 패턴은 잘못된 구조를 강제).
@@ -266,6 +268,48 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 > - **retry/validator-pass는 drafter 실패 시 허상**: drafter가 아예 실패(node 0)하면 재시도 루프에 안 들어가 "무재초안"으로 빠짐. 헤드라인 신호는 **drafter 실패율 + qa**.
 > - **단일 샘플 LLM 노이즈**: 시나리오당 ~2.5분(32건×~80분/캡처)이라 반복이 비싸지만, 핵심 결론은 2~3회 반복 측정으로 de-noise 권장.
 
+### 6.6 결정적 스켈레톤 라이브러리 (신정혜·황대원, 2026-06-08 확정) — **§6.1 soft 모티프 대체**
+
+> **결정 근거 (측정·실측)**: ① §6.1 soft `:Pattern` 힌트 효과 0(branch motif 0.50→0.50, robust null). ② #418 측정에서 **드러난 진짜 레버 = 결정적 노드 강제 포함**(범용 LLM 노드 always-include로 끊긴 워크플로우율 23%→0%, qa_pass 0.45→0.75). ③ 그러나 #418은 LLM 노드만 항상-포함이라, **발화에 명시된 임의 도메인 노드**(예: "광고 시트"→`google_sheets_read`, category=integration)는 여전히 의미검색 랭킹에만 의존→미진입→누락. **결론: 작은 LLM에게 구조를 부탁(soft hint)하거나 의미검색에 맡기지 말고, 코드가 발화에서 추출한 슬롯으로 골격을 결정적으로 조립한다. LLM은 파라미터만 채운다.**
+
+#### 6.6.1 개념 — 모티프(소비방식 soft)에서 스켈레톤(소비방식 deterministic)으로
+- `:Pattern`(§6.1)을 **`:Skeleton`(슬롯 가진 결정적 워크플로우 템플릿)**으로 확장. 그래프 DB에 저장(온톨로지가 SSOT — 노드 카탈로그·CAN_FOLLOW와 동일 store에서 큐레이션·버전관리).
+- **슬롯 역할 5종**: `trigger`(발동) / `source`(데이터 읽기·수집) / `transform`(AI/LLM 가공) / `sink`(내보내는 채널) / `gate`(생성물 검증 루프). §6.1 role_slot 매핑 표를 재사용.
+- **조건부 필수성** (사용자 "5요소 항상 필수" 정정): `trigger` 1개 + `sink` ≥1개는 **거의 보편 필수**. `source`/`transform`/`gate`는 **발화가 함의할 때만** 슬롯 활성. (전부 강제 시 단순 알림에 불필요한 검증 루프를 박는 과강제 — soft 힌트가 잘못된 구조를 강제한 실패의 결정적 버전이 되어 더 나쁨.)
+
+#### 6.6.2 그래프 스키마 확장 (멱등 DDL, build_ontology.py)
+```cypher
+(:Skeleton {name, intent_keywords})                          // 예: scheduled_pipeline, event_response, quality_loop
+(:Skeleton)-[:HAS_SLOT {order, role, required, cardinality}]->(:SlotSpec {role})
+(:SlotSpec)-[:FILLED_BY {by}]->(:Node)                        // by="category"|"lexical"|"entity" — 슬롯 후보 node_type
+// 슬롯↔노드 호환은 기존 CAN_FOLLOW(노드 I/O) + REQUIRES(connection)로 검증 → 조립 시 깨진 엣지 0
+```
+- 슬롯 후보는 **카탈로그 실재 node_type만**(없는 슬롯 시드 금지 — 환각 유발, §6.1 시드 원칙 ① 계승).
+
+#### 6.6.3 조립 파이프라인 (composer drafter 대체 — 코드가 구조, LLM이 파라미터)
+```
+1. 엔티티 추출 (intent_analyzer 강화): 발화 → {trigger_type, sources[], transforms[], sinks[], needs_gate}
+   - 렉시컬+의미 하이브리드: "매주 월요일"→schedule_trigger, "광고 시트"→google_sheets_read,
+     "요약"→ai, "slack"→slack_post_message, "통과할 때까지/검증"→needs_gate=true
+2. 스켈레톤 선택: intent_keywords 매칭 → :Skeleton (scheduled_pipeline 등)
+3. 슬롯 채우기 (결정적): 각 활성 슬롯에 추출 엔티티→node_type 바인딩. 미지정 보편 슬롯은 default
+   (trigger 없으면 manual_trigger). **발화에 명시된 도메인 노드는 여기서 강제 진입** → 누락 0.
+4. 엣지 배선 (코드): trigger→source→transform→sink 선형 + needs_gate면 transform→gate→(back-edge/exit)
+   루프(§6.1 quality_gate_loop 구조·엔진 계약 그대로).
+5. LLM 호출: 구조 확정된 골격에 **파라미터만**(prompt·시트범위·슬랙채널·max_iterations). 구조 생성 책임 제거.
+```
+
+#### 6.6.4 효과 (e2e 버그 직격 + 일반화)
+- **"매주 시트 읽어 요약 slack" 버그 해소**: "광고 시트" 엔티티가 source 슬롯을 결정적으로 채워 `google_sheets_read` 강제 진입 → 4노드(schedule→sheets→ai→slack) 완성. retrieval 랭킹·Gemma 구조판단에 의존 0.
+- **#418의 정공법 일반화**: LLM 노드 항상-포함(특수)을 **엔티티→슬롯 결정적 채움**(범용)으로 승격.
+- **soft 모티프(§6.1) 폐기**: motif block 프롬프트 주입 제거. `quality_gate_loop`은 `gate` 슬롯의 결정적 back-edge 조립으로 부활(soft 힌트 아님 → §6.5 motif-correctness 결정적 보장).
+
+#### 6.6.5 가드·트레이드오프·RACI
+- **엔진 계약 파리티 필수**(§6.1 계승): 코드 조립 골격이 CyclicScheduler/BranchEvaluator/GraphValidator 수용 계약과 1:1 — 조립 단계에서 위반 시 fail-fast(런타임 false accept 차단). 스켈레톤당 골든셋 + 파리티 테스트.
+- **트레이드오프**: 결정적 조립 = LLM 구조 자유 ↓. **업무 자동화 도메인은 예측가능·정확 > 창의 구조**라 정당한 교환(§9.4 graph-planning 갭은 분기·루프에 집중). 스켈레톤 라이브러리 폭이 곧 표현력 → 라이브러리 확장이 핵심 작업.
+- **skill-binding 정밀화(별건, 박아름 협의)**: e2e에서 무관 스킬("근거 기반 고객 문의 응대")이 시트요약 요청에 오바인딩(`_SKILL_SEARCH_MAX_DISTANCE=0.50` 느슨) → drafter를 잘못 유도. 스켈레톤은 skill을 `transform` 슬롯의 **선택적 보강**으로 격하(구조는 스켈레톤이 소유). 임계 강화 + 약한 매칭 바인딩 보류는 REQ-013 박아름 협의.
+- **측정**: §6.5 하니스 before/after. 스켈레톤 조립 on/off + 엔티티추출 정밀도. **Modal 복귀 후** 구현·측정(soft 힌트 폐기로 motif-correctness·끊긴워크플로우율 결정적 개선 기대).
+
 ---
 
 ## 7. 지뢰 / 운영 체크리스트
@@ -285,14 +329,18 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 [황대원] §4.2a CAN_FOLLOW + expand 부활(capped, 하니스 검증) ✅ PR #410 (정혜 이관 대기)
 [박아름] §4.2b 스킬 BINDS ETL ✅ (#397/#401 머지·배포)
 [공통]  §6.5 평가 하니스 ✅ PR #409 머지
-        ↓ ── 후속 고도화(전 항목 진행 확정, 측정 주도) ──
-[우선1] 반복 측정 de-noise (capped A1 2~3회 재캡처 — 기능 추가 0, '달성' 검증 최우선)
-[우선2] §6.1 모티프 라이브러리 확장 (branch_on_classification / fan_out_map / retry_backoff /
-        approval_gate) — 의도된 고도화의 본질(다양한 control-flow 생성). 모티프당 골든셋+파리티
-[우선3] §6.3 CAN_FOLLOW 신뢰도(실행로그 node_results 마이닝) + §6.2 retrieval 튜닝 + §6.4 provenance
+        ↓ ── 후속 고도화(측정 주도) ──
+[완료] §6.5 하니스 ✅(#409) / 우선1 capped A1 de-noise ✅ / §4.2a CAN_FOLLOW ✅(#410)
+[완료] §6.1 모티프 soft 시드 측정 → 효과 0 판명(#416) → §6.6으로 전환 결정
+[완료] #418 범용 LLM 노드 always-include ✅ (끊긴워크플로우 23%→0%, qa_pass 0.45→0.75) — §6.6 부분 선구현
+        ↓ ── 전환: soft 힌트/의미검색 의존 → 결정적 스켈레톤 조립 ──
+[우선A] §6.6 결정적 스켈레톤 라이브러리 (Neo4j :Skeleton + 슬롯) — 엔티티추출→슬롯 결정적 채움→코드 배선.
+        e2e 누락 버그(시트 등) 직격 + soft 모티프 대체. 스켈레톤당 골든셋+엔진계약 파리티. **Modal 복귀 후 측정**
+[우선B] §6.3 CAN_FOLLOW 신뢰도(실행로그 마이닝) + §6.2 retrieval 튜닝 + §6.4 provenance
         ↑ 각 항목 §6.5 하니스 before/after 게이트 통과 필수
+[별건]  skill-binding 정밀화(임계 강화·약한매칭 보류, 무관 스킬 오바인딩 차단) — REQ-013 박아름 협의
 ```
-> RACI: §6 후속은 plan상 신정혜(composer grounding). 황대원 A1 선반영분(#410) 이관 후 신정혜 주도, 황대원 리뷰/하니스 조율. 일정은 2026-06-30 staging 종료 전 합의.
+> RACI: §6.6 스켈레톤은 composer grounding(신정혜) + 그래프 스키마/ETL(황대원). soft 모티프 폐기로 §6.1 시드 작업은 role 매핑 표만 §6.6에 계승. 일정은 2026-06-30 staging 종료 전 합의.
 
 ---
 
