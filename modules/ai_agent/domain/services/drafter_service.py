@@ -403,8 +403,11 @@ class DrafterService:
         """GraphRAG :Pattern 모티프를 drafter 프롬프트 주입용 블록으로 직렬화 (ADR-0026 Phase 2).
 
         ETL 시드 전(빈 리스트) 또는 role_slots가 없으면 빈 문자열 반환(무영향).
-        generator+evaluator 슬롯 구조(패턴명 무관)를 루프 패턴으로 판정해 back-edge 배선 지침 주입.
-        패턴명 하드코딩 제거 — 향후 루프 슬롯 구조를 가진 패턴이 추가돼도 자동 처리(리뷰 LOW).
+        슬롯 구조(패턴명 무관)로 모티프 형태를 판정해 형태별 배선 지침을 주입한다:
+          - generator+evaluator → LOOP(back-edge 재시도).
+          - classifier+router   → BRANCH(XOR 배타분기, 무순환).
+          - 그 외               → 슬롯 평문 나열(폴백).
+        패턴명 하드코딩 없음 — 같은 슬롯 구조의 패턴이 추가돼도 자동 처리.
         """
         if not pattern_templates:
             return ""
@@ -415,9 +418,9 @@ class DrafterService:
                 continue
             generator_types = slots.get("generator", ())
             evaluator_types = slots.get("evaluator", ())
-            # 슬롯 구조로 루프 판정 — 패턴명 하드코딩 없이 generator+evaluator 쌍이면 루프
-            is_loop = bool(generator_types) and bool(evaluator_types)
-            if is_loop:
+            classifier_types = slots.get("classifier", ())
+            router_types = slots.get("router", ())
+            if generator_types and evaluator_types:
                 gen = generator_types[0] if len(generator_types) == 1 else f"({'/'.join(generator_types)})"
                 ev = evaluator_types[0] if len(evaluator_types) == 1 else f"({'/'.join(evaluator_types)})"
                 lines.append(
@@ -426,6 +429,18 @@ class DrafterService:
                     f"  evaluator slot: use a {ev} node as the branching point\n"
                     f"  wiring: {gen} -[output]-> {ev}, then {ev} -[false]-> {gen} (BACK-EDGE retry),\n"
                     f"          then {ev} -[true]-> next_node (exit/pass branch)"
+                )
+            elif classifier_types and router_types:
+                cls = classifier_types[0] if len(classifier_types) == 1 else f"({'/'.join(classifier_types)})"
+                rt = router_types[0] if len(router_types) == 1 else f"({'/'.join(router_types)})"
+                lines.append(
+                    f"- {pt.name} (BRANCH pattern — exclusive choice / routing, NOT a loop):\n"
+                    f"  classifier slot: use ONE {cls} node to classify/decide "
+                    f"(or feed an existing value into the router)\n"
+                    f"  router slot: use a {rt} node as the XOR branch point\n"
+                    f"  wiring: classifier -[output]-> {rt}, then {rt} -[true]-> path_A "
+                    f"and {rt} -[false]-> path_B\n"
+                    f"          (each branch is a SEPARATE downstream path; do NOT add a back-edge)"
                 )
             else:
                 slot_desc = ", ".join(

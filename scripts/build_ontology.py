@@ -68,6 +68,19 @@ MATCH (n:Node) WHERE n.category = $category
 MERGE (p)-[:USES_ROLE {slot: $slot}]->(n)
 """
 
+# 슬롯을 특정 node_type으로 한정(category 전체가 아님). 예: router=if_condition/switch_case만
+# (loop_count/merge_branch 등 다른 condition 노드는 제외). §6.1 — 모티프별 정확한 슬롯 그라운딩.
+_MERGE_USES_ROLE_TYPE = """
+MATCH (p:Pattern {name: $pattern_name})
+MATCH (n:Node {node_type: $node_type})
+MERGE (p)-[:USES_ROLE {slot: $slot}]->(n)
+"""
+
+# 모티프 시드 (§6.1 라이브러리 — van der Aalst ∩ agentic 교집합만). 각 role은
+# `category`(카테고리 전체) 또는 `node_types`(특정 노드만) 중 하나로 슬롯을 채운다.
+# intent는 '|'로 구분된 키워드 목록 — match_patterns가 사용자 문장에 그중 하나라도
+# CONTAINS되면 패턴 활성(any 매칭). 키워드는 카탈로그/엔진에 실재하는 구조만 가리켜야
+# 환각을 늘리지 않는다(없는 슬롯 시드 금지).
 _PATTERNS: tuple[dict, ...] = (
     {
         "name": "quality_gate_loop",
@@ -75,6 +88,15 @@ _PATTERNS: tuple[dict, ...] = (
         "roles": [
             {"slot": "generator", "category": "ai"},
             {"slot": "evaluator", "category": "condition"},
+        ],
+    },
+    {
+        # Exclusive Choice(XOR) / agentic Routing — 분류·조건에 따라 갈래를 나눈다.
+        "name": "branch_on_classification",
+        "intent": "분류|분기|넘으면|따라",
+        "roles": [
+            {"slot": "classifier", "category": "ai"},
+            {"slot": "router", "node_types": ["if_condition", "switch_case"]},
         ],
     },
 )
@@ -114,12 +136,21 @@ async def project_patterns(session: Any) -> int:
     for p in _PATTERNS:
         await session.run(_MERGE_PATTERN, name=p["name"], intent=p["intent"])
         for role in p["roles"]:
-            await session.run(
-                _MERGE_USES_ROLE,
-                pattern_name=p["name"],
-                category=role["category"],
-                slot=role["slot"],
-            )
+            if "node_types" in role:
+                for node_type in role["node_types"]:
+                    await session.run(
+                        _MERGE_USES_ROLE_TYPE,
+                        pattern_name=p["name"],
+                        node_type=node_type,
+                        slot=role["slot"],
+                    )
+            else:
+                await session.run(
+                    _MERGE_USES_ROLE,
+                    pattern_name=p["name"],
+                    category=role["category"],
+                    slot=role["slot"],
+                )
     return len(_PATTERNS)
 
 

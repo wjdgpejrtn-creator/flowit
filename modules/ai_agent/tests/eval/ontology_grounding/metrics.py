@@ -17,9 +17,14 @@ from dataclasses import dataclass
 from nodes_graph.application.executable_node_types import EXECUTABLE_NODE_TYPES
 
 from .records import UNKNOWN_NODE_TYPE, RunRecord
-from .scenarios import QUALITY_GATE_LOOP
+from .scenarios import BRANCH_ON_CLASSIFICATION, QUALITY_GATE_LOOP
 
 QA_PASS_THRESHOLD = 8.0
+
+# XOR 분기점이 될 수 있는 condition node_type(다중 outgoing 핸들로 라우팅).
+# BranchEvaluator(execution_engine)가 selector 문자열로 live 핸들을 고르는 노드들.
+# (loop_count/loop_list 등 반복 condition은 분기가 아니라 제외.)
+ROUTER_NODE_TYPES: frozenset[str] = frozenset({"if_condition", "switch_case"})
 
 # category=="condition"인 카탈로그 node_type 8종. validator(_CONDITION_CATEGORY)와
 # CyclicScheduler(is_brancher = category=="condition")의 루프 탈출 판정 기준을 미러한다.
@@ -101,14 +106,42 @@ def detects_quality_gate_loop(rec: RunRecord) -> bool:
     return has_cycle(rec) and has_condition_node(rec)
 
 
+def has_branch_point(rec: RunRecord) -> bool:
+    """router condition 노드(if_condition/switch_case)가 outgoing 엣지 ≥2개를 가지는가.
+
+    = XOR 분기점. BranchEvaluator가 selector로 한 핸들을 고르려면 분기가 ≥2 갈래여야 한다.
+    """
+    n = len(rec.node_types)
+    out_degree = [0] * n
+    for a, _b in rec.edges:
+        if 0 <= a < n:
+            out_degree[a] += 1
+    return any(
+        nt in ROUTER_NODE_TYPES and out_degree[i] >= 2
+        for i, nt in enumerate(rec.node_types)
+    )
+
+
+def detects_branch_on_classification(rec: RunRecord) -> bool:
+    """실행가능 XOR 분기 모티프 판정.
+
+    router condition 노드의 다중 분기(outgoing ≥2) + **무순환**(루프 아닌 순수 분기).
+    BranchEvaluator(L2) 수용 계약 정합 — 조건 노드가 outgoing 핸들 중 live를 선택.
+    """
+    return has_branch_point(rec) and not has_cycle(rec)
+
+
 def motif_verdict(rec: RunRecord) -> bool | None:
     """motif-correctness 판정.
 
     - expected_motif 없음 → None(채점 제외).
     - quality_gate_loop 기대 → 실행가능 루프를 만들었는가.
+    - branch_on_classification 기대 → 실행가능 XOR 분기를 만들었는가.
     """
     if rec.expected_motif == QUALITY_GATE_LOOP:
         return detects_quality_gate_loop(rec)
+    if rec.expected_motif == BRANCH_ON_CLASSIFICATION:
+        return detects_branch_on_classification(rec)
     return None
 
 
