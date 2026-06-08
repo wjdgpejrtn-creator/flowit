@@ -54,6 +54,14 @@ class PgOAuthRepository(OAuthConnectionRepository):
             return None
         return OAuthConnectionMapper.to_domain(model)
 
+    async def list_for_user(self, user_id: UUID) -> list[OAuthConnection]:
+        stmt = select(OAuthConnectionModel).where(
+            OAuthConnectionModel.user_id == user_id,
+            OAuthConnectionModel.is_active.is_(True),
+        )
+        result = await self._session.execute(stmt)
+        return [OAuthConnectionMapper.to_domain(model) for model in result.scalars().all()]
+
     async def update_tokens(self, credential_id: UUID, new_tokens: dict[str, Any]) -> None:
         values: dict[str, Any] = {"last_refreshed_at": datetime.now(timezone.utc)}
         if "access_token_encrypted" in new_tokens:
