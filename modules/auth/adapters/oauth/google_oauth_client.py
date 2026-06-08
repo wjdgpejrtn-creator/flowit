@@ -33,16 +33,20 @@ class GoogleOAuthClient(OAuthClientPort):
         self._client_secret = client_secret or os.getenv("GOOGLE_CLIENT_SECRET", "")
         self._redirect_uri = redirect_uri or os.getenv("GOOGLE_REDIRECT_URI", "")
 
-    def authorization_url(self, state: str, scopes: list[str] | None = None) -> str:
+    def authorization_url(
+        self, state: str, scopes: list[str] | None = None, redirect_uri: str | None = None
+    ) -> str:
         """OAuth authorization URL 생성.
 
         scopes 미지정 시 로그인 신원 scope(`_DEFAULT_SCOPES`). connection authorize는
         서비스 scope(Sheets/Drive 등)를 scopes로 전달한다(ADR-0027 ② scope 분리).
+        redirect_uri 미지정 시 기본(로그인 callback). connection은 자신의 callback 경로를 전달해
+        google이 connection callback으로 돌려보내게 한다(exchange_code와 동일 값 필수 — google 검증).
         include_granted_scopes=true로 incremental authorization — 기존 승인 scope를 누적한다.
         """
         params = {
             "client_id": self._client_id,
-            "redirect_uri": self._redirect_uri,
+            "redirect_uri": redirect_uri or self._redirect_uri,
             "response_type": "code",
             "scope": " ".join(scopes or _DEFAULT_SCOPES),
             "access_type": "offline",

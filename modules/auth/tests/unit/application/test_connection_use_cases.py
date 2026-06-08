@@ -10,10 +10,13 @@ class FakeOAuth:
     def __init__(self, sub: str = "sub1", email: str = "u@x.com", access: str = "tok") -> None:
         self._sub, self._email, self._access = sub, email, access
 
-    def authorization_url(self, state: str, scopes: list[str] | None = None) -> str:
-        return f"https://accounts.google.com/auth?state={state}&scope={' '.join(scopes or [])}"
+    def authorization_url(self, state: str, scopes: list[str] | None = None, redirect_uri: str | None = None) -> str:
+        return (
+            f"https://accounts.google.com/auth?state={state}"
+            f"&scope={' '.join(scopes or [])}&redirect_uri={redirect_uri or ''}"
+        )
 
-    async def exchange_code(self, code: str) -> dict:
+    async def exchange_code(self, code: str, redirect_uri: str | None = None) -> dict:
         return {
             "sub": self._sub,
             "email": self._email,
@@ -35,6 +38,13 @@ def test_start_authorize_builds_url_with_service_scopes():
 def test_start_authorize_rejects_unsupported_service():
     with pytest.raises(ValueError):
         StartConnectionAuthorizeUseCase(FakeOAuth()).build_authorization_url("notion", "s")
+
+
+def test_start_authorize_uses_connection_redirect_uri():
+    """connection callback redirect_uri가 authorize URL에 반영 — 로그인 callback과 분리 (셀프리뷰 HIGH)."""
+    redirect = "https://api.example/api/v1/connections/google/callback"
+    url = StartConnectionAuthorizeUseCase(FakeOAuth()).build_authorization_url("google", "s", redirect)
+    assert f"redirect_uri={redirect}" in url
 
 
 # ── Complete ───────────────────────────────────────────────────────────────

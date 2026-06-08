@@ -9,7 +9,7 @@ import logging
 import secrets
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
@@ -70,6 +70,7 @@ async def list_connections(
 
 @router.get("/{service}/authorize", response_model=AuthorizeConnectionResponse)
 async def authorize_connection(
+    request: Request,
     service: str,
     user: User = Depends(get_current_user),
     google_oauth: OAuthClientPort = Depends(get_google_oauth),
@@ -79,7 +80,10 @@ async def authorize_connection(
     """connection authorize URL 발급 — 프론트가 이 URL로 리다이렉트해 동의 화면을 띄운다."""
     try:
         state = secrets.token_urlsafe(24)
-        url = StartConnectionAuthorizeUseCase(google_oauth).build_authorization_url(service, state)
+        # redirect_uri = 이 connection의 callback 경로 — 로그인 callback과 분리(셀프리뷰 HIGH 수정).
+        # callback의 exchange_code와 동일 값이어야 google 검증 통과 → google 앱에 등록 필요(조장).
+        redirect_uri = str(request.url_for("callback_connection", service=service))
+        url = StartConnectionAuthorizeUseCase(google_oauth).build_authorization_url(service, state, redirect_uri)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -107,6 +111,7 @@ async def _consume_conn_state(state: str | None, redis: aioredis.Redis | None, s
 
 @router.get("/{service}/callback")
 async def callback_connection(
+    request: Request,
     service: str,
     code: str = Query(..., description="OAuth authorization code"),
     state: str | None = Query(None, description="CSRF state (authorize에서 발급)"),
@@ -120,9 +125,11 @@ async def callback_connection(
 ) -> RedirectResponse:
     """OAuth redirect_uri 수신 — code 교환·저장 후 settings로 복귀(쿼리로 성공/실패 시그널)."""
     await _consume_conn_state(state, redis, settings)
+    # authorize와 동일 redirect_uri로 토큰 교환 — google 검증 통과 필수(셀프리뷰 HIGH 수정).
+    redirect_uri = str(request.url_for("callback_connection", service=service))
     try:
         await CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, google_oauth).execute(
-            user.user_id, service, code
+            user.user_id, service, code, redirect_uri
         )
     except Exception as exc:
         logger.warning("connection callback 실패 (%s): %s", service, exc)

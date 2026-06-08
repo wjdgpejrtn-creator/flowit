@@ -31,8 +31,11 @@ class CompleteConnectionUseCase:
         self._cipher = cipher
         self._oauth_client = oauth_client
 
-    async def execute(self, user_id: UUID, service: str, code: str) -> OAuthConnection:
-        info = await self._oauth_client.exchange_code(code)
+    async def execute(
+        self, user_id: UUID, service: str, code: str, redirect_uri: str | None = None
+    ) -> OAuthConnection:
+        # redirect_uri는 authorize 때와 동일해야 google 토큰 교환이 통과한다(셀프리뷰 HIGH 수정).
+        info = await self._oauth_client.exchange_code(code, redirect_uri)
         enc_access = self._cipher.encrypt(info["access_token"].encode())
         enc_refresh = self._cipher.encrypt(info.get("refresh_token", "").encode())
         scopes: list[str] = info.get("scopes", [])

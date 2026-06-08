@@ -25,8 +25,10 @@ class StartConnectionAuthorizeUseCase:
     def __init__(self, oauth_client: OAuthClientPort) -> None:
         self._oauth_client = oauth_client
 
-    def build_authorization_url(self, service: str, state: str) -> str:
+    def build_authorization_url(self, service: str, state: str, redirect_uri: str | None = None) -> str:
         scopes = CONNECTION_SCOPES.get(service)
         if scopes is None:
             raise ValueError(f"Unsupported connection service: {service}")
-        return self._oauth_client.authorization_url(state, scopes)
+        # redirect_uri = connection callback 경로(라우터가 전달) — 로그인 callback과 분리해야
+        # google이 connection callback으로 돌려보낸다(ADR-0027 셀프리뷰 HIGH 수정).
+        return self._oauth_client.authorization_url(state, scopes, redirect_uri)
