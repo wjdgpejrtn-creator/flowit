@@ -337,11 +337,16 @@ class TestRetrieverExpandCanFollow:
         oc = self._orchestrator_with_retriever(
             [seed], ontology_retriever, list_by_node_types=[neighbor]
         )
+        # list_by_node_types는 (1) 범용 LLM 노드 항상-포함 (2) CAN_FOLLOW expand 양쪽에 쓰인다.
+        # args 기반 side_effect로 현실 반영 — core LLM 요청엔 [], csv_build 요청에만 neighbor.
+        async def _lbnt(types):
+            return [neighbor] if "csv_build" in types else []
+        oc._node_registry.list_by_node_types = AsyncMock(side_effect=_lbnt)
         result = await oc._retriever_node(_make_state())
 
         ontology_retriever.expand_candidates.assert_called_once()
-        # 그라운딩은 seed에 이미 없는 후행 node_type만 대상으로 호출
-        oc._node_registry.list_by_node_types.assert_awaited_once_with(["csv_build"])
+        # 그라운딩은 seed에 이미 없는 후행 node_type만 대상으로 호출(expand 호출 확인).
+        oc._node_registry.list_by_node_types.assert_any_await(["csv_build"])
         types_in_result = {c.node_type for c in result["node_candidates"]}
         assert types_in_result == {"csv_parse", "csv_build"}
 
