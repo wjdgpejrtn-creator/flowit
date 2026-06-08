@@ -23,11 +23,12 @@ RETURN n.node_type AS node_type,
                          risk_level: succ.risk_level, confidence: f.confidence}) AS successors
 """
 
-# Phase 2 모티프 질의 — intent 문자열에 CONTAINS 매칭. :Pattern/USES_ROLE 시드는 박아름 §4.2.
-# 데이터 없으면 빈 리스트 반환(정상 동작 — 시드 전까지 모티프 없음).
+# Phase 2 모티프 질의 — p.intent는 '|'로 구분된 키워드 목록(§6.1). 사용자 문장에 그중
+# 하나라도 CONTAINS되면 패턴 활성(any 매칭). 단일 키워드 패턴(예: "검증")도 split이
+# 1원소 리스트라 동일하게 동작 — 하위호환. 데이터 없으면 빈 리스트(시드 전 정상 동작).
 _MATCH_PATTERNS_CYPHER = """
 MATCH (p:Pattern)
-WHERE toLower($intent) CONTAINS toLower(p.intent)
+WHERE any(kw IN split(toLower(p.intent), '|') WHERE toLower($intent) CONTAINS kw)
 OPTIONAL MATCH (p)-[r:USES_ROLE]->(n:Node)
 WITH p, collect({slot: r.slot, node_type: n.node_type}) AS role_rows
 RETURN p.name AS name,
