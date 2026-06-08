@@ -103,6 +103,18 @@ settings "Google 연결" 클릭
 
 ---
 
+## 구현 선행 의존성 (조장 협의 — 2026-06-08 구현 착수 중 발견)
+
+구현 착수 결과, 본 ADR이 "박아름 auth/api"로 분담했으나 실제 구현이 아래 **조장 영역과 직접 얽힘**. 전체 결선 전 합의 필요:
+
+1. **`oauth_connections` account/display 컬럼** (database REQ-001, `008` 마이그레이션) — 응답계약 `display`(google=이메일 / slack=workspace)를 채울 필드가 `OAuthConnection` 엔티티·테이블에 **없음**. `get_user_info` 매번 호출로 우회 가능하나 성능·복잡도 trade-off → **컬럼 추가 권장**.
+2. **slack OAuth client + 앱 등록** (인프라) — `GoogleOAuthClient`만 존재. slack용 client(`authorization_url`/`exchange_code`) + OAuth 앱 등록·secret 필요.
+3. **scope 분리(②) 실행** — 로그인 `GoogleOAuthClient._DEFAULT_SCOPES`가 이미 drive/gmail/calendar(readonly) 포함. connection은 별도 scope(sheets **read+write** 등) 필요 → `authorization_url(state, scopes)` 파라미터화 + 로그인 scope 정리.
+
+> **박아름 단독 진행분**: `list_for_user` Port/구현(✅ 완료, auth 44 passed), use case 골격, credentials 트랜잭션(③). 위 3건 합의 후 전체 결선.
+
+---
+
 ## Consequences
 
 ### Positive
