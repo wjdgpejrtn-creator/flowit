@@ -14,6 +14,17 @@ from ..ports.llm_port import LLMPort
 
 _logger = logging.getLogger(__name__)
 
+# 드래프터 프롬프트 다이어트 캡 — 컨텍스트 윈도우 초과 방지 (#413)
+_MAX_CANDIDATES = 20   # 후보 노드 최대 수
+_MAX_PATTERNS = 5      # 개인화 패턴 최대 수
+_MAX_MOTIFS = 3        # 모티프 패턴 최대 수
+
+# 캡에서 전수 보존할 우선 카테고리 — 스킬 바인딩 대상 LLM 노드(ai, #372)와 구조 노드
+# (trigger/condition, #389). 호출부(composer)가 이들을 후보 풀 '끝'에 덧붙이므로 순서
+# 무지하게 앞 N개만 자르면 풀>N일 때 보장 노드가 1순위로 드롭돼 바인딩이 조용히 실패한다.
+# node_registry_adapter._STRUCTURAL_CATEGORIES({trigger,condition}) + ai를 미러 (도메인 정책).
+_PRIORITY_CATEGORIES = frozenset({"ai", "trigger", "condition"})
+
 # 데이터 흐름 참조 ${<token>.<field>} — LLM은 token으로 node_type(fresh)/ref(edit)를 쓰고,
 # 빌드 시 instance_id로 재작성한다(token엔 점 없음 → 첫 '.'로 분리, ADR-0023 L1).
 _REF_TOKEN_RE = re.compile(r"\$\{([^.}]+)\.([^}]+)\}")
@@ -81,6 +92,27 @@ def _outputs_of(nc: NodeConfig) -> list[str]:
     return list((nc.output_schema or {}).get("properties", {}).keys())
 
 
+def _slim_schema(schema: dict | None) -> dict:
+    """input_schema에서 description/title 등 verbose 필드를 제거해 토큰 절감.
+
+    LLM이 파라미터를 채우는 데 필요한 type·default·enum·required만 보존한다.
+    """
+    if not schema:
+        return {}
+    props = schema.get("properties") or {}
+    slimmed = {}
+    for k, v in props.items():
+        entry: dict = {}
+        for keep in ("type", "default", "enum"):
+            if keep in v:
+                entry[keep] = v[keep]
+        slimmed[k] = entry
+    result: dict = {"properties": slimmed}
+    if schema.get("required"):
+        result["required"] = schema["required"]
+    return result
+
+
 _SYSTEM_PROMPT = """You are a workflow drafter. Given a DraftSpec and candidate nodes,
 output a JSON object matching this schema:
 {
@@ -120,6 +152,20 @@ DATA FLOW between nodes: when a node's input should receive data PRODUCED by an 
 Also add a connection so the upstream node runs first. Use a literal string ONLY when the user
 provided the value directly. Do NOT put placeholder prose like "the sheet data" where an upstream
 output should flow in.
+
+LOOPS (quality-gate / retry patterns): when the intent requires "regenerate if quality fails",
+build a cycle using a back-edge:
+1. Pick ONE ai node as the generator — do NOT add a second ai node for evaluation (that causes
+   a duplicate node_type error). The same ai node is both the content producer and the retry target.
+2. Use a condition node (e.g. if_condition) as the evaluator/branching point.
+3. Add a forward connection generator → evaluator (from_handle="output", to_handle="input").
+4. Add a BACK-EDGE connection evaluator → generator with from_handle="false" (the fail/retry
+   branch) and to_handle="input". This back-edge creates the retry loop and is valid/required.
+5. Add a forward exit connection evaluator → next_node with from_handle="true" (the pass branch).
+
+MULTIPLE CONDITIONS: when the intent has OR/AND conditions (e.g. "긴급 or 장애"), use a SINGLE
+condition node — do NOT create multiple if_condition nodes for each condition. One condition node
+handles complex boolean logic.
 """
 
 # refine(대화형 수정) 전용 — 이전 워크플로우를 주고 "지시한 부분만" 고치게 한다.
@@ -144,7 +190,13 @@ DATA FLOW: to feed a node's input from an upstream node's output, set that param
 be copied VERBATIM from that node's `outputs` in the candidate list — never invent a field name and
 never borrow a field that belongs to a different node. Choose a source node whose output is
 semantically the data the input needs; if none fits, leave "". Use a literal only for values the
-user gave inline."""
+user gave inline.
+
+LOOPS (quality-gate / retry patterns): when adding or editing a loop cycle, use ref-based edges:
+- Forward: {"from_ref": "<generator_ref>", "to_ref": "<evaluator_ref>", "from_handle": "output", "to_handle": "input"}
+- BACK-EDGE (fail/retry): {"from_ref": "<evaluator_ref>", "to_ref": "<generator_ref>", "from_handle": "false", "to_handle": "input"}
+- Exit (pass): {"from_ref": "<evaluator_ref>", "to_ref": "<next_ref>", "from_handle": "true", "to_handle": "input"}
+Use ONE ai node as generator — do NOT add a second ai node for evaluation."""
 
 
 # LLM 응답 전용 — common_schemas.WorkflowSchema의 owner_user_id/workflow_id 제외 부분집합.
@@ -235,13 +287,32 @@ class DrafterService:
         이 ground-truth로 직접 재검색하도록 결정화한다(#378 후속 리뷰 #2). 호출부가 요청마다
         새 리스트를 넘기므로 동시 요청 안전(서비스 인스턴스 공유 무관).
         """
+        # 프롬프트 다이어트 — 컨텍스트 윈도우 초과 방지 (#413). 단 순서 무지하게 앞에서
+        # 자르면 풀 끝에 붙은 보장 노드(ai 바인딩 대상·구조 노드)가 1순위로 드롭되므로
+        # (리뷰 MED #1), 우선 카테고리는 전수 보존하고 나머지에서만 잘라 합을 캡 이하로 맞춘다.
+        # 우선 노드만으로 캡을 넘으면 정확성(바인딩) 우선으로 전수 유지한다.
+        if len(candidates) > _MAX_CANDIDATES:
+            priority = [c for c in candidates if getattr(c, "category", None) in _PRIORITY_CATEGORIES]
+            rest = [c for c in candidates if getattr(c, "category", None) not in _PRIORITY_CATEGORIES]
+            capped = priority + rest[: max(0, _MAX_CANDIDATES - len(priority))]
+            _logger.warning(
+                "후보 %d건 → %d건 캡 적용 (prompt diet; 우선 카테고리 %d건 보존)",
+                len(candidates),
+                len(capped),
+                len(priority),
+            )
+            candidates = capped
+        capped_patterns = (personal_patterns or [])[:_MAX_PATTERNS]
+        capped_motifs = (pattern_templates or [])[:_MAX_MOTIFS] if pattern_templates else pattern_templates
+
         catalog = [
             {
                 "node_type": n.node_type,
                 "name": n.name,
                 "description": n.description,
                 "required_connections": n.required_connections,
-                "input_schema": n.input_schema,
+                # description/title 제거한 경량 스키마 — type/default/enum/required만 보존
+                "input_schema": _slim_schema(n.input_schema),
                 # 데이터 흐름 참조에 쓸 수 있는 출력 필드명 (ADR-0023 L1)
                 "outputs": list((n.output_schema or {}).get("properties", {}).keys()),
             }
@@ -252,10 +323,10 @@ class DrafterService:
             ensure_ascii=False,
         )
         catalog_json = json.dumps(catalog, ensure_ascii=False)
-        patterns_block = self._personal_patterns_block(personal_patterns)
+        patterns_block = self._personal_patterns_block(capped_patterns)
         binding_block = self._skill_binding_block(skill_selected, skill_composer_instructions)
         retry_block = self._retry_feedback_block(retry_feedback)
-        motif_block = self._motif_block(pattern_templates)
+        motif_block = self._motif_block(capped_motifs)
         # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
         # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
         if prior_workflow is not None:
@@ -332,7 +403,8 @@ class DrafterService:
         """GraphRAG :Pattern 모티프를 drafter 프롬프트 주입용 블록으로 직렬화 (ADR-0026 Phase 2).
 
         ETL 시드 전(빈 리스트) 또는 role_slots가 없으면 빈 문자열 반환(무영향).
-        "가이드이지 강제 아님"을 명시해 무관한 노드가 추가되는 것을 막는다.
+        generator+evaluator 슬롯 구조(패턴명 무관)를 루프 패턴으로 판정해 back-edge 배선 지침 주입.
+        패턴명 하드코딩 제거 — 향후 루프 슬롯 구조를 가진 패턴이 추가돼도 자동 처리(리뷰 LOW).
         """
         if not pattern_templates:
             return ""
@@ -341,17 +413,31 @@ class DrafterService:
             slots: dict[str, Any] = getattr(pt, "role_slots", {}) or {}
             if not slots:
                 continue
-            slot_desc = ", ".join(
-                f'{slot}={"|".join(types)}' for slot, types in slots.items() if types
-            )
-            lines.append(f"- {pt.name}: {slot_desc}")
+            generator_types = slots.get("generator", ())
+            evaluator_types = slots.get("evaluator", ())
+            # 슬롯 구조로 루프 판정 — 패턴명 하드코딩 없이 generator+evaluator 쌍이면 루프
+            is_loop = bool(generator_types) and bool(evaluator_types)
+            if is_loop:
+                gen = generator_types[0] if len(generator_types) == 1 else f"({'/'.join(generator_types)})"
+                ev = evaluator_types[0] if len(evaluator_types) == 1 else f"({'/'.join(evaluator_types)})"
+                lines.append(
+                    f"- {pt.name} (LOOP pattern — follow the LOOPS rules above):\n"
+                    f"  generator slot: use ONE {gen} node (do NOT add a second {gen} for evaluation)\n"
+                    f"  evaluator slot: use a {ev} node as the branching point\n"
+                    f"  wiring: {gen} -[output]-> {ev}, then {ev} -[false]-> {gen} (BACK-EDGE retry),\n"
+                    f"          then {ev} -[true]-> next_node (exit/pass branch)"
+                )
+            else:
+                slot_desc = ", ".join(
+                    f'{slot}={"|".join(types)}' for slot, types in slots.items() if types
+                )
+                lines.append(f"- {pt.name}: {slot_desc}")
         if not lines:
             return ""
         joined = "\n".join(lines)
         return (
             "\nWORKFLOW MOTIFS (structural patterns from the knowledge graph matching this "
-            "intent — use as a guide for which node categories to combine; do NOT add nodes "
-            "solely to satisfy a motif, only include nodes the request actually needs):\n"
+            "intent — apply only if the request actually calls for it):\n"
             f"{joined}\n"
         )
 

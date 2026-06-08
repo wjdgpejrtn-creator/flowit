@@ -63,6 +63,20 @@ class NodeRegistryAdapter(NodeRegistry):
         ]
         return [self._to_config(d) for d in structural]
 
+    async def list_by_node_types(self, node_types: list[str]) -> list[NodeConfig]:
+        # CAN_FOLLOW 확장이 회수한 후행 node_type을 NodeConfig로 그라운딩 (ADR-0026 §4.2a).
+        # search()/list_structural()과 동일한 실행가능 가드 — 카탈로그 오염 행(과거 게시 스킬
+        # NodeDefinition 등)이 후보로 새지 않게 EXECUTABLE_NODE_TYPES만 통과시킨다.
+        wanted = set(node_types)
+        if not wanted:
+            return []
+        definitions = await self._repo.list_all()
+        matched = [
+            d for d in definitions
+            if d.node_type in wanted and d.node_type in EXECUTABLE_NODE_TYPES
+        ]
+        return [self._to_config(d) for d in matched]
+
     @staticmethod
     def _to_config(d: NodeDefinition) -> NodeConfig:
         return NodeConfig(

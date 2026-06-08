@@ -22,7 +22,7 @@
 
 ## 1. Phase 1 — 그래프 DB 초기 인프라 (황대원 구축 범위) — ✅ 완료 (PR #393, 라이브 검증)
 
-> **상태(2026-06-06)**: 코드 스캐폴드 + ETL = PR #393. **실제 AuraDB Free 인스턴스로 라이브 검증 완료** — `build_ontology.py`가 제약 5건 + 노드 53건 투영, `expand_candidates` 어댑터 스모크 통과. GCP secret 3종 + Modal SA IAM 부여 완료(아래 §1.1). 남은 건 Phase 2 소비자 배선뿐.
+> **상태(2026-06-06)**: 코드 스캐폴드 + ETL = PR #393. **실제 AuraDB Free 인스턴스로 라이브 검증 완료** — `build_ontology.py`가 제약 5건 + 노드 53건 투영, `expand_candidates` 어댑터 스모크 통과. GCP secret 3종 + Modal SA IAM 부여 완료(아래 §1.1). ~~남은 건 Phase 2 소비자 배선뿐.~~ → **Phase 2 소비자 배선 완료**(§4.2a #410: sibling→CAN_FOLLOW 교체 + retriever ADD 소비, capped).
 
 ### 1.1 AuraDB provisioning — ✅ 완료
 - Neo4j **AuraDB Free** 인스턴스 1개 생성·운영 중. (AuraDB = 매니지드 Neo4j. self-host로 바꿔도 코드 무변경, secret 값만.)
@@ -60,7 +60,7 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 
 ### 1.4 `Neo4jOntologyAdapter` — ✅ 빌드됨 (`ai_agent/adapters/ontology/`)
 - **요청마다 driver 생성·close** 패턴 강제(`composer_modal_per_request_engine` — Modal boot≠request 루프 hang 회피). neo4j는 lazy import(extras 미설치여도 모듈 로드 가능), `NEO4J_*` env에서 연결정보, `driver_factory` 주입 훅으로 테스트.
-- **Phase 1 expand_candidates 실제 범위 = seed + category sibling 1-hop** (REQUIRES/IN_CATEGORY 메타 포함). **`CAN_FOLLOW`는 아직 없음**(Phase 2 신정혜 — composer grounding). `hops` 인자는 forward-compat 예약.
+- ~~**Phase 1 expand_candidates 실제 범위 = seed + category sibling 1-hop**~~ → **Phase 2a(#410)에서 CAN_FOLLOW 1-hop traverse로 교체** + confidence 내림차순 정렬(소비측 cap 결정성). `hops` 인자는 forward-compat 예약.
 - `match_patterns`는 **`NotImplementedError`** — Phase 2 신정혜가 `:Pattern` Cypher로 채움(§4.1).
 
 ### 1.5 `scripts/build_ontology.py` (멱등 ETL) — ✅ 빌드+검증됨
@@ -183,6 +183,21 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 - **소비**: retriever에서 `expand_candidates` 결과의 CAN_FOLLOW로 후보를 **ADD 보강/랭킹**(subtract 필터 금지 — stale 역효과).
 - **USES_ROLE / `:Pattern` 시드**: 모티프 슬롯(generator=LLM 노드, evaluator=condition 노드)을 카탈로그 node_type으로 큐레이션 → `:Pattern`에 연결. 카탈로그 기반이라 박아름 비의존.
 
+> **✅ 구현·측정 완료 (PR #410, 황대원 선반영 — 정혜 검토/이관 대기, 2026-06-08)**
+> `compute_can_follow_edges()`(output명 ∩ B.required-input명 + 트리거 타깃 제외 → 실 카탈로그 **55엣지**) + 어댑터 `_EXPAND_CYPHER`를 CAN_FOLLOW traverse로 교체 + `NodeRegistry.list_by_node_types()` 그라운딩 + retriever `_expand_can_follow()` ADD 보강.
+>
+> **§6.5 하니스로 in-process before/after 측정(엣지 0↔55 토글)** — 하니스가 **회귀를 잡은 사례**:
+> | 지표 | baseline | ADD-all | **capped(채택)** |
+> |---|---|---|---|
+> | drafter 실패 | 6 | 🔴 23 | ✅ 9 |
+> | qa pass(≥8) | 64.3% | 🔴 28.6% | ✅ 67.9% |
+> | motif-correctness | 75% | 75% | ✅ **100%** |
+> | hallucination | 0% | 0% | 0% |
+>
+> - **ADD-all = 회귀**: 후보 풀 비대(~24→38)로 Gemma structured JSON이 잘림(`Invalid JSON: EOF`). → **cap 필수**: seed=검색 상위 5 hit만(구조/개인 노드 제외) + 추가 ≤3개(`_EXPAND_SEED_LIMIT`/`_EXPAND_ADD_LIMIT`).
+> - **핵심 교훈**: **환각은 이미 baseline 0%**(`executable_node_types` 그라운딩 #378이 진작 해결) → CAN_FOLLOW의 실효는 **환각감소가 아니라 motif(75→100%)·워크플로우 풍부화**다. ADR가 내세운 "환각 억제" 명분은 이 갈래에선 헤드룸이 없었음(§9.2 "constrained generation 최고가치"는 hallucinated-edge가 0이 아닐 때만 유효 — 본 카탈로그 규모에선 이미 0).
+> - **구현은 ADD 보강이지 constrained generation(allowed_node_types whitelist/subtract)이 아님** — subtract는 ETL stale 시 유효 후보 삭제 위험이라 의도적 회피. whitelist 레버는 환각이 0이 아닌 환경(스킬 노드 대량 유입 등)에서 재검토.
+
 ### 4.2b 박아름 — 스킬 그래프 ETL (skill-builder grounding, 별개 소비자)
 - **스킬 `(:Skill)-[:BINDS]->(:Node)` ETL**: 기존 스킬 **publish 경로에 Neo4j incremental upsert 훅** 배선(`BINDS`, `:Skill` 속성). 정적 카탈로그와 달리 스킬은 자주 바뀜. 소비자는 skill-builder(+ 향후 composer 스킬 제시) — composer의 노드 grounding(§4.2a)과 독립.
 - ✅ **구현 완료**(#397 박아름) + **라이브 활성화**(#401 황대원): api 이미지 `ai_agent[ontology]` + api_server(Cloud Run) terraform `secret_env` `NEO4J_*` 바인딩 + api SA `secretAccessor`. 머지+`terraform apply`+기존 PUBLISHED 스킬 `project_skills()` backfill 후 신규 게시분이 자동 투영된다.
@@ -194,17 +209,31 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 
 ---
 
-## 6. 고도화(advancement) 레버 — 상세 가이드
+## 6. 고도화(advancement) — 후속 본작업 (전 항목 진행 확정)
 
-품질을 단계적으로 끌어올리는 레버. 담당자가 측정하며 적용.
+> **범위 확정 (2026-06-08)**: 본 이니셔티브의 의도된 고도화는 **"품질검증 루프 하나"가 아니라 "retry·분기·fan-out 등 다양한 control-flow 패턴을 자연어로 1급 생성"**이다. A1(#410)으로 핵심 2갈래(환각=이미 0%, quality_gate_loop=75→100%)는 충족됐으나, **그것만으론 의도한 고도화에 미달** — §6.1 모티프 확장이 능력 갭(미충족 의도)이고 §6.2/6.3/6.4도 함께 진행한다. 따라서 §6은 "선택적 레버"가 아니라 **커밋된 후속 로드맵**이다(우선순위는 §8).
+>
+> **방법론**: 각 항목은 §6.5 하니스로 before/after 측정하며 적용한다(A1에서 ADD-all 회귀를 잡았듯 — 측정 없는 고도화는 추측). 단일 샘플 노이즈를 줄이려 핵심 변경은 2~3회 반복 측정.
 
-### 6.1 모티프 라이브러리 확장 (신정혜·박아름)
-`quality_gate_loop` 외 검증된 모티프를 `:Pattern`으로 추가 → composer가 복합 패턴을 1급 생성:
-- **fan_out / map**: 리스트 입력을 노드별 병렬 처리 (control-flow L1 데이터흐름 위)
-- **retry_backoff**: 실패 시 지연 후 재시도 (유한 순환 + 조건)
-- **approval_gate**: 사람 컨펌 후 진행 (컨펌 게이트와 연계, ADR 컨펌 시리즈)
-- **branch_on_classification**: 분류 결과로 분기 (L2 조건 분기)
-> 각 모티프는 §2 validator 통과 + `CyclicScheduler`/`BranchEvaluator` 계약 정합이 필수. 추가 시 파리티 테스트 동반.
+### 6.1 모티프 라이브러리 확장 (신정혜) — **agentic 패턴 기반 시드 스펙**
+
+> **문제 인식(2026-06-07)**: 현재 `:Pattern`은 `quality_gate_loop` **1종뿐**이라 사실상 "패턴 라이브러리"라 부르기 어렵다. 온톨로지 그라운딩의 효익은 **검증된 모티프의 폭**에 비례하므로(§9 연구 근거), 아래 라이브러리를 1급으로 시드한다.
+>
+> **모티프 = 두 계보의 교집합** (§9.3): ① **van der Aalst control-flow 패턴**(프로세스 과학 정전, 20+종) ② **agentic workflow 패턴**(LLM 시대 — Anthropic/HF/Neo4j 합의: Prompt-Chaining·Routing·Parallelization·Orchestrator-Workers·Evaluator-Optimizer·Planning). 둘 다에서 검증된 패턴만 넣어야 환각을 **늘리지 않고** 억제한다(임의 패턴은 잘못된 구조를 강제).
+
+**시드 스펙** — `_PATTERNS`(build_ontology.py) 확장. `intent`는 `match_patterns`의 `CONTAINS` 매칭 키워드, `role_slots`는 슬롯→카탈로그 category 매핑(현 condition 노드 인벤토리: `if_condition`/`switch_case`/`loop_list`/`loop_count`/`delay`/`retry`/`merge_branch`/`stop_workflow`, ai 노드: `anthropic_chat`/`gemma_chat`):
+
+| 모티프 | van der Aalst | agentic | intent 키워드(예) | role_slots (slot→category/node) | 구조 | 엔진 계약 |
+|--------|---------------|---------|-------------------|--------------------------------|------|-----------|
+| `quality_gate_loop` ✅ | Structured Loop | Evaluator-Optimizer | 검증·품질·재생성 | generator→ai, evaluator→condition | gen→eval→(back-edge/exit-edge), `max_iterations` | CyclicScheduler(SCC당 condition≥1) + #392 validator |
+| `branch_on_classification` | Exclusive Choice (XOR) | Routing | 분류·조건·~이면·분기 | classifier→ai, router→condition(`if_condition`/`switch_case`) | classify→XOR 분기→합류 | BranchEvaluator (L2 조건분기) |
+| `fan_out_map` | Parallel Split + Sync | Orchestrator-Workers / Parallelization | 각각·목록·일괄·전부 | splitter→condition(`loop_list`), worker→ai/action, merger→condition(`merge_branch`) | split→병렬 worker→merge | L1 데이터흐름 + loop_list/merge_branch |
+| `retry_backoff` | Structured Loop + delay | (resilience) | 재시도·실패하면·반복 | action→action, delay→condition(`delay`/`retry`), gate→condition(`if_condition`) | try→실패?→delay→retry / →exit | CyclicScheduler(condition≥1) |
+| `approval_gate` | Deferred Choice / Milestone | Human-in-the-loop | 승인·검토 후·컨펌 | proposer→ai/action, gate→condition(`if_condition`), terminal→condition(`stop_workflow`) | propose→hold→approve/reject | 컨펌 게이트(ADR 컨펌 시리즈) |
+| `sequential_chain` (암묵) | Sequence | Prompt-Chaining | (명시 모티프 불요 — DAG 기본) | step→any | A→B→C 선형 | 기본 DAG (validator 무순환) |
+
+> **시드 원칙**: ① 슬롯 category는 **카탈로그에 실재하는 node_type**으로만(없는 슬롯은 시드 안 함 — 환각 유발). ② intent 키워드는 사용자 문장에서 실제 등장하는 한국어 표현으로(현 매칭이 `toLower CONTAINS p.intent`라 한 패턴에 복수 키워드가 필요하면 `:Pattern`을 키워드별 복수 시드하거나 매칭 Cypher를 `any()`로 확장). ③ `sequential_chain`은 LLM이 이미 잘 만드는 선형이라(§9.4 graph-planning 갭은 분기·루프에 집중) 시드 우선순위 최하.
+> **필수 가드**: 각 모티프는 §2 validator 통과 + `CyclicScheduler`/`BranchEvaluator` 수용 계약과 1:1 정합 + **파리티 테스트 동반**(composer가 통과시킨 모티프 draft가 엔진에서 죽으면 false accept). 신규 모티프 PR마다 골든셋에 해당 시나리오 1건 추가(§6.5).
 
 ### 6.2 retrieval 튜닝 (신정혜)
 - vector seed `k`, hop depth(1 vs 2)를 골든 셋으로 스윕. 1홉은 정밀/저지연, 2홉은 재현↑/노이즈↑.
@@ -228,12 +257,21 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 | **e2e quality score** | qa_evaluator score(≥8 통과) 분포 |
 - GraphRAG 도입 전(현 pgvector top-k) 베이스라인 측정 → Phase별 회귀. `/rag-check` 골든 스냅샷 패턴 참고.
 
+> **✅ 하니스 구축 완료 (PR #409 머지)** — `modules/ai_agent/tests/eval/ontology_grounding/`. 골든셋 32건(루프8/선형16/분기4/잡담4) + 순수 지표 추출기 + `run_eval`(라이브 캡처, main.py 조립 미러) + `check_snapshot`(베이스라인 회귀 게이트, `/ontology-eval`). 지표 계산은 순수/결정적(단위테스트), 라이브 캡처만 Modal+Neo4j+DB.
+>
+> **실측 캐비엇 (A1 측정에서 확인)**:
+> - **hallucinated-edge는 baseline에서 이미 0%** — `executable_node_types` 그라운딩(#378)이 진작 해결. 이 지표는 스킬 노드 대량 유입 등 카탈로그 오염 시에만 움직임. §9.2의 "constrained generation 최고가치" 전제(환각>0)가 본 규모에선 미성립.
+> - **motif-correctness 측정 정의**: "루프 요청 → 유향 순환(back-edge) + condition 노드 ≥1"(validator §2 SCC + CyclicScheduler 계약 1:1). 8개 루프 시나리오 기준.
+> - **distractor 정답률은 측정 불가 아티팩트**: `run_eval`는 composer(LangGraphOrchestrator)를 **직접** 호출하는데 잡담 fast-path는 상위 **Main Orchestrator**에 있어 composer 단독엔 미적용 → 잡담도 워크플로우 생성. before/after 동일이라 A/B 결론엔 무영향이나, 절대값은 무의미.
+> - **retry/validator-pass는 drafter 실패 시 허상**: drafter가 아예 실패(node 0)하면 재시도 루프에 안 들어가 "무재초안"으로 빠짐. 헤드라인 신호는 **drafter 실패율 + qa**.
+> - **단일 샘플 LLM 노이즈**: 시나리오당 ~2.5분(32건×~80분/캡처)이라 반복이 비싸지만, 핵심 결론은 2~3회 반복 측정으로 de-noise 권장.
+
 ---
 
 ## 7. 지뢰 / 운영 체크리스트
 1. **Modal per-request driver** — `@enter` 1회 생성 금지(loop-binding hang). 요청마다 생성·close.
 2. **secret 경로 = Modal `load_secrets_to_env` (terraform 아님)** — composer/skills-builder는 Modal 앱이라 `boot()`에서 GCP secret(`neo4j-uri`/`username`/`password`)을 런타임 pull. terraform `secret_env`는 Cloud Run(api/worker) 전용. secret `:latest` 복수 공유 시 `secret_latency_bomb` → 버전 핀.
-3. **ETL 동기화** — 정적 카탈로그 deploy 1회 + 스킬 publish incremental. 재시드 레시피(`staging_node_catalog_reseed`)와 정합.
+3. **ETL 동기화** — 정적 카탈로그 deploy 1회 + 스킬 publish incremental. 재시드 레시피(`staging_node_catalog_reseed`)와 정합. **CAN_FOLLOW 엣지는 `build_ontology.py` 재실행으로만 투영**(CI seed 자동화 없음) — **AuraDB Free 72h auto-pause 후 재개·재시드 시 엣지 유실 가능**. 유실되면 expand가 search-only로 조용히 degrade(non-fatal·환각無, 단 motif 품질이 baseline으로 후퇴) → 재투영 절차: `NEO4J_* env + python scripts/build_ontology.py`로 노드+패턴+CAN_FOLLOW 일괄 멱등 재투영. 배포 런북에 명문화.
 4. **소비자 분리 — Phase 2는 박아름 의존 아님**: composer grounding(§4.2a 모티프·CAN_FOLLOW)은 노드 I/O 스키마 파생이라 **신정혜 자력 완결**. 박아름 몫(§4.2b 스킬 BINDS)은 skill-builder grounding이라 **독립 병렬**. (Phase 0 validator만 nodes_graph 교차소유라 박아름 sign-off 필요 — PR #392.)
 5. **프로젝트 일정** — 2026-06-30 staging 종료와 별개의 **장기 제품 방향**. staging 검증은 Phase 1 한정, Phase 2+는 일정 합의 후.
 
@@ -241,10 +279,55 @@ PatternTemplate(name, intent, role_slots: dict[str, tuple[str,...]])
 
 ## 8. 진행 순서 요약
 ```
-[황대원] §1 인프라 ✅ PR #393 (AuraDB 라이브검증 + secret 3종 + IAM)        ─┐
-[황대원] §2 Phase 0 validator 완화 ✅ PR #392 (박아름 sign-off 대기)        ─┘
-        ↓ (PR #391/#392/#393 머지 후)
-[신정혜] §4.1+§4.2a composer grounding (retriever+모티프+CAN_FOLLOW+drafter) ─┐ 독립 병렬
-[박아름] §4.2b 스킬 BINDS ETL (skill-builder grounding)                    ─┘ (서로 비의존)
-[공통] §6.5 평가 하니스로 측정 → §6 고도화 레버 반복
+[황대원] §1 인프라 ✅ PR #393 / §2 Phase 0 validator 완화 ✅ PR #392
+        ↓
+[신정혜] §4.1 retriever+모티프+drafter grounding ✅ (#395 머지)
+[황대원] §4.2a CAN_FOLLOW + expand 부활(capped, 하니스 검증) ✅ PR #410 (정혜 이관 대기)
+[박아름] §4.2b 스킬 BINDS ETL ✅ (#397/#401 머지·배포)
+[공통]  §6.5 평가 하니스 ✅ PR #409 머지
+        ↓ ── 후속 고도화(전 항목 진행 확정, 측정 주도) ──
+[우선1] 반복 측정 de-noise (capped A1 2~3회 재캡처 — 기능 추가 0, '달성' 검증 최우선)
+[우선2] §6.1 모티프 라이브러리 확장 (branch_on_classification / fan_out_map / retry_backoff /
+        approval_gate) — 의도된 고도화의 본질(다양한 control-flow 생성). 모티프당 골든셋+파리티
+[우선3] §6.3 CAN_FOLLOW 신뢰도(실행로그 node_results 마이닝) + §6.2 retrieval 튜닝 + §6.4 provenance
+        ↑ 각 항목 §6.5 하니스 before/after 게이트 통과 필수
 ```
+> RACI: §6 후속은 plan상 신정혜(composer grounding). 황대원 A1 선반영분(#410) 이관 후 신정혜 주도, 황대원 리뷰/하니스 조율. 일정은 2026-06-30 staging 종료 전 합의.
+
+---
+
+## 9. 온톨로지 구조·패턴 설계 원칙 (연구 근거)
+
+> **목적**: 온톨로지 성능은 **그래프 구조·검색 패턴·모티프 라이브러리·평가 방법**에 크게 좌우된다(현장/논문 합의). 본 절은 §4.2a(신정혜)·§6 고도화·§6.5 하니스 설계의 **근거와 리뷰 기준**을 박제한다. (조사 2026-06-07, 출처 §9.6.)
+
+### 9.1 그래프 구조 설계 4원칙
+1. **"단순 그래프 + 강한 검색" > 복잡한 그래프** — 완벽히 풍부한 그래프보다 *싸고 빠르게 추출 가능한 핵심만 넣고 retrieval 파이프라인이 메우게* 하는 게 비용 대비 recall이 높다. → **우리 검증**: 53노드 최소 스키마 + 벡터 비복제 결정이 정합. 신정혜 §4.2a가 그래프를 과설계하면 경계.
+2. **타입드 + 가중(confidence) 엣지** — 추론(휴리스틱) 엣지엔 confidence를 달아 임계 필터. → **우리**: `CAN_FOLLOW {confidence}`(§4.2a)가 정확히 이 패턴. 임계 골든셋 튜닝 + 오탐쌍 블랙리스트(§6.3)가 품질을 결정.
+3. **경량 계층/커뮤니티** — GraphRAG 계열은 엔티티를 community(주제 클러스터)로 묶어 전역/지역 질의를 분리. → **우리**: `:Category`(IN_CATEGORY)가 경량 community 역할. 노드 53개라 본격 community detection(Leiden 등)은 과함.
+4. **⚠️ 과확장(over-expansion)이 정밀도를 희석** — 큰 이웃을 다 끌어오면 주제 밖 노드가 섞여 retrieval precision 저하. → **우리 직결**: `expand_candidates` hops(1 vs 2) 튜닝(§6.2) + #395의 **subtract 필터 제거(ADD-only)** 결정이 이 함정 회피. 하니스로 측정할 핵심 파라미터.
+
+### 9.2 검색(retrieval) 패턴
+- **vector seed → graph expand → constrained context** = GraphRAG 표준. 우리 `pgvector seed → expand_candidates → allowed_node_types()`가 교과서 흐름.
+- **schema/ontology-constrained generation = 환각 억제의 본질** — 논문 최강 합의. 스키마·공리를 프롬프트 주입하거나 디코딩 제약 시 사실오류 유의하게↓(임상 KG-RAG 등). → **우리**: `OntologySubgraph.allowed_node_types()` 화이트리스트가 이것. **⚠️ 2026-06-08 실측 정정**: A1(#410)으로 expand는 켜졌으나 **ADD 보강 형태**(whitelist/subtract 아님)이며, 하니스 측정에서 **hallucinated-edge가 baseline 이미 0%**(executable_node_types #378이 진작 해결)라 **이 레버는 본 카탈로그 규모(53노드)에선 헤드룸이 없다**. constrained generation(whitelist)은 환각>0 환경(스킬 노드 대량 유입 등)에서만 재검토 가치. → CAN_FOLLOW의 실효는 환각감소가 아니라 **motif·풍부화**로 드러남(§4.2a 측정).
+- **local vs global retrieval 분리** — entity-centric(호환 노드) vs motif(의도 패턴). 우리가 `expand_candidates`(local) / `match_patterns`(global) 두 Port 메서드로 이미 분리.
+
+### 9.3 모티프 라이브러리 = van der Aalst ∩ agentic
+- **van der Aalst control-flow 패턴**(2003~): Sequence, Parallel Split/Synchronization, Exclusive Choice(XOR), Simple Merge, Multi-Choice, Structured Loop, Deferred Choice, Milestone …
+- **agentic workflow 패턴**(LLM): Prompt-Chaining, Routing, Parallelization/Sectioning, Orchestrator-Workers, Evaluator-Optimizer, Planning.
+- **우리 §6.1 모티프가 두 계보의 교집합** — 검증된 패턴만 1급 시드(매핑 표는 §6.1). 임의 패턴 금지 + 엔진 계약 파리티 필수.
+
+### 9.4 평가 — "워크플로우 = 그래프"
+- 워크플로우 생성 벤치마크(WorFBench/WorFEval)는 **subsequence + subgraph matching**으로 평가 — 텍스트 일치가 아닌 **구조 일치**. → **우리 하니스(§6.5)**: motif-correctness를 "생성물에 generator→evaluator→back-edge→exit-edge **서브그래프**가 있나"로, hallucinated-edge를 "생성 엣지가 카탈로그/CAN_FOLLOW의 **그래프 멤버십**인가"로 측정(텍스트 아님).
+- **결정적 발견**: LLM은 **sequence planning ≫ graph planning** — GPT-4도 그래프(분기·병렬·루프) 생성에서 ~15% 갭. → 모티프 그라운딩의 정량적 정당화. 또한 **soft 프롬프트 주입의 한계**(graph 구조는 LLM 약점)를 시사 → 장기적으로 **결정적 모티프 합성**(템플릿 서브그래프 직접 생성)이 soft 주입보다 안정적일 수 있음. §4.2a 설계 선택(주입 vs 합성)의 근거.
+
+### 9.5 종합 — 리뷰/하니스 5원칙
+1. 그래프는 단순하게, 검색을 강하게 (과설계 경계).
+2. **constrained generation(allowed_node_types)이 환각 억제 본질** — 단, 실측상 환각 이미 0%(53노드 규모)라 헤드룸 없음(§9.2 정정). A1은 ADD 보강이지 whitelist 아님. CAN_FOLLOW 실효 = motif·풍부화.
+3. CAN_FOLLOW는 confidence-weighted + 임계 튜닝 (오탐 억제가 품질 결정).
+4. 모티프는 van der Aalst/agentic 검증 패턴만 + 엔진 계약 파리티.
+5. 평가는 **subgraph matching** (구조 일치), graph-planning이 LLM 약점이라 **N회 반복 통과율**로(soft 주입 비결정성).
+
+### 9.6 출처
+- GraphRAG 구조·검색: [Towards Data Science — GraphRAG in Practice](https://towardsdatascience.com/graphrag-in-practice-how-to-build-cost-efficient-high-recall-retrieval-systems/) · [Neo4j RAG tutorial](https://neo4j.com/blog/developer/rag-tutorial/) · [Survey of Graph RAG (arXiv 2501.13958)](https://arxiv.org/pdf/2501.13958) · [Survey on Knowledge-Oriented RAG (arXiv 2503.10677)](https://arxiv.org/pdf/2503.10677)
+- 온톨로지 그라운딩/제약 생성: [Ontology-grounded KGs for clinical QA hallucination (ScienceDirect)](https://www.sciencedirect.com/science/article/abs/pii/S1532046426000171) · [Ontology-Grounded LLM Construction (EmergentMind)](https://www.emergentmind.com/topics/ontology-grounded-llm-construction) · [Ontology-Constrained Generation (arXiv 2411.15666)](https://arxiv.org/pdf/2411.15666) · [API Hallucination via Hierarchical Dependency (arXiv 2505.05057)](https://arxiv.org/pdf/2505.05057)
+- 워크플로우 패턴/평가: [Design Patterns for Agentic Workflows (HF)](https://huggingface.co/blog/dcarpintero/design-patterns-for-building-agentic-workflows) · [Workflow Patterns — van der Aalst (Springer)](https://link.springer.com/rwe/10.1007/978-0-387-39940-9_826) · [Benchmarking Agentic Workflow Generation — WorFBench (arXiv 2410.07869)](https://arxiv.org/abs/2410.07869)

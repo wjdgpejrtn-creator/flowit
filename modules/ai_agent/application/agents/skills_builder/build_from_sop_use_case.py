@@ -13,7 +13,7 @@ LLM 호출은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base
     [extract_detail] DocumentBlock + 선택된 meta dict
       → JSON prompt 구성 (target_skill_meta 명시)
       → LLM.generate_structured(prompt, _ExtractedSkillNodeDetail)
-      → ResultFrame(payload.skill_detail) — detail 5필드(inputs/outputs/instructions/...) + staging
+      → ResultFrame(payload.skill_detail) — detail(inputs/outputs/instructions/composer_instructions/...) + staging
       → 사용자 폼 prefill (frontend가 메타와 합쳐서)
     [confirm] 편집된 skills (메타 + detail 합친 형태)
       → embed(description) + CreateDraftSkillUseCase로 personal DRAFT 생성
@@ -82,6 +82,12 @@ from ....domain.ports.llm_port import LLMPort
 # DB CHECK 영문 8종 (`009_node_definitions.sql`).
 _ALLOWED_CATEGORIES = {"trigger", "action", "condition", "transform", "ai", "integration", "utility", "output"}
 
+# SOP 추출은 노드 N개를 각각 긴 instructions(SKILL.md 본문) + inputs/outputs 스키마와 함께
+# 한 JSON으로 내보내므로 structured 기본 출력 예산(2048)으로는 문자열 중간에 잘려
+# "EOF while parsing a string"가 난다 (#287/#353). 입력(문서 본문)은 작으므로 출력 예산을
+# ctx 상한까지 상향해 장문 JSON을 안전하게 받는다.
+_SOP_EXTRACT_MAX_TOKENS = 8192
+
 
 # ----------------------------------------------------------------------
 # LLM structured response 래퍼
@@ -110,13 +116,16 @@ class _ExtractedSkillNodeMetaList(BaseModel):
 
 
 class _ExtractedSkillNodeDetail(BaseModel):
-    """2차 LLM 추출 — 선택된 메타에 대한 detail 5필드. 폼 prefill용.
+    """2차 LLM 추출 — 선택된 메타에 대한 detail 필드. 폼 prefill용.
 
-    옵션 1의 2차 응답 스키마. inputs/outputs JSON Schema + instructions markdown 등 토큰 무거운 필드.
+    옵션 1의 2차 응답 스키마. inputs/outputs JSON Schema + instructions/composer_instructions markdown 등
+    토큰 무거운 필드.
     1차에서 받은 메타와 frontend가 합쳐서 사용자 폼에 prefill한다.
 
     `instructions`는 ADR-0017 이중 저장 중 SkillDocument(SKILL.md) 지침서 본문 —
     confirm 단계에서 GCS 저장된다(use case 경유).
+    `composer_instructions`는 ADR-0024 2-md 중 COMPOSER.md 본문 — 워크플로우 생성 시 drafter가
+    노드 구성에 주입하는 "이 스킬을 쓰려면 어떤 노드를 엮어야 하는가" 지침(#372 결함 A 해소). optional.
     """
     model_config = ConfigDict(frozen=True)
 
@@ -125,6 +134,7 @@ class _ExtractedSkillNodeDetail(BaseModel):
     required_connections: list[str] = Field(default_factory=list)
     service_type: str | None = None
     instructions: str = Field(min_length=1)  # SkillDocument(SKILL.md) markdown body — ADR-0017
+    composer_instructions: str = ""          # SkillDocument(COMPOSER.md) body — ADR-0024 (optional)
 
 
 # ----------------------------------------------------------------------
@@ -136,8 +146,8 @@ class BuildFromSOPUseCase:
     """SOP DocumentBlock → LLM 추출 → wizard 3단계 (ADR-0020 ③-a, Q8 wizard 1차 + 옵션 1 2단계 분리).
 
     - extract_metadata: 메타 5필드(node_type/name/description/category/risk_level) 추출, **저장 X** — 카드 그리드용
-    - extract_detail: 선택된 메타의 detail(inputs/outputs/instructions/...) + `NodeSpecStaging` 반환,
-      **저장 X** — 폼 prefill용
+    - extract_detail: 선택된 메타의 detail(inputs/outputs/instructions/composer_instructions/...) +
+      `NodeSpecStaging` 반환, **저장 X** — 폼 prefill용
     - confirm: 편집 결과 → CreateDraftSkillUseCase로 personal DRAFT 생성 (Option B — NodeDefinition은 publish 시점)
     - JSON 강제 (LLM 입출력), category/risk_level 검증
     """
@@ -180,7 +190,9 @@ class BuildFromSOPUseCase:
         yield AgentNodeFrame(agent_node_name="skills_builder.sop.llm_extract_metadata")
 
         try:
-            extracted = await self._llm.generate_structured(prompt, _ExtractedSkillNodeMetaList)
+            extracted = await self._llm.generate_structured(
+                prompt, _ExtractedSkillNodeMetaList, max_tokens=_SOP_EXTRACT_MAX_TOKENS
+            )
         except Exception as e:
             yield ErrorFrame(code="E_LLM_GENERATION_FAILED", message=f"LLM 호출 실패: {e}")
             return
@@ -269,7 +281,9 @@ class BuildFromSOPUseCase:
         yield AgentNodeFrame(agent_node_name=f"skills_builder.sop.llm_extract_detail.{meta_obj.node_type}")
 
         try:
-            detail = await self._llm.generate_structured(prompt, _ExtractedSkillNodeDetail)
+            detail = await self._llm.generate_structured(
+                prompt, _ExtractedSkillNodeDetail, max_tokens=_SOP_EXTRACT_MAX_TOKENS
+            )
         except Exception as e:
             yield ErrorFrame(code="E_LLM_GENERATION_FAILED", message=f"LLM 호출 실패: {e}")
             return
@@ -299,6 +313,7 @@ class BuildFromSOPUseCase:
                 "skill_detail": {
                     "node_type": meta_obj.node_type,            # 식별용 echo
                     "instructions": detail.instructions,
+                    "composer_instructions": detail.composer_instructions,  # COMPOSER.md (ADR-0024)
                     "inputs": detail.inputs,
                     "outputs": detail.outputs,
                     "required_connections": detail.required_connections,
@@ -316,8 +331,8 @@ class BuildFromSOPUseCase:
     ) -> AsyncGenerator[SSEFrame, None]:
         """wizard 3단계 — 사용자가 편집·확정한 추출 결과 → personal DRAFT 스킬 생성.
 
-        각 skill = `{node_type, name, description, instructions, staging:{...}}` (extract_metadata + extract_detail
-        결과를 frontend가 합쳐 사용자가 편집한 형태). `CreateDraftSkillUseCase`로 DRAFT 생성
+        각 skill = `{node_type, name, description, instructions, composer_instructions, staging:{...}}`
+        (extract_metadata + extract_detail 결과를 frontend가 합쳐 편집한 형태). `CreateDraftSkillUseCase`로 DRAFT 생성
         (Option B — NodeDefinition은 publish 시).
 
         Yields:
@@ -341,6 +356,11 @@ class BuildFromSOPUseCase:
                 # SKILL.md 본문(ADR-0017) — 편집된 입력이라 str 아니거나 빈 값이면 미저장(None) 격리.
                 raw_instr = skill.get("instructions")
                 instructions = raw_instr if isinstance(raw_instr, str) and raw_instr.strip() else None
+                # COMPOSER.md 본문(ADR-0024) — 동일 신뢰 경계. 누락/빈 값이면 None(노드 지침만 있는 스킬).
+                raw_composer = skill.get("composer_instructions")
+                composer_instructions = (
+                    raw_composer if isinstance(raw_composer, str) and raw_composer.strip() else None
+                )
                 if staging.category not in _ALLOWED_CATEGORIES:
                     raise ValueError(
                         f"category '{staging.category}'가 DB CHECK 8영문에 없음: {sorted(_ALLOWED_CATEGORIES)}"
@@ -367,6 +387,7 @@ class BuildFromSOPUseCase:
                     node_spec_staging=staging,
                     embedding=embedding,
                     instructions=instructions,  # ADR-0017 — SKILL.md 본문 → GCS 저장(use case 경유)
+                    composer_instructions=composer_instructions,  # ADR-0024 — COMPOSER.md 본문 → GCS 2-md
                 )
             except Exception as e:
                 failed.append({"node_type": node_type, "stage": "create_draft", "error": str(e)})
@@ -512,9 +533,14 @@ class BuildFromSOPUseCase:
             "  - service_type: str | null (e.g. 'slack', 'google_workspace')\n"
             "  - instructions: 이 스킬의 SKILL.md 지침서 본문 (markdown 문자열). "
             "사용자가 대화 중 읽고 선택할 수 있도록 '## When to use', '## Steps', '## Inputs/Outputs' 섹션을 "
-            "포함한 충분한 설명 (ADR-0017)\n\n"
+            "포함한 충분한 설명 (ADR-0017). 이 노드가 **실행될 때** LLM에 주입되는 도메인 지침이다\n"
+            "  - composer_instructions: 이 스킬의 COMPOSER.md 지침서 본문 (markdown 문자열, ADR-0024). "
+            "워크플로우 **작성 에이전트(Composer)** 에 주입되어 '이 스킬을 쓰려면 어떤 노드를 어떻게 엮어야 "
+            "하는가'를 지시한다. 예: 'LLM 노드 1개와 Email 발송 노드를 순서대로 배치하고, LLM 출력을 Email "
+            "본문에 연결하라'. **필수 노드 종류와 연결 방식을 명시**해 Composer가 실행 가능한 워크플로우를 "
+            "구성하도록 한다 (instructions와 소비처가 다름 — 실행 시 vs 생성 시)\n\n"
             "출력 전체는 **반드시 JSON** 형식입니다 (XML 금지). "
-            "단 instructions 필드의 *값*은 사람이 읽는 markdown 문자열입니다."
+            "단 instructions / composer_instructions 필드의 *값*은 사람이 읽는 markdown 문자열입니다."
         )
 
         few_shot_example = {
@@ -548,6 +574,11 @@ class BuildFromSOPUseCase:
                     "## Inputs/Outputs\n- 입력: refund_id, amount, channel\n"
                     "- 출력: message_ts (메시지 타임스탬프)"
                 ),
+                "composer_instructions": (
+                    "## 필수 노드\n이 스킬을 워크플로우에 쓰려면 다음 노드를 배치한다:\n"
+                    "1. **Slack 메시지 발송 노드**(category=action, service=slack) — 매니저 채널 알림\n"
+                    "## 연결\n환불 트리거의 refund_id·amount를 Slack 노드 입력으로 연결한다."
+                ),
             },
         }
 
@@ -559,8 +590,9 @@ class BuildFromSOPUseCase:
                 "required_connections": {"type": "array", "items": {"type": "string"}},
                 "service_type": {"type": ["string", "null"]},
                 "instructions": {"type": "string"},
+                "composer_instructions": {"type": "string"},
             },
-            "required": ["inputs", "outputs", "required_connections", "instructions"],
+            "required": ["inputs", "outputs", "required_connections", "instructions", "composer_instructions"],
         }
 
         payload = {

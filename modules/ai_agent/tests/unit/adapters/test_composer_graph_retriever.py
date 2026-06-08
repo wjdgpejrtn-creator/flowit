@@ -291,17 +291,19 @@ class TestRetrieverPersonalRecall:
         assert len(result["node_candidates"]) == 1
 
 
-class TestRetrieverExpandDeferred:
-    """ADR-0026 Phase 2a — expand_candidates(서브그래프)는 소비처(CAN_FOLLOW 필터, 박아름 §4.2)가
-    생기기 전까지 호출 보류한다. retriever는 모티프만 그라운딩하고, 매 compose Neo4j 왕복을
-    만들지 않는다(dead round-trip 제거)."""
+class TestRetrieverExpandCanFollow:
+    """ADR-0026 §4.2a — expand_candidates(CAN_FOLLOW 서브그래프)를 호출해 후행 노드를 검색
+    후보에 **ADD 보강**한다. ADD 전용(subtract 금지) + 실패 비치명적."""
 
-    def _orchestrator_with_retriever(self, search_result, ontology_retriever):
+    def _orchestrator_with_retriever(
+        self, search_result, ontology_retriever, list_by_node_types=None
+    ):
         from nodes_graph.domain.services.graph_validator import GraphValidator
 
         node_registry = AsyncMock(spec=NodeRegistry)
         node_registry.search = AsyncMock(return_value=search_result)
         node_registry.list_structural = AsyncMock(return_value=[])
+        node_registry.list_by_node_types = AsyncMock(return_value=list_by_node_types or [])
         return LangGraphOrchestrator(
             intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
             drafter=AsyncMock(spec=DrafterService),
@@ -313,26 +315,39 @@ class TestRetrieverExpandDeferred:
             ontology_retriever=ontology_retriever,
         )
 
+    def _subgraph(self, adjacency):
+        from ai_agent.domain.value_objects.ontology import OntologySubgraph
+
+        return OntologySubgraph(seeds=tuple(adjacency), nodes=(), adjacency=adjacency)
+
     @pytest.mark.asyncio
-    async def test_expand_candidates_not_called(self):
-        """ontology_retriever가 주입돼도 expand_candidates는 호출하지 않는다 (defer)."""
-        candidate = _node_config(name="slack_send")
-        candidate.__dict__["node_type"] = "slack_send"
+    async def test_can_follow_neighbors_added_to_candidates(self):
+        """CAN_FOLLOW 후행 노드가 그라운딩돼 후보에 ADD된다."""
+        seed = _node_config(name="csv_parse")
+        seed.__dict__["node_type"] = "csv_parse"
+        neighbor = _node_config(name="csv_build")
+        neighbor.__dict__["node_type"] = "csv_build"
 
         ontology_retriever = AsyncMock()
-        ontology_retriever.expand_candidates = AsyncMock()
         ontology_retriever.match_patterns = AsyncMock(return_value=[])
+        ontology_retriever.expand_candidates = AsyncMock(
+            return_value=self._subgraph({"csv_parse": ("csv_build",)})
+        )
 
-        oc = self._orchestrator_with_retriever([candidate], ontology_retriever)
+        oc = self._orchestrator_with_retriever(
+            [seed], ontology_retriever, list_by_node_types=[neighbor]
+        )
         result = await oc._retriever_node(_make_state())
 
-        ontology_retriever.expand_candidates.assert_not_called()
-        # 서브그래프는 state에 더 이상 저장되지 않는다(소비처 없음).
-        assert "ontology_subgraph" not in result
+        ontology_retriever.expand_candidates.assert_called_once()
+        # 그라운딩은 seed에 이미 없는 후행 node_type만 대상으로 호출
+        oc._node_registry.list_by_node_types.assert_awaited_once_with(["csv_build"])
+        types_in_result = {c.node_type for c in result["node_candidates"]}
+        assert types_in_result == {"csv_parse", "csv_build"}
 
     @pytest.mark.asyncio
     async def test_candidates_never_filtered(self):
-        """pgvector 후보는 온톨로지로 subtract 필터링되지 않는다 — ETL stale 노드도 보존."""
+        """후보는 온톨로지로 subtract 필터링되지 않는다 — ETL stale 노드도 보존(ADD 전용)."""
         candidate_a = _node_config(name="slack_send")
         candidate_a.__dict__["node_type"] = "slack_send"
         candidate_b = _node_config(name="new_node_not_in_neo4j")
@@ -340,6 +355,7 @@ class TestRetrieverExpandDeferred:
 
         ontology_retriever = AsyncMock()
         ontology_retriever.match_patterns = AsyncMock(return_value=[])
+        ontology_retriever.expand_candidates = AsyncMock(return_value=self._subgraph({}))
 
         oc = self._orchestrator_with_retriever([candidate_a, candidate_b], ontology_retriever)
         result = await oc._retriever_node(_make_state())
@@ -347,6 +363,78 @@ class TestRetrieverExpandDeferred:
         types_in_result = {c.node_type for c in result["node_candidates"]}
         assert "slack_send" in types_in_result
         assert "new_node_not_in_neo4j" in types_in_result  # stale여도 보존
+
+    @pytest.mark.asyncio
+    async def test_expansion_is_capped_and_seeds_from_search_hits_only(self):
+        """풀 비대 가드 — seed는 검색 hit만(구조노드 제외), 추가는 _EXPAND_ADD_LIMIT로 cap."""
+        from ai_agent.adapters.langgraph.composer_graph import (
+            _EXPAND_ADD_LIMIT,
+            _EXPAND_SEED_LIMIT,
+        )
+
+        # 검색 hit 6개(상위 seed 제한 검증) + 구조노드 1개(seed 제외 검증)
+        search_hits = []
+        for i in range(6):
+            c = _node_config(name=f"hit{i}")
+            c.__dict__["node_type"] = f"hit{i}"
+            search_hits.append(c)
+        structural = _node_config(name="schedule_trigger")
+        structural.__dict__["node_type"] = "schedule_trigger"
+
+        # 각 seed가 여러 후행을 갖게 해 cap 동작을 강제
+        adjacency = {f"hit{i}": (f"succ{i}a", f"succ{i}b") for i in range(6)}
+        adjacency["schedule_trigger"] = ("trig_succ",)  # 구조노드 후행 — seed면 잡힘
+
+        ontology_retriever = AsyncMock()
+        ontology_retriever.match_patterns = AsyncMock(return_value=[])
+        ontology_retriever.expand_candidates = AsyncMock(return_value=self._subgraph(adjacency))
+
+        ground_ret = [_node_config(name="g")]
+        ground_ret[0].__dict__["node_type"] = "g"
+
+        from nodes_graph.domain.services.graph_validator import GraphValidator
+
+        node_registry = AsyncMock(spec=NodeRegistry)
+        node_registry.search = AsyncMock(return_value=search_hits)
+        node_registry.list_structural = AsyncMock(return_value=[structural])
+        node_registry.list_by_node_types = AsyncMock(return_value=ground_ret)
+        oc = LangGraphOrchestrator(
+            intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
+            drafter=AsyncMock(spec=DrafterService),
+            qa_evaluator=AsyncMock(spec=QAEvaluatorService),
+            slot_filler=SlotFillingService(),
+            node_registry=node_registry,
+            workflow_repo=AsyncMock(spec=WorkflowRepository),
+            graph_validator=AsyncMock(spec=GraphValidator),
+            ontology_retriever=ontology_retriever,
+        )
+
+        await oc._retriever_node(_make_state())
+
+        # seed = 검색 상위 hit만, _EXPAND_SEED_LIMIT개로 제한(구조노드 schedule_trigger 미포함)
+        seeds_arg = ontology_retriever.expand_candidates.call_args.args[0]
+        assert "schedule_trigger" not in seeds_arg
+        assert len(seeds_arg) <= _EXPAND_SEED_LIMIT
+        assert seeds_arg == [f"hit{i}" for i in range(_EXPAND_SEED_LIMIT)]
+        # 그라운딩 대상(추가 후보)은 _EXPAND_ADD_LIMIT개로 cap
+        grounded_arg = node_registry.list_by_node_types.call_args.args[0]
+        assert len(grounded_arg) == _EXPAND_ADD_LIMIT
+
+    @pytest.mark.asyncio
+    async def test_expand_failure_is_non_fatal(self):
+        """expand_candidates 실패해도 검색 후보는 정상 반환(비치명적)."""
+        seed = _node_config(name="slack_send")
+        seed.__dict__["node_type"] = "slack_send"
+
+        ontology_retriever = AsyncMock()
+        ontology_retriever.match_patterns = AsyncMock(return_value=[])
+        ontology_retriever.expand_candidates = AsyncMock(side_effect=Exception("Neo4j 오류"))
+
+        oc = self._orchestrator_with_retriever([seed], ontology_retriever)
+        result = await oc._retriever_node(_make_state())
+
+        assert result.get("error") is None
+        assert {c.node_type for c in result["node_candidates"]} == {"slack_send"}
 
 
 class TestRetrieverMotifGrounding:
@@ -363,6 +451,14 @@ class TestRetrieverMotifGrounding:
         node_registry = AsyncMock(spec=NodeRegistry)
         node_registry.search = AsyncMock(return_value=[_node_config(name="slack_send")])
         node_registry.list_structural = AsyncMock(return_value=[])
+        node_registry.list_by_node_types = AsyncMock(return_value=[])
+        # 모티프 테스트는 expand 경로가 관심 밖 — 빈 서브그래프로 기본화(비치명적 경로 미발동).
+        if ontology_retriever is not None:
+            from ai_agent.domain.value_objects.ontology import OntologySubgraph
+
+            ontology_retriever.expand_candidates = AsyncMock(
+                return_value=OntologySubgraph(seeds=(), nodes=(), adjacency={})
+            )
         return LangGraphOrchestrator(
             intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
             drafter=AsyncMock(spec=DrafterService),
@@ -418,3 +514,115 @@ class TestRetrieverMotifGrounding:
         result = await oc._retriever_node(_make_state())
 
         assert result["pattern_templates"] == []
+
+
+class TestDrafterSkillComposerInstructions:
+    """ADR-0024 D5 — COMPOSER.md 로더 배선: skill 선택 시 composer_instructions가 drafter에 주입된다."""
+
+    def _ai_node_config(self) -> NodeConfig:
+        return NodeConfig(
+            node_id=uuid4(), node_type="gemma_chat", name="gemma_chat",
+            category="ai", version="1.0", input_schema={}, output_schema={},
+            parameter_schema={}, risk_level=RiskLevel.LOW, required_connections=[],
+            description="LLM node", is_mvp=True,
+        )
+
+    def _build_oc_with_skill_doc_store(self, skill_doc_store):
+        from nodes_graph.domain.services.graph_validator import GraphValidator
+
+        node_registry = AsyncMock(spec=NodeRegistry)
+        node_registry.search = AsyncMock(return_value=[self._ai_node_config()])
+        node_registry.list_structural = AsyncMock(return_value=[])
+        node_registry.list_by_node_types = AsyncMock(return_value=[])
+        return LangGraphOrchestrator(
+            intent_analyzer=AsyncMock(spec=IntentAnalyzerService),
+            drafter=AsyncMock(spec=DrafterService),
+            qa_evaluator=AsyncMock(spec=QAEvaluatorService),
+            slot_filler=SlotFillingService(),
+            node_registry=node_registry,
+            workflow_repo=AsyncMock(spec=WorkflowRepository),
+            graph_validator=AsyncMock(spec=GraphValidator),
+            skill_doc_store=skill_doc_store,
+        )
+
+    def _make_skill_state(self, skill_id=None):
+        from common_schemas import SkillDocument
+
+        sid = skill_id or uuid4()
+        state = _make_state("스킬 기반 워크플로우")
+        state["selected_skill_id"] = sid
+        state["offered_skill_ids"] = [str(sid)]
+        state["node_candidates"] = [self._ai_node_config()]
+        return state, sid
+
+    @pytest.mark.asyncio
+    async def test_composer_instructions_passed_to_drafter(self):
+        """SkillDocumentStore가 composer_instructions 있는 문서 반환 → drafter에 주입된다 (D5)."""
+        from common_schemas import SkillDocument
+        from skills_marketplace.domain.ports import SkillDocumentStore
+
+        sid = uuid4()
+        doc = SkillDocument(
+            skill_id=sid, name="테스트 스킬", description="설명",
+            composer_instructions="LLM 노드 + Email 노드를 순서대로 엮어야 합니다.",
+        )
+        skill_doc_store = AsyncMock(spec=SkillDocumentStore)
+        skill_doc_store.load = AsyncMock(return_value=doc)
+
+        oc = self._build_oc_with_skill_doc_store(skill_doc_store)
+        state, _ = self._make_skill_state(skill_id=sid)
+        oc._drafter.draft = AsyncMock(return_value=AsyncMock(nodes=[], connections=[]))
+
+        await oc._drafter_node(state)
+
+        call_kwargs = oc._drafter.draft.call_args.kwargs
+        assert call_kwargs.get("skill_composer_instructions") == "LLM 노드 + Email 노드를 순서대로 엮어야 합니다."
+
+    @pytest.mark.asyncio
+    async def test_empty_composer_instructions_treated_as_none(self):
+        """composer_instructions가 빈 문자열이면 None으로 처리한다."""
+        from common_schemas import SkillDocument
+        from skills_marketplace.domain.ports import SkillDocumentStore
+
+        sid = uuid4()
+        doc = SkillDocument(skill_id=sid, name="스킬", description="설명", composer_instructions="")
+        skill_doc_store = AsyncMock(spec=SkillDocumentStore)
+        skill_doc_store.load = AsyncMock(return_value=doc)
+
+        oc = self._build_oc_with_skill_doc_store(skill_doc_store)
+        state, _ = self._make_skill_state(skill_id=sid)
+        oc._drafter.draft = AsyncMock(return_value=AsyncMock(nodes=[], connections=[]))
+
+        await oc._drafter_node(state)
+
+        call_kwargs = oc._drafter.draft.call_args.kwargs
+        assert call_kwargs.get("skill_composer_instructions") is None
+
+    @pytest.mark.asyncio
+    async def test_no_skill_doc_store_passes_none(self):
+        """SkillDocumentStore 미주입 시 skill_composer_instructions=None으로 drafter 호출."""
+        oc = self._build_oc_with_skill_doc_store(skill_doc_store=None)
+        state, _ = self._make_skill_state()
+        oc._drafter.draft = AsyncMock(return_value=AsyncMock(nodes=[], connections=[]))
+
+        await oc._drafter_node(state)
+
+        call_kwargs = oc._drafter.draft.call_args.kwargs
+        assert call_kwargs.get("skill_composer_instructions") is None
+
+    @pytest.mark.asyncio
+    async def test_skill_doc_store_failure_is_non_fatal(self):
+        """SkillDocumentStore.load 실패 시 non-fatal — drafter는 None으로 호출된다."""
+        from skills_marketplace.domain.ports import SkillDocumentStore
+
+        skill_doc_store = AsyncMock(spec=SkillDocumentStore)
+        skill_doc_store.load = AsyncMock(side_effect=Exception("GCS 오류"))
+
+        oc = self._build_oc_with_skill_doc_store(skill_doc_store)
+        state, _ = self._make_skill_state()
+        oc._drafter.draft = AsyncMock(return_value=AsyncMock(nodes=[], connections=[]))
+
+        await oc._drafter_node(state)
+
+        call_kwargs = oc._drafter.draft.call_args.kwargs
+        assert call_kwargs.get("skill_composer_instructions") is None

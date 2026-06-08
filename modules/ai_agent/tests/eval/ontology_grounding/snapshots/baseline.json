@@ -1,0 +1,14 @@
+{
+  "n_total": 32,
+  "n_workflow": 28,
+  "validator_pass_rate": 0.42857142857142855,
+  "avg_retry": 0.7857142857142857,
+  "hallucinated_node_rate": 0.0,
+  "n_hallucinated_records": 0,
+  "motif_correctness": 0.75,
+  "n_motif": 8,
+  "qa_score_mean": 7.928571428571429,
+  "qa_pass_rate": 0.6428571428571429,
+  "distractor_correct_rate": 0.0,
+  "n_distractor": 4
+}

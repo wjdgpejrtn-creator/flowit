@@ -19,12 +19,12 @@ _DEFAULT_TIMEOUT = 90.0
 _MODAL_APP_NAME = "llm-base"
 _MODAL_CLS_NAME = "LLMBase"
 
-# structured 생성은 llm-base 기본 max_tokens(512)로는 부족하다 — SOP 추출은 노드 N개를
-# 각각 긴 instructions(SKILL.md 본문) + inputs/outputs 스키마와 함께 한 JSON으로 내보내므로
-# 512에서 문자열 중간에 잘려 "EOF while parsing a string"(json_invalid)가 난다.
-# 4096도 실측에서 노드 5~6개부터 잘림(라인 220~250 col 부근 EOF) — 8192로 상향하면서
-# BuildFromSOPUseCase는 메타/detail 2단계 분리로 응답당 토큰 자체를 줄였다 (안전망 + 근본 해결).
-_STRUCTURED_MAX_TOKENS = 8192
+# structured 생성 출력 예산의 *기본값* — ctx_size(8192) 전체를 출력에 쓰면 입력 여유가
+# 0이 되는 구조적 misconfig를 피하기 위한 보수적 디폴트. 대부분의 structured 호출
+# (워크플로우 초안 5~10 노드 ≈ 1000~1800 토큰, NextAction/QA/메모리 갱신은 더 작음)은
+# 2048이면 충분하고, 그만큼 입력 토큰 여유가 늘어 ctx 초과(400/500)를 막는다.
+# SOP 추출처럼 장문 JSON이 필요한 경로는 호출부에서 max_tokens를 명시적으로 상향한다.
+_STRUCTURED_MAX_TOKENS = 2048
 
 
 class ModalLLMAdapter(LLMPort):
@@ -58,13 +58,17 @@ class ModalLLMAdapter(LLMPort):
         )
         return result["generated_text"]
 
-    async def generate_structured(self, prompt: str, schema: type[T]) -> T:
+    async def generate_structured(
+        self, prompt: str, schema: type[T], max_tokens: int | None = None
+    ) -> T:
+        budget = max_tokens if max_tokens is not None else _STRUCTURED_MAX_TOKENS
         schema_json = schema.model_json_schema()
+        # 시스템 프롬프트에 이미 출력 형식이 명시돼 있으므로 schema dump를 프롬프트에
+        # 인라인하지 않는다 — 중복 토큰 절감 (drafter prompt diet, #413).
         augmented = (
             f"{prompt}\n\n"
             "아래 JSON 스키마에 맞는 JSON 객체만 반환하세요. "
-            "설명이나 마크다운 없이 JSON만 출력하세요:\n"
-            f"{json.dumps(schema_json, ensure_ascii=False)}"
+            "설명이나 마크다운 없이 JSON만 출력하세요."
         )
 
         # Modal 취소/오류 sentinel — prefix 매칭으로 false-positive 방지
@@ -74,7 +78,7 @@ class ModalLLMAdapter(LLMPort):
         for attempt in range(3):
             try:
                 use_grammar = attempt == 0  # 첫 시도만 json schema grammar 사용
-                kwargs: dict[str, Any] = {"prompt": augmented, "max_tokens": _STRUCTURED_MAX_TOKENS}
+                kwargs: dict[str, Any] = {"prompt": augmented, "max_tokens": budget}
                 if use_grammar:
                     kwargs["format"] = "json"
                     kwargs["json_schema"] = schema_json

@@ -46,4 +46,4 @@
 | 0023 | [사용자 워크플로우 control-flow 엔진 (데이터 흐름 · 조건 분기 · 유한 순환)](./adr/ADR-0023-workflow-control-flow-engine.md) | Proposed | 2026-06-04 |
 | 0024 | [SkillDocument 2-md 디렉토리 (SKILL.md + COMPOSER.md) — 스킬 사용 모델 단일화](./adr/ADR-0024-skill-document-dual-md-directory.md) | Proposed | 2026-06-05 |
 | 0025 | [재개 가능한 실행 — 협조적 pause + 체크포인트 resume](./adr/ADR-0025-resumable-execution-cooperative-pause.md) | Proposed | 2026-06-05 |
-| 0026 | [온톨로지 기반 그래프 DB (Neo4j AuraDB) + GraphRAG — composer/skill-builder 품질 향상](./adr/ADR-0026-ontology-graph-db-graphrag.md) | Proposed | 2026-06-06 |
+| 0026 | [온톨로지 기반 그래프 DB (Neo4j AuraDB) + GraphRAG — composer/skill-builder 품질 향상](./adr/ADR-0026-ontology-graph-db-graphrag.md) | Accepted | 2026-06-06 |

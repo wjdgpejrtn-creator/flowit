@@ -28,3 +28,12 @@ class NodeRegistry(ABC):
         목록을 검색 후보와 합집합해 drafter가 첫 초안부터 schedule_trigger 등을 쓸 수 있게 한다.
         """
         ...
+
+    async def list_by_node_types(self, node_types: list[str]) -> list[NodeConfig]:
+        """주어진 node_type 집합에 해당하는 NodeConfig를 반환한다 (ADR-0026 §4.2a).
+
+        온톨로지 CAN_FOLLOW 확장이 회수한 후행 node_type(문자열)을 drafter가 쓸 수 있는
+        NodeConfig로 그라운딩하는 데 쓴다. **default는 빈 리스트** — 미구현 어댑터/구버전
+        mock에서도 expand 소비가 비치명적으로 degrade한다(``list_structural`` 방어 패턴과 정합).
+        """
+        return []

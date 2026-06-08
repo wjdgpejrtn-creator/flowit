@@ -46,25 +46,49 @@ class _FakeDriver:
 
 @pytest.mark.asyncio
 async def test_expand_candidates_maps_records_to_subgraph():
+    # CAN_FOLLOW 순방향 이웃을 successors 맵으로 회수 (ADR-0026 §4.2a).
     records = [
         {
-            "node_type": "slack_send", "category": "messaging", "risk_level": "medium",
-            "requires": ["slack"], "siblings": ["discord_send", "slack_send"],
+            "node_type": "csv_parse", "category": "transform", "risk_level": "low",
+            "requires": [],
+            "successors": [
+                {"node_type": "csv_build", "category": "transform", "risk_level": "low", "confidence": 1},
+                {"node_type": "csv_parse", "category": "transform", "risk_level": "low", "confidence": 1},  # self
+                {"node_type": None, "category": None, "risk_level": None, "confidence": None},  # null succ
+            ],
         }
     ]
     driver = _FakeDriver(records)
     adapter = Neo4jOntologyAdapter(uri="neo4j+s://x", driver_factory=lambda: driver)
 
-    sg = await adapter.expand_candidates(["slack_send"])
+    sg = await adapter.expand_candidates(["csv_parse"])
 
-    assert sg.seeds == ("slack_send",)
-    seed = next(n for n in sg.nodes if n.node_type == "slack_send")
-    assert seed.requires == ("slack",)
-    assert seed.category == "messaging"
-    # 자기 자신은 sibling에서 제거, discord는 후보로 포함
-    assert sg.adjacency["slack_send"] == ("discord_send",)
-    assert sg.allowed_node_types() == frozenset({"slack_send", "discord_send"})
+    assert sg.seeds == ("csv_parse",)
+    seed = next(n for n in sg.nodes if n.node_type == "csv_parse")
+    assert seed.category == "transform"
+    # 자기 자신·null succ는 제거, csv_build만 후행 노드로 포함
+    assert sg.adjacency["csv_parse"] == ("csv_build",)
+    assert sg.allowed_node_types() == frozenset({"csv_parse", "csv_build"})
     assert driver.closed is True  # per-request driver는 반드시 close
+
+
+@pytest.mark.asyncio
+async def test_expand_successors_sorted_by_confidence_desc():
+    # 소비측 cap이 고신뢰 이웃을 결정적으로 보존하도록 adjacency는 confidence 내림차순 (#410 MED).
+    records = [
+        {
+            "node_type": "a", "category": "transform", "risk_level": "low", "requires": [],
+            "successors": [
+                {"node_type": "low1", "category": "x", "risk_level": "low", "confidence": 1},
+                {"node_type": "high", "category": "x", "risk_level": "low", "confidence": 2},
+                {"node_type": "low2", "category": "x", "risk_level": "low", "confidence": 1},
+            ],
+        }
+    ]
+    adapter = Neo4jOntologyAdapter(uri="neo4j+s://x", driver_factory=lambda: _FakeDriver(records))
+    sg = await adapter.expand_candidates(["a"])
+    # confidence 2가 먼저, 동률(1)은 node_type 사전순으로 결정적
+    assert sg.adjacency["a"] == ("high", "low1", "low2")
 
 
 @pytest.mark.asyncio
