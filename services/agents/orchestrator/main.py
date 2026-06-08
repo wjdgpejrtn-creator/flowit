@@ -8,7 +8,7 @@ Deploy:
     PYTHONUTF8=1 modal deploy services/agents/orchestrator/main.py
 
 Health:
-    curl https://<WORKSPACE>--orchestrator.modal.run/v1/health
+    curl https://flowit--orchestrator-orchestratoragent-fastapi.modal.run/v1/health
 
 Secrets:
     GCP Secret Manager가 SSOT (2026-05-19 마이그레이션). Modal에 남는 secret은
