@@ -331,32 +331,38 @@ export async function streamExtractSkill(
   }
 }
 
-// ── 마켓플레이스 lifecycle — 백엔드 미구현 mock (프론트 명세 SSOT) ────────────────
+// ── 마켓플레이스 lifecycle — 개인 스킬 보관/복원 ────────────────────────────────
 //
-// 아래 3개 전이는 현재 실 엔드포인트가 없어 프론트에서 mock으로 동작시킨다(상태 변화는
-// 호출측이 응답을 받아 로컬에 반영). 백엔드는 이 요청/응답 계약·상태전환 규칙을 그대로
-// 구현하면 되며, 구현되면 각 함수 본문을 주석의 apiJson 호출로 교체하면 된다.
+// 보관(archive)은 게시된 개인 스킬을 마켓플레이스/검색 노출에서 임시로 내리는 가역 동작,
+// 복원(restore)은 그 역연산이다. 둘 다 owner 전용(백엔드 use case가 owner 검사 + 상태 가드).
+// body 없음 — owner는 인증 컨텍스트에서 해소된다.
 //
 //   archivePersonalSkill : POST /api/v1/skills/{id}/archive  — PUBLISHED → ARCHIVED (owner)
 //   restorePersonalSkill : POST /api/v1/skills/{id}/restore  — ARCHIVED  → PUBLISHED (owner)
-//   addSkillToWorkflow   : POST /api/v1/skills/{id}/adopt    — 게시 스킬을 내 워크플로우에 도입
+
+/** PUBLISHED → ARCHIVED (owner 전용). 게시 스킬을 마켓플레이스에서 임시로 내린다. */
+export async function archivePersonalSkill(skillId: string): Promise<void> {
+  await apiJson(`/api/v1/skills/${skillId}/archive`, { method: 'POST' });
+}
+
+/** ARCHIVED → PUBLISHED (owner 전용). 보관된 스킬을 다시 게시 상태로 되돌린다. */
+export async function restorePersonalSkill(skillId: string): Promise<void> {
+  await apiJson(`/api/v1/skills/${skillId}/restore`, { method: 'POST' });
+}
+
+// ── 도입(adopt) — 백엔드 미구현 mock (프론트 명세 SSOT) ──────────────────────────
 //
-// TODO(backend, skills_marketplace REQ-013): 위 3개 라우트 실구현 후 mock 제거.
+// 게시 스킬을 내 워크플로우에 "도입"하는 영속 개념이 아직 백엔드에 없다(현재 프론트가
+// 로컬 상태로만 추적). REQ-013 도입 모델(테이블/도입 관계) 설계 후 실 엔드포인트로 교체한다.
+//
+//   addSkillToWorkflow : POST /api/v1/skills/{id}/adopt — 게시 스킬을 내 워크플로우에 도입
+//
+// TODO(backend, skills_marketplace REQ-013, 박아름 협의): adopt 영속 모델 확정 후 mock 제거.
 
 /** mock 성공 응답(네트워크 지연 흉내). 실 구현 시 apiJson 호출로 대체. */
 function mockLifecycleOk(skillId: string): Promise<void> {
   if (!skillId) return Promise.reject(new Error('skillId가 필요합니다.'));
   return new Promise((resolve) => setTimeout(resolve, 200));
-}
-
-/** PUBLISHED → ARCHIVED. TODO(backend): apiJson(`/api/v1/skills/${skillId}/archive`, { method:'POST' }) */
-export async function archivePersonalSkill(skillId: string): Promise<void> {
-  return mockLifecycleOk(skillId);
-}
-
-/** ARCHIVED → PUBLISHED. TODO(backend): apiJson(`/api/v1/skills/${skillId}/restore`, { method:'POST' }) */
-export async function restorePersonalSkill(skillId: string): Promise<void> {
-  return mockLifecycleOk(skillId);
 }
 
 /** 게시 스킬을 내 워크플로우에 도입. TODO(backend): apiJson(`/api/v1/skills/${skillId}/adopt`, { method:'POST', body: JSON.stringify({ scope }) }) */
