@@ -82,6 +82,12 @@ from ....domain.ports.llm_port import LLMPort
 # DB CHECK 영문 8종 (`009_node_definitions.sql`).
 _ALLOWED_CATEGORIES = {"trigger", "action", "condition", "transform", "ai", "integration", "utility", "output"}
 
+# SOP 추출은 노드 N개를 각각 긴 instructions(SKILL.md 본문) + inputs/outputs 스키마와 함께
+# 한 JSON으로 내보내므로 structured 기본 출력 예산(2048)으로는 문자열 중간에 잘려
+# "EOF while parsing a string"가 난다 (#287/#353). 입력(문서 본문)은 작으므로 출력 예산을
+# ctx 상한까지 상향해 장문 JSON을 안전하게 받는다.
+_SOP_EXTRACT_MAX_TOKENS = 8192
+
 
 # ----------------------------------------------------------------------
 # LLM structured response 래퍼
@@ -184,7 +190,9 @@ class BuildFromSOPUseCase:
         yield AgentNodeFrame(agent_node_name="skills_builder.sop.llm_extract_metadata")
 
         try:
-            extracted = await self._llm.generate_structured(prompt, _ExtractedSkillNodeMetaList)
+            extracted = await self._llm.generate_structured(
+                prompt, _ExtractedSkillNodeMetaList, max_tokens=_SOP_EXTRACT_MAX_TOKENS
+            )
         except Exception as e:
             yield ErrorFrame(code="E_LLM_GENERATION_FAILED", message=f"LLM 호출 실패: {e}")
             return
@@ -273,7 +281,9 @@ class BuildFromSOPUseCase:
         yield AgentNodeFrame(agent_node_name=f"skills_builder.sop.llm_extract_detail.{meta_obj.node_type}")
 
         try:
-            detail = await self._llm.generate_structured(prompt, _ExtractedSkillNodeDetail)
+            detail = await self._llm.generate_structured(
+                prompt, _ExtractedSkillNodeDetail, max_tokens=_SOP_EXTRACT_MAX_TOKENS
+            )
         except Exception as e:
             yield ErrorFrame(code="E_LLM_GENERATION_FAILED", message=f"LLM 호출 실패: {e}")
             return

@@ -19,10 +19,11 @@ _DEFAULT_TIMEOUT = 90.0
 _MODAL_APP_NAME = "llm-base"
 _MODAL_CLS_NAME = "LLMBase"
 
-# structured 생성 출력 예산 — ctx_size(8192)와 같으면 입력이 1토큰이어도 출력용 KV가
-# 남지 않아 서버가 요청을 거부하는 구조적 misconfig. 워크플로우 JSON 초안(5~10 노드)은
-# 실측 1000~1800 토큰 수준이므로 2048이면 충분. (SOP 추출처럼 장문 출력이 필요한 경로는
-# 호출부에서 max_tokens를 명시적으로 오버라이드한다.)
+# structured 생성 출력 예산의 *기본값* — ctx_size(8192) 전체를 출력에 쓰면 입력 여유가
+# 0이 되는 구조적 misconfig를 피하기 위한 보수적 디폴트. 대부분의 structured 호출
+# (워크플로우 초안 5~10 노드 ≈ 1000~1800 토큰, NextAction/QA/메모리 갱신은 더 작음)은
+# 2048이면 충분하고, 그만큼 입력 토큰 여유가 늘어 ctx 초과(400/500)를 막는다.
+# SOP 추출처럼 장문 JSON이 필요한 경로는 호출부에서 max_tokens를 명시적으로 상향한다.
 _STRUCTURED_MAX_TOKENS = 2048
 
 
@@ -57,7 +58,10 @@ class ModalLLMAdapter(LLMPort):
         )
         return result["generated_text"]
 
-    async def generate_structured(self, prompt: str, schema: type[T]) -> T:
+    async def generate_structured(
+        self, prompt: str, schema: type[T], max_tokens: int | None = None
+    ) -> T:
+        budget = max_tokens if max_tokens is not None else _STRUCTURED_MAX_TOKENS
         schema_json = schema.model_json_schema()
         # 시스템 프롬프트에 이미 출력 형식이 명시돼 있으므로 schema dump를 프롬프트에
         # 인라인하지 않는다 — 중복 토큰 절감 (drafter prompt diet, #413).
@@ -74,7 +78,7 @@ class ModalLLMAdapter(LLMPort):
         for attempt in range(3):
             try:
                 use_grammar = attempt == 0  # 첫 시도만 json schema grammar 사용
-                kwargs: dict[str, Any] = {"prompt": augmented, "max_tokens": _STRUCTURED_MAX_TOKENS}
+                kwargs: dict[str, Any] = {"prompt": augmented, "max_tokens": budget}
                 if use_grammar:
                     kwargs["format"] = "json"
                     kwargs["json_schema"] = schema_json
