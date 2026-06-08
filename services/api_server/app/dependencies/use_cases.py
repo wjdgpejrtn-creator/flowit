@@ -8,6 +8,7 @@ from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRe
 from nodes_graph.domain.services.graph_validator import GraphValidator
 from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
+    ArchivePersonalSkillUseCase,
     CreateDraftSkillUseCase,
     DeletePersonalSkillUseCase,
     GetMarketplaceSkillDocumentUseCase,
@@ -20,6 +21,7 @@ from skills_marketplace.application.use_cases import (
     PromoteToCompanyUseCase,
     PromoteToTeamUseCase,
     PublishSkillUseCase,
+    RestorePersonalSkillUseCase,
     SubmitSkillUseCase,
     UpdatePersonalSkillUseCase,
 )
@@ -170,3 +172,17 @@ def get_delete_personal_skill_use_case(
     doc_store: SkillDocumentStore = Depends(get_skill_document_store),
 ) -> DeletePersonalSkillUseCase:
     return DeletePersonalSkillUseCase(repo=repo, doc_store=doc_store)
+
+
+def get_archive_personal_skill_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+) -> ArchivePersonalSkillUseCase:
+    """개인 스킬 보관 — PUBLISHED → ARCHIVED (owner only). 마켓플레이스 보관/복원 UX."""
+    return ArchivePersonalSkillUseCase(repo=repo)
+
+
+def get_restore_personal_skill_use_case(
+    repo: SkillRepository = Depends(get_marketplace_skill_repository),
+) -> RestorePersonalSkillUseCase:
+    """개인 스킬 복원 — ARCHIVED → PUBLISHED (owner only). 보관의 역연산."""
+    return RestorePersonalSkillUseCase(repo=repo)

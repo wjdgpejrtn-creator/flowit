@@ -33,6 +33,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 from skills_marketplace.application.use_cases import (
     ApproveSkillUseCase,
+    ArchivePersonalSkillUseCase,
     CreateDraftSkillUseCase,
     DeletePersonalSkillUseCase,
     GetMarketplaceSkillDocumentUseCase,
@@ -45,6 +46,7 @@ from skills_marketplace.application.use_cases import (
     PromoteToCompanyUseCase,
     PromoteToTeamUseCase,
     PublishSkillUseCase,
+    RestorePersonalSkillUseCase,
     SubmitSkillUseCase,
     UpdatePersonalSkillUseCase,
 )
@@ -60,6 +62,7 @@ from app.dependencies.permission import get_permission_source
 from app.dependencies.repositories import get_document_repository
 from app.dependencies.use_cases import (
     get_approve_skill_use_case,
+    get_archive_personal_skill_use_case,
     get_create_draft_skill_use_case,
     get_delete_personal_skill_use_case,
     get_get_marketplace_skill_document_use_case,
@@ -72,6 +75,7 @@ from app.dependencies.use_cases import (
     get_promote_to_company_use_case,
     get_promote_to_team_use_case,
     get_publish_skill_use_case,
+    get_restore_personal_skill_use_case,
     get_submit_skill_use_case,
     get_update_personal_skill_use_case,
 )
@@ -180,6 +184,36 @@ async def publish_skill(
         actor_department_id=permission.department_id,
     )
     return LifecycleResponse(skill_id=skill_id, scope=body.scope, action="published")
+
+
+@router.post("/{skill_id}/archive", response_model=LifecycleResponse)
+async def archive_skill(
+    skill_id: UUID,
+    permission: PermissionSource = Depends(get_permission_source),
+    use_case: ArchivePersonalSkillUseCase = Depends(get_archive_personal_skill_use_case),
+) -> LifecycleResponse:
+    """보관 — 개인 스킬 PUBLISHED → ARCHIVED (마켓플레이스/검색 노출에서 임시로 내림).
+
+    personal scope 전용 — owner 본인만(use case가 owner 검사 + 상태 가드 수행, 타인 403/미존재
+    404/PUBLISHED 외 E-SKILL-002). 복원은 `POST /{skill_id}/restore`.
+    """
+    await use_case.execute(skill_id=skill_id, actor_user_id=permission.user_id)
+    return LifecycleResponse(skill_id=skill_id, scope=SkillScope.PERSONAL, action="archived")
+
+
+@router.post("/{skill_id}/restore", response_model=LifecycleResponse)
+async def restore_skill(
+    skill_id: UUID,
+    permission: PermissionSource = Depends(get_permission_source),
+    use_case: RestorePersonalSkillUseCase = Depends(get_restore_personal_skill_use_case),
+) -> LifecycleResponse:
+    """복원 — 개인 스킬 ARCHIVED → PUBLISHED (보관의 역연산, 다시 게시 상태로 노출).
+
+    personal scope 전용 — owner 본인만(use case가 owner 검사 + 상태 가드 수행, 타인 403/미존재
+    404/ARCHIVED 외 E-SKILL-002).
+    """
+    await use_case.execute(skill_id=skill_id, actor_user_id=permission.user_id)
+    return LifecycleResponse(skill_id=skill_id, scope=SkillScope.PERSONAL, action="restored")
 
 
 @router.post("/{skill_id}/promote", response_model=LifecycleResponse)
