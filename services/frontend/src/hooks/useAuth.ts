@@ -6,7 +6,7 @@ import { getAuthorizeUrl, me, type MeResponse } from '@/lib/api/authApi';
 import { setPendingToast } from '@/lib/pendingToast';
 
 export function useAuth() {
-  const { isAuthenticated, userId, userName, dept, role, setAuth, clearAuth } = useAuthStore();
+  const { isAuthenticated, userId, userName, email, dept, role, setAuth, clearAuth } = useAuthStore();
 
   const initFromRefreshToken = useCallback(async (): Promise<boolean> => {
     try {
@@ -20,6 +20,7 @@ export function useAuth() {
         role: user.role,
         userId: user.user_id,
         userName: user.name,
+        email: user.email,
         // 표시용 부서 라벨(department 문자열). 미설정 시 빈 문자열 → AppBar가 '—' 표시.
         // department_id(UUID)는 authz 전용이라 배지에 노출하지 않는다(사용자 ID처럼 보이는 문제 해소).
         dept: user.department ?? '',
@@ -44,5 +45,5 @@ export function useAuth() {
     window.location.href = '/login';
   }, [clearAuth]);
 
-  return { isAuthenticated, userId, userName, dept, role, initFromRefreshToken, startGoogleLogin, logout };
+  return { isAuthenticated, userId, userName, email, dept, role, initFromRefreshToken, startGoogleLogin, logout };
 }
