@@ -24,6 +24,8 @@ class OAuthConnectionModel(Base):
     access_token_encrypted: Mapped[bytes] = mapped_column(LargeBinary)
     refresh_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     scopes: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
+    account_id: Mapped[str | None] = mapped_column(String(255))
+    display_name: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(server_default="true")
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

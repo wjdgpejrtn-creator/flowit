@@ -32,6 +32,8 @@ class OAuthConnectionModel(Base):
     scopes: Mapped[list[str]] = mapped_column(
         pg.ARRAY(String), nullable=False, server_default="{}"
     )
+    account_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     connected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
