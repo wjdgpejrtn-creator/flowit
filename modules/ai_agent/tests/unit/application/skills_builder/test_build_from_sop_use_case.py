@@ -64,14 +64,16 @@ class _FakeLLM(LLMPort):
         self._raise_on_call = raise_on_call
         self.received_prompts: list[str] = []
         self.received_schemas: list[type] = []
+        self.received_max_tokens: list[int | None] = []
 
     async def generate(self, prompt: str, **kwargs: Any) -> str:
         self.received_prompts.append(prompt)
         return "stub"
 
-    async def generate_structured(self, prompt: str, schema: type) -> Any:
+    async def generate_structured(self, prompt: str, schema: type, max_tokens: int | None = None) -> Any:
         self.received_prompts.append(prompt)
         self.received_schemas.append(schema)
+        self.received_max_tokens.append(max_tokens)
         if self._raise_on_call:
             raise self._raise_on_call
         return self._structured_response

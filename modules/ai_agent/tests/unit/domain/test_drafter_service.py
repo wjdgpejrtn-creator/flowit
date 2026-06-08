@@ -677,6 +677,36 @@ class TestDrafterMotifBlock:
         assert "SINGLE" in prompt
 
 
+def _node_config_cat(node_type: str, category: str) -> NodeConfig:
+    """category를 지정할 수 있는 _node_config 변형 (캡 우선순위 테스트용)."""
+    cfg = _node_config(node_type)
+    return cfg.model_copy(update={"category": category})
+
+
+class TestDrafterCandidateCap:
+    """프롬프트 다이어트 캡(#413)이 보장 노드(ai 바인딩 대상·구조 노드)를 드롭하지 않는다 — 리뷰 MED #1."""
+
+    @pytest.mark.asyncio
+    async def test_cap_preserves_ai_and_structural_at_tail(self):
+        # 호출부(composer)는 ai/구조 노드를 후보 풀 '끝'에 덧붙인다 → 순서 무지 슬라이스면 1순위 드롭.
+        rest = [_node_config_cat(f"action{i}", "action") for i in range(25)]
+        ai_node = _node_config_cat("llm_generate", "ai")
+        trigger_node = _node_config_cat("webhook", "trigger")
+        candidates = [*rest, ai_node, trigger_node]  # 보장 노드가 맨 끝
+
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="llm_generate")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), candidates, uuid4())
+
+        prompt = llm.generate_structured.call_args.args[0]
+        # 보장 노드는 캡 후에도 카탈로그(프롬프트)에 살아남는다
+        assert "llm_generate" in prompt
+        assert "webhook" in prompt
+        # 캡 초과분(rest 꼬리)은 드롭된다 — 우선 2건 보존 + rest 18건 = 20건
+        assert "action24" not in prompt
+        assert "action0" in prompt
+
+
 @pytest.mark.asyncio
 async def test_refine_rewrites_ref_token_to_instance_id():
     """L1b refine 경로 — _build_from_edit가 ${<ref>.<field>}를 instance_id로 재작성."""
