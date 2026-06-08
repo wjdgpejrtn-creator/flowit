@@ -15,7 +15,12 @@ class CompleteConnectionUseCase:
     ADR-0027:
     - ④ **upsert** — 같은 user+service active 있으면 update_tokens, 없으면 create
       (active partial unique index `idx_oauth_connections_user_service_active`(008:19-20) 충족, 미증식).
-    - ③ **단일 트랜잭션** — credentials + oauth_connection write는 호출부(api_server) 단일 세션/트랜잭션.
+      동시 callback race(get→create 사이)는 2번째 create가 이 index 위반(IntegrityError → `get_db`
+      rollback). 데이터 정합 유지(active row 미증식) + 재시도 시 get_active→update_tokens로 치유.
+      동시 callback이 극히 드물어 ON CONFLICT 대신 index 정합 + 재시도로 수용(셀프리뷰 ④).
+    - ③ **단일 트랜잭션** — credentials + oauth_connection 2 write는 `get_db` request-단위 트랜잭션
+      (repo는 flush only, 정상 종료 commit / 예외 rollback, `dependencies/database.py:99-101`).
+      중간 실패 시 rollback으로 고아 credential 방지(셀프리뷰 ③).
     - account_id/display_name(#422) — google=sub/email (slack=team_id/workspace는 후속).
     """
 
