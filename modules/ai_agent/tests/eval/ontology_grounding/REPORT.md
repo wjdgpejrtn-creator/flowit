@@ -96,6 +96,14 @@ de-noise한 진짜 A1-OFF는 qa_pass **0.512** / motif **0.667**. 이 오염된 
 비교하면 가짜 qa 회귀가 보인다(직전 세션 오판 원인). → 회귀 게이트의 baseline을 **de-noise한
 A1-ON arm 평균**(현 배포 상태)으로 교정해 향후 §6.1 모티프 작업이 현 상태 대비 측정되게 한다.
 
+### qa_pass 목표 floor 0.60 (게이트≠타깃)
+baseline 하향(0.643→0.5)은 회귀 게이트를 그만큼 관대하게 만든다 — "0.5 정체를 무회귀로
+조용히 통과"(리뷰 LOW). 또 e2e에서 0.5 산출물 품질이 실제로 낮다(끊긴 워크플로우 실재).
+→ `check_snapshot`에 **qa_pass < 0.60 시 ⚠ 경고**(FAIL 아님)를 추가. 게이트 baseline은
+실측(0.5) 유지하되 목표 미달을 가시화한다. **0.6은 게이트가 아니라 타깃** — 게이트에 0.6을
+박으면 현 0.5라 영구 FAIL이 되어 회귀 탐지를 잃는다. 0.6 도달(retrieval/그라운딩 개선) 시
+baseline 승격. 실제 레버는 retrieval 수정(있는 `anthropic_chat`이 후보 미상정→끊긴 워크플로우).
+
 ### (참고) 직전 단일 샘플 A/B — superseded
 ADD-all이 후보 풀 비대(~24→38)로 Gemma structured JSON을 잘라 drafter 실패 폭증(6→23,
 qa pass 64→29%) → cap 정밀화(seed≤5·add≤3)로 폐기·수렴시킨 기록. **cap이 ADD-all 회귀를
