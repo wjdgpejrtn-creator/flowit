@@ -64,6 +64,8 @@ class InMemoryOAuthRepository(OAuthConnectionRepository):
             access_token_encrypted=tokens["access_token_encrypted"],
             refresh_token_encrypted=tokens.get("refresh_token_encrypted"),
             scopes=tokens.get("scopes", []),
+            account_id=tokens.get("account_id"),
+            display_name=tokens.get("display_name"),
             connected_at=datetime.now(UTC),
         )
         self._store[str(credential_id)] = conn
