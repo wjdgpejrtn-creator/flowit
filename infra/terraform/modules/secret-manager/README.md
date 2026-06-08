@@ -26,7 +26,7 @@ module "agent_secrets" {
 ## 값 push (별도 단계)
 
 ```bash
-echo -n "https://<WORKSPACE>--llm-base.modal.run" \
+echo -n "https://flowit--llm-base-llmbase-fastapi.modal.run" \
   | gcloud secrets versions add llm-base-url --data-file=- --project=<GCP_PROJECT_ID>
 ```
 

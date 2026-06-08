@@ -330,6 +330,13 @@ export interface ChunkingStrategy {
   token_estimator_mode: "tiktoken" | "char_estimate";
 }
 
+export interface ConnectionStatus {
+  service: string;
+  connected: boolean;
+  status: string;
+  display?: string | null;
+}
+
 export interface SheetMeta {
   sheet_name: string;
   row_count: number;

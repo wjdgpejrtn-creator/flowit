@@ -77,10 +77,8 @@ def _build_orchestrator(session, ontology_retriever):
     from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
     from storage.repositories.pg_marketplace_skill_repository import PgMarketplaceSkillRepository
     from storage.repositories.pg_node_definition_repository import PgNodeDefinitionRepository
-    from storage.repositories.pg_oauth_repository import PgOAuthRepository
     from storage.repositories.pg_workflow_repository import PgWorkflowRepository
 
-    from ai_agent.adapters.connection_resolver_adapter import OAuthConnectionResolver
     from ai_agent.adapters.langgraph.composer_graph import LangGraphOrchestrator
     from ai_agent.adapters.llm.modal_embedding_adapter import ModalEmbeddingAdapter
     from ai_agent.adapters.llm.modal_llm_adapter import ModalLLMAdapter
@@ -116,7 +114,12 @@ def _build_orchestrator(session, ontology_retriever):
         skill_search=SearchSkillsUseCase(repo=PgMarketplaceSkillRepository(session)),
         embedder=embedder,
         composer_state_store=None,
-        connection_resolver=OAuthConnectionResolver(PgOAuthRepository(session)),
+        # 평가는 autobind 비활성 — staging oauth_connections 스키마 드리프트(account_id 컬럼
+        # 부재)로 _autobind_connections가 UndefinedColumnError→세션 트랜잭션 abort→해당 시나리오
+        # validator/retry 재DB호출 오염. autobind는 credential_id만 붙이지 구조/qa를 안 바꾸고
+        # eval 유저는 실제 연결도 없으므로 None이 측정상 정당(confound 제거). 단일세션 cascade는
+        # 시나리오당 세션으로 별도 차단했으나, 이건 autobind 자체를 끄는 직접 해소.
+        connection_resolver=None,
         ontology_retriever=ontology_retriever,
     )
     return orchestrator, node_repo
@@ -217,25 +220,37 @@ async def _capture_one(orchestrator, scenario: Scenario, node_type_by_id: dict[U
     return _frames_to_record(scenario, frames, node_type_by_id)
 
 
-async def run(label: str, limit: int | None = None) -> Snapshot:
+async def run(label: str, limit: int | None = None, ids: list[str] | None = None) -> Snapshot:
     from ai_agent.adapters.ontology.neo4j_ontology_adapter import Neo4jOntologyAdapter
 
-    scenarios = SCENARIOS[:limit] if limit else SCENARIOS
+    # --ids로 특정 시나리오만(모티프 집중 측정용 — 예: branch 4건 양팔 반복). --limit과 배타.
+    if ids:
+        id_set = set(ids)
+        scenarios = [s for s in SCENARIOS if s.scenario_id in id_set]
+    else:
+        scenarios = SCENARIOS[:limit] if limit else SCENARIOS
     connector, engine, session_factory = await _create_session_factory()
     ontology_retriever = Neo4jOntologyAdapter()
     records: list[RunRecord] = []
     try:
-        async with session_factory() as session:
-            orchestrator, node_repo = _build_orchestrator(session, ontology_retriever)
+        # 카탈로그 맵은 1회 로드(읽기 전용).
+        async with session_factory() as meta_session:
+            _, node_repo = _build_orchestrator(meta_session, ontology_retriever)
             defs = await node_repo.list_all()
             node_type_by_id = {d.node_id: d.node_type for d in defs}
-            print(f"카탈로그 {len(node_type_by_id)}종 로드. 시나리오 {len(scenarios)}건 캡처 시작…")
-            for i, sc in enumerate(scenarios, 1):
+        print(f"카탈로그 {len(node_type_by_id)}종 로드. 시나리오 {len(scenarios)}건 캡처 시작…")
+        # **시나리오당 새 세션** — Cloud SQL이 장시간 런 도중 연결을 끊으면(idle/maintenance)
+        # 단일 공유 세션은 InFailedSQLTransactionError로 트랜잭션이 망가져 *이후 전 시나리오가
+        # 오염*된다(실측: ON arm 2/3 런이 29/32 retriever 실패로 무효화). 세션을 시나리오마다
+        # 새로 열어 연결 1회 끊김이 그 한 건만 실패시키게 격리한다.
+        for i, sc in enumerate(scenarios, 1):
+            async with session_factory() as session:
+                orchestrator, _ = _build_orchestrator(session, ontology_retriever)
                 rec = await _capture_one(orchestrator, sc, node_type_by_id)
-                flag = "✗" if rec.error else ("∅" if not rec.produced_workflow else "✓")
-                print(f"  [{i:>2}/{len(scenarios)}] {flag} {sc.scenario_id} "
-                      f"(노드 {len(rec.node_types)}, retry {rec.retry_count}, qa {rec.qa_score})")
-                records.append(rec)
+            flag = "✗" if rec.error else ("∅" if not rec.produced_workflow else "✓")
+            print(f"  [{i:>2}/{len(scenarios)}] {flag} {sc.scenario_id} "
+                  f"(노드 {len(rec.node_types)}, retry {rec.retry_count}, qa {rec.qa_score})")
+            records.append(rec)
     finally:
         await engine.dispose()
         if connector is not None:
@@ -272,12 +287,15 @@ def main() -> int:
                         help="캡처 대신 현재 스냅샷 집계를 baseline.json으로 승격")
     parser.add_argument("--limit", type=int, default=None,
                         help="앞 N개 시나리오만 캡처(스모크/부분 측정용). 미지정=전체 32건")
+    parser.add_argument("--ids", default=None,
+                        help="쉼표구분 scenario_id만 캡처(모티프 집중 측정용). --limit보다 우선")
     args = parser.parse_args()
 
     if args.promote_baseline:
         return _promote_baseline()
 
-    snap = asyncio.run(run(args.label, limit=args.limit))
+    ids = [s.strip() for s in args.ids.split(",")] if args.ids else None
+    snap = asyncio.run(run(args.label, limit=args.limit, ids=ids))
     path = save_snapshot(snap)
     print(f"\n스냅샷 저장 → {path} ({len(snap.records)}건)")
     print("이어서 점검: python -m ai_agent.tests.eval.ontology_grounding.check_snapshot")

@@ -1,0 +1,152 @@
+# ADR-0027: OAuth Connection authorize/저장 플로우 (생성 측)
+
+- **Status**: **Accepted** (2026-06-08 — 조장 미해결 5건 결정 #417. 박아름 제안자, e2e 검증 중 발견)
+- **관련 이슈**: e2e 시나리오 `S-AREUM-2`(구글시트 읽기) staging 실행 시 `google_sheets_read` **401 (OAuth 토큰 없음)**
+- **관련 PR**: #348 (OAuthConnectionResolver — 주입 측, 기 구현)
+
+---
+
+## Context
+
+e2e 사용자 시나리오를 staging에서 실제 실행(execute)하니 `google_sheets_read`가 **401 "Expected OAuth 2 access token"**으로 실패. 진단 결과 OAuth connection이 **주입 측만 구현되고 생성 측이 없음**:
+
+- ✅ **주입(consume) 측 (PR #348)**: `oauth_connections`에 connection이 *있으면* → `OAuthConnectionResolver`가 credential로 해소 → 노드에 토큰 선바인딩. 파이프라인 완비.
+- ❌ **생성(authorize) 측**: 사용자가 google/slack을 authorize해서 토큰을 `oauth_connections`에 **저장하는 입구가 없음**. → 테이블이 비어 있어 resolver가 빈손 → 401.
+- ⚠️ 프론트 `settings/page.tsx:168-170`은 가원 계정 하드코딩(`connected=true` 고정)이라 "연결됨" **거짓 표시**.
+
+> 로그인용 google OAuth(`/auth/authorize`, openid/email scope)는 별개로 존재. 본 ADR은 **워크플로우 노드용 서비스 연동 토큰**(Sheets/Drive/Docs/Calendar/Slack scope) 생성 흐름이다.
+
+---
+
+## ✅ 이미 있는 것 (재사용 — 변경 없음)
+
+| 구성 | 위치 |
+|---|---|
+| `oauth_connections` 테이블 (service, credential_id FK, access/refresh_token_encrypted, scopes, is_active…) | `database/schemas/008_oauth_security.sql` |
+| `OAuthConnection` 엔티티 | `modules/auth/domain/entities/oauth_connection.py` |
+| `OAuthConnectionRepository`: **`create` / `get_active_for_user` / `update_tokens` / `revoke` / `get_by_credential_id`** (전체목록용 `list_for_user`만 신규 — 아래 gap) | `modules/auth/domain/ports/` |
+| `CipherPort` / `AESGCMCipher` (토큰 암호화) | `modules/auth/` |
+| `OAuthConnectionResolver` (노드 주입, PR #348) | `modules/ai_agent/adapters/connection_resolver_adapter.py` |
+
+→ 저장·조회·갱신·해제·암호화·주입이 전부 구현됨. **남은 건 이들을 묶는 use case + 엔드포인트 + OAuth 토큰 교환뿐.**
+
+---
+
+## Decision — 생성 측 gap만 채운다
+
+### Port 메서드 추가 (auth/domain/ports — 조장 #417 리뷰 MEDIUM 반영)
+
+- **신규** `OAuthConnectionRepository.list_for_user(user_id) -> list[OAuthConnection]` — settings용 사용자 **전체** 연결 목록. 기존 `get_active_for_user(user_id, service)`는 **단일 service → 단일 connection** 시그니처라 전체 목록을 못 만든다. 구현은 storage(`PgOAuthConnectionRepository`).
+
+### use case (auth/application/use_cases)
+
+1. `StartConnectionAuthorizeUseCase` — service별 `authorization_url` + `state`(CSRF, Redis) 생성
+2. `CompleteConnectionUseCase` — callback `code` → 토큰 교환 → `repo.create(user_id, service, tokens)` (토큰은 `AESGCMCipher` 암호화)
+3. `ListConnectionsUseCase` — **신규 `repo.list_for_user(user_id)`** 기반 사용자 연결 목록 (조장 #417 MEDIUM 반영 — `get_active_for_user`는 단일 service라 부적합)
+4. `RevokeConnectionUseCase` — `repo.revoke`
+
+### 엔드포인트 (api_server, `/api/v1/connections`)
+
+| 메서드 | 경로 | 동작 |
+|---|---|---|
+| `GET` | `/connections` | 연결 목록 (settings 화면용 — service/account/connected) |
+| `GET` | `/connections/{service}/authorize` | `authorization_url` 반환 → 프론트가 리다이렉트 |
+| `GET` | `/connections/{service}/callback` | `code`→토큰교환→저장→프론트 settings로 복귀 |
+| `DELETE` | `/connections/{service}` | 연결 해제 |
+
+### 응답 계약 (가원 #417 프론트 요청 반영 — settings 연동 풀림)
+
+`GET /connections` 응답:
+```jsonc
+[
+  { "service": "google",          // 식별자: google | slack | erp
+    "display": "user@gmail.com",  // 표시용 — google=계정 이메일, slack=workspace명
+    "connected": true,
+    "status": "connected" }       // connected | expired (미해결 ① 토큰 refresh와 연계)
+]
+```
+
+**callback 복귀 시그널**: callback이 프론트로 리다이렉트할 때 결과를 쿼리로 전달 — 성공 `{frontend}/settings?connected={service}` / 실패 `{frontend}/settings?error={code}`. → 프론트가 복귀 후 토스트 + 목록 재조회.
+
+### scope (노드 `required_connections` 충족)
+
+```
+google: spreadsheets, drive, documents, calendar.events, gmail.send
+        → google_sheets_read / google_docs_write / google_drive_read / google_calendar_create_event / gmail_send 전부 커버
+slack:  chat:write, channels:read
+```
+
+### authorize 흐름
+
+```
+settings "Google 연결" 클릭
+ → GET /connections/google/authorize → authorization_url (state 발급, Redis 저장)
+ → 브라우저 google 동의화면 → 사용자 승인
+ → GET /connections/google/callback?code=&state=
+     → state 검증(CSRF, Redis GETDEL) → code로 access/refresh_token 교환
+     → AESGCMCipher 암호화 → repo.create(user_id, "google", tokens)
+     → 프론트 settings 리다이렉트 (연결됨)
+ → 이후 execute 시 OAuthConnectionResolver가 자동 주입 → 401 해소
+```
+
+---
+
+## 영역 분담
+
+| 작업 | 담당 |
+|---|---|
+| use case 4 + 엔드포인트 4 + 토큰 교환 로직 | **박아름 (auth / api_server, REQ-002)** |
+| google OAuth 앱 scope 추가 + staging redirect URI / slack 앱 생성·secret 등록 | **조장 (인프라)** |
+| `settings/page.tsx` 하드코딩 제거 + `GET /connections` 연동 + "연결" 버튼 | **가원/조장 (프론트, REQ-010)** |
+
+**순서**: ① 박아름 엔드포인트 스펙 확정 → ②(프론트 연동)·③(OAuth 앱 scope) 병행.
+
+---
+
+## 구현 선행 의존성 (조장 협의 — 2026-06-08 구현 착수 중 발견)
+
+구현 착수 결과, 본 ADR이 "박아름 auth/api"로 분담했으나 실제 구현이 아래 **조장 영역과 직접 얽힘**. 전체 결선 전 합의 필요:
+
+1. **`oauth_connections` account/display 컬럼** (database REQ-001, `008` 마이그레이션) — 응답계약 `display`(google=이메일 / slack=workspace)를 채울 필드가 `OAuthConnection` 엔티티·테이블에 **없음**. `get_user_info` 매번 호출로 우회 가능하나 성능·복잡도 trade-off → **컬럼 추가 권장**.
+2. **slack OAuth client + 앱 등록** (인프라) — `GoogleOAuthClient`만 존재. slack용 client(`authorization_url`/`exchange_code`) + OAuth 앱 등록·secret 필요.
+3. **scope 분리(②) 실행** — 로그인 `GoogleOAuthClient._DEFAULT_SCOPES`가 이미 drive/gmail/calendar(readonly) 포함. connection은 별도 scope(sheets **read+write** 등) 필요 → `authorization_url(state, scopes)` 파라미터화 + 로그인 scope 정리.
+
+> **박아름 단독 진행분**: `list_for_user` Port/구현(✅ 완료, auth 44 passed), use case 골격, credentials 트랜잭션(③). 위 3건 합의 후 전체 결선.
+
+---
+
+## 구현 (2026-06-08 — 박아름, #423)
+
+설계대로 use case 4 + 엔드포인트 4 + `list_for_user`/`authorization_url` Port 구현. 셀프 3축 리뷰로 확정·보강된 디테일:
+- **② scope 분리 확장** — 단순 scope 트림이 아니라, 로그인 `AuthenticateUseCase`가 readonly scope로 oauth_connection을 **암묵 생성**하던 것을 제거(로그인=신원 전용, connection은 별도 플로우). 로그인 access_token 서비스 API 소비처 0건이라 무영향(조장 확인).
+- **redirect_uri 분리 (셀프리뷰 🔴 HIGH)** — connection authorize/callback이 `request.url_for("callback_connection")`로 **자신의 callback**을 redirect_uri로 사용. 로그인 callback(`GOOGLE_REDIRECT_URI`)을 그대로 쓰면 google이 로그인 callback으로 돌려보내 connection callback 미호출 = 작동불가였음. → google 앱에 connection redirect_uri 등록 필요(조장).
+- ③ 단일 트랜잭션 = `get_db` request-단위(repo flush only, 예외 rollback). ④ active partial index가 동시 callback race 정합 보장 → ON CONFLICT 대신 수용.
+- `ConnectionStatus`는 **common_schemas 0.21.0** SSOT(use case ↔ api ↔ frontend TS 공유).
+
+PR: **#420**(ADR Accepted + list_for_user + scope 분리, MERGED) / **#422**(조장 026 account/display, MERGED) / **#423**(use case + 엔드포인트, 조장 리뷰 대기).
+
+---
+
+## Consequences
+
+### Positive
+- e2e 시나리오(google/slack 노드) staging 실제 실행 가능 → 조장 "실제 실행 검증" 충족.
+- 주입 인프라(PR #348) 재사용 → 신규 작업이 use case 4 + 엔드포인트 4로 작음.
+- 토큰 `AESGCMCipher` 암호화 저장 (평문 금지).
+
+### Negative / Trade-offs
+- google OAuth 앱 scope 확장 = Google 검증(verification) 필요 가능성 (민감 scope) — **일정 리스크로 추적** (조장 #417 LOW).
+- 프론트 settings 더미 제거까지 묶여야 사용자 눈에 "연결됨"이 진실이 됨.
+
+### 결정 (Decided — 조장 2026-06-08, #417)
+- **① 토큰 refresh 전략** — ✅ **resolver 만료 체크 후 갱신**. `OAuthConnectionResolver`가 노드 주입 전 access_token 만료 확인 → `refresh_token`으로 `update_tokens` 갱신(별도 스케줄 X). refresh 자체 실패(refresh_token 만료/취소) 시 `status: expired`로 내려 settings "재연결 필요" 표시.
+- **② google scope** — ✅ **로그인 앱과 분리**(incremental authorization). 로그인 OAuth(openid/email)와 별개로 connection authorize에서 서비스 scope(Sheets/Drive/Docs/Calendar/Gmail)를 추가 요청.
+- **③ credentials FK 저장 흐름** — ✅ **단일 트랜잭션**. connection 저장 시 `credentials` row + `oauth_connections` row를 **하나의 트랜잭션/UoW로 동시 생성**(partial state·고아 row 방지). ⑤와 동일 결정.
+- **④ 재연결(중복) 처리** — ✅ **upsert 확정** (가원 #417 프론트 UX + 셀프리뷰 + 조장 2차 리뷰): 같은 user+service 재연결 시 기존 active 있으면 `update_tokens`, 없으면 `create`. `CompleteConnectionUseCase`에서 처리(동시 callback 2회 race 포함). **제약 2개** = `credential_id UNIQUE`(`008:8`) + **partial unique index `idx_oauth_connections_user_service_active` ON `(user_id, service)` WHERE `is_active=TRUE`**(`008:19-20`) — 새 credential_id를 발급해도 같은 user+service 2번째 active row는 이 partial index를 위반하므로, **upsert(active row `update_tokens`)가 둘 다 자연 충족**(active row 미증식). `revoke`(is_active=FALSE) 후 `create`도 충족하나 중간 실패 시 "연결 끊김" 노출 UX 문제로 기각. 구현 시 이 partial index 기준으로 원자성(동시 callback) 확정.
+- **⑤ 저장 트랜잭션 경계** — ✅ **단일 트랜잭션/UoW** (③과 통합 — 조장 결정). `credentials` row + `oauth_connections` row를 원자적으로 저장 → partial state(고아 credential) 방지.
+
+---
+
+## Alternatives Considered
+- **프론트 더미 유지 + 백엔드만**: 거짓 "연결됨" 표시 잔존 → 사용자 혼란. 기각.
+- **노드에 토큰 수동 입력**: 보안·UX 최악. 기각.

@@ -10,14 +10,20 @@ import pytest
 from ai_agent.tests.eval.ontology_grounding.metrics import (
     QA_PASS_THRESHOLD,
     aggregate,
+    detects_branch_on_classification,
     detects_quality_gate_loop,
     hallucinated_node_types,
+    has_branch_point,
     has_condition_node,
     has_cycle,
     motif_verdict,
 )
 from ai_agent.tests.eval.ontology_grounding.records import UNKNOWN_NODE_TYPE, RunRecord
-from ai_agent.tests.eval.ontology_grounding.scenarios import QUALITY_GATE_LOOP, SCENARIOS
+from ai_agent.tests.eval.ontology_grounding.scenarios import (
+    BRANCH_ON_CLASSIFICATION,
+    QUALITY_GATE_LOOP,
+    SCENARIOS,
+)
 
 
 def _rec(**kw) -> RunRecord:
@@ -110,6 +116,64 @@ def test_motif_verdict_scores_loop_expectation():
     assert motif_verdict(bad) is False
 
 
+# ── 분기 모티프(branch_on_classification) ─────────────────────────────────────
+
+
+def test_has_branch_point_needs_router_with_two_out_edges():
+    # if_condition(idx1)이 두 갈래로 분기 → 분기점 O
+    rec = _rec(
+        node_types=["anthropic_chat", "if_condition", "email_send", "slack_post_message"],
+        edges=[(0, 1), (1, 2), (1, 3)],
+    )
+    assert has_branch_point(rec) is True
+
+
+def test_has_branch_point_false_when_router_single_out():
+    # if_condition이 한 갈래뿐 → 분기 아님(선형)
+    rec = _rec(node_types=["anthropic_chat", "if_condition", "email_send"],
+               edges=[(0, 1), (1, 2)])
+    assert has_branch_point(rec) is False
+
+
+def test_has_branch_point_false_without_router_node():
+    # 다중 outgoing이지만 router condition 노드가 아님(ai 노드 fan-out) → 분기 모티프 아님
+    rec = _rec(node_types=["anthropic_chat", "email_send", "slack_post_message"],
+               edges=[(0, 1), (0, 2)])
+    assert has_branch_point(rec) is False
+
+
+def test_loop_count_is_not_a_router():
+    # loop_count는 반복 condition이지 XOR 분기 router가 아니다(ROUTER_NODE_TYPES 제외)
+    rec = _rec(node_types=["loop_count", "a", "b"], edges=[(0, 1), (0, 2)])
+    assert has_branch_point(rec) is False
+
+
+def test_detects_branch_requires_acyclic():
+    # 분기점 O + 무순환 → 분기 모티프 O
+    branch = _rec(node_types=["anthropic_chat", "if_condition", "a", "b"],
+                  edges=[(0, 1), (1, 2), (1, 3)])
+    assert detects_branch_on_classification(branch) is True
+    # 분기점 O + 순환 O → 루프이지 순수 분기 아님
+    looped = _rec(node_types=["anthropic_chat", "if_condition", "a"],
+                  edges=[(0, 1), (1, 2), (1, 0)])
+    assert detects_branch_on_classification(looped) is False
+
+
+def test_motif_verdict_scores_branch_expectation():
+    good = _rec(
+        expected_motif=BRANCH_ON_CLASSIFICATION,
+        node_types=["anthropic_chat", "if_condition", "email_send", "slack_post_message"],
+        edges=[(0, 1), (1, 2), (1, 3)],
+    )
+    bad = _rec(  # 분기 없이 선형이면 분기 모티프 미성립
+        expected_motif=BRANCH_ON_CLASSIFICATION,
+        node_types=["anthropic_chat", "email_send"],
+        edges=[(0, 1)],
+    )
+    assert motif_verdict(good) is True
+    assert motif_verdict(bad) is False
+
+
 # ── 집계 ─────────────────────────────────────────────────────────────────────
 
 
@@ -168,6 +232,7 @@ def test_golden_set_shape():
     ids = [s.scenario_id for s in SCENARIOS]
     assert len(ids) == len(set(ids)), "scenario_id 중복"
     assert sum(1 for s in SCENARIOS if s.expected_motif == QUALITY_GATE_LOOP) >= 5
+    assert sum(1 for s in SCENARIOS if s.expected_motif == BRANCH_ON_CLASSIFICATION) >= 4
     assert sum(1 for s in SCENARIOS if s.distractor) >= 3
     assert len(SCENARIOS) >= 30  # §6.5 권장 규모
 

@@ -7,7 +7,9 @@
 채점 축(§6.5):
   - expected_motif="quality_gate_loop" → 산출물이 **실행가능 루프**(back-edge + condition
     노드 ≥1, validator §2 SCC 수용기준 정합)를 만들어야 motif-correct.
-  - expected_motif=None(선형/분기) → 모티프 강제 없음. validator-pass / 비환각만 본다.
+  - expected_motif="branch_on_classification" → **실행가능 XOR 분기**(router condition 노드의
+    outgoing 엣지 ≥2 + 무순환, BranchEvaluator 계약 정합)를 만들어야 motif-correct (§6.1).
+  - expected_motif=None(선형) → 모티프 강제 없음. validator-pass / 비환각만 본다.
   - distractor=True(잡담) → 워크플로우를 만들지 **않아야** 정답(chitchat fast-path).
 
 > 발화는 의도적으로 다양한 도메인(메일/시트/문서/슬랙/캘린더/HTTP)에 걸쳐 두어
@@ -19,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 QUALITY_GATE_LOOP = "quality_gate_loop"
+BRANCH_ON_CLASSIFICATION = "branch_on_classification"
 
 
 @dataclass(frozen=True)
@@ -120,14 +123,20 @@ SCENARIOS: list[Scenario] = [
              node_hints=frozenset({"file_read", "csv_build"})),
     Scenario("lin_notify_on_event", "이벤트가 들어오면 담당자에게 메일 알림 보내줘",
              node_hints=frozenset({"event_trigger", "email_send"})),
-    # ── 조건 분기(if_condition, 루프 아님) — 4건 ──────────────────────────────
+    # ── 조건 분기 모티프(branch_on_classification, XOR — 루프 아님) — 4건 ────────
+    # expected_motif 태깅: "분류/조건 → XOR 분기"가 실행가능 분기점(router condition 노드의
+    # outgoing ≥2 + 무순환)으로 산출돼야 motif-correct (§6.1, BranchEvaluator 계약 정합).
     Scenario("branch_amount_route", "결제 금액이 100만원 넘으면 승인 요청, 아니면 자동 처리해줘",
+             expected_motif=BRANCH_ON_CLASSIFICATION,
              node_hints=frozenset({"if_condition", "email_send"})),
     Scenario("branch_sentiment", "고객 문의 감정을 분류해서 부정이면 매니저에게 에스컬레이션해줘",
+             expected_motif=BRANCH_ON_CLASSIFICATION,
              node_hints=frozenset({"anthropic_chat", "if_condition", "slack_post_message"})),
     Scenario("branch_category_switch", "문서 종류에 따라 다른 폴더에 저장되게 분기해줘",
+             expected_motif=BRANCH_ON_CLASSIFICATION,
              node_hints=frozenset({"switch_case"})),
     Scenario("branch_threshold_alert", "온도 값이 임계치를 넘으면 경보 메일을 보내줘",
+             expected_motif=BRANCH_ON_CLASSIFICATION,
              node_hints=frozenset({"if_condition", "email_send"})),
     # ── 잡담 distractor(워크플로우 생성 금지) — 4건 ───────────────────────────
     Scenario("chit_lunch", "점심 뭐 먹는 게 좋을까", distractor=True),

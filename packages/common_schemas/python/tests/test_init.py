@@ -2,7 +2,7 @@ import common_schemas
 
 
 def test_all_exports():
-    assert len(common_schemas.__all__) == 77
+    assert len(common_schemas.__all__) == 78
 
 
 def test_key_symbols_importable():
@@ -14,6 +14,7 @@ def test_key_symbols_importable():
         AgentProtocolResponse,
         AgentState,
         AnySSEFrame,
+        ConnectionStatus,
         DomainError,
         DraftSpec,
         Edge,

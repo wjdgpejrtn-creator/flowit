@@ -6,9 +6,9 @@
 
 ## 사전 체크
 
-- [ ] Modal 계정 + dhwang0803 워크스페이스 권한 (조장에게 요청)
+- [ ] Modal 계정 + flowit 워크스페이스 권한 (조장에게 요청)
 - [ ] `.env` 파일 프로젝트 루트에 저장 (Google Drive 배포본, 조장 5/12 카톡)
-- [ ] `python scripts/setup_modal_token.py` 1회 실행 (dhwang0803 워크스페이스 인증)
+- [ ] `python scripts/setup_modal_token.py` 1회 실행 (flowit 워크스페이스 인증)
 - [ ] llm-base Modal app 사전 배포 완료 (의존 endpoint)
 - [ ] `PgNodeDefinitionRepository` 머지 완료 (REQ-001/REQ-003 — 이미 development에 있음)
 - [ ] Windows: `PYTHONUTF8=1` 환경 변수 (modal CLI cp949 이슈)
@@ -43,7 +43,7 @@ PYTHONUTF8=1 modal deploy services/agents/agent-skills-builder/main.py
 출력에 ASGI endpoint URL 표시:
 `https://<workspace>--agent-skills-builder-skillsbuilderagent-fastapi.modal.run`
 
-대시보드: https://modal.com/apps/dhwang0803/main/deployed/agent-skills-builder
+대시보드: https://modal.com/apps/flowit/main/deployed/agent-skills-builder
 
 ## 3. 호출 계약 (Orchestrator가 부르는 형태)
 
@@ -143,8 +143,8 @@ Orchestrator 수신 (async for response in client.send(...))
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `scripts/setup_modal_token.py` | ✅ 머지 완료 | 박아름 1회 실행으로 dhwang0803 인증 완료 |
-| dhwang0803 Modal workspace 권한 | ✅ 확인 완료 | |
+| `scripts/setup_modal_token.py` | ✅ 머지 완료 | 박아름 1회 실행으로 flowit 인증 완료 |
+| flowit Modal workspace 권한 | ✅ 확인 완료 | |
 | Modal Secret `cloudsql-iam-sa` | ✅ 등록 완료 (조장 1회) | 5/19 PR #80/#81 마이그레이션 후 단일 secret |
 | GCP `secretmanager.secretAccessor` IAM (박아름) | ✅ 부여 완료 | Terraform `agent_secret_accessors` 등재 |
 | llm-base Modal app | ✅ 배포 완료 (2026-05-12, 신정혜) | `LLM_BASE_URL` GCP Secret Manager에 등록됨 |

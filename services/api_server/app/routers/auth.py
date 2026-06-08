@@ -9,9 +9,11 @@ from auth.adapters.jwt_adapter import JWTAdapter
 from auth.adapters.oauth.google_oauth_client import GoogleOAuthClient
 from auth.application.use_cases.authenticate_use_case import AuthenticateUseCase
 from auth.application.use_cases.grant_user_role_use_case import GrantUserRoleUseCase
+from auth.application.use_cases.list_connection_audit_use_case import ListConnectionAuditUseCase
 from auth.application.use_cases.refresh_token_use_case import RefreshTokenUseCase
 from auth.domain.entities.user import User, UserRole
 from auth.domain.ports.session_repository import SessionRepository
+from auth.domain.value_objects.connection_audit_entry import ConnectionAuditEntry
 from common_schemas import PermissionSource
 from common_schemas.exceptions import AuthorizationError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -25,6 +27,7 @@ from app.dependencies.auth import (
     get_google_oauth,
     get_grant_user_role_use_case,
     get_jwt_adapter,
+    get_list_connection_audit_use_case,
     get_refresh_token_use_case,
     get_session_repository,
 )
@@ -229,3 +232,19 @@ async def grant_user_role(
         role=user.role,
         department_id=user.department_id,
     )
+
+
+@router.get("/admin/credentials", response_model=list[ConnectionAuditEntry])
+async def list_credential_audit(
+    actor: PermissionSource = Depends(get_permission_source),
+    use_case: ListConnectionAuditUseCase = Depends(get_list_connection_audit_use_case),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> list[ConnectionAuditEntry]:
+    """관리자 자격증명 감사 — 전사 OAuth connection을 소유자와 함께 나열 (`/admin/credentials`).
+
+    인가는 use case에서 검증 — actor.role != 'Admin'이면 403(E-PERM-001). 응답에는 토큰을 절대
+    싣지 않는다(소유자 email/name/department + service/account/scopes/상태/일자만). 사용량·만료
+    지표는 현재 데이터 모델에 소스가 없어 제외(실 필드만, 황대원 결정 2026-06-08).
+    """
+    return await use_case.execute(actor=actor, limit=limit, offset=offset)

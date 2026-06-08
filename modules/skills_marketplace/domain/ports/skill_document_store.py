@@ -14,11 +14,16 @@ class SkillDocumentStore(ABC):
     제공한다 (2026-05-20 박아름 소유권 결정 — ADR-0017 정정. SkillRepository와 일관 +
     스킬 aggregate 완결).
 
-    ai_agent(Skills Builder)는 이 Port를 직접 import하지 않고 skills_marketplace의
-    application/use_cases(후속 RegisterSkillUseCase 등)를 경유해 접근한다 — CLAUDE.md
-    "modules 간 허용된 교차 import" 표가 `ai_agent → skills_marketplace/application/use_cases`만
-    등재하므로 domain/ports 직접 의존을 만들지 않기 위함 (조장 리뷰 #98). 구현체 DI 주입은
-    skills_marketplace use case 생성자에서 받는다.
+    ai_agent(Skills Builder)의 **쓰기 경로**(스킬 생성)는 이 Port를 직접 import하지 않고
+    skills_marketplace의 application/use_cases(후속 RegisterSkillUseCase 등)를 경유해 접근한다
+    (조장 리뷰 #98). 구현체 DI 주입은 skills_marketplace use case 생성자에서 받는다.
+
+    반면 ai_agent **Composer의 읽기 경로**는 ADR-0024 D5에서 이 Port를 직접 import해 런타임
+    소비한다 — `composer_graph._drafter_node`가 선택된 게시 스킬의 COMPOSER.md
+    (`composer_instructions`)를 `load()`해 drafter에 주입한다(#372 결함 A — drafter↔스킬 단절
+    해소). Port ABC만 참조하고 구현체(GcsSkillDocumentStore)는 composition root에서 주입하므로
+    execution_engine 런타임 주입 패턴과 동일하다. CLAUDE.md "modules 간 허용된 교차 import" 표의
+    `ai_agent → skills_marketplace/domain/ports/SkillDocumentStore` 행 참조.
 
     GCS adapter 구현 위치 = `storage/adapters/`, 담당 = 조장 (2026-05-24 협의 — "스킬이 결국
     md 문서 저장이라 storage"). 기존 ObjectStoragePort(GCSAdapter/LocalStorageAdapter)를 조합한다.
