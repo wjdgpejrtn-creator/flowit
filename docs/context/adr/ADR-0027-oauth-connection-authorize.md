@@ -118,7 +118,7 @@ settings "Google 연결" 클릭
 - **토큰 refresh 전략** — `update_tokens` 존재. 만료 시 트리거 주체 = resolver 만료 체크 후 갱신 vs 별도 스케줄.
 - google 앱 scope를 **로그인 앱과 통합 vs 분리**(incremental authorization).
 - `credentials` 테이블 ↔ `oauth_connections.credential_id` FK 저장 흐름 (connection 저장 시 credential row 동시 생성 여부).
-- **재연결(중복) 처리** — ✅ **upsert 확정** (가원 #417 프론트 UX + 셀프리뷰 합의): 같은 user+service 재연결 시 기존 active 있으면 `update_tokens`, 없으면 `create`. `CompleteConnectionUseCase`에서 처리(동시 callback 2회 race 포함). `revoke` 후 `create`는 중간 실패 시 "연결 끊김" 노출 UX 문제로 기각. 잔여 확정 = 토큰 비교/원자성 디테일.
+- **재연결(중복) 처리** — ✅ **upsert 확정** (가원 #417 프론트 UX + 셀프리뷰 + 조장 2차 리뷰): 같은 user+service 재연결 시 기존 active 있으면 `update_tokens`, 없으면 `create`. `CompleteConnectionUseCase`에서 처리(동시 callback 2회 race 포함). **제약 2개** = `credential_id UNIQUE`(`008:8`) + **partial unique index `idx_oauth_connections_user_service_active` ON `(user_id, service)` WHERE `is_active=TRUE`**(`008:19-20`) — 새 credential_id를 발급해도 같은 user+service 2번째 active row는 이 partial index를 위반하므로, **upsert(active row `update_tokens`)가 둘 다 자연 충족**(active row 미증식). `revoke`(is_active=FALSE) 후 `create`도 충족하나 중간 실패 시 "연결 끊김" 노출 UX 문제로 기각. 구현 시 이 partial index 기준으로 원자성(동시 callback) 확정.
 - **connection 저장 트랜잭션 경계** (셀프 리뷰 MEDIUM) — `credentials` row + `oauth_connections` row **2 write**가 별도 트랜잭션이면 partial state(connection 실패 시 고아 credential). 단일 트랜잭션/UoW로 묶을 것. 위 `credentials` FK 흐름과 연계.
 
 ---
