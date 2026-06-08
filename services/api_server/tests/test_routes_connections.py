@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import jwt as pyjwt
 import pytest
 from app.config import Settings
-from app.dependencies.auth import get_oauth_repository
+from app.dependencies.auth import get_google_oauth, get_oauth_repository
 from app.dependencies.permission import get_current_user
 from app.main import create_app
 from auth.domain.entities.oauth_connection import OAuthConnection
@@ -91,3 +91,45 @@ def test_list_connections_requires_auth(app):
     client = TestClient(app)
     resp = client.get("/api/v1/connections")
     assert resp.status_code == 401
+
+
+def test_authorize_connection_returns_url(app):
+    fake_oauth = MagicMock()
+    fake_oauth.authorization_url.return_value = "https://accounts.google.com/o/oauth2/v2/auth?scope=spreadsheets"
+    app.dependency_overrides[get_current_user] = _fake_user
+    app.dependency_overrides[get_google_oauth] = lambda: fake_oauth
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/connections/google/authorize", headers={"Authorization": f"Bearer {_bearer()}"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["authorization_url"].startswith("https://accounts.google.com")
+    assert body["state"]
+    app.dependency_overrides.clear()
+
+
+def test_authorize_connection_unsupported_service(app):
+    app.dependency_overrides[get_current_user] = _fake_user
+
+    client = TestClient(app)
+    resp = client.get("/api/v1/connections/notion/authorize", headers={"Authorization": f"Bearer {_bearer()}"})
+
+    assert resp.status_code == 400
+    app.dependency_overrides.clear()
+
+
+def test_revoke_connection(app):
+    repo = AsyncMock(spec=OAuthConnectionRepository)
+    repo.get_active_for_user = AsyncMock(return_value=_conn("google", "u@x.com"))
+    repo.revoke = AsyncMock()
+    app.dependency_overrides[get_current_user] = _fake_user
+    app.dependency_overrides[get_oauth_repository] = lambda: repo
+
+    client = TestClient(app)
+    resp = client.delete("/api/v1/connections/google", headers={"Authorization": f"Bearer {_bearer()}"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"service": "google", "revoked": True}
+    repo.revoke.assert_awaited_once()
+    app.dependency_overrides.clear()
