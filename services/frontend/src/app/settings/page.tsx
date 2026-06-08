@@ -33,7 +33,7 @@ function NavBtn({ active, label, onClick }: { active: boolean; label: string; on
 function ProfilePanel() {
   const { userName, userId, email, dept, role } = useAuthStore();
   const [personalId, setPersonalId] = useState(userId || userName || email?.split('@')[0] || '사용자');
-  const [displayName, setDisplayName] = useState(userName || '');
+  const [displayName, setDisplayName] = useState(userName || email?.split('@')[0] || '');
 
   const save = () => {
     if (!personalId.trim()) {
