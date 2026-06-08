@@ -92,8 +92,10 @@ _PATTERNS: tuple[dict, ...] = (
     },
     {
         # Exclusive Choice(XOR) / agentic Routing — 분류·조건에 따라 갈래를 나눈다.
+        # intent 토큰은 분기 의도를 좁게 가리키는 것만 — `따라` 단독은 빈출 부분문자열
+        # ("정책에 따라" 등)이라 과활성하므로 `에 따라`로 협소화(#416 리뷰 MED).
         "name": "branch_on_classification",
-        "intent": "분류|분기|넘으면|따라",
+        "intent": "분류|분기|넘으면|에 따라",
         "roles": [
             {"slot": "classifier", "category": "ai"},
             {"slot": "router", "node_types": ["if_condition", "switch_case"]},
