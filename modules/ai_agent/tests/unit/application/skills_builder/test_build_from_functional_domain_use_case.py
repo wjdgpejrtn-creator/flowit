@@ -350,8 +350,10 @@ async def test_result_frame_has_failed_fields_in_normal_case():
 # ----------------------------------------------------------------------
 
 
-def _write_seed(tmp_path: Path, domain_code: str = "hr", *, with_instructions: bool) -> Path:
-    """instructions 필드를 선택적으로 포함하는 테스트 seed 생성."""
+def _write_seed(
+    tmp_path: Path, domain_code: str = "hr", *, with_instructions: bool, with_composer: bool = False
+) -> Path:
+    """instructions / composer_instructions 필드를 선택적으로 포함하는 테스트 seed 생성."""
     node = {
         "node_type": "hr_onboarding_notify",
         "name": "온보딩 알림",
@@ -365,6 +367,8 @@ def _write_seed(tmp_path: Path, domain_code: str = "hr", *, with_instructions: b
     }
     if with_instructions:
         node["instructions"] = "## When to use\n신규 입사자 등록 시.\n## Steps\n1. 온보딩 체크리스트 발송"
+    if with_composer:
+        node["composer_instructions"] = "## Composer\n입사 트리거 → slack 알림 순서로 배치."
     seed = {"domain_code": domain_code, "domain_name": "인사", "skill_nodes": [node]}
     (tmp_path / f"{domain_code}.json").write_text(json.dumps(seed, ensure_ascii=False), encoding="utf-8")
     return tmp_path
@@ -385,6 +389,38 @@ async def test_seed_instructions_included_in_skill_documents(tmp_path: Path):
     assert "node_type" not in docs[0]
     assert {"skill_id", "name", "description", "instructions"} <= docs[0].keys()
     assert docs[0]["instructions"].startswith("## When to use")
+    # composer_instructions 미지정 시 빈 문자열 기본값 (ADR-0024)
+    assert docs[0].get("composer_instructions", "") == ""
+
+
+@pytest.mark.asyncio
+async def test_seed_composer_instructions_included_in_skill_documents(tmp_path: Path):
+    """seed에 composer_instructions만 있어도 SkillDocument 방출 (ADR-0024 COMPOSER.md, #372 결함 A)."""
+    seeds = _write_seed(tmp_path, "hr", with_instructions=False, with_composer=True)
+    use_case = BuildFromFunctionalDomainUseCase(_InMemoryRepo(), _FakeEmbedder(), seeds_dir=seeds)
+
+    frames = [f async for f in use_case.execute(uuid4(), "hr")]
+    result = frames[-1]
+
+    docs = result.payload["skill_documents"]
+    assert len(docs) == 1
+    assert docs[0]["composer_instructions"].startswith("## Composer")
+    assert docs[0]["instructions"] == ""
+
+
+@pytest.mark.asyncio
+async def test_seed_both_instructions_and_composer_included(tmp_path: Path):
+    """instructions + composer_instructions 둘 다 있으면 둘 다 SkillDocument에 배선."""
+    seeds = _write_seed(tmp_path, "hr", with_instructions=True, with_composer=True)
+    use_case = BuildFromFunctionalDomainUseCase(_InMemoryRepo(), _FakeEmbedder(), seeds_dir=seeds)
+
+    frames = [f async for f in use_case.execute(uuid4(), "hr")]
+    result = frames[-1]
+
+    docs = result.payload["skill_documents"]
+    assert len(docs) == 1
+    assert docs[0]["instructions"].startswith("## When to use")
+    assert docs[0]["composer_instructions"].startswith("## Composer")
 
 
 @pytest.mark.asyncio

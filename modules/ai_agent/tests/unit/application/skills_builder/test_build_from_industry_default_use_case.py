@@ -417,8 +417,10 @@ async def test_upsert_failure_isolated_other_nodes_continue():
 # ----------------------------------------------------------------------
 
 
-def _write_ecommerce_seed(tmp_path: Path, *, with_instructions: bool) -> Path:
-    """instructions 필드를 선택적으로 포함하는 테스트 ecommerce seed 생성."""
+def _write_ecommerce_seed(
+    tmp_path: Path, *, with_instructions: bool, with_composer: bool = False
+) -> Path:
+    """instructions / composer_instructions 필드를 선택적으로 포함하는 테스트 ecommerce seed 생성."""
     node = {
         "node_type": "ecommerce_cart_abandonment",
         "name": "장바구니 이탈 회복",
@@ -432,6 +434,8 @@ def _write_ecommerce_seed(tmp_path: Path, *, with_instructions: bool) -> Path:
     }
     if with_instructions:
         node["instructions"] = "## When to use\n장바구니 이탈 시.\n## Steps\n1. N시간 대기\n2. 회복 메일 발송"
+    if with_composer:
+        node["composer_instructions"] = "## Composer\n이탈 트리거 → wait → email 순서로 배치."
     seed = {"industry_code": "ecommerce", "industry_name": "이커머스", "skill_nodes": [node]}
     (tmp_path / "ecommerce.json").write_text(json.dumps(seed, ensure_ascii=False), encoding="utf-8")
     return tmp_path
@@ -452,6 +456,39 @@ async def test_seed_instructions_included_in_skill_documents(tmp_path: Path):
     assert "node_type" not in docs[0]
     assert {"skill_id", "name", "description", "instructions"} <= docs[0].keys()
     assert docs[0]["instructions"].startswith("## When to use")
+    # composer_instructions 미지정 시 빈 문자열 기본값 (ADR-0024)
+    assert docs[0].get("composer_instructions", "") == ""
+
+
+@pytest.mark.asyncio
+async def test_seed_composer_instructions_included_in_skill_documents(tmp_path: Path):
+    """seed에 composer_instructions만 있어도 SkillDocument 방출 (ADR-0024 COMPOSER.md, #372 결함 A)."""
+    seeds = _write_ecommerce_seed(tmp_path, with_instructions=False, with_composer=True)
+    use_case = BuildFromIndustryDefaultUseCase(_InMemoryRepo(), _FakeEmbedder(), seeds_dir=seeds)
+
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
+    result = frames[-1]
+
+    docs = result.payload["skill_documents"]
+    assert len(docs) == 1
+    assert docs[0]["composer_instructions"].startswith("## Composer")
+    # instructions 미지정 시 빈 문자열 — 하나라도 있으면 방출
+    assert docs[0]["instructions"] == ""
+
+
+@pytest.mark.asyncio
+async def test_seed_both_instructions_and_composer_included(tmp_path: Path):
+    """instructions + composer_instructions 둘 다 있으면 둘 다 SkillDocument에 배선."""
+    seeds = _write_ecommerce_seed(tmp_path, with_instructions=True, with_composer=True)
+    use_case = BuildFromIndustryDefaultUseCase(_InMemoryRepo(), _FakeEmbedder(), seeds_dir=seeds)
+
+    frames = [f async for f in use_case.execute(uuid4(), "ecommerce")]
+    result = frames[-1]
+
+    docs = result.payload["skill_documents"]
+    assert len(docs) == 1
+    assert docs[0]["instructions"].startswith("## When to use")
+    assert docs[0]["composer_instructions"].startswith("## Composer")
 
 
 @pytest.mark.asyncio
