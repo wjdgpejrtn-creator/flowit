@@ -10,7 +10,7 @@ URL resolution order per app:
     1. `--<app>-url` CLI flag (highest priority)
     2. matching env var (e.g. LLM_BASE_URL, COMPOSER_URL, ...)
     3. value parsed from `--env-file` (default: <repo root>/.env)
-    4. hardcoded default for workspace `dhwang0803`
+    4. hardcoded default for workspace `flowit`
 
 Usage:
     python scripts/warmup_modal.py
@@ -34,29 +34,29 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILE = REPO_ROOT / ".env"
 DEFAULT_TIMEOUT = 180.0  # llm-base cold boot ≈ 3 min (Gemma mmap + BGE load)
 
-# (env_var, default URL for workspace dhwang0803). Defaults are last-resort
+# (env_var, default URL for workspace flowit). Defaults are last-resort
 # fallbacks — staging operator changes workspace? override via env var or
 # --<app>-url flag.
 APP_DEFAULTS: dict[str, tuple[str, str]] = {
     "orchestrator": (
         "ORCHESTRATOR_URL",
-        "https://<WORKSPACE>--orchestrator.modal.run",
+        "https://flowit--orchestrator-orchestratoragent-fastapi.modal.run",
     ),
     "agent-composer": (
         "COMPOSER_URL",
-        "https://dhwang0803--agent-composer-agentcomposer-fastapi.modal.run",
+        "https://flowit--agent-composer-agentcomposer-fastapi.modal.run",
     ),
     "agent-skills-builder": (
         "SKILLS_BUILDER_URL",
-        "https://dhwang0803--agent-skills-builder-agentskillsbuilder-fastapi.modal.run",
+        "https://flowit--agent-skills-builder-agentskillsbuilder-fastapi.modal.run",
     ),
     "agent-personalization": (
         "PERSONALIZATION_URL",
-        "https://dhwang0803--agent-personalization-agentpersonalization-fastapi.modal.run",
+        "https://flowit--agent-personalization-agentpersonalization-fastapi.modal.run",
     ),
     "llm-base": (
         "LLM_BASE_URL",
-        "https://<WORKSPACE>--llm-base.modal.run",
+        "https://flowit--llm-base-llmbase-fastapi.modal.run",
     ),
 }
 

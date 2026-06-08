@@ -11,7 +11,7 @@ Deploy:
     PYTHONUTF8=1 modal deploy services/agents/agent-personalization/main.py
 
 Health:
-    curl https://dhwang0803--agent-personalization-personalizationagent-fastapi.modal.run/v1/health
+    curl https://flowit--agent-personalization-personalizationagent-fastapi.modal.run/v1/health
 """
 import os
 from pathlib import Path
