@@ -51,38 +51,10 @@ class AuthenticateUseCase:
                 department_id=None,
             )
 
-        # Encrypt OAuth tokens before storing
-        enc_access = self._cipher.encrypt(user_info["access_token"].encode())
-        enc_refresh = self._cipher.encrypt(user_info.get("refresh_token", "").encode())
-        scopes: list[str] = user_info.get("scopes", [])
-
-        # Upsert OAuth connection. oauth_connections.credential_id는 credentials FK(NOT NULL)이므로
-        # credentials row를 먼저 생성/갱신한 뒤 그 credential_id로 oauth_connection을 연결한다.
-        existing = await self._oauth_repo.get_active_for_user(user_id, "google")
-        if existing is not None:
-            await self._credential_repo.update_data(existing.credential_id, enc_access)
-            await self._oauth_repo.update_tokens(
-                existing.credential_id,
-                new_tokens={"access_token_encrypted": enc_access, "refresh_token_encrypted": enc_refresh},
-            )
-        else:
-            credential = await self._credential_repo.create(
-                user_id=user_id,
-                name="Google OAuth",
-                credential_kind="oauth_token",
-                encrypted_data=enc_access,
-                metadata={"service": "google", "scopes": scopes},
-            )
-            await self._oauth_repo.create(
-                user_id=user_id,
-                service="google",
-                tokens={
-                    "credential_id": credential.credential_id,
-                    "access_token_encrypted": enc_access,
-                    "refresh_token_encrypted": enc_refresh,
-                    "scopes": scopes,
-                },
-            )
+        # 로그인은 신원 확인 전용 — OAuth connection(서비스 토큰)은 생성하지 않는다 (ADR-0027 ③).
+        # 워크플로우 노드용 connection은 별도 connect 플로우(/api/v1/connections)에서 서비스 scope
+        # (Sheets/Drive 등)로 생성한다. 로그인 scope는 openid/email/profile뿐이라 connection 토큰으로
+        # 쓸 수 없고, 로그인 access_token을 서비스 API로 쓰는 소비처는 0건이다 (2026-06-08 조장 결정).
 
         # Create session. session expires_at은 refresh_token TTL과 동일하게 둔다.
         # access TTL(1h)에 맞추면 access 만료 후 refresh 시 RefreshTokenUseCase가

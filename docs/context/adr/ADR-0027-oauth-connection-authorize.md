@@ -1,6 +1,6 @@
 # ADR-0027: OAuth Connection authorize/저장 플로우 (생성 측)
 
-- **Status**: Proposed (박아름 제안자 — 2026-06-08 e2e 검증 중 발견)
+- **Status**: **Accepted** (2026-06-08 — 조장 미해결 5건 결정 #417. 박아름 제안자, e2e 검증 중 발견)
 - **관련 이슈**: e2e 시나리오 `S-AREUM-2`(구글시트 읽기) staging 실행 시 `google_sheets_read` **401 (OAuth 토큰 없음)**
 - **관련 PR**: #348 (OAuthConnectionResolver — 주입 측, 기 구현)
 
@@ -103,6 +103,18 @@ settings "Google 연결" 클릭
 
 ---
 
+## 구현 선행 의존성 (조장 협의 — 2026-06-08 구현 착수 중 발견)
+
+구현 착수 결과, 본 ADR이 "박아름 auth/api"로 분담했으나 실제 구현이 아래 **조장 영역과 직접 얽힘**. 전체 결선 전 합의 필요:
+
+1. **`oauth_connections` account/display 컬럼** (database REQ-001, `008` 마이그레이션) — 응답계약 `display`(google=이메일 / slack=workspace)를 채울 필드가 `OAuthConnection` 엔티티·테이블에 **없음**. `get_user_info` 매번 호출로 우회 가능하나 성능·복잡도 trade-off → **컬럼 추가 권장**.
+2. **slack OAuth client + 앱 등록** (인프라) — `GoogleOAuthClient`만 존재. slack용 client(`authorization_url`/`exchange_code`) + OAuth 앱 등록·secret 필요.
+3. **scope 분리(②) 실행** — 로그인 `GoogleOAuthClient._DEFAULT_SCOPES`가 이미 drive/gmail/calendar(readonly) 포함. connection은 별도 scope(sheets **read+write** 등) 필요 → `authorization_url(state, scopes)` 파라미터화 + 로그인 scope 정리.
+
+> **박아름 단독 진행분**: `list_for_user` Port/구현(✅ 완료, auth 44 passed), use case 골격, credentials 트랜잭션(③). 위 3건 합의 후 전체 결선.
+
+---
+
 ## Consequences
 
 ### Positive
@@ -114,12 +126,12 @@ settings "Google 연결" 클릭
 - google OAuth 앱 scope 확장 = Google 검증(verification) 필요 가능성 (민감 scope) — **일정 리스크로 추적** (조장 #417 LOW).
 - 프론트 settings 더미 제거까지 묶여야 사용자 눈에 "연결됨"이 진실이 됨.
 
-### 미해결 (논의 필요)
-- **토큰 refresh 전략** — `update_tokens` 존재. 만료 시 트리거 주체 = resolver 만료 체크 후 갱신 vs 별도 스케줄.
-- google 앱 scope를 **로그인 앱과 통합 vs 분리**(incremental authorization).
-- `credentials` 테이블 ↔ `oauth_connections.credential_id` FK 저장 흐름 (connection 저장 시 credential row 동시 생성 여부).
-- **재연결(중복) 처리** — ✅ **upsert 확정** (가원 #417 프론트 UX + 셀프리뷰 합의): 같은 user+service 재연결 시 기존 active 있으면 `update_tokens`, 없으면 `create`. `CompleteConnectionUseCase`에서 처리(동시 callback 2회 race 포함). `revoke` 후 `create`는 중간 실패 시 "연결 끊김" 노출 UX 문제로 기각. 잔여 확정 = 토큰 비교/원자성 디테일.
-- **connection 저장 트랜잭션 경계** (셀프 리뷰 MEDIUM) — `credentials` row + `oauth_connections` row **2 write**가 별도 트랜잭션이면 partial state(connection 실패 시 고아 credential). 단일 트랜잭션/UoW로 묶을 것. 위 `credentials` FK 흐름과 연계.
+### 결정 (Decided — 조장 2026-06-08, #417)
+- **① 토큰 refresh 전략** — ✅ **resolver 만료 체크 후 갱신**. `OAuthConnectionResolver`가 노드 주입 전 access_token 만료 확인 → `refresh_token`으로 `update_tokens` 갱신(별도 스케줄 X). refresh 자체 실패(refresh_token 만료/취소) 시 `status: expired`로 내려 settings "재연결 필요" 표시.
+- **② google scope** — ✅ **로그인 앱과 분리**(incremental authorization). 로그인 OAuth(openid/email)와 별개로 connection authorize에서 서비스 scope(Sheets/Drive/Docs/Calendar/Gmail)를 추가 요청.
+- **③ credentials FK 저장 흐름** — ✅ **단일 트랜잭션**. connection 저장 시 `credentials` row + `oauth_connections` row를 **하나의 트랜잭션/UoW로 동시 생성**(partial state·고아 row 방지). ⑤와 동일 결정.
+- **④ 재연결(중복) 처리** — ✅ **upsert 확정** (가원 #417 프론트 UX + 셀프리뷰 + 조장 2차 리뷰): 같은 user+service 재연결 시 기존 active 있으면 `update_tokens`, 없으면 `create`. `CompleteConnectionUseCase`에서 처리(동시 callback 2회 race 포함). **제약 2개** = `credential_id UNIQUE`(`008:8`) + **partial unique index `idx_oauth_connections_user_service_active` ON `(user_id, service)` WHERE `is_active=TRUE`**(`008:19-20`) — 새 credential_id를 발급해도 같은 user+service 2번째 active row는 이 partial index를 위반하므로, **upsert(active row `update_tokens`)가 둘 다 자연 충족**(active row 미증식). `revoke`(is_active=FALSE) 후 `create`도 충족하나 중간 실패 시 "연결 끊김" 노출 UX 문제로 기각. 구현 시 이 partial index 기준으로 원자성(동시 callback) 확정.
+- **⑤ 저장 트랜잭션 경계** — ✅ **단일 트랜잭션/UoW** (③과 통합 — 조장 결정). `credentials` row + `oauth_connections` row를 원자적으로 저장 → partial state(고아 credential) 방지.
 
 ---
 

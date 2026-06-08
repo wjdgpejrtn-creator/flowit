@@ -92,6 +92,9 @@ class InMemoryOAuthRepository(OAuthConnectionRepository):
         if key in self._store:
             self._store[key].revoke()
 
+    async def list_for_user(self, user_id):
+        return [c for c in self._store.values() if c.user_id == user_id and c.is_active]
+
 
 class FakeCipher(CipherPort):
     def encrypt(self, plaintext: bytes) -> bytes:

@@ -12,13 +12,13 @@ _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
+# 로그인 전용 — 신원(identity) scope만. 서비스 연동(Sheets/Drive/Docs/Calendar/Gmail) scope는
+# connection authorize 플로우(ADR-0027)에서 scope 인자로 별도 요청한다. 로그인 access_token을
+# drive/gmail API로 쓰는 소비처는 0건이라 트림해도 기존 기능 무영향(2026-06-08 조장 확인).
 _DEFAULT_SCOPES = [
     "openid",
     "email",
     "profile",
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
 
@@ -33,14 +33,21 @@ class GoogleOAuthClient(OAuthClientPort):
         self._client_secret = client_secret or os.getenv("GOOGLE_CLIENT_SECRET", "")
         self._redirect_uri = redirect_uri or os.getenv("GOOGLE_REDIRECT_URI", "")
 
-    def authorization_url(self, state: str) -> str:
+    def authorization_url(self, state: str, scopes: list[str] | None = None) -> str:
+        """OAuth authorization URL 생성.
+
+        scopes 미지정 시 로그인 신원 scope(`_DEFAULT_SCOPES`). connection authorize는
+        서비스 scope(Sheets/Drive 등)를 scopes로 전달한다(ADR-0027 ② scope 분리).
+        include_granted_scopes=true로 incremental authorization — 기존 승인 scope를 누적한다.
+        """
         params = {
             "client_id": self._client_id,
             "redirect_uri": self._redirect_uri,
             "response_type": "code",
-            "scope": " ".join(_DEFAULT_SCOPES),
+            "scope": " ".join(scopes or _DEFAULT_SCOPES),
             "access_type": "offline",
             "prompt": "consent",
+            "include_granted_scopes": "true",
             "state": state,
         }
         return f"{_AUTH_URL}?{urlencode(params)}"
