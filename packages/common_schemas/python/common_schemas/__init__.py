@@ -1,6 +1,7 @@
 from . import broker_tasks
 from .agent import AgentState, DraftSpec, IntentResult, MemoryEntry, MemoryType, SlotFillingState, UnresolvedNode
 from .agent_protocol import AgentProtocolRequest, AgentProtocolResponse
+from .connection import ConnectionStatus
 from .document import (
     AnalysisResult,
     AnalyzeDispatchResponse,
@@ -142,6 +143,8 @@ __all__ = [
     # validation
     "ValidationErrorItem",
     "ValidationErrorResponse",
+    # connection — OAuth connection 상태 (ADR-0027, settings GET /connections SSOT)
+    "ConnectionStatus",
     # security
     "PermissionSource",
     "PlaintextCredential",

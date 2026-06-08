@@ -26,8 +26,8 @@ const SHORTCUTS: { href: string; icon: string; label: string }[] = [
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { userName } = useAuthStore();
-  const displayName = userName || 'gawon.data';
+  const { userName, email } = useAuthStore();
+  const displayName = userName || email?.split('@')[0] || '사용자';
 
   const [input, setInput] = useState('');
   const [recent, setRecent] = useState<WorkflowSchema[]>([]);

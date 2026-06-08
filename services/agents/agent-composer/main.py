@@ -108,6 +108,15 @@ class AgentComposer:
             logging.getLogger(__name__).warning(
                 "gcs-personal-bucket secret 미등록 — personal memory 비활성: %s", exc
             )
+        # skills-marketplace-bucket: secret 미등록이어도 composer boot 실패 방지 (ADR-0024 D5).
+        # 미등록 시 SkillDocumentStore 비활성 → COMPOSER.md 미주입(하위호환, drafter는 정상 동작).
+        try:
+            load_secrets_to_env({"skills-marketplace-bucket": "SKILLS_MARKETPLACE_BUCKET"})
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "skills-marketplace-bucket secret 미등록 — COMPOSER.md 주입 비활성: %s", exc
+            )
 
         # 엔진/커넥터는 요청마다 생성 (_create_session 참조) — boot()에서 생성 안 함.
         # @modal.concurrent ASGI 환경에서 boot() 루프와 요청 루프가 달라 loop mismatch hang
@@ -135,6 +144,8 @@ class AgentComposer:
         from storage.repositories.pg_workflow_repository import PgWorkflowRepository
         from storage.repositories.pg_marketplace_skill_repository import PgMarketplaceSkillRepository
         from storage.repositories.pg_oauth_repository import PgOAuthRepository
+        from storage.adapters.gcs_adapter import GCSAdapter
+        from storage.adapters.gcs_skill_document_store import GcsSkillDocumentStore
         from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
 
         llm = ModalLLMAdapter()
@@ -163,6 +174,12 @@ class AgentComposer:
         self._personal_memory_store = GCSMemoryStore()
         self._diff_service = WorkflowDiffService()
         self._execution_engine_url = os.getenv("EXECUTION_ENGINE_URL", "")
+        # ADR-0024 D5: 게시 스킬 COMPOSER.md(composer_instructions) 로더. 버킷 env 있을 때만
+        # 주입(없으면 None=미주입, 하위호환). agent-skills-builder/main.py 동일 패턴.
+        _skills_bucket = os.environ.get("SKILLS_MARKETPLACE_BUCKET")
+        self._skill_doc_store = (
+            GcsSkillDocumentStore(GCSAdapter(bucket_name=_skills_bucket)) if _skills_bucket else None
+        )
 
         # 그래프는 요청마다 세션을 새로 생성해서 주입 — _get_graph() 참조
 
@@ -261,6 +278,7 @@ class AgentComposer:
                             composer_state_store=self._composer_state_store,
                             connection_resolver=connection_resolver,
                             ontology_retriever=self._ontology_retriever,
+                            skill_doc_store=self._skill_doc_store,
                         )
                         async for frame in await graph.stream(
                             user_id=req.user_id,

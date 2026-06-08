@@ -61,38 +61,18 @@ async def test_authenticate_derives_deterministic_user_id(session_repo, oauth_re
 
 
 @pytest.mark.asyncio
-async def test_authenticate_stores_encrypted_token(session_repo, oauth_repo, user_repo, credential_repo, cipher):
-    google = FakeGoogleOAuth(sub="sub_encrypt_test")
+async def test_authenticate_does_not_create_oauth_connection(session_repo, oauth_repo, user_repo, credential_repo, cipher):
+    """로그인은 신원 확인 전용 — oauth_connection을 생성하지 않는다 (ADR-0027 ③ scope 분리).
+
+    워크플로우 노드용 connection은 별도 connect 플로우(/api/v1/connections)에서 서비스 scope로
+    생성한다. 로그인 scope는 openid/email/profile뿐이라 connection 토큰으로 쓸 수 없다.
+    """
+    google = FakeGoogleOAuth(sub="sub_no_conn")
     uc = AuthenticateUseCase(session_repo, oauth_repo, user_repo, credential_repo, cipher, google, FakeJWT())
     await uc.execute("code_xyz")
 
-    user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "sub_encrypt_test")
-    conn = await oauth_repo.get_active_for_user(user_id, "google")
-
-    assert conn.access_token_encrypted != b"goog_access_token"
-    assert cipher.decrypt(conn.access_token_encrypted) == b"goog_access_token"
-
-
-@pytest.mark.asyncio
-async def test_authenticate_second_login_updates_tokens(session_repo, oauth_repo, user_repo, credential_repo, cipher):
-    google_first = FakeGoogleOAuth(sub="sub_reauth")
-    uc = AuthenticateUseCase(session_repo, oauth_repo, user_repo, credential_repo, cipher, google_first, FakeJWT())
-    await uc.execute("first_code")
-
-    class FakeGoogleOAuthV2(FakeGoogleOAuth):
-        async def exchange_code(self, code: str) -> dict:
-            result = await super().exchange_code(code)
-            result["access_token"] = "new_access_token"
-            return result
-
-    uc2 = AuthenticateUseCase(
-        session_repo, oauth_repo, user_repo, credential_repo, cipher, FakeGoogleOAuthV2(sub="sub_reauth"), FakeJWT()
-    )
-    await uc2.execute("second_code")
-
-    user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "sub_reauth")
-    conn = await oauth_repo.get_active_for_user(user_id, "google")
-    assert cipher.decrypt(conn.access_token_encrypted) == b"new_access_token"
+    user_id = uuid.uuid5(uuid.NAMESPACE_DNS, "sub_no_conn")
+    assert await oauth_repo.get_active_for_user(user_id, "google") is None
 
 
 # ── JIT user auto-provisioning (REQ-002 보강, 2026-05-19) ─────────────────

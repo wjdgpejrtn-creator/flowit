@@ -53,6 +53,7 @@ from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.services.graph_validator import GraphValidator
 from pydantic import BaseModel
 from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
+from skills_marketplace.domain.ports import SkillDocumentStore
 
 from ...domain.entities.memory_file import MemoryFile, MemoryFileRef
 from ...domain.entities.session_ref import SessionRef
@@ -82,6 +83,13 @@ _MAX_AGENT_ITERATIONS = 15  # 무한 루프 방지
 # seed를 검색 상위 hit으로 제한 + 추가 후보 상한으로 풀 비대를 억제한다.
 _EXPAND_SEED_LIMIT = 5   # 확장 seed = 검색 상위 N hit만(구조/개인 노드 제외)
 _EXPAND_ADD_LIMIT = 3    # CAN_FOLLOW로 추가하는 신규 후보 상한
+
+# 범용 LLM 노드 — 요약/생성/분류/판단 등 거의 모든 워크플로우의 핵심 스텝인데, 의미검색은
+# 특정 도메인 쿼리("이 URL 요약")에서 이 generic 노드를 top-k 밖으로 밀어내 후보에서 누락시킨다
+# → drafter가 쓰려다 `후보 목록에 없는 node_type drop`으로 끊긴 워크플로우 산출(평가 진단 ②,
+# anthropic_chat이 카탈로그에 있는데도 드롭). 구조 노드(#378)와 동일하게 관련도 무관 항상-포함한다.
+# 카탈로그 ai 노드와 동기화는 test_core_llm_nodes_drift가 가드.
+_CORE_LLM_NODE_TYPES: tuple[str, ...] = ("anthropic_chat", "gemma_chat")
 
 # 스킬 검색 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 상한. 이 거리 밖 후보는 제외해
 # 무관한 스킬이 옵션/노드 후보에 딸려 나오는 것을 막는다.
@@ -205,6 +213,7 @@ class LangGraphOrchestrator:
         workflow_explanation_svc: WorkflowExplanationService | None = None,
         connection_resolver: ConnectionResolver | None = None,
         ontology_retriever: OntologyRetrieverPort | None = None,
+        skill_doc_store: SkillDocumentStore | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -225,6 +234,7 @@ class LangGraphOrchestrator:
         self._workflow_explanation_svc = workflow_explanation_svc or WorkflowExplanationService()
         self._connection_resolver = connection_resolver
         self._ontology_retriever = ontology_retriever
+        self._skill_doc_store = skill_doc_store
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -735,6 +745,23 @@ class LangGraphOrchestrator:
             _logger.warning("구조 노드 후보 합산 실패 (non-fatal): %s", exc)
             return []
 
+    async def _fetch_core_llm_candidates(self) -> list[NodeConfig]:
+        """범용 LLM 노드(anthropic_chat/gemma_chat)를 관련도 무관 항상-포함 회수.
+
+        의미검색이 도메인 쿼리에서 generic LLM 노드를 top-k 밖으로 밀어내 끊긴 워크플로우를
+        만드는 문제(평가 진단 ②) 대응. ``list_by_node_types``(EXECUTABLE 가드 포함)를 재사용 —
+        없거나(구버전 mock) 실패해도 빈 리스트로 비치명적 degrade(검색 후보만으로 진행).
+        """
+        grounder = getattr(self._node_registry, "list_by_node_types", None)
+        if grounder is None:
+            return []
+        try:
+            result = await grounder(list(_CORE_LLM_NODE_TYPES))
+            return list(result) if result else []
+        except Exception as exc:
+            _logger.warning("범용 LLM 노드 후보 합산 실패 (non-fatal): %s", exc)
+            return []
+
     @staticmethod
     def _dedup_union(base: list[NodeConfig], extra: list[NodeConfig]) -> list[NodeConfig]:
         """node_id 기준 dedup 합집합 — base를 우선 보존하고 새 항목만 뒤에 덧붙인다."""
@@ -815,6 +842,11 @@ class LangGraphOrchestrator:
         # (#378 후속 A). 관련성 무관하게 항상 후보에 선제 합산해 첫 초안부터 사용 가능하게 한다.
         # node_id 기준 dedup. 조회 실패는 비치명적 — 검색 후보만으로 진행한다.
         candidates = self._dedup_union(raw_candidates, await self._fetch_structural_candidates())
+
+        # 범용 LLM 노드(anthropic_chat/gemma_chat)도 구조 노드와 동일하게 관련도 무관 항상-포함한다.
+        # 의미검색이 generic LLM 노드를 도메인 쿼리 top-k 밖으로 밀어내 drafter가 드롭→끊긴
+        # 워크플로우를 만드는 문제(평가 진단 ②) 대응. 이미 있으면 dedup으로 무시된다.
+        candidates = self._dedup_union(candidates, await self._fetch_core_llm_candidates())
 
         # GraphRAG CAN_FOLLOW 확장 (ADR-0026 §4.2a) — 검색 상위 hit의 후행 가능 노드를 온톨로지에서
         # 회수해 **ADD 보강**한다. 의미검색이 놓치는 글루/transform/control 노드(예: csv_parse 뒤
@@ -1109,6 +1141,16 @@ class LangGraphOrchestrator:
         )
         if skill_selected and not instruct_skill_binding:
             _logger.warning("스킬 선택됐으나 LLM 노드 후보 확보 실패 — 바인딩 skip 예상")
+        # ADR-0024 D5: 선택된 스킬의 COMPOSER.md(composer_instructions)를 drafter에 주입.
+        # SkillDocumentStore 미주입 또는 문서 없으면 non-fatal(None으로 진행).
+        skill_composer_instructions: str | None = None
+        if instruct_skill_binding and self._skill_doc_store is not None:
+            try:
+                skill_doc = await self._skill_doc_store.load(state["selected_skill_id"])
+                if skill_doc and skill_doc.composer_instructions:
+                    skill_composer_instructions = skill_doc.composer_instructions
+            except Exception as exc:
+                _logger.warning("COMPOSER.md 로드 실패 (건너뜀): %s", exc)
         # degrade로 버린 node_type을 수집할 요청-로컬 sink(동시 요청 안전). 재시도 retriever가
         # 이 ground-truth로 재검색하도록 state에 실어 보낸다(리뷰 #2 — QA-LLM 재인지 의존 제거).
         dropped: list[str] = []
@@ -1117,6 +1159,7 @@ class LangGraphOrchestrator:
                 spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow,
                 personal_patterns=state.get("personal_patterns"),
                 skill_selected=instruct_skill_binding,
+                skill_composer_instructions=skill_composer_instructions,
                 retry_feedback=state.get("retry_feedback"),
                 dropped_node_types=dropped,
                 pattern_templates=state.get("pattern_templates"),

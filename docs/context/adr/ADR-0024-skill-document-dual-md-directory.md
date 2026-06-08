@@ -96,12 +96,10 @@ class SkillDocument(BaseModel):
 | SKILL.md (`instructions`) | execution_engine | 워크플로우 **실행** | `_inject_skill`이 LLM 노드 `system`에 병합 (**기존 유지**) |
 | COMPOSER.md (`composer_instructions`) | ai_agent Composer | 워크플로우 **생성** | drafter가 노드 선택/구성에 반영 (**신규** — #372 결함 A 해소) |
 
-**COMPOSER.md 로더 배선** (신규 작업의 핵심 — 신정혜): 현재 Composer에는 SkillDocument **로더가 없다**(`_skill_search`·`_embedder`만 주입 — 검색·임베딩용이지 문서 본문 로드 아님). `composer_instructions`를 읽으려면:
-1. **로더 주입** — 스코프 횡단 `GetSkillDocument` **유스케이스**(`skills_marketplace/application/use_cases`)를 Composer에 주입. 선택된 `skill_id`로 COMPOSER.md 본문 회수. ⚠️ **`SkillDocumentStore` Port를 ai_agent가 직접 참조하지 않는다** — CLAUDE.md 교차 import상 `ai_agent → skills_marketplace`는 `application/use_cases`·`domain/value_objects`만 허용(`domain/ports` 직접은 `execution_engine` 전용). 따라서 반드시 **use case 경유**(기존 허용 경로).
-2. **drafter hook** — `DrafterService.draft(skill_composer_instructions=...)` 파라미터로 전달. **PR #376이 이 hook을 이미 준비**(personalization `personal_patterns` 주입 구조 재사용 가능).
-3. **컨테이너 배선** — `agent-composer` composition root에서 로더 주입.
-
-→ 즉 신정혜 잔여 작업은 "결함 A·B(#376)" + **"COMPOSER.md 로더 배선"** 으로 좁혀진다.
+**COMPOSER.md 로더 배선** — ✅ **PR #411 머지(2026-06-08)로 완료.** 아래 설계 예측 중 일부는 실제 구현에서 바뀌었다(기록 보존):
+1. **로더 주입** — (예측: 스코프 횡단 `GetSkillDocument` use case 경유, `domain/ports` 직접 금지) → **실제: `SkillDocumentStore` Port를 ai_agent Composer가 직접 import**해 런타임 소비(`composer_graph._drafter_node`가 선택 `skill_id`로 `load()`). execution_engine과 동일한 런타임 DI 패턴 — Port ABC만 참조 + 구현체(`GcsSkillDocumentStore`)는 composition root 주입이라 Clean Architecture 정합. CLAUDE.md 교차 import 표에 `ai_agent → skills_marketplace.domain.ports.SkillDocumentStore` 행 추가(**PR #413, 박아름**).
+2. **drafter hook** — `DrafterService.draft(skill_composer_instructions=...)` 전달 (신정혜, #411 `b41d20a`). #376이 준비한 hook 재사용.
+3. **컨테이너 배선** — `agent-composer` composition root에서 `skill_doc_store` 주입 완료 (박아름, #411 `6db6207`). `SKILLS_MARKETPLACE_BUCKET` secret은 공용 SA(`cloudsql-iam-modal`)가 이미 accessor 보유 → 인프라 추가 작업 0(조장 확인).
 
 ## 영역 분담
 
@@ -111,7 +109,7 @@ class SkillDocument(BaseModel):
 | `GcsSkillDocumentStore` 멀티파일 save/load/delete | storage (조장) | ✅ **PR #374 머지** |
 | `_inject_skill` (SKILL.md 노드 주입, 유지) | execution_engine (조장) | ✅ 무변경(유지) |
 | retriever `node_definition_id` 의존 제거(결함 B) + 선택 스킬 LLM 노드 보장(결함 A) | ai_agent Composer (**황대원 선반영 #376 · 신정혜 소유**) | 🔵 **PR #376 OPEN** |
-| COMPOSER.md 로더 주입 + drafter hook 배선(`skill_composer_instructions`) | ai_agent Composer (신정혜) | ⏳ #376 hook 준비됨, 로더 배선 잔여 |
+| COMPOSER.md 로더 주입 + drafter hook 배선(`skill_composer_instructions`) + composition root | ai_agent Composer (신정혜 `b41d20a` + 박아름 `6db6207`) | ✅ **PR #411 머지** |
 | `SkillOption.node_definition_id` 제거/`skill_id` 대체 (D2 #3) | common_schemas (조장) | ⏳ 대기 |
 | (선행 검증) publish NodeDef 생성 중단(D2 #1) 전 `_suggest_skill_select_node`가 옵션 제시에 `node_definition_id` 미요구 확인 (0.18.0 optional이라 likely OK) | skills_marketplace (박아름) | ⏳ D2 #1 착수 전 |
 | `PublishSkillUseCase` NodeDefinition 생성 제거 + embedding 유지(결함 B 게시측) | skills_marketplace (박아름) | ⏳ 대기 (본 ADR Accepted 후) |
@@ -137,7 +135,7 @@ class SkillDocument(BaseModel):
 - ✅ common_schemas `composer_instructions` 추가 (조장) — **PR #374 머지**
 - ✅ `GcsSkillDocumentStore` 멀티파일 save/load/delete (조장) — **PR #374 머지**
 - 🔵 Composer 결함 A·B (retriever `node_definition_id` 제거 + LLM 노드 보장) — **PR #376 OPEN (신정혜)**
-- ⏳ COMPOSER.md 로더 주입 + drafter hook 배선 (신정혜, D5 — #376 hook 준비됨)
+- ✅ COMPOSER.md 로더 주입 + drafter hook 배선 + composition root (신정혜 `b41d20a` + 박아름 `6db6207`, D5) — **PR #411 머지**
 - ⏳ `PublishSkillUseCase` NodeDefinition 생성 제거 + `category="action"` 재검토 (박아름, D2 결함 B·C)
 - ⏳ 빌더 2-md(SKILL.md + COMPOSER.md) 추출 계약 재설계 (박아름, D3)
 - ⏳ PR #343 seed 5종 2-md 전환 + embedding backfill (박아름)
@@ -148,7 +146,7 @@ class SkillDocument(BaseModel):
 - 🔴 **REQ-013 spec 갱신 — `SkillDocument` 필드에 `composer_instructions` 추가** (spec L59가 PR #374 0.20.0 미반영, SSOT drift) — 조장(REQ-013 spec)
 - 🔴 **REQ-013 spec 갱신 — D2 폐기로 L58/L93/L123 절 정정** (`PublishSkillUseCase`의 "staging→NodeDefinition 생성·upsert + node_definition_id 연결" / "NodeDefinition 메타=skills_marketplace 테이블" 흐름이 D2로 폐기됨) — 박아름(D2 게시측과 동시)
 - 🟡 **기존 published 스킬의 NodeDefinition 잔재 정리** — D2는 publish의 *신규* 생성만 멈추므로, 이미 `node_definitions` 카탈로그에 생성된 스킬 NodeDefinition은 남아 retriever 일반 노드 검색에 잡힐 수 있음(결함 B 잔재). 정리/마이그레이션 필요 — 박아름
-- 🟡 **CLAUDE.md 교차 import 표 검토** — COMPOSER.md 로더용 스코프 횡단 `GetSkillDocument` use case가 신규면 `ai_agent → skills_marketplace.application/use_cases`(L149) 행 예시 보강 — 신정혜 배선 시
+- ✅ **CLAUDE.md 교차 import 표 보강** — 실제 배선이 `SkillDocumentStore` Port 직접 참조라 `ai_agent → skills_marketplace.domain.ports.SkillDocumentStore` 행 + Port docstring 정정 — **PR #413(박아름)**
 
 ## Alternatives Considered
 
