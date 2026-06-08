@@ -84,6 +84,13 @@ _MAX_AGENT_ITERATIONS = 15  # 무한 루프 방지
 _EXPAND_SEED_LIMIT = 5   # 확장 seed = 검색 상위 N hit만(구조/개인 노드 제외)
 _EXPAND_ADD_LIMIT = 3    # CAN_FOLLOW로 추가하는 신규 후보 상한
 
+# 범용 LLM 노드 — 요약/생성/분류/판단 등 거의 모든 워크플로우의 핵심 스텝인데, 의미검색은
+# 특정 도메인 쿼리("이 URL 요약")에서 이 generic 노드를 top-k 밖으로 밀어내 후보에서 누락시킨다
+# → drafter가 쓰려다 `후보 목록에 없는 node_type drop`으로 끊긴 워크플로우 산출(평가 진단 ②,
+# anthropic_chat이 카탈로그에 있는데도 드롭). 구조 노드(#378)와 동일하게 관련도 무관 항상-포함한다.
+# 카탈로그 ai 노드와 동기화는 test_core_llm_nodes_drift가 가드.
+_CORE_LLM_NODE_TYPES: tuple[str, ...] = ("anthropic_chat", "gemma_chat")
+
 # 스킬 검색 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 상한. 이 거리 밖 후보는 제외해
 # 무관한 스킬이 옵션/노드 후보에 딸려 나오는 것을 막는다.
 # 기본값 0.50: staging 실측(BGE-M3, 한국어 짧은 텍스트) 기준 — 관련 스킬은 0.35~0.49,
@@ -738,6 +745,23 @@ class LangGraphOrchestrator:
             _logger.warning("구조 노드 후보 합산 실패 (non-fatal): %s", exc)
             return []
 
+    async def _fetch_core_llm_candidates(self) -> list[NodeConfig]:
+        """범용 LLM 노드(anthropic_chat/gemma_chat)를 관련도 무관 항상-포함 회수.
+
+        의미검색이 도메인 쿼리에서 generic LLM 노드를 top-k 밖으로 밀어내 끊긴 워크플로우를
+        만드는 문제(평가 진단 ②) 대응. ``list_by_node_types``(EXECUTABLE 가드 포함)를 재사용 —
+        없거나(구버전 mock) 실패해도 빈 리스트로 비치명적 degrade(검색 후보만으로 진행).
+        """
+        grounder = getattr(self._node_registry, "list_by_node_types", None)
+        if grounder is None:
+            return []
+        try:
+            result = await grounder(list(_CORE_LLM_NODE_TYPES))
+            return list(result) if result else []
+        except Exception as exc:
+            _logger.warning("범용 LLM 노드 후보 합산 실패 (non-fatal): %s", exc)
+            return []
+
     @staticmethod
     def _dedup_union(base: list[NodeConfig], extra: list[NodeConfig]) -> list[NodeConfig]:
         """node_id 기준 dedup 합집합 — base를 우선 보존하고 새 항목만 뒤에 덧붙인다."""
@@ -818,6 +842,11 @@ class LangGraphOrchestrator:
         # (#378 후속 A). 관련성 무관하게 항상 후보에 선제 합산해 첫 초안부터 사용 가능하게 한다.
         # node_id 기준 dedup. 조회 실패는 비치명적 — 검색 후보만으로 진행한다.
         candidates = self._dedup_union(raw_candidates, await self._fetch_structural_candidates())
+
+        # 범용 LLM 노드(anthropic_chat/gemma_chat)도 구조 노드와 동일하게 관련도 무관 항상-포함한다.
+        # 의미검색이 generic LLM 노드를 도메인 쿼리 top-k 밖으로 밀어내 drafter가 드롭→끊긴
+        # 워크플로우를 만드는 문제(평가 진단 ②) 대응. 이미 있으면 dedup으로 무시된다.
+        candidates = self._dedup_union(candidates, await self._fetch_core_llm_candidates())
 
         # GraphRAG CAN_FOLLOW 확장 (ADR-0026 §4.2a) — 검색 상위 hit의 후행 가능 노드를 온톨로지에서
         # 회수해 **ADD 보강**한다. 의미검색이 놓치는 글루/transform/control 노드(예: csv_parse 뒤
