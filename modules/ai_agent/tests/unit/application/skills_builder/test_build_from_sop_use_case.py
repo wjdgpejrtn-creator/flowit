@@ -122,12 +122,14 @@ def _make_detail(
     required_connections: list[str] | None = None,
     service_type: str | None = "slack",
     instructions: str = "## When to use\n고객 문의 접수 시.\n## Steps\n1. Slack 채널 확인\n2. 알림 발송",
+    composer_instructions: str = "## 필수 노드\n이 스킬은 LLM 노드 + Slack 노드를 함께 배치해 엮어야 한다.",
 ) -> _ExtractedSkillNodeDetail:
     return _ExtractedSkillNodeDetail(
         inputs={"type": "object", "properties": {"channel": {"type": "string"}}, "required": ["channel"]},
         outputs={"type": "object", "properties": {"ts": {"type": "string"}}},
         required_connections=required_connections or ["slack"],
         service_type=service_type, instructions=instructions,
+        composer_instructions=composer_instructions,
     )
 
 
@@ -251,6 +253,22 @@ async def test_extract_detail_returns_detail_with_staging():
 
 
 @pytest.mark.asyncio
+async def test_extract_detail_returns_composer_instructions():
+    # ADR-0024 D3: detail 응답에 COMPOSER.md(composer_instructions) 포함 — drafter 노드구성 주입(#372 결함 A)
+    llm = _FakeLLM(structured_response=_make_detail())
+    frames = [f async for f in _make_uc(llm=llm).extract_detail(uuid4(), _make_document(), _meta_dict())]
+    detail = frames[-1].payload["skill_detail"]
+    assert detail["composer_instructions"].startswith("## 필수 노드")
+
+
+def test_build_prompt_detail_requests_composer_instructions():
+    # 프롬프트가 COMPOSER.md(composer_instructions) 합성을 요청 — 2-md 추출 계약(ADR-0024 D3)
+    prompt = BuildFromSOPUseCase._build_prompt_detail(_make_document(), [], _make_meta())
+    assert "composer_instructions" in prompt
+    assert "COMPOSER.md" in prompt
+
+
+@pytest.mark.asyncio
 async def test_extract_detail_progress_frames():
     llm = _FakeLLM(structured_response=_make_detail())
     frames = [f async for f in _make_uc(llm=llm).extract_detail(uuid4(), _make_document(), _meta_dict())]
@@ -334,6 +352,25 @@ async def test_confirm_creates_draft_skills():
     assert call["embedding"] == [0.1] * 768
     assert call["instructions"] == "## When to use\n..."  # ADR-0017 — SKILL.md 본문 전달
     assert len(embedder.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_confirm_passes_composer_instructions():
+    # ADR-0024 D3: 편집된 composer_instructions(COMPOSER.md)를 CreateDraftSkill에 전달 → GCS 2-md 저장
+    draft = _FakeCreateDraftSkill()
+    skill = _valid_skill()
+    skill["composer_instructions"] = "## 필수 노드\nLLM 노드 + Email 노드 필수"
+    frames = [f async for f in _make_uc(draft=draft).confirm(uuid4(), [skill])]
+    assert frames[-1].payload["created_count"] == 1
+    assert draft.calls[0]["composer_instructions"] == "## 필수 노드\nLLM 노드 + Email 노드 필수"
+
+
+@pytest.mark.asyncio
+async def test_confirm_missing_composer_passes_none():
+    # composer_instructions 누락 시 None 전달 (역호환 — 노드 지침만 있는 스킬)
+    draft = _FakeCreateDraftSkill()
+    _ = [f async for f in _make_uc(draft=draft).confirm(uuid4(), [_valid_skill()])]
+    assert draft.calls[0]["composer_instructions"] is None
 
 
 @pytest.mark.asyncio
