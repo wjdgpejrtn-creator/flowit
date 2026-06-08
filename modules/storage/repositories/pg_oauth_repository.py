@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.domain.entities.oauth_connection import OAuthConnection
 from auth.domain.ports.oauth_connection_repository import OAuthConnectionRepository
+from auth.domain.value_objects.connection_audit_entry import ConnectionAuditEntry
 
 from ..mappers.oauth_connection_mapper import OAuthConnectionMapper
 from ..orm.oauth_connection_model import OAuthConnectionModel
+from ..orm.user_model import UserModel
 
 
 class PgOAuthRepository(OAuthConnectionRepository):
@@ -61,6 +63,37 @@ class PgOAuthRepository(OAuthConnectionRepository):
         )
         result = await self._session.execute(stmt)
         return [OAuthConnectionMapper.to_domain(model) for model in result.scalars().all()]
+
+    async def list_connection_audit(
+        self, limit: int = 200, offset: int = 0
+    ) -> list[ConnectionAuditEntry]:
+        # 전사 connection + 소유자 식별(users JOIN). 토큰 컬럼은 select하지 않는다(감사 화면 불필요).
+        # is_active 무관 — 해지된 connection도 감사 대상. owner 필터 없음(인가는 use case).
+        stmt = (
+            select(OAuthConnectionModel, UserModel)
+            .join(UserModel, OAuthConnectionModel.user_id == UserModel.user_id)
+            .order_by(OAuthConnectionModel.connected_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            ConnectionAuditEntry(
+                oauth_id=conn.oauth_id,
+                user_id=conn.user_id,
+                owner_email=user.email,
+                owner_name=user.name,
+                owner_department=user.department,
+                service=conn.service,
+                account_id=conn.account_id,
+                display_name=conn.display_name,
+                scopes=list(conn.scopes),
+                is_active=conn.is_active,
+                connected_at=conn.connected_at,
+                last_refreshed_at=conn.last_refreshed_at,
+            )
+            for conn, user in result.all()
+        ]
 
     async def update_tokens(self, credential_id: UUID, new_tokens: dict[str, Any]) -> None:
         values: dict[str, Any] = {"last_refreshed_at": datetime.now(timezone.utc)}

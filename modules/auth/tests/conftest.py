@@ -95,6 +95,30 @@ class InMemoryOAuthRepository(OAuthConnectionRepository):
     async def list_for_user(self, user_id):
         return [c for c in self._store.values() if c.user_id == user_id and c.is_active]
 
+    async def list_connection_audit(self, limit: int = 200, offset: int = 0):
+        # in-memory fake — 소유자 정보 join 없이 connection 필드만 채운다(감사 단위 테스트는
+        # use case의 Admin 게이트를 주로 검증하므로 owner 메타는 placeholder).
+        from auth.domain.value_objects.connection_audit_entry import ConnectionAuditEntry
+
+        rows = sorted(self._store.values(), key=lambda c: c.connected_at, reverse=True)
+        return [
+            ConnectionAuditEntry(
+                oauth_id=c.oauth_id,
+                user_id=c.user_id,
+                owner_email="",
+                owner_name="",
+                owner_department=None,
+                service=c.service,
+                account_id=c.account_id,
+                display_name=c.display_name,
+                scopes=list(c.scopes),
+                is_active=c.is_active,
+                connected_at=c.connected_at,
+                last_refreshed_at=c.last_refreshed_at,
+            )
+            for c in rows[offset : offset + limit]
+        ]
+
 
 class FakeCipher(CipherPort):
     def encrypt(self, plaintext: bytes) -> bytes:
