@@ -14,6 +14,11 @@ from ..ports.llm_port import LLMPort
 
 _logger = logging.getLogger(__name__)
 
+# 드래프터 프롬프트 다이어트 캡 — 컨텍스트 윈도우 초과 방지 (#413)
+_MAX_CANDIDATES = 20   # 후보 노드 최대 수
+_MAX_PATTERNS = 5      # 개인화 패턴 최대 수
+_MAX_MOTIFS = 3        # 모티프 패턴 최대 수
+
 # 데이터 흐름 참조 ${<token>.<field>} — LLM은 token으로 node_type(fresh)/ref(edit)를 쓰고,
 # 빌드 시 instance_id로 재작성한다(token엔 점 없음 → 첫 '.'로 분리, ADR-0023 L1).
 _REF_TOKEN_RE = re.compile(r"\$\{([^.}]+)\.([^}]+)\}")
@@ -79,6 +84,27 @@ def _ground_ref_fields(value: Any, outputs_by_instance: dict[UUID, list[str]]) -
 def _outputs_of(nc: NodeConfig) -> list[str]:
     """NodeConfig의 출력 필드명 목록 (output_schema.properties 키)."""
     return list((nc.output_schema or {}).get("properties", {}).keys())
+
+
+def _slim_schema(schema: dict | None) -> dict:
+    """input_schema에서 description/title 등 verbose 필드를 제거해 토큰 절감.
+
+    LLM이 파라미터를 채우는 데 필요한 type·default·enum·required만 보존한다.
+    """
+    if not schema:
+        return {}
+    props = schema.get("properties") or {}
+    slimmed = {}
+    for k, v in props.items():
+        entry: dict = {}
+        for keep in ("type", "default", "enum"):
+            if keep in v:
+                entry[keep] = v[keep]
+        slimmed[k] = entry
+    result: dict = {"properties": slimmed}
+    if schema.get("required"):
+        result["required"] = schema["required"]
+    return result
 
 
 _SYSTEM_PROMPT = """You are a workflow drafter. Given a DraftSpec and candidate nodes,
@@ -255,13 +281,21 @@ class DrafterService:
         이 ground-truth로 직접 재검색하도록 결정화한다(#378 후속 리뷰 #2). 호출부가 요청마다
         새 리스트를 넘기므로 동시 요청 안전(서비스 인스턴스 공유 무관).
         """
+        # 프롬프트 다이어트 — 컨텍스트 윈도우 초과 방지 (#413)
+        if len(candidates) > _MAX_CANDIDATES:
+            _logger.warning("후보 %d건 → %d건 캡 적용 (prompt diet)", len(candidates), _MAX_CANDIDATES)
+            candidates = candidates[:_MAX_CANDIDATES]
+        capped_patterns = (personal_patterns or [])[:_MAX_PATTERNS]
+        capped_motifs = (pattern_templates or [])[:_MAX_MOTIFS] if pattern_templates else pattern_templates
+
         catalog = [
             {
                 "node_type": n.node_type,
                 "name": n.name,
                 "description": n.description,
                 "required_connections": n.required_connections,
-                "input_schema": n.input_schema,
+                # description/title 제거한 경량 스키마 — type/default/enum/required만 보존
+                "input_schema": _slim_schema(n.input_schema),
                 # 데이터 흐름 참조에 쓸 수 있는 출력 필드명 (ADR-0023 L1)
                 "outputs": list((n.output_schema or {}).get("properties", {}).keys()),
             }
@@ -272,10 +306,10 @@ class DrafterService:
             ensure_ascii=False,
         )
         catalog_json = json.dumps(catalog, ensure_ascii=False)
-        patterns_block = self._personal_patterns_block(personal_patterns)
+        patterns_block = self._personal_patterns_block(capped_patterns)
         binding_block = self._skill_binding_block(skill_selected, skill_composer_instructions)
         retry_block = self._retry_feedback_block(retry_feedback)
-        motif_block = self._motif_block(pattern_templates)
+        motif_block = self._motif_block(capped_motifs)
         # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
         # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
         if prior_workflow is not None:
