@@ -217,10 +217,15 @@ async def _capture_one(orchestrator, scenario: Scenario, node_type_by_id: dict[U
     return _frames_to_record(scenario, frames, node_type_by_id)
 
 
-async def run(label: str, limit: int | None = None) -> Snapshot:
+async def run(label: str, limit: int | None = None, ids: list[str] | None = None) -> Snapshot:
     from ai_agent.adapters.ontology.neo4j_ontology_adapter import Neo4jOntologyAdapter
 
-    scenarios = SCENARIOS[:limit] if limit else SCENARIOS
+    # --ids로 특정 시나리오만(모티프 집중 측정용 — 예: branch 4건 양팔 반복). --limit과 배타.
+    if ids:
+        id_set = set(ids)
+        scenarios = [s for s in SCENARIOS if s.scenario_id in id_set]
+    else:
+        scenarios = SCENARIOS[:limit] if limit else SCENARIOS
     connector, engine, session_factory = await _create_session_factory()
     ontology_retriever = Neo4jOntologyAdapter()
     records: list[RunRecord] = []
@@ -272,12 +277,15 @@ def main() -> int:
                         help="캡처 대신 현재 스냅샷 집계를 baseline.json으로 승격")
     parser.add_argument("--limit", type=int, default=None,
                         help="앞 N개 시나리오만 캡처(스모크/부분 측정용). 미지정=전체 32건")
+    parser.add_argument("--ids", default=None,
+                        help="쉼표구분 scenario_id만 캡처(모티프 집중 측정용). --limit보다 우선")
     args = parser.parse_args()
 
     if args.promote_baseline:
         return _promote_baseline()
 
-    snap = asyncio.run(run(args.label, limit=args.limit))
+    ids = [s.strip() for s in args.ids.split(",")] if args.ids else None
+    snap = asyncio.run(run(args.label, limit=args.limit, ids=ids))
     path = save_snapshot(snap)
     print(f"\n스냅샷 저장 → {path} ({len(snap.records)}건)")
     print("이어서 점검: python -m ai_agent.tests.eval.ontology_grounding.check_snapshot")
