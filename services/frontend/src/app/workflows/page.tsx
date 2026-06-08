@@ -43,8 +43,8 @@ function StatusChip({ isDraft }: { isDraft?: boolean }) {
 
 function WorkflowListContent() {
   const router = useRouter();
-  const { userName } = useAuthStore();
-  const displayName = userName || 'gawon.data';
+  const { userName, email } = useAuthStore();
+  const displayName = userName || email?.split('@')[0] || '사용자';
 
   const [workflows, setWorkflows] = useState<WorkflowSchema[]>([]);
   const [loading, setLoading] = useState(true);
