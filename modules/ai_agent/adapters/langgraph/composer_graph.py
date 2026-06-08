@@ -53,6 +53,7 @@ from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from nodes_graph.domain.services.graph_validator import GraphValidator
 from pydantic import BaseModel
 from skills_marketplace.application.use_cases.search_skills_use_case import SearchSkillsUseCase
+from skills_marketplace.domain.ports import SkillDocumentStore
 
 from ...domain.entities.memory_file import MemoryFile, MemoryFileRef
 from ...domain.entities.session_ref import SessionRef
@@ -205,6 +206,7 @@ class LangGraphOrchestrator:
         workflow_explanation_svc: WorkflowExplanationService | None = None,
         connection_resolver: ConnectionResolver | None = None,
         ontology_retriever: OntologyRetrieverPort | None = None,
+        skill_doc_store: SkillDocumentStore | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
@@ -225,6 +227,7 @@ class LangGraphOrchestrator:
         self._workflow_explanation_svc = workflow_explanation_svc or WorkflowExplanationService()
         self._connection_resolver = connection_resolver
         self._ontology_retriever = ontology_retriever
+        self._skill_doc_store = skill_doc_store
         self._layout = WorkflowLayoutService()
         self._graph = self._build()
 
@@ -1109,6 +1112,16 @@ class LangGraphOrchestrator:
         )
         if skill_selected and not instruct_skill_binding:
             _logger.warning("스킬 선택됐으나 LLM 노드 후보 확보 실패 — 바인딩 skip 예상")
+        # ADR-0024 D5: 선택된 스킬의 COMPOSER.md(composer_instructions)를 drafter에 주입.
+        # SkillDocumentStore 미주입 또는 문서 없으면 non-fatal(None으로 진행).
+        skill_composer_instructions: str | None = None
+        if instruct_skill_binding and self._skill_doc_store is not None:
+            try:
+                skill_doc = await self._skill_doc_store.load(state["selected_skill_id"])
+                if skill_doc and skill_doc.composer_instructions:
+                    skill_composer_instructions = skill_doc.composer_instructions
+            except Exception as exc:
+                _logger.warning("COMPOSER.md 로드 실패 (건너뜀): %s", exc)
         # degrade로 버린 node_type을 수집할 요청-로컬 sink(동시 요청 안전). 재시도 retriever가
         # 이 ground-truth로 재검색하도록 state에 실어 보낸다(리뷰 #2 — QA-LLM 재인지 의존 제거).
         dropped: list[str] = []
@@ -1117,6 +1130,7 @@ class LangGraphOrchestrator:
                 spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior_workflow,
                 personal_patterns=state.get("personal_patterns"),
                 skill_selected=instruct_skill_binding,
+                skill_composer_instructions=skill_composer_instructions,
                 retry_feedback=state.get("retry_feedback"),
                 dropped_node_types=dropped,
                 pattern_templates=state.get("pattern_templates"),
