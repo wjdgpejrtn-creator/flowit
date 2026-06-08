@@ -29,6 +29,8 @@ class PgOAuthRepository(OAuthConnectionRepository):
             access_token_encrypted=tokens["access_token_encrypted"],
             refresh_token_encrypted=tokens.get("refresh_token_encrypted"),
             scopes=tokens.get("scopes", []),
+            account_id=tokens.get("account_id"),
+            display_name=tokens.get("display_name"),
             is_active=True,
             connected_at=datetime.now(timezone.utc),
         )

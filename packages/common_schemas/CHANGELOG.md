@@ -7,6 +7,12 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.21.0] - 2026-06-08
+
+### Added — OAuth connection 상태 (ADR-0027)
+
+- `connection.py` `ConnectionStatus`(service/connected/status/display: str|None) 추가 — settings 통합 탭 + `GET /api/v1/connections` 응답의 **단일 SSOT**. `ListConnectionsUseCase` 반환 ↔ api_server 응답 ↔ frontend 타입 공유로, use case VO(dataclass) ↔ api response(pydantic) 중복 제거(셀프리뷰 LOW). 신규 모델 → MINOR. TS regenerate(`ConnectionStatus` interface 자동 반영).
+
 ## [0.20.0] - 2026-06-05
 
 ### Added — 스킬 지침서 묶음 (노드측 / composer측 분리, #372 결함 A·B 해소)
