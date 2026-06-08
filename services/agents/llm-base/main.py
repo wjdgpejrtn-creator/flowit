@@ -179,7 +179,13 @@ def download_model() -> None:
     # 15분 idle 유지 — staging 연속 테스트 시 3분 cold start(Gemma mmap+BGE) 회피.
     scaledown_window=900,
 )
-@modal.concurrent(max_inputs=4)
+# max_inputs=1 — 단일 llama-server의 통합 KV 캐시(--ctx-size 8192 토큰)를 동시 요청이
+# 공유하면, 각 compose 프롬프트(~3.5K 토큰)가 2~3건만 겹쳐도 합산이 8192를 넘어
+# "Context size has been exceeded"(500)로 전부 죽는다(2026-06-08 실측). 요청을 직렬화해
+# 각 요청이 8192 윈도우를 단독 점유하도록 한다. composer는 이미 요청당 100~300s라
+# 직렬 큐잉 체감이 작고, OOM 없이 간헐 500을 원천 차단한다. 처리량이 필요하면 ctx를
+# 키우고(=KV 메모리 증가, L4 여유 확인) max_inputs를 함께 올려야 한다.
+@modal.concurrent(max_inputs=1)
 class LLMBase:
     """Gemma 4 (llama.cpp subprocess) + BGE-M3 (in-process) on one L4."""
 
@@ -354,7 +360,14 @@ class LLMBase:
             f"http://127.0.0.1:{LLAMA_SERVER_PORT}/v1/chat/completions",
             json=body,
         )
-        r.raise_for_status()
+        # raise_for_status()가 던지는 httpx.HTTPStatusError는 request/response 키워드
+        # 인자가 Modal의 원격 예외 직렬화를 넘지 못해 호출부에서 진짜 원인이 마스킹된다
+        # ("missing 2 required keyword-only arguments"). llama-server의 에러 본문
+        # (예: "Context size has been exceeded")을 평문 RuntimeError로 그대로 노출한다.
+        if r.status_code >= 400:
+            raise RuntimeError(
+                f"llama-server {r.status_code} at /v1/chat/completions: {r.text[:1000]}"
+            )
         body_json = r.json()
         # With enable_thinking=False + reasoning_format=none the visible answer
         # lands on `content`. We keep `reasoning_content` as a defensive
