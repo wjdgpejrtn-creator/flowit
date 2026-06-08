@@ -71,7 +71,8 @@ async def authorize_connection(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if redis is not None:
-        await redis.setex(f"{CONN_STATE_PREFIX}{state}", CONN_STATE_TTL_SECONDS, "1")
+        # state → user_id 바인딩(connection-fixation CSRF 방어, 조장 MED) — callback이 동일 user 확인.
+        await redis.setex(f"{CONN_STATE_PREFIX}{state}", CONN_STATE_TTL_SECONDS, str(user.user_id))
     elif settings.is_production():
         raise HTTPException(status_code=503, detail="OAuth state store unavailable (Redis required in production)")
     else:
@@ -79,8 +80,13 @@ async def authorize_connection(
     return AuthorizeConnectionResponse(authorization_url=url, state=state)
 
 
-async def _consume_conn_state(state: str | None, redis: aioredis.Redis | None, settings: Settings) -> None:
-    """connection callback state 검증 + 일회 소진(GETDEL). invalid/expired 시 401."""
+async def _consume_conn_state(
+    state: str | None, redis: aioredis.Redis | None, settings: Settings, expected_user_id: object
+) -> None:
+    """connection callback state 검증 + 일회 소진(GETDEL) + **user 바인딩 검증**(CSRF, 조장 MED).
+
+    authorize가 state→user_id를 저장 → callback이 현재 인증 user와 일치 확인(connection-fixation 방어).
+    """
     if redis is None:
         if settings.is_production():
             raise HTTPException(status_code=503, detail="OAuth state store unavailable (Redis required in production)")
@@ -90,6 +96,9 @@ async def _consume_conn_state(state: str | None, redis: aioredis.Redis | None, s
     value = await redis.getdel(f"{CONN_STATE_PREFIX}{state}")
     if value is None:
         raise HTTPException(status_code=401, detail="Invalid or expired OAuth state (CSRF check)")
+    bound = value.decode() if isinstance(value, (bytes, bytearray)) else value
+    if bound != str(expected_user_id):
+        raise HTTPException(status_code=401, detail="OAuth state user mismatch (CSRF check)")
 
 
 @router.get("/{service}/callback")
@@ -104,7 +113,7 @@ async def callback_connection(
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
     """OAuth redirect_uri 수신 — code 교환·저장 후 settings로 복귀(쿼리로 성공/실패 시그널)."""
-    await _consume_conn_state(state, redis, settings)
+    await _consume_conn_state(state, redis, settings, user.user_id)
     # authorize와 동일 redirect_uri로 토큰 교환 — google 검증 통과 필수.
     redirect_uri = str(request.url_for("callback_connection", service=service))
     try:

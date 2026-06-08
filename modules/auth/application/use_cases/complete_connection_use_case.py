@@ -42,7 +42,8 @@ class CompleteConnectionUseCase:
         # redirect_uri는 authorize 때와 동일해야 google 토큰 교환이 통과한다(셀프리뷰 HIGH 수정).
         info = await self._oauth_client.exchange_code(code, redirect_uri)
         enc_access = self._cipher.encrypt(info["access_token"].encode())
-        enc_refresh = self._cipher.encrypt(info.get("refresh_token", "").encode())
+        refresh = info.get("refresh_token")
+        enc_refresh = self._cipher.encrypt(refresh.encode()) if refresh else None  # 부재 시 None(클로버 방어, 조장 LOW)
         scopes: list[str] = info.get("scopes", [])
         account_id = info.get("sub")  # google subject (slack=team_id 후속)
         display_name = info.get("email")  # google email (slack=workspace 후속)
@@ -51,10 +52,11 @@ class CompleteConnectionUseCase:
         if existing is not None:
             # ④ upsert — 기존 active 토큰 갱신 (active row 미증식)
             await self._credential_repo.update_data(existing.credential_id, enc_access)
-            await self._oauth_repo.update_tokens(
-                existing.credential_id,
-                {"access_token_encrypted": enc_access, "refresh_token_encrypted": enc_refresh},
-            )
+            # refresh 부재 시 refresh_token_encrypted 제외 → 기존 refresh 유지(클로버 방어, 조장 LOW).
+            new_tokens: dict = {"access_token_encrypted": enc_access}
+            if enc_refresh is not None:
+                new_tokens["refresh_token_encrypted"] = enc_refresh
+            await self._oauth_repo.update_tokens(existing.credential_id, new_tokens)
             return existing
 
         credential = await self._credential_repo.create(
