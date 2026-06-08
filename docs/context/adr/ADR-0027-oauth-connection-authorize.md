@@ -54,6 +54,20 @@ e2e 사용자 시나리오를 staging에서 실제 실행(execute)하니 `google
 | `GET` | `/connections/{service}/callback` | `code`→토큰교환→저장→프론트 settings로 복귀 |
 | `DELETE` | `/connections/{service}` | 연결 해제 |
 
+### 응답 계약 (가원 #417 프론트 요청 반영 — settings 연동 풀림)
+
+`GET /connections` 응답:
+```jsonc
+[
+  { "service": "google",          // 식별자: google | slack | erp
+    "display": "user@gmail.com",  // 표시용 — google=계정 이메일, slack=workspace명
+    "connected": true,
+    "status": "connected" }       // connected | expired (미해결 ① 토큰 refresh와 연계)
+]
+```
+
+**callback 복귀 시그널**: callback이 프론트로 리다이렉트할 때 결과를 쿼리로 전달 — 성공 `{frontend}/settings?connected={service}` / 실패 `{frontend}/settings?error={code}`. → 프론트가 복귀 후 토스트 + 목록 재조회.
+
 ### scope (노드 `required_connections` 충족)
 
 ```
@@ -104,7 +118,7 @@ settings "Google 연결" 클릭
 - **토큰 refresh 전략** — `update_tokens` 존재. 만료 시 트리거 주체 = resolver 만료 체크 후 갱신 vs 별도 스케줄.
 - google 앱 scope를 **로그인 앱과 통합 vs 분리**(incremental authorization).
 - `credentials` 테이블 ↔ `oauth_connections.credential_id` FK 저장 흐름 (connection 저장 시 credential row 동시 생성 여부).
-- **재연결(중복) 처리** (셀프 리뷰 MEDIUM) — 같은 user+service 재연결 시 `repo.create`만 하면 `oauth_connections.credential_id UNIQUE`(008 DDL) 충돌 / 중복 active row. 정책 택1: **upsert**(기존 active 있으면 `update_tokens`, 없으면 `create`) vs **`revoke` 후 `create`**. 동시 callback 2회 race도 같은 경로 — `CompleteConnectionUseCase`에서 처리.
+- **재연결(중복) 처리** — ✅ **upsert 확정** (가원 #417 프론트 UX + 셀프리뷰 합의): 같은 user+service 재연결 시 기존 active 있으면 `update_tokens`, 없으면 `create`. `CompleteConnectionUseCase`에서 처리(동시 callback 2회 race 포함). `revoke` 후 `create`는 중간 실패 시 "연결 끊김" 노출 UX 문제로 기각. 잔여 확정 = 토큰 비교/원자성 디테일.
 - **connection 저장 트랜잭션 경계** (셀프 리뷰 MEDIUM) — `credentials` row + `oauth_connections` row **2 write**가 별도 트랜잭션이면 partial state(connection 실패 시 고아 credential). 단일 트랜잭션/UoW로 묶을 것. 위 `credentials` FK 흐름과 연계.
 
 ---
