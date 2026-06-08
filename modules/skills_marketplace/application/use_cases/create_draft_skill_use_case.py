@@ -39,18 +39,23 @@ class CreateDraftSkillUseCase:
         embedding: list[float] | None = None,
         skill_document_uri: str | None = None,
         instructions: str | None = None,
+        composer_instructions: str | None = None,
         source_document_id: UUID | None = None,
     ) -> UUID:
         skill_id = uuid4()
 
-        # ADR-0017 이중 저장 — instructions(SKILL.md 본문)가 있으면 GCS에 저장하고 URI를 메타에 기록.
+        # ADR-0017 이중 저장 + ADR-0024 2-md — instructions(SKILL.md) / composer_instructions(COMPOSER.md)
+        # 중 하나라도 있으면 SkillDocument를 GCS에 저장하고 반환 URI를 메타에 기록한다.
         # bucket은 어댑터만 알기 때문에 어댑터가 반환한 URI를 그대로 사용 (2026-05-24 결정).
-        if self._doc_store is not None and instructions is not None:
+        # store.save는 SKILL.md를 항상 기록(부재 시 None load 트랩 회피, ADR-0024 D4)하므로
+        # composer 지침만 있는 스킬도 instructions=""로 안전하게 저장된다.
+        if self._doc_store is not None and (instructions is not None or composer_instructions is not None):
             document = SkillDocument(
                 skill_id=skill_id,
                 name=name,
                 description=description,
-                instructions=instructions,
+                instructions=instructions or "",
+                composer_instructions=composer_instructions or "",
             )
             skill_document_uri = await self._doc_store.save(skill_id, document)
 
