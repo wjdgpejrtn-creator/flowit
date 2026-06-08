@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Icon from '@/components/common/Icon';
 import Skel from '@/components/common/Skel';
+import { showToast } from '@/stores/toastStore';
 import { listCredentialAudit, type CredentialAuditEntry } from '@/lib/api/credentialApi';
 
 type FilterKey = 'all' | 'active' | 'revoked';
@@ -12,6 +13,10 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'active', label: '활성' },
   { key: 'revoked', label: '해지' },
 ];
+
+// 한 번에 불러오는 connection 수. 응답이 PAGE_SIZE와 같으면 더 있을 수 있어 "더 보기"를 노출한다
+// (silent truncation 방지 — 관리자가 잘림을 모른 채 일부만 보는 것 차단).
+const PAGE_SIZE = 200;
 
 const SERVICE_LABEL: Record<string, string> = { google: 'Google', slack: 'Slack' };
 
@@ -39,18 +44,36 @@ function errorMessage(err: unknown): string {
 export default function AdminCredentialsPage() {
   const [rows, setRows] = useState<CredentialAuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fetchKey, setFetchKey] = useState(0);
   const [filter, setFilter] = useState<FilterKey>('all');
+  // 직전 페이지가 가득 찼는지 — true면 추가 connection이 더 있을 수 있다.
+  const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
-    listCredentialAudit()
-      .then(setRows)
+    setHasMore(false);
+    listCredentialAudit(PAGE_SIZE, 0)
+      .then((page) => {
+        setRows(page);
+        setHasMore(page.length === PAGE_SIZE);
+      })
       .catch((err) => setError(errorMessage(err)))
       .finally(() => setLoading(false));
   }, [fetchKey]);
+
+  const loadMore = () => {
+    setLoadingMore(true);
+    listCredentialAudit(PAGE_SIZE, rows.length)
+      .then((page) => {
+        setRows((prev) => [...prev, ...page]);
+        setHasMore(page.length === PAGE_SIZE);
+      })
+      .catch((err) => showToast(errorMessage(err)))
+      .finally(() => setLoadingMore(false));
+  };
 
   const counts = useMemo(
     () => ({
@@ -74,7 +97,7 @@ export default function AdminCredentialsPage() {
         <p className="text-xs text-[var(--color-ink3)] mt-0.5">전사 OAuth 연결 추적 · 소유자·부서별</p>
       </div>
 
-      {/* 필터 알약 탭 */}
+      {/* 필터 알약 탭 — 더 있을 수 있으면 카운트에 + 표기(전수 아님을 명시) */}
       <div className="flex gap-1 mb-4">
         {FILTERS.map(({ key, label }) => (
           <button
@@ -88,7 +111,8 @@ export default function AdminCredentialsPage() {
                 : 'text-[var(--color-ink3)] hover:text-[var(--color-ink)] hover:bg-white/40',
             ].join(' ')}
           >
-            {label} ({counts[key]})
+            {label} ({counts[key]}
+            {hasMore ? '+' : ''})
           </button>
         ))}
       </div>
@@ -115,6 +139,7 @@ export default function AdminCredentialsPage() {
           <p className="text-sm font-bold text-[var(--color-ink)]">표시할 자격증명이 없습니다.</p>
         </div>
       ) : (
+        <>
         <div className="bg-white border border-[var(--color-line-soft)] rounded-2xl shadow-sm overflow-hidden">
           {/* 헤더 */}
           <div className="grid grid-cols-12 px-4 py-3 border-b border-[var(--color-line-soft)] text-[11px] font-bold uppercase tracking-wide text-[var(--color-ink3)]">
@@ -165,6 +190,21 @@ export default function AdminCredentialsPage() {
             ))}
           </div>
         </div>
+
+        {/* 더 보기 — 직전 페이지가 가득 찼을 때만 노출(잘림 미고지 방지) */}
+        {hasMore && (
+          <div className="flex justify-center mt-4">
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="text-xs px-4 py-2 rounded-lg border border-[var(--color-line-soft)] bg-white font-bold hover:bg-[var(--color-paper)] disabled:opacity-50"
+            >
+              {loadingMore ? '불러오는 중…' : '더 보기'}
+            </button>
+          </div>
+        )}
+        </>
       )}
     </div>
   );
