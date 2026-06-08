@@ -1,6 +1,6 @@
 """OAuth connection 관리 라우터 (ADR-0027).
 
-settings 통합 탭의 실제 연결 상태 조회(GET) + 연결 버튼(authorize/callback) + 해제(DELETE).
+settings 통합 탭 실제 연결 상태 조회(GET) + 연결 버튼(authorize/callback) + 해제(DELETE).
 가짜 '연결됨' 하드코딩(settings/page.tsx)을 이 라우터로 대체한다.
 """
 from __future__ import annotations
@@ -9,6 +9,7 @@ import logging
 import secrets
 
 import redis.asyncio as aioredis
+from common_schemas import ConnectionStatus
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -18,19 +19,15 @@ from auth.application.use_cases.list_connections_use_case import ListConnections
 from auth.application.use_cases.revoke_connection_use_case import RevokeConnectionUseCase
 from auth.application.use_cases.start_connection_authorize_use_case import StartConnectionAuthorizeUseCase
 from auth.domain.entities.user import User
-from auth.domain.ports.cipher_port import CipherPort
-from auth.domain.ports.credential_repository import CredentialRepository
-from auth.domain.ports.oauth_client_port import OAuthClientPort
-from auth.domain.ports.oauth_connection_repository import OAuthConnectionRepository
 
 from ..config import Settings
-from ..dependencies.auth import (
-    get_cipher,
-    get_credential_repository,
-    get_google_oauth,
-    get_oauth_repository,
-)
 from ..dependencies.clients import get_redis
+from ..dependencies.connections import (
+    get_complete_connection_use_case,
+    get_list_connections_use_case,
+    get_revoke_connection_use_case,
+    get_start_connection_use_case,
+)
 from ..dependencies.permission import get_current_user
 from ..dependencies.settings import get_settings
 
@@ -42,30 +39,17 @@ CONN_STATE_PREFIX = "conn_oauth_state:"
 CONN_STATE_TTL_SECONDS = 600
 
 
-class ConnectionResponse(BaseModel):
-    """ADR-0027 응답 계약. display=google 이메일 / slack workspace (미확보 시 null)."""
-
-    service: str
-    display: str | None
-    connected: bool
-    status: str  # "connected" | "expired"
-
-
 class AuthorizeConnectionResponse(BaseModel):
     authorization_url: str
     state: str
 
 
-@router.get("", response_model=list[ConnectionResponse])
+@router.get("", response_model=list[ConnectionStatus])
 async def list_connections(
     user: User = Depends(get_current_user),
-    oauth_repo: OAuthConnectionRepository = Depends(get_oauth_repository),
-) -> list[ConnectionResponse]:
-    statuses = await ListConnectionsUseCase(oauth_repo).execute(user.user_id)
-    return [
-        ConnectionResponse(service=s.service, display=s.display, connected=s.connected, status=s.status)
-        for s in statuses
-    ]
+    use_case: ListConnectionsUseCase = Depends(get_list_connections_use_case),
+) -> list[ConnectionStatus]:
+    return await use_case.execute(user.user_id)
 
 
 @router.get("/{service}/authorize", response_model=AuthorizeConnectionResponse)
@@ -73,17 +57,16 @@ async def authorize_connection(
     request: Request,
     service: str,
     user: User = Depends(get_current_user),
-    google_oauth: OAuthClientPort = Depends(get_google_oauth),
+    use_case: StartConnectionAuthorizeUseCase = Depends(get_start_connection_use_case),
     redis: aioredis.Redis | None = Depends(get_redis),
     settings: Settings = Depends(get_settings),
 ) -> AuthorizeConnectionResponse:
     """connection authorize URL 발급 — 프론트가 이 URL로 리다이렉트해 동의 화면을 띄운다."""
     try:
         state = secrets.token_urlsafe(24)
-        # redirect_uri = 이 connection의 callback 경로 — 로그인 callback과 분리(셀프리뷰 HIGH 수정).
-        # callback의 exchange_code와 동일 값이어야 google 검증 통과 → google 앱에 등록 필요(조장).
+        # redirect_uri = 이 connection의 callback 경로 — 로그인 callback과 분리(redirect mismatch 방지).
         redirect_uri = str(request.url_for("callback_connection", service=service))
-        url = StartConnectionAuthorizeUseCase(google_oauth).build_authorization_url(service, state, redirect_uri)
+        url = use_case.build_authorization_url(service, state, redirect_uri)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -97,7 +80,7 @@ async def authorize_connection(
 
 
 async def _consume_conn_state(state: str | None, redis: aioredis.Redis | None, settings: Settings) -> None:
-    """connection callback state 검증 + 일회 소진 (GETDEL). invalid/expired 시 401."""
+    """connection callback state 검증 + 일회 소진(GETDEL). invalid/expired 시 401."""
     if redis is None:
         if settings.is_production():
             raise HTTPException(status_code=503, detail="OAuth state store unavailable (Redis required in production)")
@@ -116,21 +99,16 @@ async def callback_connection(
     code: str = Query(..., description="OAuth authorization code"),
     state: str | None = Query(None, description="CSRF state (authorize에서 발급)"),
     user: User = Depends(get_current_user),
-    oauth_repo: OAuthConnectionRepository = Depends(get_oauth_repository),
-    credential_repo: CredentialRepository = Depends(get_credential_repository),
-    cipher: CipherPort = Depends(get_cipher),
-    google_oauth: OAuthClientPort = Depends(get_google_oauth),
+    use_case: CompleteConnectionUseCase = Depends(get_complete_connection_use_case),
     redis: aioredis.Redis | None = Depends(get_redis),
     settings: Settings = Depends(get_settings),
 ) -> RedirectResponse:
     """OAuth redirect_uri 수신 — code 교환·저장 후 settings로 복귀(쿼리로 성공/실패 시그널)."""
     await _consume_conn_state(state, redis, settings)
-    # authorize와 동일 redirect_uri로 토큰 교환 — google 검증 통과 필수(셀프리뷰 HIGH 수정).
+    # authorize와 동일 redirect_uri로 토큰 교환 — google 검증 통과 필수.
     redirect_uri = str(request.url_for("callback_connection", service=service))
     try:
-        await CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, google_oauth).execute(
-            user.user_id, service, code, redirect_uri
-        )
+        await use_case.execute(user.user_id, service, code, redirect_uri)
     except Exception as exc:
         logger.warning("connection callback 실패 (%s): %s", service, exc)
         return RedirectResponse(url=f"{settings.frontend_url}/settings?error=connect_failed", status_code=302)
@@ -141,7 +119,7 @@ async def callback_connection(
 async def revoke_connection(
     service: str,
     user: User = Depends(get_current_user),
-    oauth_repo: OAuthConnectionRepository = Depends(get_oauth_repository),
+    use_case: RevokeConnectionUseCase = Depends(get_revoke_connection_use_case),
 ) -> dict:
-    revoked = await RevokeConnectionUseCase(oauth_repo).execute(user.user_id, service)
+    revoked = await use_case.execute(user.user_id, service)
     return {"service": service, "revoked": revoked}
