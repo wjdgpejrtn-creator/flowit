@@ -24,7 +24,7 @@ e2e 사용자 시나리오를 staging에서 실제 실행(execute)하니 `google
 |---|---|
 | `oauth_connections` 테이블 (service, credential_id FK, access/refresh_token_encrypted, scopes, is_active…) | `database/schemas/008_oauth_security.sql` |
 | `OAuthConnection` 엔티티 | `modules/auth/domain/entities/oauth_connection.py` |
-| `OAuthConnectionRepository`: **`create` / `get_active_for_user` / `update_tokens` / `revoke` / `get_by_credential_id`** | `modules/auth/domain/ports/` |
+| `OAuthConnectionRepository`: **`create` / `get_active_for_user` / `update_tokens` / `revoke` / `get_by_credential_id`** (전체목록용 `list_for_user`만 신규 — 아래 gap) | `modules/auth/domain/ports/` |
 | `CipherPort` / `AESGCMCipher` (토큰 암호화) | `modules/auth/` |
 | `OAuthConnectionResolver` (노드 주입, PR #348) | `modules/ai_agent/adapters/connection_resolver_adapter.py` |
 
@@ -34,11 +34,15 @@ e2e 사용자 시나리오를 staging에서 실제 실행(execute)하니 `google
 
 ## Decision — 생성 측 gap만 채운다
 
+### Port 메서드 추가 (auth/domain/ports — 조장 #417 리뷰 MEDIUM 반영)
+
+- **신규** `OAuthConnectionRepository.list_for_user(user_id) -> list[OAuthConnection]` — settings용 사용자 **전체** 연결 목록. 기존 `get_active_for_user(user_id, service)`는 **단일 service → 단일 connection** 시그니처라 전체 목록을 못 만든다. 구현은 storage(`PgOAuthConnectionRepository`).
+
 ### use case (auth/application/use_cases)
 
 1. `StartConnectionAuthorizeUseCase` — service별 `authorization_url` + `state`(CSRF, Redis) 생성
 2. `CompleteConnectionUseCase` — callback `code` → 토큰 교환 → `repo.create(user_id, service, tokens)` (토큰은 `AESGCMCipher` 암호화)
-3. `ListConnectionsUseCase` — `repo.get_active_for_user` 기반 사용자 연결 목록
+3. `ListConnectionsUseCase` — **신규 `repo.list_for_user(user_id)`** 기반 사용자 연결 목록 (조장 #417 MEDIUM 반영 — `get_active_for_user`는 단일 service라 부적합)
 4. `RevokeConnectionUseCase` — `repo.revoke`
 
 ### 엔드포인트 (api_server, `/api/v1/connections`)
@@ -93,7 +97,7 @@ settings "Google 연결" 클릭
 - 토큰 `AESGCMCipher` 암호화 저장 (평문 금지).
 
 ### Negative / Trade-offs
-- google OAuth 앱 scope 확장 = Google 검증(verification) 필요 가능성 (민감 scope).
+- google OAuth 앱 scope 확장 = Google 검증(verification) 필요 가능성 (민감 scope) — **일정 리스크로 추적** (조장 #417 LOW).
 - 프론트 settings 더미 제거까지 묶여야 사용자 눈에 "연결됨"이 진실이 됨.
 
 ### 미해결 (논의 필요)
