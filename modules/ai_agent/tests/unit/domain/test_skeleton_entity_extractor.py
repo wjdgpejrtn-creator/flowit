@@ -69,3 +69,22 @@ def test_full_e2e_bug_utterance() -> None:
     assert e.transforms == ("anthropic_chat",)
     assert e.sinks == ("slack_post_message",)
     assert e.needs_gate is False
+    assert e.has_branch is False
+    assert e.has_fanout is False
+
+
+def test_branch_signal_detected() -> None:
+    e = _X.extract("긴급하면 슬랙, 아니면 이메일로 보내줘")
+    assert e.has_branch is True
+    assert e.has_unsupported_shape() is True
+
+
+def test_fanout_signal_detected() -> None:
+    e = _X.extract("각 항목마다 요약해서 저장")
+    assert e.has_fanout is True
+    assert e.has_unsupported_shape() is True
+
+
+def test_plain_pipeline_has_no_shape_signal() -> None:
+    e = _X.extract("매주 시트 읽어서 요약해서 슬랙으로 보내줘")
+    assert e.has_unsupported_shape() is False

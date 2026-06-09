@@ -90,10 +90,19 @@ class ExtractedEntities:
     transforms: tuple[str, ...] = ()
     sinks: tuple[str, ...] = ()
     needs_gate: bool = False
+    # 현 스켈레톤(선형/루프)이 표현 못 하는 제어흐름 shape 신호. 잡히면 조립기가 LLM으로
+    # bail한다(억지 선형 납작화보다 LLM 시도가 나음). 향후 branch/fan_out 스켈레톤이 생기면
+    # 해당 스켈레톤으로 라우팅(ADR-0026 §6.6 라이브러리 확장 로드맵, §9.3 van der Aalst 모티프).
+    has_branch: bool = False   # XOR 분기 — "~이면 …, 아니면 …" (Exclusive Choice / Routing)
+    has_fanout: bool = False   # 병렬 팬아웃 — "각 항목마다 …" (Parallel Split / Orchestrator-Workers)
 
     def is_empty(self) -> bool:
         """트리거 외에 아무 슬롯 재료도 없으면 True(조립 무의미 — fast-path/폴백 판단용)."""
         return not (self.sources or self.transforms or self.sinks or self.needs_gate)
+
+    def has_unsupported_shape(self) -> bool:
+        """현 스켈레톤 라이브러리가 결정적으로 못 짜는 제어흐름인지(분기/팬아웃)."""
+        return self.has_branch or self.has_fanout
 
 
 @dataclass(frozen=True)

@@ -97,11 +97,33 @@ def test_chitchat_returns_none() -> None:
     assert _A.assemble("안녕 오늘 날씨 어때") is None
 
 
-def test_sink_missing_emits_warning_not_crash() -> None:
-    # sink는 발화 의존(default 없음) — 못 뽑으면 경고만, 조립은 진행(끊기지 않음).
-    d = _A.assemble("매주 시트 읽어서 요약")
+def test_sink_missing_bails_to_llm() -> None:
+    # sink(출력 채널)를 발화에서 못 채우면 토막 골격 대신 LLM 폴백(불완전 커버리지 게이트).
+    assert _A.assemble("매주 시트 읽어서 요약") is None
+
+
+def test_branch_request_bails_to_llm() -> None:
+    # XOR 분기는 현 라이브러리가 결정적으로 못 짬 → 선형 납작화 대신 LLM 폴백.
+    assert _A.assemble("문의가 들어오면 분류해서 긴급하면 슬랙, 아니면 이메일로 보내줘") is None
+
+
+def test_fanout_request_bails_to_llm() -> None:
+    # 병렬 팬아웃도 미지원 shape → LLM 폴백.
+    assert _A.assemble("목록의 각 항목마다 요약해서 슬랙으로 보내줘") is None
+
+
+def test_multiple_sinks_fan_out_in_parallel() -> None:
+    # 복수 sink는 직렬(sink→sink)이 아니라 마지막 처리 노드에서 병렬 분기.
+    d = _A.assemble("매주 시트 읽어서 요약해서 슬랙이랑 이메일 둘 다 보내줘")
     assert d is not None
-    assert any("sink" in w for w in d.warnings)
+    transform = next(n for n in d.nodes if n.role == SlotRole.TRANSFORM)
+    sinks = [n for n in d.nodes if n.role == SlotRole.SINK]
+    assert len(sinks) == 2
+    # 두 sink 모두 transform에서 직접 나오고, sink끼리 잇는 엣지는 없다.
+    for s in sinks:
+        assert any(e.from_ref == transform.ref and e.to_ref == s.ref for e in d.edges)
+    sink_refs = {s.ref for s in sinks}
+    assert not any(e.from_ref in sink_refs and e.to_ref in sink_refs for e in d.edges)
 
 
 # ── 변환기 ─────────────────────────────────────────────────────────────────

@@ -58,6 +58,19 @@ _GATE_KEYWORDS: tuple[str, ...] = (
     "검증", "품질", "재생성", "반복 개선", "개선해서", "점수가", "퀄리티",
 )
 
+# ── 미지원 shape 신호 (현 라이브러리=선형/루프만) ─────────────────────────────
+# 잡히면 조립기가 LLM으로 bail — 억지 선형 납작화 방지. 향후 branch/fan_out 스켈레톤이
+# 생기면 라우팅 신호로 승격(ADR-0026 §6.6 확장). 과활성을 피해 분기/병렬을 명확히 가리키는
+# 구절만 둔다(예: 단독 "면"은 "하면/되면" 등 빈출이라 금지, "아니면"처럼 양자택일만).
+_BRANCH_KEYWORDS: tuple[str, ...] = (
+    "아니면", "아니라면", "그렇지 않으면", "그 외에는", "경우에 따라", "에 따라 다르",
+    "분기", "조건에 따라", "라면 ", "이라면 ",
+)
+_FANOUT_KEYWORDS: tuple[str, ...] = (
+    "각각", "각 항목", "항목마다", "항목별", "그룹별", "건마다", "건별", "개별적으로",
+    "전부 각", "하나하나", "병렬",
+)
+
 
 def _match_single(text: str, rules: tuple[tuple[str, tuple[str, ...]], ...]) -> str | None:
     """우선순위 순으로 첫 매칭 node_type 반환(트리거용)."""
@@ -101,4 +114,6 @@ class SkeletonEntityExtractor:
             transforms=_match_ordered(text, _TRANSFORM_RULES),
             sinks=sinks,
             needs_gate=any(kw in text for kw in _GATE_KEYWORDS),
+            has_branch=any(kw in text for kw in _BRANCH_KEYWORDS),
+            has_fanout=any(kw in text for kw in _FANOUT_KEYWORDS),
         )

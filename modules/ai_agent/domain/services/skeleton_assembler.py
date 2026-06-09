@@ -73,17 +73,27 @@ class SkeletonAssembler:
 
     # ── 조립 ────────────────────────────────────────────────────────────────
     def assemble(self, utterance: str) -> AssembledDraft | None:
-        """발화를 결정적 워크플로우 골격으로 조립. 조립할 재료가 없으면 None(LLM 폴백).
+        """발화를 결정적 워크플로우 골격으로 조립. 확신이 없으면 None(LLM drafter 폴백).
 
-        None 반환 = 트리거 외 슬롯 재료(source/transform/sink/gate)가 전무 → 잡담이거나
-        스켈레톤이 잡지 못하는 요청. composer는 이때 기존 LLM drafter 경로로 폴백한다.
+        스켈레톤은 "전부 처리"가 아니라 "확신할 때만 처리하는 fast-path"다(ADR-0026 §6.6).
+        다음 셋 중 하나면 None을 반환해 composer가 기존 LLM drafter로 폴백하게 한다 —
+        억지로 선형에 납작하게 끼워맞춰 confident-wrong 워크플로우를 내는 것보다 낫다:
+
+        1. 슬롯 재료 전무(트리거 외) — 잡담이거나 카탈로그 밖 요청.
+        2. **미지원 shape** — 분기(XOR)/팬아웃(병렬). 현 라이브러리는 선형/루프만 결정적으로
+           짜므로, 이런 모양은 LLM에 맡긴다(향후 branch/fan_out 스켈레톤 추가 시 라우팅).
+        3. **불완전 커버리지** — required 슬롯(예: 출력 채널)을 발화에서 못 채워 조립이 토막남.
+           불완전 골격보다 LLM의 시도/되묻기가 낫다.
         """
         text = utterance.lower()
         entities = self._extractor.extract(text)
-        if entities.is_empty():
+        if entities.is_empty() or entities.has_unsupported_shape():
             return None
         skeleton = self._select(entities, text)
-        return self._fill_and_wire(skeleton, entities)
+        draft = self._fill_and_wire(skeleton, entities)
+        if any("미충전" in w for w in draft.warnings):
+            return None
+        return draft
 
     def _fill_and_wire(self, skeleton: Skeleton, entities: ExtractedEntities) -> AssembledDraft:
         warnings: list[str] = []
@@ -119,25 +129,34 @@ class SkeletonAssembler:
             for a, b in zip(seq, seq[1:]):
                 edges.append(DraftEdge(from_ref=a.ref, to_ref=b.ref))
 
+        def fan_sinks(source_ref: str, handle: str = "output") -> None:
+            # 복수 sink는 직렬(sink→sink)이 아니라 마지막 처리 노드에서 **병렬 분기**한다
+            # ("요약해서 슬랙이랑 이메일 둘 다" = transform→slack, transform→email).
+            for s in sinks:
+                edges.append(DraftEdge(from_ref=source_ref, to_ref=s.ref, from_handle=handle))
+
         if gate and transforms:
-            # 검증 루프: trigger→source→transform 선형, 마지막 transform↔gate back-edge,
-            # gate 통과(true)→sink(있으면). quality_gate_loop 구조·엔진 계약 그대로.
-            pre = trigger + sources + transforms
-            chain(pre)
+            # 검증 루프: trigger→source→transform 선형(spine), 마지막 transform↔gate back-edge,
+            # gate 통과(true)→sink 병렬 분기. quality_gate_loop 구조·엔진 계약 그대로.
+            spine = trigger + sources + transforms
+            chain(spine)
             gen = transforms[-1]
             evaluator = gate[0]
             edges.append(DraftEdge(from_ref=gen.ref, to_ref=evaluator.ref))
             edges.append(DraftEdge(from_ref=evaluator.ref, to_ref=gen.ref, from_handle="false"))
-            if sinks:
-                edges.append(DraftEdge(from_ref=evaluator.ref, to_ref=sinks[0].ref, from_handle="true"))
-                chain(sinks)
+            fan_sinks(evaluator.ref, handle="true")
         else:
-            # 선형 파이프라인: trigger→source→transform→sink.
+            # 선형 파이프라인: trigger→source→transform 선형(spine) → sink 병렬 분기.
             if gate and not transforms:  # 방어 — 선택 규칙상 도달 불가(quality_loop가 transform 강제)
                 warnings.append("gate 슬롯이 transform 없이 활성 — gate 무시")
                 gate = []
                 all_nodes = trigger + sources + transforms + sinks
-            chain(trigger + sources + transforms + sinks)
+            spine = trigger + sources + transforms
+            chain(spine)
+            if spine:
+                fan_sinks(spine[-1].ref)
+            else:
+                chain(sinks)  # spine 전무(트리거조차 없음) — 방어적 sink 직렬
 
         return AssembledDraft(
             skeleton_name=skeleton.name,
