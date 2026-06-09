@@ -74,7 +74,10 @@ SKELETONS: tuple[Skeleton, ...] = (
             SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
             SlotSpec(SlotRole.TRANSFORM, required=False, cardinality="many", candidates=_AI),
             SlotSpec(SlotRole.GATE, required=False, cardinality="one", candidates=_GATES),
-            SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
+            # sink optional — "주간 보고서 작성"처럼 출력 채널 미언급 요청도 trigger→…→transform
+            # 종단으로 결정적 조립(간결한 실제 발화 커버리지, 2026-06-09 측정). is_empty 가드가
+            # 트리거뿐인 무의미 조립은 막는다. branch/approval은 타깃 필요라 sink 필수 유지.
+            SlotSpec(SlotRole.SINK, required=False, cardinality="many", candidates=_SINKS),
         ),
     ),
     # ── event_response ──────────────────────────────────────────────────────
@@ -89,7 +92,8 @@ SKELETONS: tuple[Skeleton, ...] = (
             SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
             SlotSpec(SlotRole.TRANSFORM, required=False, cardinality="many", candidates=_AI),
             SlotSpec(SlotRole.GATE, required=False, cardinality="one", candidates=_GATES),
-            SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
+            # sink optional (scheduled_pipeline과 동일 사유 — 간결 발화 커버리지).
+            SlotSpec(SlotRole.SINK, required=False, cardinality="many", candidates=_SINKS),
         ),
     ),
     # ── quality_loop ────────────────────────────────────────────────────────

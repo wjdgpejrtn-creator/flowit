@@ -7,6 +7,16 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.22.0] - 2026-06-09
+
+### Added — 비실재 노드 검증 코드 (ADR-0026 §6.6)
+
+- `enums.py` `ErrorCode.E_UNKNOWN_NODE_TYPE` 추가 — 워크플로우 노드가 카탈로그에 실재하지 않는 node_type/node_id를 참조할 때 `GraphValidator`가 검증 시점에 거부하는 코드. LLM이 임시 생성한 비실재 노드가 QA를 통과한 뒤 실행 단계에서 executor 없어 실패하는 것을 차단(방어 심층 — compose+execute 공통 chokepoint). 신규 enum 멤버 → MINOR. TS `ErrorCode` regenerate 반영.
+
+### Fixed — stale enum count 테스트 교정 (drive-by)
+
+- `test_enums.py` `ErrorCode`(7→9) / `IntentType`(5→9) member_count assertion이 직전 멤버 추가(E_INVALID_TRIGGER, fast-path IntentType 4종) 후 갱신 누락돼 red였던 것을 실제 수에 맞게 교정. CI에 enum 테스트 게이트 부재로 미검출됐던 것 — 본 변경으로 green 복구.
+
 ## [0.21.0] - 2026-06-08
 
 ### Added — OAuth connection 상태 (ADR-0027)
