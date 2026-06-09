@@ -1,15 +1,15 @@
 """DocumentRepository 구현체 — `doc_parser.domain.ports.DocumentRepositoryPort` 상속.
 
-`save` / `save_chunks` / `save_quality_log` 3 메서드를 PG ORM에 매핑한다.
-모든 입력은 typed VO(`DocumentBlock` / `Chunk` / `QualityGateResult`) — JSONB 컬럼
-저장 시점에 `.model_dump()`로 변환한다.
+`save` / `save_chunks` / `save_quality_log` / `get_by_id` / `list_by_owner` / `delete`를
+PG ORM에 매핑한다. 모든 입력은 typed VO(`DocumentBlock` / `Chunk` / `QualityGateResult`) —
+JSONB 컬럼 저장 시점에 `.model_dump()`로 변환한다.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from common_schemas import Chunk, DocumentBlock, QualityGateResult
@@ -69,3 +69,23 @@ class PgDocumentRepository(DocumentRepositoryPort):
         )
         self._session.add(model)
         await self._session.flush()
+
+    async def delete(self, document_id: UUID) -> bool:
+        # hard delete — 자식(chunks/quality_log) 먼저 명시 제거 후 부모 삭제.
+        # FK ON DELETE CASCADE가 있어도 DDL에 의존하지 않고 코드에서 보장(고아 방지).
+        # GCS 원본 삭제는 라우터(api_server)가 object_storage로 수행 — Repo는 DB만 책임.
+        model = await self._session.get(DocumentModel, document_id)
+        if model is None:
+            return False
+
+        await self._session.execute(
+            delete(DocumentChunkModel).where(
+                DocumentChunkModel.parent_document_id == document_id
+            )
+        )
+        await self._session.execute(
+            delete(QualityLogModel).where(QualityLogModel.document_id == document_id)
+        )
+        await self._session.delete(model)
+        await self._session.flush()
+        return True
