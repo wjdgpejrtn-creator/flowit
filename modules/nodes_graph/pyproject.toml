@@ -1,7 +1,7 @@
 [project]
 name = "nodes_graph"
 version = "0.1.0"
-description = "REQ-003: 53종 노드 정의 카탈로그, 그래프 검증, 직렬화"
+description = "REQ-003: 54종 노드 정의 카탈로그, 그래프 검증, 직렬화"
 requires-python = ">=3.12"
 dependencies = [
     "common_schemas",

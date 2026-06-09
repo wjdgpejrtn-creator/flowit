@@ -23,6 +23,10 @@ from .skeleton_library import SKELETONS, find_skeleton
 # WorkflowSchema로 만들고 LLM이 파라미터만 채운다(step 5).
 
 _GATE_DEFAULT = "if_condition"
+# 콘텐츠(transform) 산출물이 갈 곳이 없을 때의 기본 출력 — "보고서 작성"처럼 출력 채널을
+# 발화에서 안 준 경우 산출물을 문서로 떨군다(2026-06-09 측정: sink 없는 transform-종단을 qa가
+# 불완전으로 저평가). 문서가 보고서/생성물의 자연스러운 기본 산출처(google_docs_write).
+_DEFAULT_CONTENT_SINK = "google_docs_write"
 
 
 class SkeletonAssembler:
@@ -86,8 +90,9 @@ class SkeletonAssembler:
     ) -> tuple[dict[SlotRole, list[DraftNode]], list[str]]:
         """스켈레톤 슬롯을 추출 엔티티로 채운다. required인데 비고 default도 없으면 경고.
 
-        반환: (역할→DraftNode 목록, 경고 목록). control 슬롯(router/splitter/merger)은
-        _materials가 () → required+default로 항상 채워진다(사용자가 loop_list를 발화하지 않음).
+        반환: (역할→DraftNode 목록, 경고 목록). control 슬롯(router/splitter/merger)과
+        scorer는 _materials가 () → required+default로 항상 채워진다(사용자가 loop_list나
+        llm_judge를 발화하지 않으므로 구조 슬롯은 코드가 결정).
         """
         warnings: list[str] = []
         by_role: dict[SlotRole, list[DraftNode]] = {}
@@ -159,10 +164,17 @@ class SkeletonAssembler:
         trigger = by_role.get(SlotRole.TRIGGER, [])
         sources = by_role.get(SlotRole.SOURCE, [])
         transforms = by_role.get(SlotRole.TRANSFORM, [])
+        scorer = by_role.get(SlotRole.SCORER, [])
         gate = by_role.get(SlotRole.GATE, [])
         sinks = by_role.get(SlotRole.SINK, [])
 
-        all_nodes = trigger + sources + transforms + sinks + gate
+        # 콘텐츠 생산(transform)이 있는데 출력 채널이 없으면 기본 문서 출력 부여 — 산출물이 갈 곳
+        # 없는 워크플로우를 qa가 불완전으로 저평가하는 것 방지. 순수 선형(gate 없음)에만 적용:
+        # quality_loop(gate)는 점수갭(#438)이 본질이라 무관. source-only(transform 없음)는 종단 유지.
+        if transforms and not sinks and not gate:
+            sinks = [DraftNode(ref="sink_0", node_type=_DEFAULT_CONTENT_SINK, role=SlotRole.SINK)]
+
+        all_nodes = trigger + sources + transforms + scorer + sinks + gate
         edges: list[DraftEdge] = []
 
         def fan_sinks(source_ref: str, handle: str = "output") -> None:
@@ -171,11 +183,18 @@ class SkeletonAssembler:
                 edges.append(DraftEdge(from_ref=source_ref, to_ref=s.ref, from_handle=handle))
 
         if gate and transforms:
-            # 검증 루프: spine 선형, 마지막 transform↔gate back-edge, gate 통과(true)→sink 분기.
+            # 검증 루프: spine 선형 → scorer(점수화) → gate, gate→generator back-edge(재생성),
+            # gate 통과(true)→sink 분기. scorer가 score를 내고 gate가 그 점수를 gte 비교한다
+            # (#438 §6.6). back-edge는 scorer가 아니라 generator로 — 재생성 후 다시 채점 루프.
             spine = trigger + sources + transforms
             self._chain(edges, spine)
             gen, evaluator = transforms[-1], gate[0]
-            edges.append(DraftEdge(from_ref=gen.ref, to_ref=evaluator.ref))
+            if scorer:
+                judge = scorer[0]
+                edges.append(DraftEdge(from_ref=gen.ref, to_ref=judge.ref))
+                edges.append(DraftEdge(from_ref=judge.ref, to_ref=evaluator.ref))
+            else:  # 방어 — scorer 슬롯 없는 스켈레톤(현재 quality_loop만 보유)
+                edges.append(DraftEdge(from_ref=gen.ref, to_ref=evaluator.ref))
             edges.append(DraftEdge(from_ref=evaluator.ref, to_ref=gen.ref, from_handle="false"))
             fan_sinks(evaluator.ref, handle="true")
         else:

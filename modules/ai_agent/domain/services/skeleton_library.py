@@ -13,7 +13,7 @@ from ..value_objects.skeleton import Skeleton, SlotRole, SlotSpec
 # default_node_type은 required 슬롯이 발화에서 비었을 때의 폴백(trigger 등). 슬롯 순서가 곧
 # 선형 배선 순서이며, GATE는 직전 transform과 back-edge 루프를 이룬다(조립기 책임).
 
-# ── 슬롯 후보 풀 (카탈로그 category 기반, 53종 중) ──────────────────────────────
+# ── 슬롯 후보 풀 (카탈로그 category 기반, 54종 중) ──────────────────────────────
 # 발화에서 추출된 node_type만 실제로 슬롯에 들어가므로, candidates는 "이 슬롯이 허용하는
 # 집합"(그래프 FILLED_BY)이다. 조립기는 추출 엔티티가 candidates에 속할 때만 채운다.
 _TRIGGERS: tuple[str, ...] = (
@@ -36,6 +36,10 @@ _SOURCES: tuple[str, ...] = (
     "file_read",
 )
 _AI: tuple[str, ...] = ("anthropic_chat", "gemma_chat")
+# scorer = 생성물을 기준에 따라 채점하는 ai 노드. quality_loop에서 generator와 gate(if_condition)
+# 사이에 들어가 score(number)를 내고, gate가 그 점수를 gte 비교한다(#438 §6.6 — 점수 내는 노드 부재
+# 갭 해소). condition이 아니라 ai 노드이므로 _GATES와 분리.
+_SCORERS: tuple[str, ...] = ("llm_judge",)
 _SINKS: tuple[str, ...] = (
     "slack_post_message",
     "slack_notify",
@@ -98,8 +102,11 @@ SKELETONS: tuple[Skeleton, ...] = (
     ),
     # ── quality_loop ────────────────────────────────────────────────────────
     # van der Aalst Structured Loop + agentic Evaluator-Optimizer. quality_gate_loop의
-    # 결정적 부활 — soft 힌트가 아니라 코드가 back-edge를 깐다(§6.6.4). generator(ai)와
-    # evaluator(condition)가 필수이며 둘이 루프를 이룬다.
+    # 결정적 부활 — soft 힌트가 아니라 코드가 back-edge를 깐다(§6.6.4). generator(ai)→
+    # scorer(llm_judge, 점수화)→evaluator(if_condition, gte 비교)가 필수이며 generator↔evaluator가
+    # 루프를 이룬다. scorer는 #438 §6.6에서 추가 — gate가 비교할 score를 내는 노드가 카탈로그에
+    # 없던 갭을 메운다(점수 없이는 if_condition이 의미 비교 불가). SCC={generator,scorer,evaluator}에
+    # condition(evaluator) 포함 → CyclicScheduler 수용(#392).
     Skeleton(
         name="quality_loop",
         intent_keywords=("통과할 때까지", "검증", "품질", "재생성", "만족할 때까지", "기준 충족", "반복 개선"),
@@ -109,6 +116,8 @@ SKELETONS: tuple[Skeleton, ...] = (
             SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
             SlotSpec(SlotRole.TRANSFORM, required=True, cardinality="one",
                      default_node_type="anthropic_chat", candidates=_AI),
+            SlotSpec(SlotRole.SCORER, required=True, cardinality="one",
+                     default_node_type="llm_judge", candidates=_SCORERS),
             SlotSpec(SlotRole.GATE, required=True, cardinality="one",
                      default_node_type="if_condition", candidates=_GATES),
             SlotSpec(SlotRole.SINK, required=False, cardinality="many", candidates=_SINKS),

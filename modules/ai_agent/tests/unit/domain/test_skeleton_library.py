@@ -1,6 +1,6 @@
 """스켈레톤 라이브러리 그라운딩 가드 (ADR-0026 §6.6 시드 원칙 ①).
 
-슬롯 후보·default node_type이 전부 카탈로그(53종)에 실재하는지 카탈로그 대조로 강제한다.
+슬롯 후보·default node_type이 전부 카탈로그(54종)에 실재하는지 카탈로그 대조로 강제한다.
 없는 node_type을 시드하면 조립기가 환각 노드를 생성하므로(§6.1 원칙 계승) 회귀 차단.
 """
 from __future__ import annotations
@@ -49,13 +49,18 @@ def test_skeletons_have_intent_keywords_and_unique_names() -> None:
         assert skel.intent_keywords, f"{skel.name}: intent_keywords 비어있음"
 
 
-def test_quality_loop_has_generator_and_gate() -> None:
-    # quality_gate_loop의 결정적 부활 — transform(generator)+gate(evaluator) 둘 다 required.
+def test_quality_loop_has_generator_scorer_and_gate() -> None:
+    # quality_gate_loop의 결정적 부활 — transform(generator)+scorer(채점)+gate(evaluator)
+    # 셋 다 required. scorer(#438 §6.6)가 gate가 비교할 score를 낸다.
     skel = find_skeleton("quality_loop")
     assert skel is not None
     transform = skel.slot(SlotRole.TRANSFORM)
+    scorer = skel.slot(SlotRole.SCORER)
     gate = skel.slot(SlotRole.GATE)
     assert transform is not None and transform.required
+    assert scorer is not None and scorer.required
+    assert scorer.default_node_type == "llm_judge"
+    assert scorer.candidates == ("llm_judge",)
     assert gate is not None and gate.required
 
 

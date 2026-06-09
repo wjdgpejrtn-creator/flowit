@@ -4,6 +4,7 @@ httpx.AsyncClient를 fake로 치환해 검증.
 - anthropic_chat: Anthropic Messages API (connection_token = API key)
 - linear_create_issue: Linear GraphQL issueCreate (connection_token = API key)
 - gemma_chat: llm-base /v1/generate (credential 불필요, LLM_BASE_URL 기반)
+- llm_judge: Anthropic Messages API로 채점 — score:number + reason (#438 §6.6 품질 루프 scorer)
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from nodes_graph.adapters.catalog.external.linear_create_issue import (
     LinearCreateIssueInput,
     LinearCreateIssueNode,
 )
+from nodes_graph.adapters.catalog.external.llm_judge import LlmJudgeInput, LlmJudgeNode
 
 NODE_CTX = NodeContext(execution_id=uuid4(), user_id=uuid4())
 
@@ -227,3 +229,90 @@ async def test_gemma_chat_missing_base_url_raises(fake_http, monkeypatch):
     monkeypatch.delenv("LLM_BASE_URL", raising=False)
     with pytest.raises(ExecutionError, match="LLM_BASE_URL"):
         await GemmaChatNode().process(GemmaChatInput(prompt="hi"), NODE_CTX)
+
+
+# ----------------------------------------------------------------------
+# llm_judge (#438 §6.6 품질 루프 scorer)
+# ----------------------------------------------------------------------
+
+
+def _judge_response(text: str) -> _FakeResponse:
+    return _FakeResponse(
+        200,
+        {
+            "content": [{"type": "text", "text": text}],
+            "stop_reason": "end_turn",
+            "model": "claude-haiku-4-5",
+            "usage": {"input_tokens": 30, "output_tokens": 20},
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_returns_numeric_score_and_reason(fake_http):
+    fake_http.response = _judge_response('{"score": 8, "reason": "기준 대부분 충족"}')
+    out = await LlmJudgeNode().process(
+        LlmJudgeInput(content="보고서 초안", criteria="명료성·완결성"),
+        _ctx_with_token("sk-ant-test"),
+    )
+    assert out.score == 8.0
+    assert isinstance(out.score, float)  # if_condition gte가 숫자 비교 — float 보장
+    assert out.reason == "기준 대부분 충족"
+    assert out.usage == {"input_tokens": 30, "output_tokens": 20}
+    # 채점은 결정적 — temperature 0, system 프롬프트로 JSON 강제
+    assert fake_http.request["json"]["temperature"] == 0.0
+    assert "JSON" in fake_http.request["json"]["system"]
+    assert fake_http.request["headers"]["x-api-key"] == "sk-ant-test"
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_tolerates_codefence_and_preamble(fake_http):
+    fake_http.response = _judge_response('점수입니다:\n```json\n{"score": 5, "reason": "보통"}\n```')
+    out = await LlmJudgeNode().process(
+        LlmJudgeInput(content="x", criteria="y"), _ctx_with_token("k")
+    )
+    assert out.score == 5.0
+    assert out.reason == "보통"
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_clamps_out_of_range_score(fake_http):
+    fake_http.response = _judge_response('{"score": 42, "reason": "과대평가"}')
+    out = await LlmJudgeNode().process(
+        LlmJudgeInput(content="x", criteria="y", min_score=0, max_score=10),
+        _ctx_with_token("k"),
+    )
+    assert out.score == 10.0  # max_score로 클램프
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_missing_token_raises(fake_http):
+    with pytest.raises(ValidationError, match="credential"):
+        await LlmJudgeNode().process(LlmJudgeInput(content="x", criteria="y"), NODE_CTX)
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_api_error_raises(fake_http):
+    fake_http.response = _FakeResponse(429, text='{"error": "rate limit"}')
+    with pytest.raises(ExecutionError, match="Anthropic API 오류 429"):
+        await LlmJudgeNode().process(
+            LlmJudgeInput(content="x", criteria="y"), _ctx_with_token("k")
+        )
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_non_json_response_raises(fake_http):
+    fake_http.response = _judge_response("점수를 매길 수 없습니다")
+    with pytest.raises(ExecutionError, match="JSON"):
+        await LlmJudgeNode().process(
+            LlmJudgeInput(content="x", criteria="y"), _ctx_with_token("k")
+        )
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_missing_score_field_raises(fake_http):
+    fake_http.response = _judge_response('{"reason": "score 없음"}')
+    with pytest.raises(ExecutionError, match="score"):
+        await LlmJudgeNode().process(
+            LlmJudgeInput(content="x", criteria="y"), _ctx_with_token("k")
+        )

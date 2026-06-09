@@ -79,6 +79,23 @@ def test_quality_loop_has_back_edge_and_exit() -> None:
                for e in d.edges)
 
 
+def test_quality_loop_inserts_scorer_between_generator_and_gate() -> None:
+    # #438 §6.6: generator(ai)→scorer(llm_judge, 점수화)→gate(if_condition, gte 비교). gate가
+    # 비교할 score를 scorer가 낸다. back-edge는 generator로(재생성), scorer 경유 아님.
+    d = _A.assemble("보고서 초안 생성하고 품질 기준 통과할 때까지 재생성한 다음 구글 docs에 저장")
+    assert d is not None
+    scorer = next(n for n in d.nodes if n.role == SlotRole.SCORER)
+    gen = next(n for n in d.nodes if n.role == SlotRole.TRANSFORM)
+    gate = next(n for n in d.nodes if n.role == SlotRole.GATE)
+    assert scorer.node_type == "llm_judge"
+    # generator → scorer → gate 직렬, gate에 직접 들어오는 건 scorer뿐(generator 아님).
+    assert any(e.from_ref == gen.ref and e.to_ref == scorer.ref for e in d.edges)
+    assert any(e.from_ref == scorer.ref and e.to_ref == gate.ref for e in d.edges)
+    assert not any(e.from_ref == gen.ref and e.to_ref == gate.ref for e in d.edges)
+    # scorer는 루프 안(back-edge 대상 아님) — gate의 false는 generator로만 되돌아간다.
+    assert not any(e.to_ref == scorer.ref and e.from_handle == "false" for e in d.edges)
+
+
 def test_needs_gate_routes_to_quality_loop_over_schedule() -> None:
     # 스케줄 키워드 + 검증 함의가 함께면 needs_gate가 quality_loop로 라우팅(gate 불변 보장).
     d = _A.assemble("매주 보고서 생성하고 기준 충족할 때까지 검증")
@@ -97,14 +114,22 @@ def test_chitchat_returns_none() -> None:
     assert _A.assemble("안녕 오늘 날씨 어때") is None
 
 
-def test_sink_optional_assembles_spine_terminal() -> None:
-    # 출력 채널 미언급(간결 발화)도 trigger→source→transform 종단으로 결정적 조립
-    # (sink optional, 2026-06-09 커버리지 측정 — bail 대신 결정적 골격이 LLM 병리보다 나음).
+def test_content_without_sink_gets_default_doc_output() -> None:
+    # 콘텐츠 생산(요약=transform) 있는데 출력 채널 미언급 → 기본 문서 출력(google_docs_write) 부여
+    # — 산출물이 갈 곳 없는 워크플로우를 qa가 불완전 저평가하는 것 방지(2026-06-09 측정 (b)).
     d = _A.assemble("매주 시트 읽어서 요약")
     assert d is not None
     assert d.skeleton_name == "scheduled_pipeline"
-    assert _node_types(d) == ["schedule_trigger", "google_sheets_read", "anthropic_chat"]
-    assert not any(n.role == SlotRole.SINK for n in d.nodes)  # sink 없음(종단=transform)
+    assert _node_types(d) == [
+        "schedule_trigger", "google_sheets_read", "anthropic_chat", "google_docs_write",
+    ]
+
+
+def test_source_only_no_default_sink() -> None:
+    # transform 없는 read-only(시트만 읽기)는 기본 문서 출력 강제 안 함 — 종단 유지.
+    d = _A.assemble("매주 시트 읽어줘")
+    assert d is not None
+    assert not any(n.node_type == "google_docs_write" for n in d.nodes)
 
 
 def test_terse_doc_request_assembles() -> None:

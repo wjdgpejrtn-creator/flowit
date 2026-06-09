@@ -9,7 +9,7 @@ from common_schemas.enums import RiskLevel
 
 @dataclass
 class NodeDefinition:
-    """53종 노드 타입의 카탈로그 엔티티.
+    """54종 노드 타입의 카탈로그 엔티티.
 
     H-4 합의: REQ-002 CredentialInjectionService가 get_by_id() 후
     risk_level, required_connections, service_type 필드에 직접 접근한다.
@@ -33,6 +33,6 @@ class NodeDefinition:
     service_type: str | None = None
     embedding: list[float] | None = None
 
-    # ADR-0020 (i) scope 격리. None=company 전역(기존 53종 비침습) / owner=personal / team=team
+    # ADR-0020 (i) scope 격리. None=company 전역(기존 54종 비침습) / owner=personal / team=team
     owner_user_id: UUID | None = None
     team_id: UUID | None = None
