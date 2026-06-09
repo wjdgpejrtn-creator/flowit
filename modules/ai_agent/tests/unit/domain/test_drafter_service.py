@@ -17,6 +17,7 @@ from ai_agent.domain.services.drafter_service import (
     _EditNodeDraft,
     _EditResponse,
     _NodeDraft,
+    _NodeParamFill,
     _ParamFillResponse,
 )
 from ai_agent.domain.services.skeleton_assembler import SkeletonAssembler
@@ -746,7 +747,9 @@ class TestScaffoldParamFill:
         first_ref = scaffold.nodes[0].ref
         llm = AsyncMock(spec=LLMPort)
         llm.generate_structured = AsyncMock(
-            return_value=_ParamFillResponse(name="주간요약", params={first_ref: {"cron": "0 9 * * 1"}})
+            return_value=_ParamFillResponse(
+                name="주간요약", nodes=[_NodeParamFill(ref=first_ref, parameters={"cron": "0 9 * * 1"})]
+            )
         )
         wf = await DrafterService(llm).draft(_spec(), candidates, uuid4(), skeleton_scaffold=scaffold)
 
@@ -764,7 +767,7 @@ class TestScaffoldParamFill:
         scaffold, candidates = self._scaffold_and_candidates("웹훅 들어오면 분석해서 이메일로")
         llm = AsyncMock(spec=LLMPort)
         llm.generate_structured = AsyncMock(
-            return_value=_ParamFillResponse(params={"GHOST_ref": {"x": 1}})
+            return_value=_ParamFillResponse(nodes=[_NodeParamFill(ref="GHOST_ref", parameters={"x": 1})])
         )
         wf = await DrafterService(llm).draft(_spec(), candidates, uuid4(), skeleton_scaffold=scaffold)
         assert len(wf.nodes) == len(scaffold.nodes)

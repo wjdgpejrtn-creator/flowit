@@ -227,10 +227,16 @@ class _DraftResponse(BaseModel):
 
 # 스켈레톤 scaffold 경로 전용 — 구조는 코드가 결정(불변)하고 LLM은 ref별 parameters만 반환
 # (ADR-0026 §6.6.3 step5). soft 구조 힌트(#416 효과0)와 달리 구조 생성 책임을 LLM에서 제거.
+# top-level은 **list**(검증된 _DraftResponse와 동형) — 최상위 open dict는 attempt0 json-schema
+# grammar에서 빈 객체로 trivially 만족돼 파라미터가 비는 위험이 있어 회피(modal_llm_adapter).
+class _NodeParamFill(BaseModel):
+    ref: str
+    parameters: dict[str, Any] = {}
+
+
 class _ParamFillResponse(BaseModel):
     name: str = "Untitled Workflow"
-    # ref → 그 노드의 parameters (input_schema에 맞춰). 누락 ref는 빈 파라미터로 둔다.
-    params: dict[str, dict[str, Any]] = {}
+    nodes: list[_NodeParamFill] = []
 
 
 _PARAM_FILL_SYSTEM_PROMPT = """You fill PARAMETERS for a workflow whose STRUCTURE IS ALREADY FIXED.
@@ -238,8 +244,8 @@ Do NOT invent, add, remove, or reorder nodes/edges — structure is decided by c
 For each node (identified by its stable "ref"), produce a `parameters` object whose keys match
 that node's input_schema, derived from the user's request. For data flowing from an upstream node,
 use "${<ref>.<output_field>}" referencing the upstream node's ref.
-Return JSON: {"name": "<short workflow name>", "params": {"<ref>": {"<param_key>": <value>}, ...}}.
-Only include refs from the provided node list. Omit a ref if it needs no parameters."""
+Return JSON: {"name": "<short workflow name>", "nodes": [{"ref": "<ref>", "parameters": {...}}, ...]}.
+Only include refs from the provided node list. Omit a node entry if it needs no parameters."""
 
 
 # refine 편집 응답 전용 — node_type이 아니라 ref로 노드 정체성을 잡는다(중복 node_type 허용).
@@ -438,6 +444,7 @@ class DrafterService:
             + f"\nNodes (structure fixed): {json.dumps(node_specs, ensure_ascii=False)}"
         )
         resp = await self._llm.generate_structured(prompt, _ParamFillResponse)
+        params_by_ref = {item.ref: item.parameters for item in resp.nodes}
 
         outputs_by_instance = {
             ref_to_iid[ref]: _outputs_of(cfg_by_type[ref_node_types[ref]])
@@ -449,7 +456,7 @@ class DrafterService:
             n.model_copy(
                 update={
                     "parameters": _ground_ref_fields(
-                        _rewrite_refs(resp.params.get(iid_to_ref[n.instance_id], {}), ref_to_iid),
+                        _rewrite_refs(params_by_ref.get(iid_to_ref[n.instance_id], {}), ref_to_iid),
                         outputs_by_instance,
                     )
                 }
