@@ -108,6 +108,7 @@ class ExtractedEntities:
     has_fanout: bool = False     # 병렬 팬아웃 — "각 항목마다 …" (Parallel Split / Orchestrator-Workers)
     has_retry: bool = False      # 재시도 루프 — "실패하면 재시도" (Structured Loop + delay)
     has_approval: bool = False   # 승인 게이트 — "검토 후 승인" (Deferred Choice / Human-in-the-loop)
+    has_guard: bool = False      # 단일 가드 조건문 — "임계치 넘으면 …" (분류·승인 아닌 1-action, conditional_action)
 
     def is_empty(self) -> bool:
         """트리거 외에 아무 슬롯 재료도 없으면 True(조립 무의미 — fast-path/폴백 판단용)."""
@@ -122,6 +123,7 @@ class ExtractedEntities:
                 ("retry", self.has_retry),
                 ("fanout", self.has_fanout),
                 ("branch", self.has_branch),
+                ("guard", self.has_guard),
             )
             if flag
         }

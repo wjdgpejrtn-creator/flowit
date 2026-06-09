@@ -132,11 +132,12 @@ def test_source_only_no_default_sink() -> None:
     assert not any(n.node_type == "google_docs_write" for n in d.nodes)
 
 
-def test_terse_doc_request_assembles() -> None:
-    # "문서 만들어" 어휘 보강 — google_docs_write로 결정적 진입(이전엔 어휘 미매칭→None).
+def test_terse_sink_only_request_bails() -> None:
+    # RC1(skeleton-regressor-fix): source/transform 없는 sink-only 발화는 스켈레톤이 trigger+sink
+    # 토막만 만들어 LLM 자유조립보다 못하다(측정: lin_make_doc 스켈레톤 8.7 < LLM 10). #440의
+    # terse-doc 결정적 진입을 의도적으로 좁혀 None(LLM 폴백) 반환.
     d = _A.assemble("보고서 문서 하나 만들어줘")
-    assert d is not None
-    assert "google_docs_write" in [n.node_type for n in d.nodes]
+    assert d is None
 
 
 def test_terse_quality_loop_assembles() -> None:
@@ -242,6 +243,77 @@ def test_approval_subsumes_branch_signal() -> None:
     assert d.skeleton_name == "approval_gate"
 
 
+def test_conditional_guard_assembles_router_with_stop() -> None:
+    # 단일 가드("임계치 넘으면 경보") — conditional_action: router(if_condition)→true→sink/
+    # false→stop_workflow. transform 없음(가드는 분류기 불필요). RC2 — 폴백으로 if_condition
+    # 소실되던 branch_threshold_alert 회귀 직격.
+    d = _A.assemble("온도 값이 임계치를 넘으면 경보 메일을 보내줘")
+    assert d is not None
+    assert d.skeleton_name == "conditional_action"
+    types = [n.node_type for n in d.nodes]
+    assert "if_condition" in types and "stop_workflow" in types
+    assert not any(n.role == SlotRole.TRANSFORM for n in d.nodes)  # 가드=분류기 없음
+    router = next(n for n in d.nodes if n.role == SlotRole.ROUTER)
+    terminal = next(n for n in d.nodes if n.role == SlotRole.TERMINAL)
+    sink = next(n for n in d.nodes if n.role == SlotRole.SINK)
+    assert any(e.from_ref == router.ref and e.to_ref == terminal.ref and e.from_handle == "false"
+               for e in d.edges)
+    assert any(e.from_ref == router.ref and e.to_ref == sink.ref and e.from_handle == "true"
+               for e in d.edges)
+    # router outgoing ≥2 (true sink + false terminal) → motif(branch_on_classification) 정합.
+    out = [e for e in d.edges if e.from_ref == router.ref]
+    assert len(out) >= 2
+
+
+def test_conditional_guard_with_classifier_keeps_transform() -> None:
+    # 분류 가드("분류해서 …넘으면")는 transform(분류기)도 동반 — spine에 포함.
+    d = _A.assemble("점수를 분석해서 80점을 넘으면 슬랙으로 알림 보내줘")
+    assert d is not None
+    assert d.skeleton_name == "conditional_action"
+    assert any(n.role == SlotRole.TRANSFORM for n in d.nodes)
+
+
+def test_branch_signal_wins_over_guard() -> None:
+    # guard("넘으면")+branch("아니면") 동반 + 2 sink → branch_on_classification(분기 우선, guard
+    # 양보). assemble의 `shapes.discard("guard")` 우선순위(approval>branch>guard) 회귀 가드.
+    d = _A.assemble("금액이 100만원을 넘으면 슬랙으로 알림, 아니면 이메일로 보내줘")
+    assert d is not None
+    assert d.skeleton_name == "branch_on_classification"
+
+
+def test_approval_wins_over_guard() -> None:
+    # approval("승인")+guard("넘으면") 동반 → approval_gate(승인 우선, guard 양보).
+    d = _A.assemble("금액이 한도를 넘으면 검토 후 승인되면 이메일로 발송")
+    assert d is not None
+    assert d.skeleton_name == "approval_gate"
+
+
+def test_guard_without_sink_bails_to_llm() -> None:
+    # 가드 신호여도 action 채널(sink) 못 채우면 LLM 폴백(억지 조립 금지).
+    assert _A.assemble("값이 임계치를 넘으면 처리해줘") is None
+
+
+def test_terse_sink_only_does_not_force_pipeline() -> None:
+    # RC1: source/transform 없는 sink-only는 None(LLM). (test_terse_sink_only_request_bails 보강 —
+    # 다양한 sink 채널에서 일관)
+    assert _A.assemble("슬랙으로 공지 하나 보내줘") is None
+
+
+def test_transform_only_no_sink_bails() -> None:
+    # RC1: 출력 채널(sink) 없는 transform-only는 catch-all 미발동 → None(LLM). default 문서 sink
+    # 오주입(google_docs_write) 방지 — 측정상 LLM 자유조립이 나음(lin_fetch_summarize).
+    assert _A.assemble("이 URL 내용을 가져와서 요약해줘") is None
+
+
+def test_real_pipeline_with_sink_still_assembles() -> None:
+    # source/transform + sink 갖춘 실제 파이프라인은 catch-all로 정상 조립(승리 케이스 보존).
+    d = _A.assemble("구글시트 데이터를 읽어서 요약 메일로 보내줘")
+    assert d is not None
+    assert d.skeleton_name == "scheduled_pipeline"
+    types = [n.node_type for n in d.nodes]
+    assert "google_sheets_read" in types and "email_send" in types
+
+
 def test_multiple_sinks_fan_out_in_parallel() -> None:
     # 복수 sink는 직렬(sink→sink)이 아니라 마지막 처리 노드에서 병렬 분기.
     d = _A.assemble("매주 시트 읽어서 요약해서 슬랙이랑 이메일 둘 다 보내줘")
@@ -280,6 +352,7 @@ _PARITY_UTTERANCES = [
     "목록의 각 항목마다 요약해서 슬랙으로 보내줘",                      # 팬아웃(병렬 map)
     "외부 api 호출해서 실패하면 재시도하고 결과를 슬랙으로",            # 재시도(백오프 루프)
     "보고서 초안 작성하고 검토 후 승인되면 이메일로 발송",              # 승인 게이트(HITL)
+    "온도 값이 임계치를 넘으면 경보 메일을 보내줘",                    # 단일 가드(conditional_action)
 ]
 
 
