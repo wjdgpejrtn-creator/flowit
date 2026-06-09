@@ -189,26 +189,34 @@ const INTEGRATION_SERVICES: { service: string; icon: string; iconBg: string; nam
 
 // callback 복귀 시그널(?connected / ?error)을 토스트로 표시하고 URL에서 정리한다.
 // 백엔드 callback이 /settings?connected={service} 또는 ?error=connect_failed 로 리다이렉트한다.
-function consumeConnectCallback(serviceLabel: (s: string) => string): boolean {
-  if (typeof window === 'undefined') return false;
+function consumeConnectCallback(serviceLabel: (s: string) => string): void {
+  if (typeof window === 'undefined') return;
   const params = new URLSearchParams(window.location.search);
   const connected = params.get('connected');
   const error = params.get('error');
-  if (!connected && !error) return false;
+  if (!connected && !error) return;
 
   if (connected) showToast(`${serviceLabel(connected)} 연결이 완료되었습니다.`);
   else if (error === 'connect_failed') showToast('연결에 실패했습니다. 다시 시도해주세요.');
 
   // 새로고침/뒤로가기 시 토스트 재발생 방지 — 쿼리만 제거.
   window.history.replaceState({}, '', window.location.pathname);
-  return Boolean(connected);
 }
 
 function IntegrationPanel() {
   const [connections, setConnections] = useState<ConnectionStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [busyService, setBusyService] = useState<string | null>(null);
+  const [busyServices, setBusyServices] = useState<Set<string>>(new Set());
+
+  // 서비스별 처리 중 상태를 독립적으로 토글 — 여러 서비스 동시 연결/해제 시 각자 busy 표시.
+  const setBusy = (service: string, busy: boolean) =>
+    setBusyServices((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(service);
+      else next.delete(service);
+      return next;
+    });
 
   const load = async () => {
     try {
@@ -229,18 +237,18 @@ function IntegrationPanel() {
   }, []);
 
   const handleConnect = async (service: string) => {
-    setBusyService(service);
+    setBusy(service, true);
     try {
       // 성공 시 OAuth 동의 화면으로 전체 페이지 이동(반환 없음).
       await startConnection(service);
     } catch {
       showToast('연결을 시작하지 못했습니다. 잠시 후 다시 시도해주세요.');
-      setBusyService(null);
+      setBusy(service, false);
     }
   };
 
   const handleRevoke = async (service: string) => {
-    setBusyService(service);
+    setBusy(service, true);
     try {
       await revokeConnection(service);
       showToast('연결을 해제했습니다.');
@@ -248,7 +256,7 @@ function IntegrationPanel() {
     } catch {
       showToast('연결 해제에 실패했습니다. 다시 시도해주세요.');
     } finally {
-      setBusyService(null);
+      setBusy(service, false);
     }
   };
 
@@ -278,7 +286,7 @@ function IntegrationPanel() {
               name={s.name}
               detail={detail}
               connected={connected}
-              busy={busyService === s.service}
+              busy={busyServices.has(s.service)}
               onConnect={() => void handleConnect(s.service)}
               onRevoke={() => void handleRevoke(s.service)}
             />
