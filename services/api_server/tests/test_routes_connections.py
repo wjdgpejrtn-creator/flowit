@@ -187,3 +187,48 @@ def test_connection_providers_cover_all_catalog_providers():
     }
     missing = catalog_providers - set(CONNECTION_PROVIDERS)
     assert not missing, f"CONNECTION_PROVIDERS 메타 누락 provider: {sorted(missing)}"
+
+
+def test_connection_redirect_uri_uses_frontend_url():
+    """redirect_uri = 정적 FRONTEND_URL(https) 기준 — Cloud Run 프록시 scheme(http) 어긋남 회피.
+
+    google redirect_uri_mismatch 회귀 가드: request.url_for(프록시 뒤 http)가 아니라
+    설정값 https 단일출처를 써야 한다.
+    """
+    from types import SimpleNamespace
+
+    from app.routers.connections import _connection_redirect_uri
+
+    settings = SimpleNamespace(frontend_url="https://front.example.app")
+    uri = _connection_redirect_uri(None, settings, "google")  # https 분기는 request 미사용
+    assert uri == "https://front.example.app/api/v1/connections/google/callback"
+    assert uri.startswith("https://")  # 절대 http:// 아님
+
+
+def test_connection_redirect_uri_strips_trailing_slash():
+    from types import SimpleNamespace
+
+    from app.routers.connections import _connection_redirect_uri
+
+    settings = SimpleNamespace(frontend_url="https://front.example.app/")
+    assert (
+        _connection_redirect_uri(None, settings, "slack")
+        == "https://front.example.app/api/v1/connections/slack/callback"
+    )
+
+
+def test_connection_redirect_uri_local_fallback_when_unset():
+    """FRONTEND_URL 미설정(로컬 dev="/")이면 프록시가 없으므로 request.url_for 폴백."""
+    from types import SimpleNamespace
+
+    from app.routers.connections import _connection_redirect_uri
+
+    class _Req:
+        def url_for(self, name: str, **kw: str) -> str:
+            return f"http://local/api/v1/connections/{kw['service']}/callback"
+
+    settings = SimpleNamespace(frontend_url="/")
+    assert (
+        _connection_redirect_uri(_Req(), settings, "google")
+        == "http://local/api/v1/connections/google/callback"
+    )
