@@ -162,6 +162,8 @@ class GraphValidator:
     3. 노드 타입 불일치 (from_handle ↔ to_handle 타입 호환)
     4. 중복 instance_id 검출
     5. 필수 연결 누락 (required_connections 확인)
+    6. 비실재 노드 (node_id가 카탈로그에 없음 = 실행 불가, E_UNKNOWN_NODE_TYPE,
+       ADR-0026 §6.6 — 가장 먼저 검사; 다른 검사는 정의 미존재를 skip하므로)
     """
     
     def __init__(self, node_def_repo: NodeDefinitionRepository):
