@@ -16,18 +16,30 @@ from ..adapters.catalog.external.file_write import FileWriteNode
 from ..adapters.catalog.external.file_write import get_node_definition as _file_write
 from ..adapters.catalog.external.gemma_chat import GemmaChatNode
 from ..adapters.catalog.external.gemma_chat import get_node_definition as _gemma_chat
+
+# 신규 external 8 (#438 §6.6 read/write 비대칭 해소)
+from ..adapters.catalog.external.gmail_read import GmailReadNode
+from ..adapters.catalog.external.gmail_read import get_node_definition as _gmail_read
 from ..adapters.catalog.external.gmail_send import GmailSendNode
 from ..adapters.catalog.external.gmail_send import get_node_definition as _gmail_send
 from ..adapters.catalog.external.google_calendar_create_event import GoogleCalendarCreateEventNode
 from ..adapters.catalog.external.google_calendar_create_event import (
     get_node_definition as _google_calendar_create_event,
 )
+from ..adapters.catalog.external.google_calendar_read import GoogleCalendarReadNode
+from ..adapters.catalog.external.google_calendar_read import get_node_definition as _google_calendar_read
+from ..adapters.catalog.external.google_docs_read import GoogleDocsReadNode
+from ..adapters.catalog.external.google_docs_read import get_node_definition as _google_docs_read
 from ..adapters.catalog.external.google_docs_write import GoogleDocsWriteNode
 from ..adapters.catalog.external.google_docs_write import get_node_definition as _google_docs_write
 from ..adapters.catalog.external.google_drive_read import GoogleDriveReadNode
 from ..adapters.catalog.external.google_drive_read import get_node_definition as _google_drive_read
+from ..adapters.catalog.external.google_drive_upload import GoogleDriveUploadNode
+from ..adapters.catalog.external.google_drive_upload import get_node_definition as _google_drive_upload
 from ..adapters.catalog.external.google_sheets_read import GoogleSheetsReadNode
 from ..adapters.catalog.external.google_sheets_read import get_node_definition as _google_sheets_read
+from ..adapters.catalog.external.google_sheets_write import GoogleSheetsWriteNode
+from ..adapters.catalog.external.google_sheets_write import get_node_definition as _google_sheets_write
 from ..adapters.catalog.external.graphql import GraphqlNode
 from ..adapters.catalog.external.graphql import get_node_definition as _graphql
 from ..adapters.catalog.external.http_request import HttpRequestNode
@@ -36,6 +48,10 @@ from ..adapters.catalog.external.json_transform import JsonTransformNode
 from ..adapters.catalog.external.json_transform import get_node_definition as _json_transform
 from ..adapters.catalog.external.linear_create_issue import LinearCreateIssueNode
 from ..adapters.catalog.external.linear_create_issue import get_node_definition as _linear_create_issue
+from ..adapters.catalog.external.linear_read import LinearReadNode
+from ..adapters.catalog.external.linear_read import get_node_definition as _linear_read
+from ..adapters.catalog.external.linear_update import LinearUpdateNode
+from ..adapters.catalog.external.linear_update import get_node_definition as _linear_update
 from ..adapters.catalog.external.llm_judge import LlmJudgeNode
 from ..adapters.catalog.external.llm_judge import get_node_definition as _llm_judge
 from ..adapters.catalog.external.mysql_query import MysqlQueryNode
@@ -50,6 +66,8 @@ from ..adapters.catalog.external.slack_notify import SlackNotifyNode
 from ..adapters.catalog.external.slack_notify import get_node_definition as _slack_notify
 from ..adapters.catalog.external.slack_post_message import SlackPostMessageNode
 from ..adapters.catalog.external.slack_post_message import get_node_definition as _slack_post_message
+from ..adapters.catalog.external.slack_read import SlackReadNode
+from ..adapters.catalog.external.slack_read import get_node_definition as _slack_read
 from ..adapters.catalog.external.text_template import TextTemplateNode
 from ..adapters.catalog.external.text_template import get_node_definition as _text_template
 from ..adapters.catalog.external.webhook import WebhookNode
@@ -65,9 +83,9 @@ def get_all_node_definitions() -> list[NodeDefinition]:
     카테고리는 DB CHECK 영문 8종(trigger/action/condition/transform/ai/integration/utility/output)
     안에서 지정. Microsoft(Outlook/Teams/OneDrive) / Notion / OpenAI는 데모 후속 개발로 보류.
 
-    구성 (총 54종):
+    구성 (총 62종):
         - domain/catalog/ 28종: data 14 + control 8 + trigger 6
-        - adapters/catalog/external/ 26종:
+        - adapters/catalog/external/ 34종:
             · 기존 14종 (박아름 1주차 + gemma_chat PR #68):
               http_request(integration), pdf_generate(output),
               slack_post_message·gmail_send(action),
@@ -81,6 +99,9 @@ def get_all_node_definitions() -> list[NodeDefinition]:
               file_read·file_write(utility)
             · 신규 1종 (#438 §6.6 품질 루프 scorer):
               llm_judge(ai) — 콘텐츠+기준→score:number, if_condition gte가 게이트로 소비
+            · 신규 8종 (#438 §6.6 read/write 비대칭 해소, 전부 integration):
+              google_sheets_write·google_calendar_read·google_docs_read·google_drive_upload·
+              gmail_read(google), slack_read(slack), linear_read·linear_update(linear)
 
     Note: 중복 3종(http_request_tool=external/http_request, conditional=domain/control/if_condition,
     loop=domain/control/loop_list)은 카탈로그에서 제거. 실행 흐름은
@@ -105,6 +126,15 @@ def get_all_node_definitions() -> list[NodeDefinition]:
         _linear_create_issue(),
         # 신규 external 1 (#438 §6.6 품질 루프 scorer)
         _llm_judge(),
+        # 신규 external 8 (#438 §6.6 read/write 비대칭 해소)
+        _google_sheets_write(),
+        _google_calendar_read(),
+        _google_docs_read(),
+        _google_drive_upload(),
+        _gmail_read(),
+        _slack_read(),
+        _linear_read(),
+        _linear_update(),
         # 신규 external 11 (REQ-005 toolset 연동)
         _rest_api(),
         _graphql(),
@@ -121,11 +151,11 @@ def get_all_node_definitions() -> list[NodeDefinition]:
 
 
 def get_all_node_classes() -> dict[str, type[BaseNode]]:
-    """카탈로그 전체 54종 node_type → BaseNode 클래스.
+    """카탈로그 전체 62종 node_type → BaseNode 클래스.
 
     execution_engine.CatalogNodeExecutor가 node_type으로 노드를 조회·실행한다 (ADR-0018).
-    domain 28종 + external 26종 = 54종 전부 process() 실구현 — NotImplementedError 스텁 없음.
-    (external 26 = 기존 25 + #438 §6.6 llm_judge scorer 1)
+    domain 28종 + external 34종 = 62종 전부 process() 실구현 — NotImplementedError 스텁 없음.
+    (external 34 = 기존 25 + #438 §6.6 llm_judge scorer 1 + read/write 비대칭 8)
     """
     return {
         **get_domain_node_classes(),
@@ -146,6 +176,15 @@ def get_all_node_classes() -> dict[str, type[BaseNode]]:
         "linear_create_issue": LinearCreateIssueNode,
         # 신규 external 1 (#438 §6.6 품질 루프 scorer)
         "llm_judge": LlmJudgeNode,
+        # 신규 external 8 (#438 §6.6 read/write 비대칭 해소)
+        "google_sheets_write": GoogleSheetsWriteNode,
+        "google_calendar_read": GoogleCalendarReadNode,
+        "google_docs_read": GoogleDocsReadNode,
+        "google_drive_upload": GoogleDriveUploadNode,
+        "gmail_read": GmailReadNode,
+        "slack_read": SlackReadNode,
+        "linear_read": LinearReadNode,
+        "linear_update": LinearUpdateNode,
         # 신규 external 11 (REQ-005 toolset 연동)
         "rest_api": RestApiNode,
         "graphql": GraphqlNode,

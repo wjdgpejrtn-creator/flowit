@@ -69,6 +69,7 @@ from ...domain.ports.workflow_repository import WorkflowRepository
 from ...domain.services.drafter_service import DrafterService
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 from ...domain.services.qa_evaluator_service import QAEvaluatorService
+from ...domain.services.skeleton_assembler import SkeletonAssembler
 from ...domain.services.slot_filling_service import SlotFillingService
 from ...domain.services.workflow_explanation_service import WorkflowExplanationService
 from ...domain.services.workflow_layout_service import WorkflowLayoutService
@@ -216,9 +217,13 @@ class LangGraphOrchestrator:
         connection_resolver: ConnectionResolver | None = None,
         ontology_retriever: OntologyRetrieverPort | None = None,
         skill_doc_store: SkillDocumentStore | None = None,
+        skeleton_assembler: SkeletonAssembler | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
+        # ADR-0026 §6.6 결정적 스켈레톤 — 순수(무의존)라 미주입 시 기본 생성. assemble None이면
+        # 일반 LLM draft로 폴백하므로 항상 안전(소비처 _drafter_node).
+        self._skeleton_assembler = skeleton_assembler or SkeletonAssembler()
         self._qa_evaluator = qa_evaluator
         self._slot_filler = slot_filler
         self._node_registry = node_registry
@@ -1110,6 +1115,31 @@ class LangGraphOrchestrator:
                 return [*candidates, cfg]
         return candidates
 
+    async def _ensure_scaffold_candidates(
+        self, candidates: list[NodeConfig], scaffold: Any
+    ) -> list[NodeConfig]:
+        """scaffold node_type 중 후보에 없는 것을 NodeRegistry에서 정확 조회해 보강 (ADR-0026 §6.6).
+
+        scaffold 노드는 카탈로그 실재(그라운딩 가드)지만 의미검색 후보엔 빠질 수 있다. drafter의
+        node_type→node_id 해소를 위해 누락분만 ``list_by_node_types``로 채운다. 실패 시 무변경
+        (non-fatal) — 미해소 노드는 scaffold 빌드에서 드롭되고 drafter가 일반 경로로 폴백한다.
+        """
+        have = {c.node_type for c in candidates}
+        missing = list(dict.fromkeys(dn.node_type for dn in scaffold.nodes if dn.node_type not in have))
+        if not missing:
+            return candidates
+        # 기존 호출부(_retriever 보강)와 동일하게 getattr 가드 — port에 메서드가 있어도
+        # 테스트 더블/구버전 어댑터가 미구현일 수 있어 일관 방어(#439 리뷰 LOW).
+        grounder = getattr(self._node_registry, "list_by_node_types", None)
+        if grounder is None:
+            return candidates
+        try:
+            extra = await grounder(missing)
+        except Exception as exc:
+            _logger.warning("scaffold 후보 보강 실패 (일부 노드 드롭 가능): %s", exc)
+            return candidates
+        return [*candidates, *extra]
+
     # 7. drafter_node — 워크플로우 초안 생성
     async def _drafter_node(self, state: _State) -> dict:
         t0 = time.monotonic()
@@ -1153,6 +1183,18 @@ class LangGraphOrchestrator:
                     skill_composer_instructions = skill_doc.composer_instructions
             except Exception as exc:
                 _logger.warning("COMPOSER.md 로드 실패 (건너뜀): %s", exc)
+        # ADR-0026 §6.6: 결정적 스켈레톤 조립 — 구조는 코드가 결정, LLM은 파라미터만 채운다.
+        # refine(prior_workflow)·two-shot 스킬 바인딩 경로는 제외(기존 편집/바인딩 흐름 보존).
+        # assemble None(확신 없음/미지원 shape/잡담)이면 일반 LLM draft로 폴백(drafter가 처리).
+        skeleton_scaffold = None
+        if prior_workflow is None and not skill_selected:
+            try:
+                skeleton_scaffold = self._skeleton_assembler.assemble(spec.natural_language_intent)
+            except Exception as exc:
+                _logger.warning("스켈레톤 조립 실패 (LLM draft로 진행): %s", exc)
+                skeleton_scaffold = None
+            if skeleton_scaffold is not None:
+                candidates = await self._ensure_scaffold_candidates(candidates, skeleton_scaffold)
         # degrade로 버린 node_type을 수집할 요청-로컬 sink(동시 요청 안전). 재시도 retriever가
         # 이 ground-truth로 재검색하도록 state에 실어 보낸다(리뷰 #2 — QA-LLM 재인지 의존 제거).
         dropped: list[str] = []
@@ -1165,6 +1207,7 @@ class LangGraphOrchestrator:
                 retry_feedback=state.get("retry_feedback"),
                 dropped_node_types=dropped,
                 pattern_templates=state.get("pattern_templates"),
+                skeleton_scaffold=skeleton_scaffold,
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:

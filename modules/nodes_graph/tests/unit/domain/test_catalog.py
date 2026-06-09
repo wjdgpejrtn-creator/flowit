@@ -16,8 +16,8 @@ NODE_CTX = NodeContext(execution_id=uuid4(), user_id=uuid4())
 
 def test_catalog_count():
     defs = get_all_node_definitions()
-    # 28 domain (data 14 + control 8 + trigger 6) + 26 external = 54
-    #   external 26 = 기존 14 + REQ-005 toolset 연동 신규 11 + #438 §6.6 llm_judge scorer 1
+    # 28 domain (data 14 + control 8 + trigger 6) + 34 external = 62
+    #   external 34 = 기존 14 + REQ-005 toolset 연동 신규 11 + #438 §6.6 llm_judge 1 + read/write 비대칭 8
     #
     #   기존 14 (박아름 1주차 + gemma_chat PR #68):
     #   - 기타 2: http_request, pdf_generate
@@ -37,7 +37,9 @@ def test_catalog_count():
     #                  loop(=domain/control/loop_list) → 양쪽 제거
     #
     #   #438 §6.6 신규 1: llm_judge(ai) — 품질 루프 scorer
-    assert len(defs) == 54
+    #   #438 §6.6 신규 8: read/write 비대칭 — google_sheets_write·google_calendar_read·
+    #     google_docs_read·google_drive_upload·gmail_read(google)·slack_read·linear_read·linear_update
+    assert len(defs) == 62
 
 
 def test_catalog_unique_node_ids():

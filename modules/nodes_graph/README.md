@@ -1,6 +1,6 @@
 # nodes_graph
 
-> REQ-003: 54종 노드 정의 카탈로그, 그래프 검증 (위상 정렬), 직렬화
+> REQ-003: 62종 노드 정의 카탈로그, 그래프 검증 (위상 정렬), 직렬화
 >
 > 구현 명세 → [`docs/specs/REQ-003-nodes_graph.md`](../../docs/specs/REQ-003-nodes_graph.md)
 
@@ -94,9 +94,9 @@ Downstream (이 모듈에 의존):
 |--------|------|------|
 | 없음 | — | 순수 도메인 로직. 임베딩 설정은 EmbedderPort 구현체가 관리 |
 
-## 노드 카탈로그 요약 (54종 MVP)
+## 노드 카탈로그 요약 (62종 MVP)
 
-> 상세 분류는 `docs/specs/REQ-003-nodes-graph.md` §"노드 카탈로그 요약" 참조. 28 domain + 26 external (기존 14 + REQ-005 toolset 연동 11 + #438 §6.6 llm_judge 1).
+> 상세 분류는 `docs/specs/REQ-003-nodes-graph.md` §"노드 카탈로그 요약" 참조. 28 domain + 34 external (기존 14 + REQ-005 toolset 연동 11 + #438 §6.6 llm_judge 1 + read/write 비대칭 8).
 
 | 카테고리 | MVP | 예시 node_type |
 |---------|:---:|------|
