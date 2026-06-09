@@ -1126,8 +1126,13 @@ class LangGraphOrchestrator:
         missing = list(dict.fromkeys(dn.node_type for dn in scaffold.nodes if dn.node_type not in have))
         if not missing:
             return candidates
+        # 기존 호출부(_retriever 보강)와 동일하게 getattr 가드 — port에 메서드가 있어도
+        # 테스트 더블/구버전 어댑터가 미구현일 수 있어 일관 방어(#439 리뷰 LOW).
+        grounder = getattr(self._node_registry, "list_by_node_types", None)
+        if grounder is None:
+            return candidates
         try:
-            extra = await self._node_registry.list_by_node_types(missing)
+            extra = await grounder(missing)
         except Exception as exc:
             _logger.warning("scaffold 후보 보강 실패 (일부 노드 드롭 가능): %s", exc)
             return candidates
