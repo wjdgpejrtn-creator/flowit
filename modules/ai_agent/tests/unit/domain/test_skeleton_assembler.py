@@ -97,9 +97,34 @@ def test_chitchat_returns_none() -> None:
     assert _A.assemble("안녕 오늘 날씨 어때") is None
 
 
-def test_sink_missing_bails_to_llm() -> None:
-    # sink(출력 채널)를 발화에서 못 채우면 토막 골격 대신 LLM 폴백(불완전 커버리지 게이트).
-    assert _A.assemble("매주 시트 읽어서 요약") is None
+def test_sink_optional_assembles_spine_terminal() -> None:
+    # 출력 채널 미언급(간결 발화)도 trigger→source→transform 종단으로 결정적 조립
+    # (sink optional, 2026-06-09 커버리지 측정 — bail 대신 결정적 골격이 LLM 병리보다 나음).
+    d = _A.assemble("매주 시트 읽어서 요약")
+    assert d is not None
+    assert d.skeleton_name == "scheduled_pipeline"
+    assert _node_types(d) == ["schedule_trigger", "google_sheets_read", "anthropic_chat"]
+    assert not any(n.role == SlotRole.SINK for n in d.nodes)  # sink 없음(종단=transform)
+
+
+def test_terse_doc_request_assembles() -> None:
+    # "문서 만들어" 어휘 보강 — google_docs_write로 결정적 진입(이전엔 어휘 미매칭→None).
+    d = _A.assemble("보고서 문서 하나 만들어줘")
+    assert d is not None
+    assert "google_docs_write" in [n.node_type for n in d.nodes]
+
+
+def test_terse_quality_loop_assembles() -> None:
+    # "검수/통과 못 하면" gate 보강 — quality_loop 발동(이전엔 gate 미감지→None).
+    d = _A.assemble("영어 번역문을 만들고 검수해서 통과 못 하면 다시 번역 반복해줘")
+    assert d is not None
+    assert d.skeleton_name == "quality_loop"
+    assert "if_condition" in [n.node_type for n in d.nodes]
+
+
+def test_empty_still_bails() -> None:
+    # sink optional이어도 트리거뿐(의미 재료 전무)이면 여전히 None(is_empty 가드 유지).
+    assert _A.assemble("안녕 오늘 날씨 좋네") is None
 
 
 # ── 분기 (XOR) ─────────────────────────────────────────────────────────────
