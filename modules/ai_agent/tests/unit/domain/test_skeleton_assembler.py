@@ -97,14 +97,22 @@ def test_chitchat_returns_none() -> None:
     assert _A.assemble("안녕 오늘 날씨 어때") is None
 
 
-def test_sink_optional_assembles_spine_terminal() -> None:
-    # 출력 채널 미언급(간결 발화)도 trigger→source→transform 종단으로 결정적 조립
-    # (sink optional, 2026-06-09 커버리지 측정 — bail 대신 결정적 골격이 LLM 병리보다 나음).
+def test_content_without_sink_gets_default_doc_output() -> None:
+    # 콘텐츠 생산(요약=transform) 있는데 출력 채널 미언급 → 기본 문서 출력(google_docs_write) 부여
+    # — 산출물이 갈 곳 없는 워크플로우를 qa가 불완전 저평가하는 것 방지(2026-06-09 측정 (b)).
     d = _A.assemble("매주 시트 읽어서 요약")
     assert d is not None
     assert d.skeleton_name == "scheduled_pipeline"
-    assert _node_types(d) == ["schedule_trigger", "google_sheets_read", "anthropic_chat"]
-    assert not any(n.role == SlotRole.SINK for n in d.nodes)  # sink 없음(종단=transform)
+    assert _node_types(d) == [
+        "schedule_trigger", "google_sheets_read", "anthropic_chat", "google_docs_write",
+    ]
+
+
+def test_source_only_no_default_sink() -> None:
+    # transform 없는 read-only(시트만 읽기)는 기본 문서 출력 강제 안 함 — 종단 유지.
+    d = _A.assemble("매주 시트 읽어줘")
+    assert d is not None
+    assert not any(n.node_type == "google_docs_write" for n in d.nodes)
 
 
 def test_terse_doc_request_assembles() -> None:

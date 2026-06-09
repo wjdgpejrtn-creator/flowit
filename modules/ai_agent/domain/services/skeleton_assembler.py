@@ -23,6 +23,10 @@ from .skeleton_library import SKELETONS, find_skeleton
 # WorkflowSchema로 만들고 LLM이 파라미터만 채운다(step 5).
 
 _GATE_DEFAULT = "if_condition"
+# 콘텐츠(transform) 산출물이 갈 곳이 없을 때의 기본 출력 — "보고서 작성"처럼 출력 채널을
+# 발화에서 안 준 경우 산출물을 문서로 떨군다(2026-06-09 측정: sink 없는 transform-종단을 qa가
+# 불완전으로 저평가). 문서가 보고서/생성물의 자연스러운 기본 산출처(google_docs_write).
+_DEFAULT_CONTENT_SINK = "google_docs_write"
 
 
 class SkeletonAssembler:
@@ -161,6 +165,12 @@ class SkeletonAssembler:
         transforms = by_role.get(SlotRole.TRANSFORM, [])
         gate = by_role.get(SlotRole.GATE, [])
         sinks = by_role.get(SlotRole.SINK, [])
+
+        # 콘텐츠 생산(transform)이 있는데 출력 채널이 없으면 기본 문서 출력 부여 — 산출물이 갈 곳
+        # 없는 워크플로우를 qa가 불완전으로 저평가하는 것 방지. 순수 선형(gate 없음)에만 적용:
+        # quality_loop(gate)는 점수갭(#438)이 본질이라 무관. source-only(transform 없음)는 종단 유지.
+        if transforms and not sinks and not gate:
+            sinks = [DraftNode(ref="sink_0", node_type=_DEFAULT_CONTENT_SINK, role=SlotRole.SINK)]
 
         all_nodes = trigger + sources + transforms + sinks + gate
         edges: list[DraftEdge] = []
