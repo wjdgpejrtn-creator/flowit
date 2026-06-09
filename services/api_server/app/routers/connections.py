@@ -70,6 +70,22 @@ def _provider_node_counts() -> dict[str, int]:
     return counts
 
 
+def _connection_redirect_uri(request: Request, settings: Settings, service: str) -> str:
+    """connection callback redirect_uri — 정적 `FRONTEND_URL`(https 단일출처) 기준으로 구성.
+
+    `request.url_for`는 Cloud Run 프록시 뒤에서 scheme(https→http)·host가 어긋나(uvicorn이
+    `X-Forwarded-Proto`를 신뢰 안 함) google `redirect_uri_mismatch`를 유발한다. 로그인이 정적
+    `GOOGLE_REDIRECT_URI` secret을 쓰는 것과 동일한 이유로, connection도 설정값 기준으로 고정한다.
+    authorize·callback이 같은 helper를 써 redirect_uri 일치(토큰 교환 통과)를 보장.
+
+    FRONTEND_URL 미설정(로컬 dev = "/")이면 프록시가 없으므로 request 기반으로 폴백.
+    """
+    base = settings.frontend_url.rstrip("/")
+    if base.startswith("http"):
+        return f"{base}/api/v1/connections/{service}/callback"
+    return str(request.url_for("callback_connection", service=service))
+
+
 @router.get("", response_model=list[ConnectionStatus])
 async def list_connections(
     user: User = Depends(get_current_user),
@@ -123,7 +139,7 @@ async def authorize_connection(
     try:
         state = secrets.token_urlsafe(24)
         # redirect_uri = 이 connection의 callback 경로 — 로그인 callback과 분리(redirect mismatch 방지).
-        redirect_uri = str(request.url_for("callback_connection", service=service))
+        redirect_uri = _connection_redirect_uri(request, settings, service)
         url = use_case.build_authorization_url(service, state, redirect_uri)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -172,8 +188,8 @@ async def callback_connection(
 ) -> RedirectResponse:
     """OAuth redirect_uri 수신 — code 교환·저장 후 settings로 복귀(쿼리로 성공/실패 시그널)."""
     await _consume_conn_state(state, redis, settings, user.user_id)
-    # authorize와 동일 redirect_uri로 토큰 교환 — google 검증 통과 필수.
-    redirect_uri = str(request.url_for("callback_connection", service=service))
+    # authorize와 동일 redirect_uri로 토큰 교환 — google 검증 통과 필수(같은 helper로 일치 보장).
+    redirect_uri = _connection_redirect_uri(request, settings, service)
     try:
         await use_case.execute(user.user_id, service, code, redirect_uri)
     except Exception as exc:
