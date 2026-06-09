@@ -5,7 +5,7 @@ import Icon from '@/components/common/Icon';
 import { showToast } from '@/stores/toastStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useAuth } from '@/hooks/useAuth';
-import { getConnections, type ConnectionResponse } from '@/lib/api/connectionApi';
+import { getConnections, type ConnectionStatus } from '@/lib/api/connectionApi';
 
 type Panel = 'profile' | 'integration' | 'alert' | 'security';
 
@@ -166,7 +166,7 @@ const INTEGRATION_SERVICES: { service: string; icon: string; iconBg: string; nam
 ];
 
 function IntegrationPanel() {
-  const [connections, setConnections] = useState<ConnectionResponse[]>([]);
+  const [connections, setConnections] = useState<ConnectionStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
