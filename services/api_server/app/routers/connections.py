@@ -7,18 +7,18 @@ from __future__ import annotations
 
 import logging
 import secrets
+from functools import lru_cache
 
 import redis.asyncio as aioredis
-from common_schemas import ConnectionStatus
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
-
 from auth.application.use_cases.complete_connection_use_case import CompleteConnectionUseCase
 from auth.application.use_cases.list_connections_use_case import ListConnectionsUseCase
 from auth.application.use_cases.revoke_connection_use_case import RevokeConnectionUseCase
 from auth.application.use_cases.start_connection_authorize_use_case import StartConnectionAuthorizeUseCase
 from auth.domain.entities.user import User
+from common_schemas import ConnectionStatus
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 
 from ..config import Settings
 from ..dependencies.clients import get_redis
@@ -44,12 +44,70 @@ class AuthorizeConnectionResponse(BaseModel):
     state: str
 
 
+class AvailableConnection(BaseModel):
+    """연결 가능한 provider 1건 — 카탈로그 사용처(node_count) × auth 연결 메타의 조인 결과."""
+
+    service: str
+    name: str
+    auth_type: str  # oauth | api_key | connection_string
+    available: bool  # 지금 실제 연결 가능(oauth 배선 여부 / 키 입력 상시 가능)
+    node_count: int  # 이 provider를 요구하는 카탈로그 노드 수
+
+
+@lru_cache(maxsize=1)
+def _provider_node_counts() -> dict[str, int]:
+    """provider → 그 provider를 요구하는 카탈로그 노드 수. 카탈로그는 코드 정의라 프로세스 내 불변 → 1회 산정 후 캐시.
+
+    반환 dict는 공유 캐시 객체이므로 호출 측은 읽기만 한다(변경 금지).
+    """
+    # lazy import — 카탈로그 모듈은 무거운 어댑터 의존(httpx 등)을 끌어오므로 함수 내부에서 로드.
+    from nodes_graph.application.catalog_registry import get_all_node_definitions
+
+    counts: dict[str, int] = {}
+    for node in get_all_node_definitions():
+        for conn in node.required_connections or []:
+            counts[conn] = counts.get(conn, 0) + 1
+    return counts
+
+
 @router.get("", response_model=list[ConnectionStatus])
 async def list_connections(
     user: User = Depends(get_current_user),
     use_case: ListConnectionsUseCase = Depends(get_list_connections_use_case),
 ) -> list[ConnectionStatus]:
     return await use_case.execute(user.user_id)
+
+
+@router.get("/available", response_model=list[AvailableConnection])
+async def available_connections(
+    user: User = Depends(get_current_user),
+) -> list[AvailableConnection]:
+    """연결 가능한 외부 provider 목록 — 하드코딩 대신 카탈로그에서 결정적으로 도출(ADR-0027).
+
+    provider 집합 = nodes_graph 카탈로그의 distinct required_connections(코드 SSOT, 시드 무관 →
+    노드 추가 시 자동 반영). provider별 표시명·연결모델은 auth CONNECTION_PROVIDERS가 소유.
+    Composition Root가 둘을 조인한다(어느 모듈도 상대 application을 직접 알 필요 없음).
+    """
+    from auth.application.connection_providers import CONNECTION_PROVIDERS, is_connectable
+
+    counts = _provider_node_counts()  # 캐시된 카탈로그 산정(매 요청 전수 순회 회피)
+    result: list[AvailableConnection] = []
+    for service in sorted(counts):
+        meta = CONNECTION_PROVIDERS.get(service)
+        if meta is None:
+            # 메타 미정 provider는 노출 안 함(드리프트 가드 테스트가 누락을 잡는다).
+            logger.warning("connection provider 메타 누락 — 목록에서 제외: %s", service)
+            continue
+        result.append(
+            AvailableConnection(
+                service=service,
+                name=meta.name,
+                auth_type=meta.auth_type,
+                available=is_connectable(service),
+                node_count=counts[service],
+            )
+        )
+    return result
 
 
 @router.get("/{service}/authorize", response_model=AuthorizeConnectionResponse)
