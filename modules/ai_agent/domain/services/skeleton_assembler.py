@@ -42,8 +42,14 @@ class SkeletonAssembler:
             if gate_skel is not None:
                 return gate_skel
 
+        # 선형 계열만 후보 — 분기/팬아웃(control 슬롯 보유)은 shape 라우팅이 전담하므로
+        # 여기서 고르면 _assemble_linear가 router/splitter/merger를 무시해 구조가 깨진다.
+        _CONTROL = {SlotRole.ROUTER, SlotRole.SPLITTER, SlotRole.MERGER}
+        linear_family = [
+            s for s in SKELETONS if not any(sl.role in _CONTROL for sl in s.slots)
+        ]
         best: tuple[int, int, Skeleton] | None = None
-        for neg_idx, skel in enumerate(SKELETONS):
+        for neg_idx, skel in enumerate(linear_family):
             score = sum(1 for kw in skel.intent_keywords if kw in text)
             # 동률이면 정의 순서가 앞선 것 우선(neg_idx 작을수록) → 결정적.
             cand = (score, -neg_idx, skel)
@@ -71,34 +77,17 @@ class SkeletonAssembler:
             return (_GATE_DEFAULT,) if entities.needs_gate else ()
         return ()
 
-    # ── 조립 ────────────────────────────────────────────────────────────────
-    def assemble(self, utterance: str) -> AssembledDraft | None:
-        """발화를 결정적 워크플로우 골격으로 조립. 확신이 없으면 None(LLM drafter 폴백).
+    # ── 슬롯 채움 (공통) ──────────────────────────────────────────────────────
+    def _collect(
+        self, skeleton: Skeleton, entities: ExtractedEntities
+    ) -> tuple[dict[SlotRole, list[DraftNode]], list[str]]:
+        """스켈레톤 슬롯을 추출 엔티티로 채운다. required인데 비고 default도 없으면 경고.
 
-        스켈레톤은 "전부 처리"가 아니라 "확신할 때만 처리하는 fast-path"다(ADR-0026 §6.6).
-        다음 셋 중 하나면 None을 반환해 composer가 기존 LLM drafter로 폴백하게 한다 —
-        억지로 선형에 납작하게 끼워맞춰 confident-wrong 워크플로우를 내는 것보다 낫다:
-
-        1. 슬롯 재료 전무(트리거 외) — 잡담이거나 카탈로그 밖 요청.
-        2. **미지원 shape** — 분기(XOR)/팬아웃(병렬). 현 라이브러리는 선형/루프만 결정적으로
-           짜므로, 이런 모양은 LLM에 맡긴다(향후 branch/fan_out 스켈레톤 추가 시 라우팅).
-        3. **불완전 커버리지** — required 슬롯(예: 출력 채널)을 발화에서 못 채워 조립이 토막남.
-           불완전 골격보다 LLM의 시도/되묻기가 낫다.
+        반환: (역할→DraftNode 목록, 경고 목록). control 슬롯(router/splitter/merger)은
+        _materials가 () → required+default로 항상 채워진다(사용자가 loop_list를 발화하지 않음).
         """
-        text = utterance.lower()
-        entities = self._extractor.extract(text)
-        if entities.is_empty() or entities.has_unsupported_shape():
-            return None
-        skeleton = self._select(entities, text)
-        draft = self._fill_and_wire(skeleton, entities)
-        if any("미충전" in w for w in draft.warnings):
-            return None
-        return draft
-
-    def _fill_and_wire(self, skeleton: Skeleton, entities: ExtractedEntities) -> AssembledDraft:
         warnings: list[str] = []
         by_role: dict[SlotRole, list[DraftNode]] = {}
-
         for slot in skeleton.slots:
             mats = [m for m in self._materials(slot.role, entities) if m in slot.candidates]
             if slot.cardinality == "one":
@@ -109,13 +98,50 @@ class SkeletonAssembler:
                 else:
                     warnings.append(f"required slot '{slot.role.value}' 미충전 (발화에서 추출 실패)")
                     continue
-            nodes = [
-                DraftNode(ref=f"{slot.role.value}_{i}", node_type=nt, role=slot.role)
-                for i, nt in enumerate(mats)
-            ]
-            if nodes:
-                by_role[slot.role] = nodes
+            if mats:
+                by_role[slot.role] = [
+                    DraftNode(ref=f"{slot.role.value}_{i}", node_type=nt, role=slot.role)
+                    for i, nt in enumerate(mats)
+                ]
+        return by_role, warnings
 
+    @staticmethod
+    def _chain(edges: list[DraftEdge], seq: list[DraftNode]) -> None:
+        for a, b in zip(seq, seq[1:]):
+            edges.append(DraftEdge(from_ref=a.ref, to_ref=b.ref))
+
+    # ── 조립 (shape 라우팅) ───────────────────────────────────────────────────
+    def assemble(self, utterance: str) -> AssembledDraft | None:
+        """발화를 결정적 워크플로우 골격으로 조립. 확신이 없으면 None(LLM drafter 폴백).
+
+        스켈레톤은 "전부 처리"가 아니라 "확신할 때만 처리하는 fast-path"다(ADR-0026 §6.6).
+        shape 신호로 분기/팬아웃 전용 조립으로 라우팅하고, 표현 못 하는 경우(중첩 조합,
+        불완전 커버리지, 잡담)는 None을 반환해 composer가 기존 LLM drafter로 폴백하게 한다 —
+        억지로 끼워맞춰 confident-wrong 워크플로우를 내는 것보다 낫다.
+
+        ⚠️ 중첩 합성(팬아웃 안 분기 등)은 현재 flat 라이브러리로 결정적 표현 불가 → LLM bail.
+        실측상 흔하면 모티프 연산자 합성으로 진화(§6.6 로드맵, 측정 게이트).
+        """
+        text = utterance.lower()
+        entities = self._extractor.extract(text)
+        if entities.is_empty():
+            return None
+        if entities.has_branch and entities.has_fanout:
+            return None  # 중첩 제어흐름 — flat 스켈레톤으로 표현 불가, LLM에 위임
+        if entities.has_branch:
+            return self._assemble_branch(entities)
+        if entities.has_fanout:
+            return self._assemble_fanout(entities)
+
+        skeleton = self._select(entities, text)
+        draft = self._assemble_linear(skeleton, entities)
+        if any("미충전" in w for w in draft.warnings):
+            return None  # 불완전 커버리지(출력 채널 등) — LLM 폴백
+        return draft
+
+    # ── 선형 / 검증 루프 ──────────────────────────────────────────────────────
+    def _assemble_linear(self, skeleton: Skeleton, entities: ExtractedEntities) -> AssembledDraft:
+        by_role, warnings = self._collect(skeleton, entities)
         trigger = by_role.get(SlotRole.TRIGGER, [])
         sources = by_role.get(SlotRole.SOURCE, [])
         transforms = by_role.get(SlotRole.TRANSFORM, [])
@@ -125,44 +151,101 @@ class SkeletonAssembler:
         all_nodes = trigger + sources + transforms + sinks + gate
         edges: list[DraftEdge] = []
 
-        def chain(seq: list[DraftNode]) -> None:
-            for a, b in zip(seq, seq[1:]):
-                edges.append(DraftEdge(from_ref=a.ref, to_ref=b.ref))
-
         def fan_sinks(source_ref: str, handle: str = "output") -> None:
-            # 복수 sink는 직렬(sink→sink)이 아니라 마지막 처리 노드에서 **병렬 분기**한다
-            # ("요약해서 슬랙이랑 이메일 둘 다" = transform→slack, transform→email).
+            # 복수 sink는 직렬(sink→sink)이 아니라 마지막 처리 노드에서 **병렬 분기**.
             for s in sinks:
                 edges.append(DraftEdge(from_ref=source_ref, to_ref=s.ref, from_handle=handle))
 
         if gate and transforms:
-            # 검증 루프: trigger→source→transform 선형(spine), 마지막 transform↔gate back-edge,
-            # gate 통과(true)→sink 병렬 분기. quality_gate_loop 구조·엔진 계약 그대로.
+            # 검증 루프: spine 선형, 마지막 transform↔gate back-edge, gate 통과(true)→sink 분기.
             spine = trigger + sources + transforms
-            chain(spine)
-            gen = transforms[-1]
-            evaluator = gate[0]
+            self._chain(edges, spine)
+            gen, evaluator = transforms[-1], gate[0]
             edges.append(DraftEdge(from_ref=gen.ref, to_ref=evaluator.ref))
             edges.append(DraftEdge(from_ref=evaluator.ref, to_ref=gen.ref, from_handle="false"))
             fan_sinks(evaluator.ref, handle="true")
         else:
-            # 선형 파이프라인: trigger→source→transform 선형(spine) → sink 병렬 분기.
-            if gate and not transforms:  # 방어 — 선택 규칙상 도달 불가(quality_loop가 transform 강제)
+            if gate and not transforms:  # 방어 — 선택 규칙상 도달 불가
                 warnings.append("gate 슬롯이 transform 없이 활성 — gate 무시")
-                gate = []
                 all_nodes = trigger + sources + transforms + sinks
             spine = trigger + sources + transforms
-            chain(spine)
+            self._chain(edges, spine)
             if spine:
                 fan_sinks(spine[-1].ref)
             else:
-                chain(sinks)  # spine 전무(트리거조차 없음) — 방어적 sink 직렬
+                self._chain(edges, sinks)  # spine 전무 — 방어적 직렬
+
+        return AssembledDraft(
+            skeleton_name=skeleton.name, nodes=tuple(all_nodes),
+            edges=tuple(edges), warnings=tuple(warnings),
+        )
+
+    # ── 분기 (XOR) ────────────────────────────────────────────────────────────
+    def _assemble_branch(self, entities: ExtractedEntities) -> AssembledDraft | None:
+        """branch_on_classification — classifier(ai)→router(if_condition)→2갈래 sink.
+
+        MVP=2-way(if_condition true/false). sink가 정확히 2개일 때만 결정적 조립(3갈래↑는
+        switch_case 다중 라우팅이 정적으로 모호 → LLM bail). 핸들은 BranchEvaluator의
+        if_condition.branch selector(true/false)와 정합.
+        """
+        if len(entities.sinks) != 2:
+            return None
+        skeleton = find_skeleton("branch_on_classification")
+        if skeleton is None:
+            return None
+        by_role, warnings = self._collect(skeleton, entities)
+        if warnings:  # required 미충전(이론상 sink뿐이나 방어)
+            return None
+        trigger = by_role[SlotRole.TRIGGER]
+        sources = by_role.get(SlotRole.SOURCE, [])
+        classifier = by_role[SlotRole.TRANSFORM]
+        router = by_role[SlotRole.ROUTER]
+        sinks = by_role[SlotRole.SINK]
+
+        edges: list[DraftEdge] = []
+        spine = trigger + sources + classifier
+        self._chain(edges, spine)
+        edges.append(DraftEdge(from_ref=classifier[-1].ref, to_ref=router[0].ref))
+        edges.append(DraftEdge(from_ref=router[0].ref, to_ref=sinks[0].ref, from_handle="true"))
+        edges.append(DraftEdge(from_ref=router[0].ref, to_ref=sinks[1].ref, from_handle="false"))
 
         return AssembledDraft(
             skeleton_name=skeleton.name,
-            nodes=tuple(all_nodes),
-            edges=tuple(edges),
-            warnings=tuple(warnings),
+            nodes=tuple(trigger + sources + classifier + router + sinks),
+            edges=tuple(edges), warnings=(),
+        )
+
+    # ── 팬아웃 (병렬 map) ─────────────────────────────────────────────────────
+    def _assemble_fanout(self, entities: ExtractedEntities) -> AssembledDraft | None:
+        """fan_out_map — splitter(loop_list)→worker(ai)→merger(merge_branch)→sink.
+
+        출력 채널(sink)을 발화에서 못 채우면 토막 골격 대신 LLM bail. loop_list/merge_branch
+        출력은 list/int라 selector 없음 → 엣지 전부 live(BranchEvaluator degrade), 순수 DAG.
+        """
+        if not entities.sinks:
+            return None
+        skeleton = find_skeleton("fan_out_map")
+        if skeleton is None:
+            return None
+        by_role, warnings = self._collect(skeleton, entities)
+        if warnings:
+            return None
+        trigger = by_role[SlotRole.TRIGGER]
+        sources = by_role.get(SlotRole.SOURCE, [])
+        splitter = by_role[SlotRole.SPLITTER]
+        worker = by_role[SlotRole.TRANSFORM]
+        merger = by_role[SlotRole.MERGER]
+        sinks = by_role[SlotRole.SINK]
+
+        edges: list[DraftEdge] = []
+        self._chain(edges, trigger + sources + splitter + worker + merger)
+        for s in sinks:  # merger → sink 병렬 분기
+            edges.append(DraftEdge(from_ref=merger[0].ref, to_ref=s.ref))
+
+        return AssembledDraft(
+            skeleton_name=skeleton.name,
+            nodes=tuple(trigger + sources + splitter + worker + merger + sinks),
+            edges=tuple(edges), warnings=(),
         )
 
 

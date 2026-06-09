@@ -16,16 +16,21 @@ from enum import Enum
 
 
 class SlotRole(str, Enum):
-    """스켈레톤 슬롯 역할 5종 (ADR-0026 §6.6.1, §6.1 role_slot 표 계승).
+    """스켈레톤 슬롯 역할 (ADR-0026 §6.6.1, §6.1 role_slot 표 계승).
 
-    JSON 직렬화 호환을 위해 ``str`` 상속(컨벤션).
+    데이터흐름 5역할(trigger/source/transform/sink/gate) + 제어흐름 3역할
+    (router/splitter/merger). 제어 역할은 전부 condition 카테고리 노드로 채워지며 엔진의
+    BranchEvaluator/CyclicScheduler 수용 계약과 정합한다. JSON 직렬화 호환 위해 ``str`` 상속.
     """
 
     TRIGGER = "trigger"      # 발동 — 워크플로우 진입점 (schedule/webhook/manual…)
     SOURCE = "source"        # 데이터 읽기·수집 (sheets/drive/db/http…)
     TRANSFORM = "transform"  # AI/LLM 가공 (요약·생성·분류…)
     SINK = "sink"            # 내보내는 채널 (slack/email/docs…)
-    GATE = "gate"            # 생성물 검증 루프 (condition 노드 — quality_gate_loop)
+    GATE = "gate"            # 생성물 검증 루프 (condition — quality_gate_loop evaluator)
+    ROUTER = "router"        # XOR 분기 (condition — branch_on_classification, if_condition/switch_case)
+    SPLITTER = "splitter"    # 병렬 분할 (condition — fan_out_map, loop_list)
+    MERGER = "merger"        # 병렬 합류 (condition — fan_out_map, merge_branch)
 
 
 @dataclass(frozen=True)

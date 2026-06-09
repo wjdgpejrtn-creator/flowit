@@ -102,14 +102,49 @@ def test_sink_missing_bails_to_llm() -> None:
     assert _A.assemble("매주 시트 읽어서 요약") is None
 
 
-def test_branch_request_bails_to_llm() -> None:
-    # XOR 분기는 현 라이브러리가 결정적으로 못 짬 → 선형 납작화 대신 LLM 폴백.
-    assert _A.assemble("문의가 들어오면 분류해서 긴급하면 슬랙, 아니면 이메일로 보내줘") is None
+# ── 분기 (XOR) ─────────────────────────────────────────────────────────────
+def test_branch_assembles_xor_to_two_sinks() -> None:
+    # classifier(ai)→router(if_condition)→ true/false 2갈래 sink. 핸들=BranchEvaluator selector.
+    d = _A.assemble("문의를 분류해서 긴급하면 슬랙, 아니면 이메일로 보내줘")
+    assert d is not None
+    assert d.skeleton_name == "branch_on_classification"
+    router = next(n for n in d.nodes if n.role == SlotRole.ROUTER)
+    assert router.node_type == "if_condition"
+    classifier = next(n for n in d.nodes if n.role == SlotRole.TRANSFORM)
+    sinks = [n for n in d.nodes if n.role == SlotRole.SINK]
+    assert len(sinks) == 2
+    assert any(e.from_ref == classifier.ref and e.to_ref == router.ref for e in d.edges)
+    handles = {e.from_handle for e in d.edges if e.from_ref == router.ref}
+    assert handles == {"true", "false"}
 
 
-def test_fanout_request_bails_to_llm() -> None:
-    # 병렬 팬아웃도 미지원 shape → LLM 폴백.
-    assert _A.assemble("목록의 각 항목마다 요약해서 슬랙으로 보내줘") is None
+def test_branch_with_three_sinks_bails_to_llm() -> None:
+    # 3갈래↑는 if_condition 2-way로 표현 불가(switch_case 다중은 정적 모호) → LLM 폴백.
+    assert _A.assemble("조건에 따라 긴급은 슬랙, 보통은 이메일, 낮으면 linear 이슈로") is None
+
+
+# ── 팬아웃 (병렬 map) ───────────────────────────────────────────────────────
+def test_fanout_assembles_split_worker_merge() -> None:
+    d = _A.assemble("목록의 각 항목마다 요약해서 슬랙으로 보내줘")
+    assert d is not None
+    assert d.skeleton_name == "fan_out_map"
+    types = [n.node_type for n in d.nodes]
+    assert "loop_list" in types and "merge_branch" in types
+    splitter = next(n for n in d.nodes if n.role == SlotRole.SPLITTER)
+    worker = next(n for n in d.nodes if n.role == SlotRole.TRANSFORM)
+    merger = next(n for n in d.nodes if n.role == SlotRole.MERGER)
+    # splitter→worker→merger 연쇄.
+    assert any(e.from_ref == splitter.ref and e.to_ref == worker.ref for e in d.edges)
+    assert any(e.from_ref == worker.ref and e.to_ref == merger.ref for e in d.edges)
+
+
+def test_fanout_without_sink_bails_to_llm() -> None:
+    assert _A.assemble("각 항목마다 요약해줘") is None
+
+
+def test_nested_branch_in_fanout_bails_to_llm() -> None:
+    # 중첩 합성(팬아웃 안 분기)은 flat 라이브러리로 표현 불가 → LLM 폴백(§6.6 측정 게이트).
+    assert _A.assemble("각 항목마다 분류해서 긴급하면 슬랙, 아니면 이메일") is None
 
 
 def test_multiple_sinks_fan_out_in_parallel() -> None:
@@ -146,6 +181,8 @@ _PARITY_UTTERANCES = [
     "보고서 초안 생성하고 품질 기준 통과할 때까지 재생성한 다음 구글 docs에 저장",
     "매주 보고서 생성하고 기준 충족할 때까지 검증해서 슬랙 알림",
     "빅쿼리 조회해서 요약하고 pdf로 저장",
+    "문의를 분류해서 긴급하면 슬랙, 아니면 이메일로 보내줘",          # 분기(XOR)
+    "목록의 각 항목마다 요약해서 슬랙으로 보내줘",                      # 팬아웃(병렬 map)
 ]
 
 

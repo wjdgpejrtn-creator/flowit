@@ -59,18 +59,36 @@ def test_quality_loop_has_generator_and_gate() -> None:
     assert gate is not None and gate.required
 
 
-def test_gate_candidates_are_condition_nodes() -> None:
-    # gate = 탈출 조건 condition 노드 — CyclicScheduler/validator 계약(SCC당 condition≥1)의 근거.
+def test_control_role_candidates_are_condition_nodes() -> None:
+    # control 슬롯(gate/router/splitter/merger) 후보는 전부 condition 노드여야 — 엔진의
+    # BranchEvaluator/CyclicScheduler가 분기·루프·합류를 condition 카테고리로 해석.
     cond = {d.node_type for d in get_all_node_definitions() if d.category == "condition"}
+    control_roles = (SlotRole.GATE, SlotRole.ROUTER, SlotRole.SPLITTER, SlotRole.MERGER)
     for skel in SKELETONS:
-        gate = skel.slot(SlotRole.GATE)
-        if gate is None:
-            continue
-        for nt in gate.candidates:
-            assert nt in cond, f"{skel.name}: gate 후보 {nt}가 condition 노드 아님"
+        for role in control_roles:
+            slot = skel.slot(role)
+            if slot is None:
+                continue
+            for nt in slot.candidates:
+                assert nt in cond, f"{skel.name}/{role.value}: 후보 {nt}가 condition 노드 아님"
 
 
-@pytest.mark.parametrize("name", ["scheduled_pipeline", "event_response", "quality_loop"])
+def test_branch_and_fanout_have_required_control_slots() -> None:
+    branch = find_skeleton("branch_on_classification")
+    assert branch is not None
+    assert branch.slot(SlotRole.ROUTER) is not None and branch.slot(SlotRole.ROUTER).required
+    fanout = find_skeleton("fan_out_map")
+    assert fanout is not None
+    for role in (SlotRole.SPLITTER, SlotRole.MERGER, SlotRole.TRANSFORM):
+        slot = fanout.slot(role)
+        assert slot is not None and slot.required
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["scheduled_pipeline", "event_response", "quality_loop",
+     "branch_on_classification", "fan_out_map"],
+)
 def test_find_skeleton(name: str) -> None:
     assert find_skeleton(name) is not None
 

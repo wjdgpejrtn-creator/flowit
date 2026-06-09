@@ -50,6 +50,10 @@ _SINKS: tuple[str, ...] = (
 )
 # gate = 탈출 조건 condition 노드. quality_gate_loop의 evaluator(if_condition) 그대로.
 _GATES: tuple[str, ...] = ("if_condition", "switch_case")
+# router = XOR 분기 condition. splitter/merger = 병렬 분할/합류 condition.
+_ROUTERS: tuple[str, ...] = ("if_condition", "switch_case")
+_SPLITTERS: tuple[str, ...] = ("loop_list",)
+_MERGERS: tuple[str, ...] = ("merge_branch",)
 
 
 SKELETONS: tuple[Skeleton, ...] = (
@@ -99,6 +103,45 @@ SKELETONS: tuple[Skeleton, ...] = (
             SlotSpec(SlotRole.GATE, required=True, cardinality="one",
                      default_node_type="if_condition", candidates=_GATES),
             SlotSpec(SlotRole.SINK, required=False, cardinality="many", candidates=_SINKS),
+        ),
+    ),
+    # ── branch_on_classification ────────────────────────────────────────────
+    # van der Aalst Exclusive Choice(XOR) + agentic Routing. "긴급하면 슬랙, 아니면 이메일" —
+    # classifier(ai)가 분류 신호를 내고 router(if_condition)가 2갈래로 라우팅, 각 갈래가 다른
+    # sink로 종결(합류 불요). 핸들=true/false (BranchEvaluator: if_condition.branch selector).
+    # MVP=2-way(if_condition). 3갈래↑(switch_case 다중)는 조립기가 LLM으로 bail.
+    Skeleton(
+        name="branch_on_classification",
+        intent_keywords=("분류", "분기", "조건에 따라", "경우에 따라", "라우팅"),
+        slots=(
+            SlotSpec(SlotRole.TRIGGER, required=True, cardinality="one",
+                     default_node_type="manual_trigger", candidates=_TRIGGERS),
+            SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
+            SlotSpec(SlotRole.TRANSFORM, required=True, cardinality="one",
+                     default_node_type="anthropic_chat", candidates=_AI),
+            SlotSpec(SlotRole.ROUTER, required=True, cardinality="one",
+                     default_node_type="if_condition", candidates=_ROUTERS),
+            SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
+        ),
+    ),
+    # ── fan_out_map ─────────────────────────────────────────────────────────
+    # van der Aalst Parallel Split + Synchronization + agentic Orchestrator-Workers. "각 항목마다
+    # 처리" — splitter(loop_list)가 목록을 펼치고 worker(ai)가 항목별 처리, merger(merge_branch)가
+    # 합류 후 sink. loop_list/merge_branch 출력은 list/int라 selector 없음 → 엣지 전부 live(DAG).
+    Skeleton(
+        name="fan_out_map",
+        intent_keywords=("각각", "각 항목", "항목마다", "항목별", "그룹별", "일괄", "전부", "하나하나"),
+        slots=(
+            SlotSpec(SlotRole.TRIGGER, required=True, cardinality="one",
+                     default_node_type="manual_trigger", candidates=_TRIGGERS),
+            SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
+            SlotSpec(SlotRole.SPLITTER, required=True, cardinality="one",
+                     default_node_type="loop_list", candidates=_SPLITTERS),
+            SlotSpec(SlotRole.TRANSFORM, required=True, cardinality="one",
+                     default_node_type="anthropic_chat", candidates=_AI),
+            SlotSpec(SlotRole.MERGER, required=True, cardinality="one",
+                     default_node_type="merge_branch", candidates=_MERGERS),
+            SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
         ),
     ),
 )
