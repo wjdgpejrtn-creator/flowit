@@ -36,6 +36,8 @@ from ..adapters.catalog.external.json_transform import JsonTransformNode
 from ..adapters.catalog.external.json_transform import get_node_definition as _json_transform
 from ..adapters.catalog.external.linear_create_issue import LinearCreateIssueNode
 from ..adapters.catalog.external.linear_create_issue import get_node_definition as _linear_create_issue
+from ..adapters.catalog.external.llm_judge import LlmJudgeNode
+from ..adapters.catalog.external.llm_judge import get_node_definition as _llm_judge
 from ..adapters.catalog.external.mysql_query import MysqlQueryNode
 from ..adapters.catalog.external.mysql_query import get_node_definition as _mysql_query
 from ..adapters.catalog.external.pdf_generate import PdfGenerateNode
@@ -63,9 +65,9 @@ def get_all_node_definitions() -> list[NodeDefinition]:
     카테고리는 DB CHECK 영문 8종(trigger/action/condition/transform/ai/integration/utility/output)
     안에서 지정. Microsoft(Outlook/Teams/OneDrive) / Notion / OpenAI는 데모 후속 개발로 보류.
 
-    구성 (총 53종):
+    구성 (총 54종):
         - domain/catalog/ 28종: data 14 + control 8 + trigger 6
-        - adapters/catalog/external/ 25종:
+        - adapters/catalog/external/ 26종:
             · 기존 14종 (박아름 1주차 + gemma_chat PR #68):
               http_request(integration), pdf_generate(output),
               slack_post_message·gmail_send(action),
@@ -77,6 +79,8 @@ def get_all_node_definitions() -> list[NodeDefinition]:
               rest_api·graphql(integration), webhook·email_send·slack_notify(action),
               text_template·json_transform·data_mapping·file_transform(transform),
               file_read·file_write(utility)
+            · 신규 1종 (#438 §6.6 품질 루프 scorer):
+              llm_judge(ai) — 콘텐츠+기준→score:number, if_condition gte가 게이트로 소비
 
     Note: 중복 3종(http_request_tool=external/http_request, conditional=domain/control/if_condition,
     loop=domain/control/loop_list)은 카탈로그에서 제거. 실행 흐름은
@@ -99,6 +103,8 @@ def get_all_node_definitions() -> list[NodeDefinition]:
         _gemma_chat(),
         _google_calendar_create_event(),
         _linear_create_issue(),
+        # 신규 external 1 (#438 §6.6 품질 루프 scorer)
+        _llm_judge(),
         # 신규 external 11 (REQ-005 toolset 연동)
         _rest_api(),
         _graphql(),
@@ -115,11 +121,11 @@ def get_all_node_definitions() -> list[NodeDefinition]:
 
 
 def get_all_node_classes() -> dict[str, type[BaseNode]]:
-    """카탈로그 전체 53종 node_type → BaseNode 클래스.
+    """카탈로그 전체 54종 node_type → BaseNode 클래스.
 
     execution_engine.CatalogNodeExecutor가 node_type으로 노드를 조회·실행한다 (ADR-0018).
-    Phase 3d 완료로 domain 28종 + external 25종 = 53종 전부 process() 실구현 —
-    NotImplementedError 스텁 없음.
+    domain 28종 + external 26종 = 54종 전부 process() 실구현 — NotImplementedError 스텁 없음.
+    (external 26 = 기존 25 + #438 §6.6 llm_judge scorer 1)
     """
     return {
         **get_domain_node_classes(),
@@ -138,6 +144,8 @@ def get_all_node_classes() -> dict[str, type[BaseNode]]:
         "gemma_chat": GemmaChatNode,
         "google_calendar_create_event": GoogleCalendarCreateEventNode,
         "linear_create_issue": LinearCreateIssueNode,
+        # 신규 external 1 (#438 §6.6 품질 루프 scorer)
+        "llm_judge": LlmJudgeNode,
         # 신규 external 11 (REQ-005 toolset 연동)
         "rest_api": RestApiNode,
         "graphql": GraphqlNode,

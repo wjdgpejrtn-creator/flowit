@@ -89,7 +89,9 @@ _EXPAND_ADD_LIMIT = 3    # CAN_FOLLOW로 추가하는 신규 후보 상한
 # → drafter가 쓰려다 `후보 목록에 없는 node_type drop`으로 끊긴 워크플로우 산출(평가 진단 ②,
 # anthropic_chat이 카탈로그에 있는데도 드롭). 구조 노드(#378)와 동일하게 관련도 무관 항상-포함한다.
 # 카탈로그 ai 노드와 동기화는 test_core_llm_nodes_drift가 가드.
-_CORE_LLM_NODE_TYPES: tuple[str, ...] = ("anthropic_chat", "gemma_chat")
+# llm_judge: 콘텐츠를 기준에 따라 채점(score:number)하는 scorer — 품질 루프
+# (generator→llm_judge→if_condition gte)의 게이트 노드라 항상-포함해야 composer가 누락 없이 배선한다(#438 §6.6).
+_CORE_LLM_NODE_TYPES: tuple[str, ...] = ("anthropic_chat", "gemma_chat", "llm_judge")
 
 # 스킬 검색 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 상한. 이 거리 밖 후보는 제외해
 # 무관한 스킬이 옵션/노드 후보에 딸려 나오는 것을 막는다.

@@ -1,6 +1,6 @@
 """실행 가능한 노드 카탈로그 node_type 집합 — **의존성 없는 SSOT 미러**.
 
-`catalog_registry.get_all_node_classes()`는 53종 BaseNode 클래스를 import하므로(httpx/
+`catalog_registry.get_all_node_classes()`는 54종 BaseNode 클래스를 import하므로(httpx/
 fpdf2/pymupdf 등 무거운 어댑터 의존) ai_agent Composer처럼 그 의존을 갖지 않는 모듈이
 import하면 `ModuleNotFoundError`로 크래시한다(worker skills_marketplace 사고와 동류).
 
@@ -44,6 +44,7 @@ EXECUTABLE_NODE_TYPES: frozenset[str] = frozenset({
     "linear_create_issue",
     "list_filter",
     "list_map",
+    "llm_judge",
     "loop_count",
     "loop_list",
     "manual_trigger",
