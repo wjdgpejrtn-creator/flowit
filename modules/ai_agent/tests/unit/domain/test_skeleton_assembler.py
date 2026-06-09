@@ -284,6 +284,21 @@ def test_terse_sink_only_does_not_force_pipeline() -> None:
     assert _A.assemble("슬랙으로 공지 하나 보내줘") is None
 
 
+def test_transform_only_no_sink_bails() -> None:
+    # RC1: 출력 채널(sink) 없는 transform-only는 catch-all 미발동 → None(LLM). default 문서 sink
+    # 오주입(google_docs_write) 방지 — 측정상 LLM 자유조립이 나음(lin_fetch_summarize).
+    assert _A.assemble("이 URL 내용을 가져와서 요약해줘") is None
+
+
+def test_real_pipeline_with_sink_still_assembles() -> None:
+    # source/transform + sink 갖춘 실제 파이프라인은 catch-all로 정상 조립(승리 케이스 보존).
+    d = _A.assemble("구글시트 데이터를 읽어서 요약 메일로 보내줘")
+    assert d is not None
+    assert d.skeleton_name == "scheduled_pipeline"
+    types = [n.node_type for n in d.nodes]
+    assert "google_sheets_read" in types and "email_send" in types
+
+
 def test_multiple_sinks_fan_out_in_parallel() -> None:
     # 복수 sink는 직렬(sink→sink)이 아니라 마지막 처리 노드에서 병렬 분기.
     d = _A.assemble("매주 시트 읽어서 요약해서 슬랙이랑 이메일 둘 다 보내줘")

@@ -71,9 +71,13 @@ class SkeletonAssembler:
             return find_skeleton("event_response") or SKELETONS[0]
         if entities.trigger == "schedule_trigger":
             return find_skeleton("scheduled_pipeline") or SKELETONS[0]
-        # catch-all 제거(RC1): source/transform 둘 다 없는 trivial(sink만/빈) 발화는 스켈레톤이
-        # 구조를 못 살린다(transform 드롭→trigger+sink 토막). 실제 파이프라인일 때만 조립.
-        if entities.sources or entities.transforms:
+        # catch-all 제거(RC1): 실제 파이프라인 = 입력/가공(source|transform) **+ 출력(sink)** 둘 다
+        # 있을 때만 scheduled_pipeline. 출력 채널 없는 transform-only는 _DEFAULT_CONTENT_SINK
+        # (google_docs_write) 오주입으로 저품질이 됐다(측정: lin_fetch_summarize/branch_sentiment
+        # qa≈4-6 < LLM 자유조립 10) → None(LLM 폴백). sink-only/trivial도 None(transform 드롭 토막).
+        # (스케줄/이벤트 트리거가 명시된 경우는 위에서 이미 분기 — "주간 보고서 작성"처럼 출력
+        # 미언급이어도 trigger 신호가 확실하면 default 문서 sink가 정당, #441.)
+        if entities.sinks and (entities.sources or entities.transforms):
             return find_skeleton("scheduled_pipeline") or SKELETONS[0]
         return None
 
