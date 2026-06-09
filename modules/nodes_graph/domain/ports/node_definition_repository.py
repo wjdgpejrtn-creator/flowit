@@ -18,7 +18,7 @@ class NodeDefinitionRepository(ABC):
 
     @abstractmethod
     async def upsert(self, definition: NodeDefinition) -> NodeDefinition:
-        """노드 정의 생성 또는 갱신. Plugin discovery 시 54종 노드를 일괄 등록할 때 사용."""
+        """노드 정의 생성 또는 갱신. Plugin discovery 시 62종 노드를 일괄 등록할 때 사용."""
         ...
 
     @abstractmethod

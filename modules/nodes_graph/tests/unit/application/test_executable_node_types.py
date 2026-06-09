@@ -21,4 +21,4 @@ def test_executable_node_types_matches_registry_exactly():
 def test_executable_node_types_is_frozenset_of_str():
     assert isinstance(EXECUTABLE_NODE_TYPES, frozenset)
     assert all(isinstance(nt, str) for nt in EXECUTABLE_NODE_TYPES)
-    assert len(EXECUTABLE_NODE_TYPES) == 54
+    assert len(EXECUTABLE_NODE_TYPES) == 62

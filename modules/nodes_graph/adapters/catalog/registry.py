@@ -42,7 +42,7 @@ async def discover_and_register(
         embedder: EmbedderPort 구현체 (REQ-004 ai_agent.adapters.llm.modal_embedding_adapter)
 
     Returns:
-        등록된 노드 수 (현재 54종 — 28 domain + 26 external)
+        등록된 노드 수 (현재 62종 — 28 domain + 34 external)
 
     Notes:
         - 임베딩이 없는 노드는 description 텍스트로 embedder.embed_batch() 일괄 호출
