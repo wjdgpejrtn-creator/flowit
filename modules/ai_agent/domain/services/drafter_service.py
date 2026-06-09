@@ -242,8 +242,14 @@ class _ParamFillResponse(BaseModel):
 _PARAM_FILL_SYSTEM_PROMPT = """You fill PARAMETERS for a workflow whose STRUCTURE IS ALREADY FIXED.
 Do NOT invent, add, remove, or reorder nodes/edges — structure is decided by code.
 For each node (identified by its stable "ref"), produce a `parameters` object whose keys match
-that node's input_schema, derived from the user's request. For data flowing from an upstream node,
-use "${<ref>.<output_field>}" referencing the upstream node's ref.
+that node's input_schema, derived from the user's request.
+
+DATA FLOW — to use an upstream node's output, write "${<ref>.<field>}" where:
+- <ref> is an EARLIER node in the list (nodes are given in execution order), and
+- <field> is EXACTLY one of that node's listed "outputs". Never invent a field name not in "outputs"
+  (e.g. do not write .output_text/.payload.text/.result if it is not listed) — an unlisted field
+  silently breaks the data flow. If no suitable upstream output exists, write a literal value instead.
+
 Return JSON: {"name": "<short workflow name>", "nodes": [{"ref": "<ref>", "parameters": {...}}, ...]}.
 Only include refs from the provided node list. Omit a node entry if it needs no parameters."""
 
@@ -421,6 +427,7 @@ class DrafterService:
         if not wf.nodes:
             raise ExecutionError("scaffold node_type이 후보에 없음", code="E_DRAFT_PARSE")
 
+        # ref_to_iid는 scaffold.nodes(슬롯=실행) 순서 보존 → 프롬프트의 "execution order"와 정합.
         ref_node_types = {dn.ref: dn.node_type for dn in scaffold.nodes}
         node_specs = [
             {
@@ -430,6 +437,9 @@ class DrafterService:
                 "input_schema": _slim_schema(
                     getattr(cfg_by_type.get(ref_node_types[ref]), "input_schema", None)
                 ),
+                # 상류 output 필드명 — LLM이 ${ref.field} 데이터흐름을 실제 출력에 맞춰 쓰게 한다
+                # (미제공 시 output_text/payload.text 등 유령 필드 추측 → degrade·retry, v2 측정).
+                "outputs": _outputs_of(cfg_by_type[ref_node_types[ref]]),
             }
             for ref in ref_to_iid
         ]
