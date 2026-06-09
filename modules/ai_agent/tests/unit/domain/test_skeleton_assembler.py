@@ -273,6 +273,21 @@ def test_conditional_guard_with_classifier_keeps_transform() -> None:
     assert any(n.role == SlotRole.TRANSFORM for n in d.nodes)
 
 
+def test_branch_signal_wins_over_guard() -> None:
+    # guard("넘으면")+branch("아니면") 동반 + 2 sink → branch_on_classification(분기 우선, guard
+    # 양보). assemble의 `shapes.discard("guard")` 우선순위(approval>branch>guard) 회귀 가드.
+    d = _A.assemble("금액이 100만원을 넘으면 슬랙으로 알림, 아니면 이메일로 보내줘")
+    assert d is not None
+    assert d.skeleton_name == "branch_on_classification"
+
+
+def test_approval_wins_over_guard() -> None:
+    # approval("승인")+guard("넘으면") 동반 → approval_gate(승인 우선, guard 양보).
+    d = _A.assemble("금액이 한도를 넘으면 검토 후 승인되면 이메일로 발송")
+    assert d is not None
+    assert d.skeleton_name == "approval_gate"
+
+
 def test_guard_without_sink_bails_to_llm() -> None:
     # 가드 신호여도 action 채널(sink) 못 채우면 LLM 폴백(억지 조립 금지).
     assert _A.assemble("값이 임계치를 넘으면 처리해줘") is None
