@@ -10,3 +10,23 @@ export type { ConnectionStatus };
 export async function getConnections(): Promise<ConnectionStatus[]> {
   return apiJson<ConnectionStatus[]>('/api/v1/connections');
 }
+
+// GET /api/v1/connections/{service}/authorize → 동의 화면 URL 발급(ADR-0027).
+// 받은 authorization_url로 전체 페이지를 넘겨 OAuth 동의를 띄운다. callback이 끝나면
+// 백엔드가 /settings?connected={service} 또는 ?error=connect_failed 로 되돌려보낸다.
+interface AuthorizeConnectionResponse {
+  authorization_url: string;
+  state: string;
+}
+
+export async function startConnection(service: string): Promise<void> {
+  const { authorization_url } = await apiJson<AuthorizeConnectionResponse>(
+    `/api/v1/connections/${service}/authorize`,
+  );
+  window.location.href = authorization_url;
+}
+
+// DELETE /api/v1/connections/{service} → 연결 해제(ADR-0027).
+export async function revokeConnection(service: string): Promise<void> {
+  await apiJson(`/api/v1/connections/${service}`, { method: 'DELETE' });
+}

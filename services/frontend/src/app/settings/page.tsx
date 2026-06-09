@@ -5,7 +5,12 @@ import Icon from '@/components/common/Icon';
 import { showToast } from '@/stores/toastStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useAuth } from '@/hooks/useAuth';
-import { getConnections, type ConnectionStatus } from '@/lib/api/connectionApi';
+import {
+  getConnections,
+  startConnection,
+  revokeConnection,
+  type ConnectionStatus,
+} from '@/lib/api/connectionApi';
 
 type Panel = 'profile' | 'integration' | 'alert' | 'security';
 
@@ -116,12 +121,18 @@ function IntegrationRow({
   name,
   detail,
   connected,
+  busy,
+  onConnect,
+  onRevoke,
 }: {
   icon: string;
   iconBg: string;
   name: string;
   detail: string;
   connected: boolean;
+  busy: boolean;
+  onConnect: () => void;
+  onRevoke: () => void;
 }) {
   return (
     <div className="flex items-center justify-between p-3.5 rounded-xl border border-line-soft bg-white">
@@ -138,20 +149,31 @@ function IntegrationRow({
         </div>
       </div>
       {connected ? (
-        <span
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold"
-          style={{ background: '#E7F6EF', color: '#10B981' }}
-        >
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#10B981' }} />
-          연결됨
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold"
+            style={{ background: '#E7F6EF', color: '#10B981' }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#10B981' }} />
+            연결됨
+          </span>
+          <button
+            type="button"
+            onClick={onRevoke}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-lg border border-line-soft text-ink3 text-[10px] font-bold hover:bg-paper/60 hover:text-danger disabled:opacity-50"
+          >
+            {busy ? '처리 중…' : '해제'}
+          </button>
+        </div>
       ) : (
         <button
           type="button"
-          onClick={() => showToast(`${name} 연동을 시작합니다.`)}
-          className="px-3 py-1.5 rounded-lg bg-accent text-white text-[10px] font-bold shadow-sm hover:bg-accent3"
+          onClick={onConnect}
+          disabled={busy}
+          className="px-3 py-1.5 rounded-lg bg-accent text-white text-[10px] font-bold shadow-sm hover:bg-accent3 disabled:opacity-50"
         >
-          연결
+          {busy ? '연결 중…' : '연결'}
         </button>
       )}
     </div>
@@ -165,27 +187,70 @@ const INTEGRATION_SERVICES: { service: string; icon: string; iconBg: string; nam
   { service: 'erp', icon: 'database', iconBg: '#A2917F', name: '사내 ERP' },
 ];
 
+// callback 복귀 시그널(?connected / ?error)을 토스트로 표시하고 URL에서 정리한다.
+// 백엔드 callback이 /settings?connected={service} 또는 ?error=connect_failed 로 리다이렉트한다.
+function consumeConnectCallback(serviceLabel: (s: string) => string): boolean {
+  if (typeof window === 'undefined') return false;
+  const params = new URLSearchParams(window.location.search);
+  const connected = params.get('connected');
+  const error = params.get('error');
+  if (!connected && !error) return false;
+
+  if (connected) showToast(`${serviceLabel(connected)} 연결이 완료되었습니다.`);
+  else if (error === 'connect_failed') showToast('연결에 실패했습니다. 다시 시도해주세요.');
+
+  // 새로고침/뒤로가기 시 토스트 재발생 방지 — 쿼리만 제거.
+  window.history.replaceState({}, '', window.location.pathname);
+  return Boolean(connected);
+}
+
 function IntegrationPanel() {
   const [connections, setConnections] = useState<ConnectionStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [busyService, setBusyService] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      setConnections(await getConnections());
+      setError(false);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let alive = true;
-    getConnections()
-      .then((rows) => {
-        if (alive) setConnections(rows);
-      })
-      .catch(() => {
-        if (alive) setError(true);
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
+    const labelOf = (svc: string) =>
+      INTEGRATION_SERVICES.find((s) => s.service === svc)?.name ?? svc;
+    consumeConnectCallback(labelOf);
+    void load();
   }, []);
+
+  const handleConnect = async (service: string) => {
+    setBusyService(service);
+    try {
+      // 성공 시 OAuth 동의 화면으로 전체 페이지 이동(반환 없음).
+      await startConnection(service);
+    } catch {
+      showToast('연결을 시작하지 못했습니다. 잠시 후 다시 시도해주세요.');
+      setBusyService(null);
+    }
+  };
+
+  const handleRevoke = async (service: string) => {
+    setBusyService(service);
+    try {
+      await revokeConnection(service);
+      showToast('연결을 해제했습니다.');
+      await load();
+    } catch {
+      showToast('연결 해제에 실패했습니다. 다시 시도해주세요.');
+    } finally {
+      setBusyService(null);
+    }
+  };
 
   const byService = new Map(connections.map((c) => [c.service, c]));
 
@@ -213,6 +278,9 @@ function IntegrationPanel() {
               name={s.name}
               detail={detail}
               connected={connected}
+              busy={busyService === s.service}
+              onConnect={() => void handleConnect(s.service)}
+              onRevoke={() => void handleRevoke(s.service)}
             />
           );
         })}

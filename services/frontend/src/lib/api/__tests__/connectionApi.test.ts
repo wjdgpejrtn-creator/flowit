@@ -1,4 +1,4 @@
-import { getConnections } from '../connectionApi';
+import { getConnections, startConnection, revokeConnection } from '../connectionApi';
 
 jest.mock('../../apiClient', () => ({
   apiJson: jest.fn(),
@@ -48,5 +48,40 @@ describe('getConnections', () => {
     mockApiJson.mockRejectedValueOnce(new Error('500 Internal Server Error: boom'));
 
     await expect(getConnections()).rejects.toThrow('500 Internal Server Error');
+  });
+});
+
+describe('startConnection', () => {
+  it('GET /api/v1/connections/{service}/authorize 를 호출한다', async () => {
+    mockApiJson.mockResolvedValueOnce({
+      authorization_url: 'https://accounts.google.com/o/oauth2/auth?x=1',
+      state: 'abc',
+    });
+
+    await startConnection('google');
+
+    expect(mockApiJson).toHaveBeenCalledWith('/api/v1/connections/google/authorize');
+  });
+
+  it('authorize 실패 시 에러를 throw한다 (리다이렉트 전 단계에서 중단)', async () => {
+    mockApiJson.mockRejectedValueOnce(new Error('400 Bad Request'));
+
+    await expect(startConnection('notion')).rejects.toThrow('400 Bad Request');
+  });
+});
+
+describe('revokeConnection', () => {
+  it('DELETE /api/v1/connections/{service} 를 호출한다', async () => {
+    mockApiJson.mockResolvedValueOnce({ service: 'google', revoked: true });
+
+    await revokeConnection('google');
+
+    expect(mockApiJson).toHaveBeenCalledWith('/api/v1/connections/google', { method: 'DELETE' });
+  });
+
+  it('apiJson 실패 시 에러를 throw한다', async () => {
+    mockApiJson.mockRejectedValueOnce(new Error('500 Internal Server Error'));
+
+    await expect(revokeConnection('slack')).rejects.toThrow('500 Internal Server Error');
   });
 });
