@@ -1,6 +1,6 @@
 """Load shared Modal token from .env and persist it to ~/.modal.toml.
 
-Team members share a single Modal workspace (dhwang0803) so that sub-agents
+Team members share a single Modal workspace (flowit) so that sub-agents
 can `modal.Cls.from_name(...)` each other across deployments. This script
 reads MODAL_TOKEN_ID / MODAL_TOKEN_SECRET from the repo-root .env file and
 runs `modal token set` so the Modal CLI/SDK picks them up for subsequent

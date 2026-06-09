@@ -12,7 +12,7 @@ Sprint 3 멀티 에이전트 구조에서 각 sub-agent(Skills Builder / Persona
 
 | 항목 | 확인 방법 | 관련 |
 |------|----------|------|
-| Modal CLI + 공용 토큰 영속화 | `modal profile list` 출력에 `dhwang0803` 워크스페이스 1개 | 전체 |
+| Modal CLI + 공용 토큰 영속화 | `modal profile list` 출력에 `flowit` 워크스페이스 1개 | 전체 |
 | `cloudsql-iam-sa` Modal Secret 존재 | `modal secret list` 출력에 포함 | 전체 |
 | `llm-base` app 배포됨 | `modal app list`에 `llm-base` state=deployed | 전체 |
 | GCP `cloudsql-iam-modal` SA가 DB IAM user로 등록됨 | 조장에게 확인 | 전체 |
@@ -302,10 +302,10 @@ $env:PYTHONUTF8 = "1"
 modal deploy services/agents/agent-skills-builder/main.py
 
 # 2) 배포 후 stdout 끝부분에 endpoint URL이 찍힌다 — LLM_BASE_URL 패턴 검증용
-#    https://dhwang0803--agent-skills-builder-skillsbuilderagent-... .modal.run
+#    https://flowit--agent-skills-builder-skillsbuilderagent-... .modal.run
 
 # 3) 헬스체크 (db: "iam-connected" 또는 503 응답)
-curl https://<WORKSPACE>--skills-builder.modal.run/v1/health
+curl https://flowit--agent-skills-builder-skillsbuilderagent-fastapi.modal.run/v1/health
 ```
 
 ---

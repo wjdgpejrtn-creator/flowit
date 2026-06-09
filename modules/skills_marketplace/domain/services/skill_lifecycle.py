@@ -9,7 +9,10 @@ _TRANSITIONS: dict[SkillState, list[SkillState]] = {
     SkillState.REVIEW: [SkillState.APPROVED, SkillState.DRAFT],
     SkillState.APPROVED: [SkillState.PUBLISHED, SkillState.DRAFT],
     SkillState.PUBLISHED: [SkillState.ARCHIVED],
-    SkillState.ARCHIVED: [SkillState.DRAFT],
+    # 보관(archive)은 게시 스킬을 마켓플레이스에서 임시로 숨기는 가역 동작이다. 복원(restore)은
+    # 보관된 스킬을 원래 자리(PUBLISHED)로 되돌린다 — 프론트 보관/복원 UX 계약(skillApi
+    # restorePersonalSkill: ARCHIVED→PUBLISHED)과 일치. DRAFT로의 복귀(재편집)도 함께 허용.
+    SkillState.ARCHIVED: [SkillState.DRAFT, SkillState.PUBLISHED],
 }
 
 

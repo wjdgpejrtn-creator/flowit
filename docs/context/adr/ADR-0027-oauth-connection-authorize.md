@@ -115,6 +115,18 @@ settings "Google 연결" 클릭
 
 ---
 
+## 구현 (2026-06-08 — 박아름, #423)
+
+설계대로 use case 4 + 엔드포인트 4 + `list_for_user`/`authorization_url` Port 구현. 셀프 3축 리뷰로 확정·보강된 디테일:
+- **② scope 분리 확장** — 단순 scope 트림이 아니라, 로그인 `AuthenticateUseCase`가 readonly scope로 oauth_connection을 **암묵 생성**하던 것을 제거(로그인=신원 전용, connection은 별도 플로우). 로그인 access_token 서비스 API 소비처 0건이라 무영향(조장 확인).
+- **redirect_uri 분리 (셀프리뷰 🔴 HIGH)** — connection authorize/callback이 `request.url_for("callback_connection")`로 **자신의 callback**을 redirect_uri로 사용. 로그인 callback(`GOOGLE_REDIRECT_URI`)을 그대로 쓰면 google이 로그인 callback으로 돌려보내 connection callback 미호출 = 작동불가였음. → google 앱에 connection redirect_uri 등록 필요(조장).
+- ③ 단일 트랜잭션 = `get_db` request-단위(repo flush only, 예외 rollback). ④ active partial index가 동시 callback race 정합 보장 → ON CONFLICT 대신 수용.
+- `ConnectionStatus`는 **common_schemas 0.21.0** SSOT(use case ↔ api ↔ frontend TS 공유).
+
+PR: **#420**(ADR Accepted + list_for_user + scope 분리, MERGED) / **#422**(조장 026 account/display, MERGED) / **#423**(use case + 엔드포인트, 조장 리뷰 대기).
+
+---
+
 ## Consequences
 
 ### Positive

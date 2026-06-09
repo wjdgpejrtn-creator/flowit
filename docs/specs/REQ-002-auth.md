@@ -293,6 +293,21 @@ JIT auto-provisioning 동작:
 
 의존성: `CredentialInjectionService`
 
+#### use_cases/list_connections_use_case.py — `ListConnectionsUseCase` (ADR-0027 OAuth connection)
+- `execute(user_id) -> list[ConnectionStatus]` — `OAuthConnectionRepository.list_for_user` 기반 settings 연결 목록 (service/connected/status/display)
+
+#### use_cases/start_connection_authorize_use_case.py — `StartConnectionAuthorizeUseCase` (ADR-0027)
+- `build_authorization_url(service, state, redirect_uri) -> str` — `CONNECTION_SCOPES`(google: sheets/drive/docs/calendar/gmail), 로그인 신원 scope와 분리(②). redirect_uri = connection callback 경로(로그인 callback과 분리)
+
+#### use_cases/complete_connection_use_case.py — `CompleteConnectionUseCase` (ADR-0027)
+- `execute(user_id, service, code, redirect_uri) -> OAuthConnection` — code 교환 → AESGCMCipher 암호화 → credentials + oauth_connection 저장. ④ upsert(active partial index 미증식) + account_id/display_name(#422). 단일 트랜잭션 = `get_db` request 단위(repo flush only)
+
+#### use_cases/revoke_connection_use_case.py — `RevokeConnectionUseCase` (ADR-0027)
+- `execute(user_id, service) -> bool` — get_active → revoke(is_active=FALSE), 멱등
+
+> **연동 엔드포인트** (api_server, REQ-009 협업): `GET /api/v1/connections` / `GET /{service}/authorize` / `GET /{service}/callback` / `DELETE /{service}`. 상세 = ADR-0027.
+> **Port 추가**: `OAuthConnectionRepository.list_for_user(user_id) -> list[OAuthConnection]` / `OAuthClientPort.authorization_url(state, scopes, redirect_uri)` · `exchange_code(code, redirect_uri)`.
+
 ---
 
 ### Infrastructure/Adapter Layer (`modules/auth/adapters/`)
