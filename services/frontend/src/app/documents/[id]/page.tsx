@@ -14,6 +14,7 @@ import {
   getDocumentBlocks,
   getDownloadUrl,
   analyzeDocument,
+  deleteDocument,
   type DocumentResponse,
 } from '@/lib/api/documentApi';
 import { AnalysisStatus, type ContentBlock, type ParseCoverage } from '@common/generated';
@@ -59,6 +60,7 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
   const [error, setError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // 폴링 lifecycle 관리 — 컴포넌트 언마운트 / 새 분석 dispatch 시 기존 타이머 정리.
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -161,6 +163,22 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
     }
   };
 
+  const handleDelete = async () => {
+    if (!doc) return;
+    if (!window.confirm(`"${doc.file_name}"을(를) 영구 삭제할까요?\n원본 파일과 분석 결과가 모두 삭제되며 되돌릴 수 없습니다.`)) {
+      return;
+    }
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteDocument(id);
+      router.push('/documents');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '삭제 실패');
+      setDeleting(false);
+    }
+  };
+
   const status: AnalysisStatus = doc?.analysis_status ?? AnalysisStatus.PENDING;
   const isRunning = status === AnalysisStatus.RUNNING || analyzing;
   const isFailed = status === AnalysisStatus.FAILED;
@@ -185,6 +203,9 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
         <div className="flex-1" />
         <Btn ghost onClick={handleDownload} disabled={downloading || !doc}>
           {downloading ? '준비 중…' : '⬇ 다운로드'}
+        </Btn>
+        <Btn ghost onClick={handleDelete} disabled={deleting || !doc}>
+          {deleting ? '삭제 중…' : '🗑 삭제'}
         </Btn>
         <Btn onClick={handleAnalyze} disabled={isRunning || !doc}>
           {isRunning ? '분석 중…' : isFailed ? '🔁 다시 분석' : '🔍 분석'}
