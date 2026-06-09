@@ -70,6 +70,13 @@ _FANOUT_KEYWORDS: tuple[str, ...] = (
     "각각", "각 항목", "항목마다", "항목별", "그룹별", "건마다", "건별", "개별적으로",
     "전부 각", "하나하나", "병렬",
 )
+_RETRY_KEYWORDS: tuple[str, ...] = (
+    "재시도", "실패하면", "실패 시", "실패하면 다시", "안 되면 다시", "다시 시도",
+    "될 때까지 재시도", "오류 나면",
+)
+_APPROVAL_KEYWORDS: tuple[str, ...] = (
+    "승인", "검토 후", "컨펌", "결재", "허가", "승인되면", "승인받아", "결재 후",
+)
 
 
 def _match_single(text: str, rules: tuple[tuple[str, tuple[str, ...]], ...]) -> str | None:
@@ -116,4 +123,6 @@ class SkeletonEntityExtractor:
             needs_gate=any(kw in text for kw in _GATE_KEYWORDS),
             has_branch=any(kw in text for kw in _BRANCH_KEYWORDS),
             has_fanout=any(kw in text for kw in _FANOUT_KEYWORDS),
+            has_retry=any(kw in text for kw in _RETRY_KEYWORDS),
+            has_approval=any(kw in text for kw in _APPROVAL_KEYWORDS),
         )

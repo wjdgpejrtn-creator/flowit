@@ -54,6 +54,11 @@ _GATES: tuple[str, ...] = ("if_condition", "switch_case")
 _ROUTERS: tuple[str, ...] = ("if_condition", "switch_case")
 _SPLITTERS: tuple[str, ...] = ("loop_list",)
 _MERGERS: tuple[str, ...] = ("merge_branch",)
+# delay = 백오프 대기(재시도 경로). terminal = 종료(반려 경로).
+_DELAYS: tuple[str, ...] = ("delay", "retry")
+_TERMINALS: tuple[str, ...] = ("stop_workflow",)
+# 재시도 대상(worker)은 통상 외부 호출 — source 풀 + ai를 후보로(실패할 수 있는 연산).
+_RETRY_WORKERS: tuple[str, ...] = _SOURCES + _AI
 
 
 SKELETONS: tuple[Skeleton, ...] = (
@@ -141,6 +146,46 @@ SKELETONS: tuple[Skeleton, ...] = (
                      default_node_type="anthropic_chat", candidates=_AI),
             SlotSpec(SlotRole.MERGER, required=True, cardinality="one",
                      default_node_type="merge_branch", candidates=_MERGERS),
+            SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
+        ),
+    ),
+    # ── retry_backoff ───────────────────────────────────────────────────────
+    # van der Aalst Structured Loop + delay (resilience). "API 호출 실패하면 재시도" — worker
+    # (실패 가능 연산)→gate(if_condition 성공?)→[false]→delay 백오프→worker 재시도 / [true]→sink.
+    # SCC={worker,gate,delay}에 condition(gate) 포함 → CyclicScheduler 수용(#392). quality_loop와
+    # 동형이나 back-edge에 delay가 끼고 worker가 ai가 아닌 외부호출(source)일 수 있다.
+    Skeleton(
+        name="retry_backoff",
+        intent_keywords=("재시도", "실패하면", "실패 시", "다시 시도", "오류 나면"),
+        slots=(
+            SlotSpec(SlotRole.TRIGGER, required=True, cardinality="one",
+                     default_node_type="manual_trigger", candidates=_TRIGGERS),
+            SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
+            SlotSpec(SlotRole.TRANSFORM, required=False, cardinality="many", candidates=_AI),
+            SlotSpec(SlotRole.GATE, required=True, cardinality="one",
+                     default_node_type="if_condition", candidates=_GATES),
+            SlotSpec(SlotRole.DELAY, required=True, cardinality="one",
+                     default_node_type="delay", candidates=_DELAYS),
+            SlotSpec(SlotRole.SINK, required=False, cardinality="many", candidates=_SINKS),
+        ),
+    ),
+    # ── approval_gate ───────────────────────────────────────────────────────
+    # van der Aalst Deferred Choice + agentic Human-in-the-loop. "초안 검토 후 승인되면 발송,
+    # 아니면 중단" — proposer(ai)→router(if_condition 승인?)→[true]→sink 진행 /[false]→terminal
+    # (stop_workflow) 반려. 분기의 특수화(한 갈래가 종료)이므로 DAG(루프 아님). validator 통과.
+    Skeleton(
+        name="approval_gate",
+        intent_keywords=("승인", "검토 후", "컨펌", "결재", "허가"),
+        slots=(
+            SlotSpec(SlotRole.TRIGGER, required=True, cardinality="one",
+                     default_node_type="manual_trigger", candidates=_TRIGGERS),
+            SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
+            SlotSpec(SlotRole.TRANSFORM, required=True, cardinality="one",
+                     default_node_type="anthropic_chat", candidates=_AI),
+            SlotSpec(SlotRole.ROUTER, required=True, cardinality="one",
+                     default_node_type="if_condition", candidates=_ROUTERS),
+            SlotSpec(SlotRole.TERMINAL, required=True, cardinality="one",
+                     default_node_type="stop_workflow", candidates=_TERMINALS),
             SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
         ),
     ),

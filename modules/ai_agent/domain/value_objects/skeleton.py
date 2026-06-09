@@ -27,10 +27,12 @@ class SlotRole(str, Enum):
     SOURCE = "source"        # 데이터 읽기·수집 (sheets/drive/db/http…)
     TRANSFORM = "transform"  # AI/LLM 가공 (요약·생성·분류…)
     SINK = "sink"            # 내보내는 채널 (slack/email/docs…)
-    GATE = "gate"            # 생성물 검증 루프 (condition — quality_gate_loop evaluator)
-    ROUTER = "router"        # XOR 분기 (condition — branch_on_classification, if_condition/switch_case)
+    GATE = "gate"            # 생성물 검증/재시도 루프 (condition — quality_gate_loop·retry evaluator)
+    ROUTER = "router"        # XOR 분기 (condition — branch/approval, if_condition/switch_case)
     SPLITTER = "splitter"    # 병렬 분할 (condition — fan_out_map, loop_list)
     MERGER = "merger"        # 병렬 합류 (condition — fan_out_map, merge_branch)
+    DELAY = "delay"          # 백오프 대기 (condition — retry_backoff 재시도 경로, delay/retry)
+    TERMINAL = "terminal"    # 종료 (condition — approval_gate 반려 경로, stop_workflow)
 
 
 @dataclass(frozen=True)
@@ -95,19 +97,31 @@ class ExtractedEntities:
     transforms: tuple[str, ...] = ()
     sinks: tuple[str, ...] = ()
     needs_gate: bool = False
-    # 현 스켈레톤(선형/루프)이 표현 못 하는 제어흐름 shape 신호. 잡히면 조립기가 LLM으로
-    # bail한다(억지 선형 납작화보다 LLM 시도가 나음). 향후 branch/fan_out 스켈레톤이 생기면
-    # 해당 스켈레톤으로 라우팅(ADR-0026 §6.6 라이브러리 확장 로드맵, §9.3 van der Aalst 모티프).
-    has_branch: bool = False   # XOR 분기 — "~이면 …, 아니면 …" (Exclusive Choice / Routing)
-    has_fanout: bool = False   # 병렬 팬아웃 — "각 항목마다 …" (Parallel Split / Orchestrator-Workers)
+    # 제어흐름 shape 신호 — 조립기가 전용 스켈레톤으로 라우팅하는 근거(ADR-0026 §6.6, §9.3
+    # van der Aalst ∩ agentic 모티프). 둘 이상 동시면 중첩 합성이라 flat 라이브러리로 표현
+    # 불가 → 조립기가 LLM으로 bail(억지 끼워맞춤 방지). approval은 "승인되면…아니면" 구조라
+    # has_branch를 동반할 수 있어 조립기가 approval을 우선(branch를 포섭)한다.
+    has_branch: bool = False     # XOR 분기 — "~이면 …, 아니면 …" (Exclusive Choice / Routing)
+    has_fanout: bool = False     # 병렬 팬아웃 — "각 항목마다 …" (Parallel Split / Orchestrator-Workers)
+    has_retry: bool = False      # 재시도 루프 — "실패하면 재시도" (Structured Loop + delay)
+    has_approval: bool = False   # 승인 게이트 — "검토 후 승인" (Deferred Choice / Human-in-the-loop)
 
     def is_empty(self) -> bool:
         """트리거 외에 아무 슬롯 재료도 없으면 True(조립 무의미 — fast-path/폴백 판단용)."""
         return not (self.sources or self.transforms or self.sinks or self.needs_gate)
 
-    def has_unsupported_shape(self) -> bool:
-        """현 스켈레톤 라이브러리가 결정적으로 못 짜는 제어흐름인지(분기/팬아웃)."""
-        return self.has_branch or self.has_fanout
+    def shape_signals(self) -> set[str]:
+        """감지된 제어흐름 shape 신호 집합 (조립기 라우팅·중첩 판정용)."""
+        return {
+            name
+            for name, flag in (
+                ("approval", self.has_approval),
+                ("retry", self.has_retry),
+                ("fanout", self.has_fanout),
+                ("branch", self.has_branch),
+            )
+            if flag
+        }
 
 
 @dataclass(frozen=True)

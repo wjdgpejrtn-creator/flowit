@@ -44,7 +44,10 @@ class SkeletonAssembler:
 
         # 선형 계열만 후보 — 분기/팬아웃(control 슬롯 보유)은 shape 라우팅이 전담하므로
         # 여기서 고르면 _assemble_linear가 router/splitter/merger를 무시해 구조가 깨진다.
-        _CONTROL = {SlotRole.ROUTER, SlotRole.SPLITTER, SlotRole.MERGER}
+        _CONTROL = {
+            SlotRole.ROUTER, SlotRole.SPLITTER, SlotRole.MERGER,
+            SlotRole.DELAY, SlotRole.TERMINAL,
+        }
         linear_family = [
             s for s in SKELETONS if not any(sl.role in _CONTROL for sl in s.slots)
         ]
@@ -126,12 +129,23 @@ class SkeletonAssembler:
         entities = self._extractor.extract(text)
         if entities.is_empty():
             return None
-        if entities.has_branch and entities.has_fanout:
-            return None  # 중첩 제어흐름 — flat 스켈레톤으로 표현 불가, LLM에 위임
-        if entities.has_branch:
-            return self._assemble_branch(entities)
-        if entities.has_fanout:
+
+        # shape 라우팅. approval은 "승인되면…아니면" 구조라 branch 신호를 동반하므로 branch를
+        # 포섭(approval 우선). 그 외 서로 다른 shape가 2개 이상이면 중첩 합성 → flat 표현 불가
+        # → LLM bail(억지 끼워맞춤 방지, §6.6 측정 게이트).
+        shapes = entities.shape_signals()
+        if "approval" in shapes:
+            shapes.discard("branch")
+        if len(shapes) >= 2:
+            return None
+        if "approval" in shapes:
+            return self._assemble_approval(entities)
+        if "retry" in shapes:
+            return self._assemble_retry(entities)
+        if "fanout" in shapes:
             return self._assemble_fanout(entities)
+        if "branch" in shapes:
+            return self._assemble_branch(entities)
 
         skeleton = self._select(entities, text)
         draft = self._assemble_linear(skeleton, entities)
@@ -245,6 +259,79 @@ class SkeletonAssembler:
         return AssembledDraft(
             skeleton_name=skeleton.name,
             nodes=tuple(trigger + sources + splitter + worker + merger + sinks),
+            edges=tuple(edges), warnings=(),
+        )
+
+    # ── 재시도 (백오프 루프) ──────────────────────────────────────────────────
+    def _assemble_retry(self, entities: ExtractedEntities) -> AssembledDraft | None:
+        """retry_backoff — worker(실패 가능 연산)→gate(if_condition)→[false]→delay→worker 루프.
+
+        재시도 대상(worker)=마지막 source/transform(외부 호출이 통상). 재시도할 연산이 없으면
+        LLM bail. SCC={worker,gate,delay}에 condition(gate) 포함 → CyclicScheduler 수용.
+        """
+        skeleton = find_skeleton("retry_backoff")
+        if skeleton is None:
+            return None
+        by_role, _ = self._collect(skeleton, entities)
+        trigger = by_role[SlotRole.TRIGGER]
+        sources = by_role.get(SlotRole.SOURCE, [])
+        transforms = by_role.get(SlotRole.TRANSFORM, [])
+        ops = sources + transforms
+        if not ops:
+            return None  # 재시도할 연산이 발화에 없음 → LLM
+        gate = by_role[SlotRole.GATE]
+        delay = by_role[SlotRole.DELAY]
+        sinks = by_role.get(SlotRole.SINK, [])
+
+        worker = ops[-1]
+        edges: list[DraftEdge] = []
+        self._chain(edges, trigger + ops)              # 진입 선형 (… → worker)
+        edges.append(DraftEdge(from_ref=worker.ref, to_ref=gate[0].ref))
+        # 실패(false) → delay 백오프 → worker 재시도 (back-edge)
+        edges.append(DraftEdge(from_ref=gate[0].ref, to_ref=delay[0].ref, from_handle="false"))
+        edges.append(DraftEdge(from_ref=delay[0].ref, to_ref=worker.ref))
+        # 성공(true) → sink 병렬 분기
+        for s in sinks:
+            edges.append(DraftEdge(from_ref=gate[0].ref, to_ref=s.ref, from_handle="true"))
+
+        return AssembledDraft(
+            skeleton_name=skeleton.name,
+            nodes=tuple(trigger + ops + gate + delay + sinks),
+            edges=tuple(edges), warnings=(),
+        )
+
+    # ── 승인 게이트 (HITL) ────────────────────────────────────────────────────
+    def _assemble_approval(self, entities: ExtractedEntities) -> AssembledDraft | None:
+        """approval_gate — proposer(ai)→router(if_condition)→[true]→sink /[false]→terminal.
+
+        분기의 특수화(반려 갈래가 stop_workflow로 종료) — 루프 아님(DAG). 진행 채널(sink)을
+        발화에서 못 채우면 LLM bail.
+        """
+        if not entities.sinks:
+            return None
+        skeleton = find_skeleton("approval_gate")
+        if skeleton is None:
+            return None
+        by_role, warnings = self._collect(skeleton, entities)
+        if warnings:
+            return None
+        trigger = by_role[SlotRole.TRIGGER]
+        sources = by_role.get(SlotRole.SOURCE, [])
+        proposer = by_role[SlotRole.TRANSFORM]
+        router = by_role[SlotRole.ROUTER]
+        terminal = by_role[SlotRole.TERMINAL]
+        sinks = by_role[SlotRole.SINK]
+
+        edges: list[DraftEdge] = []
+        self._chain(edges, trigger + sources + proposer)
+        edges.append(DraftEdge(from_ref=proposer[-1].ref, to_ref=router[0].ref))
+        edges.append(DraftEdge(from_ref=router[0].ref, to_ref=terminal[0].ref, from_handle="false"))
+        for s in sinks:  # 승인(true) → 진행 채널 병렬 분기
+            edges.append(DraftEdge(from_ref=router[0].ref, to_ref=s.ref, from_handle="true"))
+
+        return AssembledDraft(
+            skeleton_name=skeleton.name,
+            nodes=tuple(trigger + sources + proposer + router + terminal + sinks),
             edges=tuple(edges), warnings=(),
         )
 

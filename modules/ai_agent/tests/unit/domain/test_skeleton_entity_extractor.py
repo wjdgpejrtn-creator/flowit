@@ -76,15 +76,27 @@ def test_full_e2e_bug_utterance() -> None:
 def test_branch_signal_detected() -> None:
     e = _X.extract("긴급하면 슬랙, 아니면 이메일로 보내줘")
     assert e.has_branch is True
-    assert e.has_unsupported_shape() is True
+    assert e.shape_signals() == {"branch"}
 
 
 def test_fanout_signal_detected() -> None:
     e = _X.extract("각 항목마다 요약해서 저장")
     assert e.has_fanout is True
-    assert e.has_unsupported_shape() is True
+    assert e.shape_signals() == {"fanout"}
+
+
+def test_retry_signal_detected() -> None:
+    e = _X.extract("API 호출 실패하면 재시도해줘")
+    assert e.has_retry is True
+    assert "retry" in e.shape_signals()
+
+
+def test_approval_signal_detected() -> None:
+    e = _X.extract("초안 검토 후 승인되면 발송")
+    assert e.has_approval is True
+    assert "approval" in e.shape_signals()
 
 
 def test_plain_pipeline_has_no_shape_signal() -> None:
     e = _X.extract("매주 시트 읽어서 요약해서 슬랙으로 보내줘")
-    assert e.has_unsupported_shape() is False
+    assert e.shape_signals() == set()

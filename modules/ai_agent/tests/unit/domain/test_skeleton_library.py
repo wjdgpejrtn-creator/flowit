@@ -63,7 +63,10 @@ def test_control_role_candidates_are_condition_nodes() -> None:
     # control 슬롯(gate/router/splitter/merger) 후보는 전부 condition 노드여야 — 엔진의
     # BranchEvaluator/CyclicScheduler가 분기·루프·합류를 condition 카테고리로 해석.
     cond = {d.node_type for d in get_all_node_definitions() if d.category == "condition"}
-    control_roles = (SlotRole.GATE, SlotRole.ROUTER, SlotRole.SPLITTER, SlotRole.MERGER)
+    control_roles = (
+        SlotRole.GATE, SlotRole.ROUTER, SlotRole.SPLITTER, SlotRole.MERGER,
+        SlotRole.DELAY, SlotRole.TERMINAL,
+    )
     for skel in SKELETONS:
         for role in control_roles:
             slot = skel.slot(role)
@@ -84,10 +87,19 @@ def test_branch_and_fanout_have_required_control_slots() -> None:
         assert slot is not None and slot.required
 
 
+def test_library_covers_six_control_flow_primitives() -> None:
+    # 6 기본형 — 순서(scheduled/event)·루프(quality)·분기·병렬·재시도·승인.
+    names = {s.name for s in SKELETONS}
+    assert {
+        "scheduled_pipeline", "event_response", "quality_loop",
+        "branch_on_classification", "fan_out_map", "retry_backoff", "approval_gate",
+    } <= names
+
+
 @pytest.mark.parametrize(
     "name",
     ["scheduled_pipeline", "event_response", "quality_loop",
-     "branch_on_classification", "fan_out_map"],
+     "branch_on_classification", "fan_out_map", "retry_backoff", "approval_gate"],
 )
 def test_find_skeleton(name: str) -> None:
     assert find_skeleton(name) is not None

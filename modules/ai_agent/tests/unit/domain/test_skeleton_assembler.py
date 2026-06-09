@@ -147,6 +147,51 @@ def test_nested_branch_in_fanout_bails_to_llm() -> None:
     assert _A.assemble("각 항목마다 분류해서 긴급하면 슬랙, 아니면 이메일") is None
 
 
+# ── 재시도 (백오프 루프) ────────────────────────────────────────────────────
+def test_retry_assembles_backoff_loop() -> None:
+    d = _A.assemble("외부 api 호출해서 실패하면 재시도하고 결과를 슬랙으로")
+    assert d is not None
+    assert d.skeleton_name == "retry_backoff"
+    types = [n.node_type for n in d.nodes]
+    assert "delay" in types and "if_condition" in types
+    gate = next(n for n in d.nodes if n.role == SlotRole.GATE)
+    delay = next(n for n in d.nodes if n.role == SlotRole.DELAY)
+    worker = next(n for n in d.nodes if n.node_type == "http_request")
+    # 실패(false)→delay→worker 백오프 루프 + 성공(true)→sink.
+    assert any(e.from_ref == gate.ref and e.to_ref == delay.ref and e.from_handle == "false"
+               for e in d.edges)
+    assert any(e.from_ref == delay.ref and e.to_ref == worker.ref for e in d.edges)
+    assert any(e.from_ref == gate.ref and e.from_handle == "true" for e in d.edges)
+
+
+def test_retry_without_operation_bails_to_llm() -> None:
+    # 재시도할 연산(source/transform)이 발화에 없으면 LLM 폴백.
+    assert _A.assemble("실패하면 재시도") is None
+
+
+# ── 승인 게이트 (HITL) ──────────────────────────────────────────────────────
+def test_approval_assembles_router_with_stop() -> None:
+    d = _A.assemble("보고서 초안 작성하고 검토 후 승인되면 이메일로 발송")
+    assert d is not None
+    assert d.skeleton_name == "approval_gate"
+    types = [n.node_type for n in d.nodes]
+    assert "if_condition" in types and "stop_workflow" in types
+    router = next(n for n in d.nodes if n.role == SlotRole.ROUTER)
+    terminal = next(n for n in d.nodes if n.role == SlotRole.TERMINAL)
+    sink = next(n for n in d.nodes if n.role == SlotRole.SINK)
+    assert any(e.from_ref == router.ref and e.to_ref == terminal.ref and e.from_handle == "false"
+               for e in d.edges)
+    assert any(e.from_ref == router.ref and e.to_ref == sink.ref and e.from_handle == "true"
+               for e in d.edges)
+
+
+def test_approval_subsumes_branch_signal() -> None:
+    # "승인되면 …, 아니면 …"은 approval+branch 동시 신호지만 approval로 라우팅(branch 포섭).
+    d = _A.assemble("초안 검토 후 승인되면 슬랙으로 발송, 아니면 중단")
+    assert d is not None
+    assert d.skeleton_name == "approval_gate"
+
+
 def test_multiple_sinks_fan_out_in_parallel() -> None:
     # 복수 sink는 직렬(sink→sink)이 아니라 마지막 처리 노드에서 병렬 분기.
     d = _A.assemble("매주 시트 읽어서 요약해서 슬랙이랑 이메일 둘 다 보내줘")
@@ -183,6 +228,8 @@ _PARITY_UTTERANCES = [
     "빅쿼리 조회해서 요약하고 pdf로 저장",
     "문의를 분류해서 긴급하면 슬랙, 아니면 이메일로 보내줘",          # 분기(XOR)
     "목록의 각 항목마다 요약해서 슬랙으로 보내줘",                      # 팬아웃(병렬 map)
+    "외부 api 호출해서 실패하면 재시도하고 결과를 슬랙으로",            # 재시도(백오프 루프)
+    "보고서 초안 작성하고 검토 후 승인되면 이메일로 발송",              # 승인 게이트(HITL)
 ]
 
 
