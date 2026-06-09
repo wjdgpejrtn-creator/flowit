@@ -336,17 +336,18 @@ class SkeletonAssembler:
         )
 
 
-def to_workflow_schema(
+def build_workflow_with_refs(
     draft: AssembledDraft,
     node_id_by_type: dict[str, UUID],
     owner_user_id: UUID,
     name: str | None = None,
-) -> WorkflowSchema:
-    """조립 골격을 WorkflowSchema로 변환 (ADR-0026 §6.6.3 step 4→5 경계, 순수).
+) -> tuple[WorkflowSchema, dict[str, UUID]]:
+    """조립 골격을 WorkflowSchema로 변환하고 ref→instance_id 맵을 함께 반환.
 
-    node_type → 카탈로그 node_id 해소 + ref → instance_id 매핑. 파라미터는 빈 dict(LLM이
-    step 5에서 채움). 카탈로그에 없는 node_type은 그 노드와 의존 엣지를 드롭한다(drafter
-    `_build` 동작과 동형 — 스켈레톤 후보는 전부 카탈로그라 정상 경로에선 미발생).
+    구조(노드/엣지)는 코드가 결정적으로 빌드(LLM 무관). 파라미터는 빈 dict — composer가 ref
+    맵으로 LLM 파라미터 채움 결과를 인스턴스에 적용한다(ADR-0026 §6.6.3 step5, 구조는 불변).
+    카탈로그에 없는 node_type은 그 노드와 의존 엣지를 드롭한다(drafter `_build`와 동형 —
+    스켈레톤 후보는 전부 카탈로그라 정상 경로에선 미발생).
     """
     instance_by_ref: dict[str, UUID] = {}
     nodes: list[NodeInstance] = []
@@ -380,7 +381,7 @@ def to_workflow_schema(
             )
         )
 
-    return WorkflowSchema(
+    wf = WorkflowSchema(
         workflow_id=uuid4(),
         name=name or f"{draft.skeleton_name} workflow",
         scope="private",
@@ -389,3 +390,15 @@ def to_workflow_schema(
         connections=connections,
         owner_user_id=owner_user_id,
     )
+    return wf, instance_by_ref
+
+
+def to_workflow_schema(
+    draft: AssembledDraft,
+    node_id_by_type: dict[str, UUID],
+    owner_user_id: UUID,
+    name: str | None = None,
+) -> WorkflowSchema:
+    """``build_workflow_with_refs``의 WorkflowSchema만 필요할 때의 얇은 래퍼 (ref 맵 무시)."""
+    wf, _ = build_workflow_with_refs(draft, node_id_by_type, owner_user_id, name)
+    return wf

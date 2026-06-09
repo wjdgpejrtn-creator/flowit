@@ -11,6 +11,8 @@ from common_schemas.exceptions import ExecutionError
 from pydantic import BaseModel
 
 from ..ports.llm_port import LLMPort
+from ..value_objects.skeleton import AssembledDraft
+from .skeleton_assembler import build_workflow_with_refs
 
 _logger = logging.getLogger(__name__)
 
@@ -223,6 +225,23 @@ class _DraftResponse(BaseModel):
     connections: list[_EdgeDraft] = []
 
 
+# 스켈레톤 scaffold 경로 전용 — 구조는 코드가 결정(불변)하고 LLM은 ref별 parameters만 반환
+# (ADR-0026 §6.6.3 step5). soft 구조 힌트(#416 효과0)와 달리 구조 생성 책임을 LLM에서 제거.
+class _ParamFillResponse(BaseModel):
+    name: str = "Untitled Workflow"
+    # ref → 그 노드의 parameters (input_schema에 맞춰). 누락 ref는 빈 파라미터로 둔다.
+    params: dict[str, dict[str, Any]] = {}
+
+
+_PARAM_FILL_SYSTEM_PROMPT = """You fill PARAMETERS for a workflow whose STRUCTURE IS ALREADY FIXED.
+Do NOT invent, add, remove, or reorder nodes/edges — structure is decided by code.
+For each node (identified by its stable "ref"), produce a `parameters` object whose keys match
+that node's input_schema, derived from the user's request. For data flowing from an upstream node,
+use "${<ref>.<output_field>}" referencing the upstream node's ref.
+Return JSON: {"name": "<short workflow name>", "params": {"<ref>": {"<param_key>": <value>}, ...}}.
+Only include refs from the provided node list. Omit a ref if it needs no parameters."""
+
+
 # refine 편집 응답 전용 — node_type이 아니라 ref로 노드 정체성을 잡는다(중복 node_type 허용).
 class _EditNodeDraft(BaseModel):
     ref: str
@@ -263,6 +282,7 @@ class DrafterService:
         retry_feedback: str | None = None,
         dropped_node_types: list[str] | None = None,
         pattern_templates: list[Any] | None = None,
+        skeleton_scaffold: AssembledDraft | None = None,
     ) -> WorkflowSchema:
         """워크플로우 초안 생성. ``prior_workflow``가 주어지면(대화형 refine) 처음부터
         재생성하지 않고 그 워크플로우를 편집 컨텍스트로 주어 지시한 부분만 수정한다.
@@ -286,7 +306,19 @@ class DrafterService:
         (후보에 없어 떨군 것)을 거기에 append한다. 재시도 retriever가 QA-LLM 재인지가 아니라
         이 ground-truth로 직접 재검색하도록 결정화한다(#378 후속 리뷰 #2). 호출부가 요청마다
         새 리스트를 넘기므로 동시 요청 안전(서비스 인스턴스 공유 무관).
+
+        ``skeleton_scaffold``(ADR-0026 §6.6)가 주어지면(refine 아닐 때) **구조를 코드가 결정**한
+        결정적 골격에 LLM이 **파라미터만** 채운다 — soft 구조 힌트(#416 효과0)와 달리 구조
+        생성 책임을 LLM에서 제거. scaffold 경로 실패 시 일반 LLM draft로 폴백(non-fatal).
         """
+        if skeleton_scaffold is not None and prior_workflow is None:
+            try:
+                return await self._fill_scaffold_params(
+                    skeleton_scaffold, candidates, spec, owner_user_id, retry_feedback
+                )
+            except Exception as exc:
+                # 구조는 결정적이지만 파라미터 채움이 실패하면 일반 LLM draft로 폴백(완전 산출 보장).
+                _logger.warning("스켈레톤 scaffold 파라미터 채움 실패 — 일반 draft 폴백: %s", exc)
         # 프롬프트 다이어트 — 컨텍스트 윈도우 초과 방지 (#413). 단 순서 무지하게 앞에서
         # 자르면 풀 끝에 붙은 보장 노드(ai 바인딩 대상·구조 노드)가 1순위로 드롭되므로
         # (리뷰 MED #1), 우선 카테고리는 전수 보존하고 나머지에서만 잘라 합을 캡 이하로 맞춘다.
@@ -362,6 +394,70 @@ class DrafterService:
         except Exception as e:
             raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
         return self._build(draft_resp, candidates, owner_user_id, dropped_sink=dropped_node_types)
+
+    async def _fill_scaffold_params(
+        self,
+        scaffold: AssembledDraft,
+        candidates: list[NodeConfig],
+        spec: DraftSpec,
+        owner_user_id: UUID,
+        retry_feedback: str | None,
+    ) -> WorkflowSchema:
+        """결정적 스켈레톤 골격에 LLM 파라미터만 채워 완성 (ADR-0026 §6.6.3 step5).
+
+        구조(노드/엣지)는 ``build_workflow_with_refs``가 코드로 빌드 — LLM 출력은 parameters에만
+        적용하고 구조는 절대 바꾸지 않는다(결정적 보장). 데이터흐름 ``${ref.field}`` 참조는 _build와
+        동일하게 instance_id로 rewrite + 상류 output_schema로 grounding한다(ADR-0023 L1).
+        """
+        node_id_by_type = {c.node_type: c.node_id for c in candidates}
+        cfg_by_type = {c.node_type: c for c in candidates}
+        wf, ref_to_iid = build_workflow_with_refs(scaffold, node_id_by_type, owner_user_id)
+        if not wf.nodes:
+            raise ExecutionError("scaffold node_type이 후보에 없음", code="E_DRAFT_PARSE")
+
+        ref_node_types = {dn.ref: dn.node_type for dn in scaffold.nodes}
+        node_specs = [
+            {
+                "ref": ref,
+                "node_type": ref_node_types[ref],
+                "name": getattr(cfg_by_type.get(ref_node_types[ref]), "name", ref_node_types[ref]),
+                "input_schema": _slim_schema(
+                    getattr(cfg_by_type.get(ref_node_types[ref]), "input_schema", None)
+                ),
+            }
+            for ref in ref_to_iid
+        ]
+        spec_json = json.dumps(
+            {"intent": spec.natural_language_intent, "entities": spec.discovered_entities},
+            ensure_ascii=False,
+        )
+        prompt = (
+            _PARAM_FILL_SYSTEM_PROMPT
+            + self._retry_feedback_block(retry_feedback)
+            + f"\nUser request: {spec_json}"
+            + f"\nNodes (structure fixed): {json.dumps(node_specs, ensure_ascii=False)}"
+        )
+        resp = await self._llm.generate_structured(prompt, _ParamFillResponse)
+
+        outputs_by_instance = {
+            ref_to_iid[ref]: _outputs_of(cfg_by_type[ref_node_types[ref]])
+            for ref in ref_to_iid
+            if ref_node_types[ref] in cfg_by_type
+        }
+        iid_to_ref = {iid: ref for ref, iid in ref_to_iid.items()}
+        filled = [
+            n.model_copy(
+                update={
+                    "parameters": _ground_ref_fields(
+                        _rewrite_refs(resp.params.get(iid_to_ref[n.instance_id], {}), ref_to_iid),
+                        outputs_by_instance,
+                    )
+                }
+            )
+            for n in wf.nodes
+        ]
+        name = (resp.name or "").strip() or (spec.natural_language_intent or "")[:60] or wf.name
+        return wf.model_copy(update={"nodes": filled, "name": name})
 
     @staticmethod
     def _personal_patterns_block(personal_patterns: list[str] | None) -> str:
