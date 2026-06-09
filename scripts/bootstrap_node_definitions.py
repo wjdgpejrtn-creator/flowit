@@ -5,11 +5,10 @@
 
 ### 등록 내용
 
-1. REQ-003 카탈로그 56종 (`catalog_registry.discover_and_register`)
+1. REQ-003 카탈로그 62종 (`catalog_registry.discover_and_register`)
    - 28 도메인 (trigger 6 + condition 8 + data 14)
-   - 14 외부 어댑터 (Slack/Gmail/Google Drive/Sheets/Docs/PostgreSQL/MySQL/
-     BigQuery/Anthropic/Gemma/Calendar/Linear/HTTP/PDF) — gemma_chat 추가 PR #68
-   - 14 toolset 연결 (햄햄 commit `59f0e26`)
+   - 34 외부 어댑터: 기존 25(REQ-005 toolset external 이전 포함) + #438 §6.6
+     llm_judge scorer 1 + read/write 비대칭 8
 2. REQ-004 Skills Builder baseline 30 SkillNode (is_mvp=False)
    - 산업 활성 1종: ecommerce (5 SkillNode)
    - 직무 영역 5종: customer_support / it_ops / document_data / hr / marketing
@@ -131,13 +130,13 @@ async def _print_db_state(session, label: str) -> None:
 
 
 def _get_arum_node_type_set() -> set[str]:
-    """박아름 카탈로그 56 + Skills Builder baseline 30 node_type set."""
+    """박아름 카탈로그 62 + Skills Builder baseline 30 node_type set."""
     import json
 
     from nodes_graph.application.catalog_registry import get_all_node_definitions
 
     types: set[str] = set()
-    # 1) 카탈로그 56종
+    # 1) 카탈로그 62종
     for n in get_all_node_definitions():
         types.add(n.node_type)
 
@@ -161,7 +160,7 @@ def _get_arum_node_type_set() -> set[str]:
 async def _cleanup_placeholder(session) -> int:
     """조장 5/13 합의: placeholder는 박아름 노드 따라간다 → 박아름 카탈로그+SkillNode 외 모두 삭제.
 
-    박아름 카탈로그(56) + SkillNode(30) = 86 node_type set 밖의 row를 DELETE.
+    박아름 카탈로그(62) + SkillNode(30) = 92 node_type set 밖의 row를 DELETE.
     """
     from sqlalchemy import text
 
@@ -203,7 +202,7 @@ async def _make_embedder():
 
 
 async def _register_catalog(session_factory, dry_run: bool) -> int:
-    """REQ-003 카탈로그 56종 등록 (discover_and_register)."""
+    """REQ-003 카탈로그 62종 등록 (discover_and_register)."""
     from nodes_graph.adapters.catalog.registry import (
         discover_and_register,
         discover_node_definitions,
@@ -287,7 +286,7 @@ async def _register_skills_baseline(session_factory, dry_run: bool) -> int:
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--catalog-only", action="store_true", help="REQ-003 카탈로그 56종만")
+    group.add_argument("--catalog-only", action="store_true", help="REQ-003 카탈로그 62종만")
     group.add_argument("--skills-only", action="store_true", help="REQ-004 Skills Builder 30종만")
     group.add_argument("--all", action="store_true", help="카탈로그 + Skills Builder 모두 (default)")
     parser.add_argument("--dry-run", action="store_true", help="실 등록 없이 영향 평가만")
@@ -336,7 +335,7 @@ async def main() -> int:
 
         # 2) 카탈로그 등록
         if args.catalog_only or args.all:
-            print("[A] REQ-003 카탈로그 56종 등록...")
+            print("[A] REQ-003 카탈로그 62종 등록...")
             count = await _register_catalog(session_factory, args.dry_run)
             print(f"  → {'(dry-run) ' if args.dry_run else ''}완료: {count}종")
             print()

@@ -35,6 +35,20 @@ def test_start_authorize_builds_url_with_service_scopes():
     assert "spreadsheets" in url  # connection scope 포함 (로그인 신원 scope와 분리)
 
 
+def test_google_connection_scopes_cover_read_and_write():
+    # #438 §6.6 D: read/write 양방향 노드 충족. gmail은 send+readonly 둘 다 필요
+    # (gmail.send만으론 gmail_read 불가). 나머지는 broad scope가 read까지 포함.
+    from auth.application.use_cases.start_connection_authorize_use_case import CONNECTION_SCOPES
+
+    google = CONNECTION_SCOPES["google"]
+    assert "https://www.googleapis.com/auth/gmail.send" in google
+    assert "https://www.googleapis.com/auth/gmail.readonly" in google  # gmail_read
+    assert "https://www.googleapis.com/auth/spreadsheets" in google    # sheets read+write
+    assert "https://www.googleapis.com/auth/drive" in google           # drive read+upload
+    assert "https://www.googleapis.com/auth/documents" in google       # docs read+write
+    assert "https://www.googleapis.com/auth/calendar.events" in google # calendar read+create
+
+
 def test_start_authorize_rejects_unsupported_service():
     with pytest.raises(ValueError):
         StartConnectionAuthorizeUseCase(FakeOAuth()).build_authorization_url("notion", "s")

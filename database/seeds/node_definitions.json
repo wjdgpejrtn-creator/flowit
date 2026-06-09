@@ -3085,5 +3085,561 @@
     "description": "Linear에 이슈 생성 (GraphQL issueCreate). API key 자격증명 필요",
     "is_mvp": true,
     "service_type": "linear"
+  },
+  {
+    "node_type": "llm_judge",
+    "name": "LLM 채점기",
+    "category": "ai",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "평가 대상 텍스트"
+        },
+        "criteria": {
+          "type": "string",
+          "description": "평가 기준/루브릭"
+        },
+        "model": {
+          "type": "string",
+          "default": "claude-haiku-4-5"
+        },
+        "min_score": {
+          "type": "integer",
+          "default": 0
+        },
+        "max_score": {
+          "type": "integer",
+          "default": 10
+        },
+        "max_tokens": {
+          "type": "integer",
+          "default": 512
+        }
+      },
+      "required": [
+        "content",
+        "criteria"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "score": {
+          "type": "number",
+          "description": "채점 점수 (if_condition gte 등이 비교)"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "anthropic"
+    ],
+    "description": "콘텐츠를 평가 기준에 따라 채점해 score(숫자)와 근거를 반환. 품질 루프(generator→llm_judge→if_condition gte)에서 게이트 점수 산출. Anthropic API key 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "anthropic"
+  },
+  {
+    "node_type": "google_sheets_write",
+    "name": "Google Sheets 쓰기",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "spreadsheet_id": {
+          "type": "string"
+        },
+        "range_a1": {
+          "type": "string",
+          "description": "A1 표기법 (Sheet1!A1)"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "array"
+          },
+          "description": "2D 행렬(행 우선)"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "update",
+            "append"
+          ],
+          "default": "update"
+        },
+        "value_input_option": {
+          "type": "string",
+          "enum": [
+            "USER_ENTERED",
+            "RAW"
+          ],
+          "default": "USER_ENTERED"
+        }
+      },
+      "required": [
+        "spreadsheet_id",
+        "range_a1",
+        "values"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "updated_range": {
+          "type": "string"
+        },
+        "updated_rows": {
+          "type": "integer"
+        },
+        "updated_columns": {
+          "type": "integer"
+        },
+        "updated_cells": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Sheets 지정 범위에 값 쓰기/추가 (values.update·append). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "google_calendar_read",
+    "name": "Google Calendar 이벤트 조회",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "calendar_id": {
+          "type": "string",
+          "default": "primary"
+        },
+        "time_min": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "time_max": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_results": {
+          "type": "integer",
+          "default": 10
+        }
+      },
+      "required": []
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Calendar 이벤트 목록 조회 (events.list). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "google_docs_read",
+    "name": "Google Docs 읽기",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "document_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "document_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "revision_id": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Docs 문서 본문 평문 읽기 (documents.get). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "google_drive_upload",
+    "name": "Google Drive 업로드",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "content_base64": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": "string",
+          "default": "text/plain"
+        },
+        "folder_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "content_base64"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "file_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "web_view_link": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Drive에 파일 업로드 (files.create + media). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "gmail_read",
+    "name": "Gmail 메일 읽기",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Gmail 검색 쿼리 (예: from:boss is:unread)"
+        },
+        "max_results": {
+          "type": "integer",
+          "default": 10
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": []
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Gmail 인박스 메일 조회 (messages.list + metadata.get). Google OAuth(readonly) 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "slack_read",
+    "name": "Slack 메시지 조회",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "description": "채널 ID"
+        },
+        "limit": {
+          "type": "integer",
+          "default": 20
+        },
+        "oldest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "이 ts 이후"
+        },
+        "latest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "이 ts 이전"
+        }
+      },
+      "required": [
+        "channel"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "count": {
+          "type": "integer"
+        },
+        "raw_response": {
+          "type": "object"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "slack"
+    ],
+    "description": "Slack 채널 메시지 이력 조회 (conversations.history). OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "slack"
+  },
+  {
+    "node_type": "linear_read",
+    "name": "Linear 이슈 조회",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "team_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assignee_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "first": {
+          "type": "integer",
+          "default": 20
+        }
+      },
+      "required": []
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "linear"
+    ],
+    "description": "Linear 이슈 목록 조회 (GraphQL issues). API key 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "linear"
+  },
+  {
+    "node_type": "linear_update",
+    "name": "Linear 이슈 수정",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priority": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "enum": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            null
+          ]
+        },
+        "assignee_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "issue_id"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "linear"
+    ],
+    "description": "Linear 이슈 수정 (GraphQL issueUpdate — state/담당자/우선순위 등). API key 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "linear"
   }
 ]

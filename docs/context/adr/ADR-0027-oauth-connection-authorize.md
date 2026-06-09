@@ -150,3 +150,17 @@ PR: **#420**(ADR Accepted + list_for_user + scope 분리, MERGED) / **#422**(조
 ## Alternatives Considered
 - **프론트 더미 유지 + 백엔드만**: 거짓 "연결됨" 표시 잔존 → 사용자 혼란. 기각.
 - **노드에 토큰 수동 입력**: 보안·UX 최악. 기각.
+
+---
+
+## 추가 결정 — 연결 가능 목록 카탈로그 결정적 도출 (Decided, 2026-06-09, #447)
+
+settings 통합 탭의 "연결 가능 목록"을 프론트 하드코딩(`[slack, google, erp]`)으로 두니 실제 노드 카탈로그와 어긋났다(가짜 `erp` 노출 + read/write 노드가 요구하는 `linear`·`anthropic` 누락, #438 §6.6 노드 추가분 미반영). 하드코딩 대신 **카탈로그에서 결정적으로 도출**한다.
+
+- **provider 집합 SSOT = `nodes_graph` 카탈로그의 distinct `required_connections`** (코드 기반 — DB 시드와 무관하므로 노드 추가 시 목록 자동 반영). `EXECUTABLE_NODE_TYPES`처럼 "코드가 진실"인 경로.
+- **provider별 연결 메타(표시명 + `auth_type`)는 auth 소유** — `auth/application/connection_providers.py`의 `CONNECTION_PROVIDERS` 레지스트리. "이 provider를 어떻게 연결하는가"는 auth 책임이라는 ②(scope 분리)와 동일한 소유권 원칙.
+- **`auth_type` 3종** — `oauth`(동의화면 연결 버튼), `api_key`(키 입력·자격증명 페이지), `connection_string`(DB 접속정보). oauth의 실제 가능 여부(`available`)는 `CONNECTION_SCOPES` 배선에서 단일 도출 → slack은 `SlackOAuthClient` 미배선이라 "준비 중", 배선 시 코드 변경 없이 자동 활성.
+- **조인은 Composition Root(api_server)** — `GET /api/v1/connections/available`이 카탈로그(provider 집합) × auth(메타)를 합친다. 두 module이 서로의 application을 직접 알 필요 없음(단방향 유지).
+- **드리프트 가드** — 카탈로그 `required_connections`의 모든 provider가 `CONNECTION_PROVIDERS`에 있어야 한다(엔드포인트가 메타 없는 provider를 silent skip하므로 누락을 CI에서 강제 검출).
+
+> 응답 DTO `AvailableConnection`은 엔드포인트 전용이라 router-local + 프론트 수동 타입으로 둔다(기존 `AuthorizeConnectionResponse` 선례 일관). connection DTO 일괄 common_schemas 이관은 후속.

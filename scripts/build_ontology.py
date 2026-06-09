@@ -30,6 +30,10 @@ from ai_agent.adapters.ontology.neo4j_skill_projector import (
     _RESET_BINDS as _RESET_SKILL_BINDS,
 )
 
+# 결정적 스켈레톤 라이브러리 (ADR-0026 §6.6) — SSOT는 ai_agent 도메인 상수. ETL이 이걸
+# :Skeleton/:SlotSpec/:FILLED_BY로 투영하고, 조립기(SkeletonAssembler)가 같은 상수를 소비한다.
+from ai_agent.domain.services.skeleton_library import SKELETONS
+
 # 멱등 스키마 제약/인덱스 (ADR-0026 §1.2). CREATE ... IF NOT EXISTS 라 반복 안전.
 CONSTRAINTS: tuple[str, ...] = (
     "CREATE CONSTRAINT node_type_unique IF NOT EXISTS FOR (n:Node) REQUIRE n.node_type IS UNIQUE",
@@ -38,6 +42,8 @@ CONSTRAINTS: tuple[str, ...] = (
     "FOR (c:Connection) REQUIRE c.provider IS UNIQUE",
     "CREATE CONSTRAINT category_name_unique IF NOT EXISTS FOR (c:Category) REQUIRE c.name IS UNIQUE",
     "CREATE CONSTRAINT pattern_name_unique IF NOT EXISTS FOR (p:Pattern) REQUIRE p.name IS UNIQUE",
+    "CREATE CONSTRAINT skeleton_name_unique IF NOT EXISTS FOR (s:Skeleton) REQUIRE s.name IS UNIQUE",
+    "CREATE CONSTRAINT slotspec_id_unique IF NOT EXISTS FOR (sp:SlotSpec) REQUIRE sp.id IS UNIQUE",
 )
 
 _MERGE_NODE = """
@@ -103,6 +109,35 @@ _PATTERNS: tuple[dict, ...] = (
     },
 )
 
+# 결정적 스켈레톤 (ADR-0026 §6.6) — 슬롯을 가진 워크플로우 템플릿. soft :Pattern(§6.1, 효과0)을
+# 대체. 슬롯역할 5종(trigger/source/transform/sink/gate), FILLED_BY로 슬롯↔후보 node_type 연결.
+# 전 재투영이라 기존 :Skeleton 서브그래프를 먼저 리셋(:Node는 보존, slot만 DETACH DELETE)한다.
+_RESET_SKELETONS = """
+MATCH (s:Skeleton)
+OPTIONAL MATCH (s)-[:HAS_SLOT]->(slot:SlotSpec)
+DETACH DELETE s, slot
+"""
+
+_MERGE_SKELETON = """
+MERGE (s:Skeleton {name: $name})
+SET s.intent_keywords = $intent_keywords
+"""
+
+_MERGE_SLOT = """
+MATCH (s:Skeleton {name: $skeleton})
+MERGE (slot:SlotSpec {id: $slot_id})
+SET slot.role = $role
+MERGE (s)-[h:HAS_SLOT]->(slot)
+SET h.order = $order, h.required = $required, h.cardinality = $cardinality
+"""
+
+_MERGE_FILLED_BY = """
+MATCH (slot:SlotSpec {id: $slot_id})
+MATCH (n:Node {node_type: $node_type})
+MERGE (slot)-[:FILLED_BY]->(n)
+"""
+
+
 # CAN_FOLLOW 노드 호환 엣지 (ADR-0026 §4.2a) — output↔input 휴리스틱.
 # (A)-[:CAN_FOLLOW]->(B) ⟺ A의 output 속성명 ∩ B의 **required** input 속성명 ≠ ∅ 且 B≠trigger.
 # 근거: B의 required 입력 = 본질적 데이터 의존. output명 일치 = A가 B가 꼭 필요로 하는 걸 생산.
@@ -154,6 +189,33 @@ async def project_patterns(session: Any) -> int:
                     slot=role["slot"],
                 )
     return len(_PATTERNS)
+
+
+async def project_skeletons(session: Any) -> int:
+    """SKELETONS 시드를 (:Skeleton)-[:HAS_SLOT]->(:SlotSpec)-[:FILLED_BY]->(:Node)로 투영.
+
+    전 재투영(리셋 후 MERGE)이라 시드 편집 시 stale 슬롯/후보가 남지 않는다(:Node는 보존).
+    반환: 투영한 스켈레톤 수.
+    """
+    await session.run(_RESET_SKELETONS)
+    for skel in SKELETONS:
+        await session.run(
+            _MERGE_SKELETON, name=skel.name, intent_keywords=list(skel.intent_keywords)
+        )
+        for order, slot in enumerate(skel.slots):
+            slot_id = f"{skel.name}:{slot.role.value}"
+            await session.run(
+                _MERGE_SLOT,
+                skeleton=skel.name,
+                slot_id=slot_id,
+                role=slot.role.value,
+                order=order,
+                required=slot.required,
+                cardinality=slot.cardinality,
+            )
+            for node_type in slot.candidates:
+                await session.run(_MERGE_FILLED_BY, slot_id=slot_id, node_type=node_type)
+    return len(SKELETONS)
 
 
 def _output_prop_names(defn: Any) -> set[str]:
@@ -268,13 +330,14 @@ async def main() -> None:
             await apply_constraints(session)
             count = await project_catalog(session, node_defs)
             pattern_count = await project_patterns(session)
+            skeleton_count = await project_skeletons(session)
             can_follow_count = await project_can_follow(session, node_defs)
     finally:
         await driver.close()
 
     print(
         f"[build_ontology] 제약 {len(CONSTRAINTS)}건 적용 + 노드 {count}건 + 패턴 {pattern_count}건 "
-        f"+ CAN_FOLLOW {can_follow_count}엣지 투영 완료"
+        f"+ 스켈레톤 {skeleton_count}건 + CAN_FOLLOW {can_follow_count}엣지 투영 완료"
     )
     # 스킬 BINDS는 publish 훅(PublishSkillUseCase → Neo4jSkillProjector)이 incremental upsert로
     # 라이브 처리한다(ADR-0026 Phase 2b 완료). 배치 backfill이 필요하면 project_skills()에 DB

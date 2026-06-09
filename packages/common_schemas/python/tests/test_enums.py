@@ -40,9 +40,12 @@ class TestErrorCode:
         assert ErrorCode.E_NODE_TYPE_MISMATCH == "E_NODE_TYPE_MISMATCH"
         assert ErrorCode.E_CYCLE_DETECTED == "E_CYCLE_DETECTED"
         assert ErrorCode.E_ISOLATED_NODE == "E_ISOLATED_NODE"
+        assert ErrorCode.E_UNKNOWN_NODE_TYPE == "E_UNKNOWN_NODE_TYPE"
 
     def test_member_count(self):
-        assert len(ErrorCode) == 7
+        # 8 기존 + E_UNKNOWN_NODE_TYPE(0.22.0). 직전 7은 E_INVALID_TRIGGER 추가 후
+        # 갱신 누락된 stale 값이었음(CI에 enum 테스트 게이트 부재로 미검출) — 함께 교정.
+        assert len(ErrorCode) == 9
 
 
 class TestIntentType:
@@ -54,7 +57,9 @@ class TestIntentType:
         assert IntentType.BUILD_SKILL == "build_skill"
 
     def test_member_count(self):
-        assert len(IntentType) == 5
+        # 9 = clarify/draft/refine/propose/build_skill/chitchat/info_question/control/
+        # workflow_execute. 직전 5는 fast-path 4종 추가 후 갱신 누락된 stale 값(drive-by 교정).
+        assert len(IntentType) == 9
 
     def test_str_compat(self):
         # str(IntentType) JSON 직렬화 호환 — Python 3.11 이전 호환 패턴

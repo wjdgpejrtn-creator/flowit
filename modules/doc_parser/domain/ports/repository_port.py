@@ -39,3 +39,15 @@ class DocumentRepositoryPort(ABC):
         owner 본인 문서만 반환. 인가 필터(`user_id`)는 호출자가 전달 (Port는 read-only).
         """
         ...
+
+    @abstractmethod
+    async def delete(self, document_id: UUID) -> bool:
+        """문서 hard delete — DB row 영구 삭제. `DELETE /api/v1/documents/{id}`가 사용.
+
+        딸린 chunks(`document_chunks`) / quality_log(`quality_logs`)도 함께 제거한다
+        (FK ON DELETE CASCADE 유무와 무관하게 구현체가 명시적으로 정리 — 고아 데이터 방지).
+        GCS 원본 파일 삭제는 라우터(api_server)가 object_storage로 별도 수행(Port는 DB만).
+
+        삭제 성공 시 True, 대상 미존재 시 False 반환. 인가(owner 비교)는 호출자가 수행.
+        """
+        ...

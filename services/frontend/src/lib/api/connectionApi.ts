@@ -10,3 +10,40 @@ export type { ConnectionStatus };
 export async function getConnections(): Promise<ConnectionStatus[]> {
   return apiJson<ConnectionStatus[]>('/api/v1/connections');
 }
+
+// GET /api/v1/connections/available → 연결 가능한 provider 목록(ADR-0027).
+// 하드코딩 대신 백엔드가 노드 카탈로그의 required_connections에서 결정적으로 도출 — 노드가
+// 늘면 목록도 자동 반영된다. auth_type별로 프론트가 버튼을 분기한다(oauth=연결 / 그 외=키 관리).
+export type ConnectionAuthType = 'oauth' | 'api_key' | 'connection_string';
+
+export interface AvailableConnection {
+  service: string;
+  name: string;
+  auth_type: ConnectionAuthType;
+  available: boolean; // 지금 실제 연결 가능(oauth 배선 여부 / 키 입력 상시 가능)
+  node_count: number;
+}
+
+export async function getAvailableConnections(): Promise<AvailableConnection[]> {
+  return apiJson<AvailableConnection[]>('/api/v1/connections/available');
+}
+
+// GET /api/v1/connections/{service}/authorize → 동의 화면 URL 발급(ADR-0027).
+// 받은 authorization_url로 전체 페이지를 넘겨 OAuth 동의를 띄운다. callback이 끝나면
+// 백엔드가 /settings?connected={service} 또는 ?error=connect_failed 로 되돌려보낸다.
+interface AuthorizeConnectionResponse {
+  authorization_url: string;
+  state: string;
+}
+
+export async function startConnection(service: string): Promise<void> {
+  const { authorization_url } = await apiJson<AuthorizeConnectionResponse>(
+    `/api/v1/connections/${service}/authorize`,
+  );
+  window.location.href = authorization_url;
+}
+
+// DELETE /api/v1/connections/{service} → 연결 해제(ADR-0027).
+export async function revokeConnection(service: string): Promise<void> {
+  await apiJson(`/api/v1/connections/${service}`, { method: 'DELETE' });
+}

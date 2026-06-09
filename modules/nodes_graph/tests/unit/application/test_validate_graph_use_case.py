@@ -2,14 +2,24 @@ from uuid import uuid4
 
 import pytest
 from common_schemas import Edge, NodeInstance, Position, WorkflowSchema
+from common_schemas.enums import RiskLevel
 from nodes_graph.application.use_cases.validate_graph_use_case import ValidateGraphUseCase
+from nodes_graph.domain.entities.node_definition import NodeDefinition
 from nodes_graph.domain.services.graph_validator import GraphValidator
 
 
 class _Repo:
+    # get_by_id가 임의 id에 generic 정의를 반환 = "모든 노드 실재" stub. 본 파일은 use case
+    # 와이어링(passed/failed 라우팅)을 검증하며, 비실재 노드 거부(E_UNKNOWN_NODE_TYPE)는
+    # graph_validator 단위테스트가 전담한다.
     async def upsert(self, d): return d
     async def list_all(self, mvp_only=False): return []
-    async def get_by_id(self, node_id): return None
+    async def get_by_id(self, node_id):
+        return NodeDefinition(
+            node_id=node_id, node_type="x", name="x", category="x", version="1.0.0",
+            input_schema={}, output_schema={}, parameter_schema={}, risk_level=RiskLevel.LOW,
+            required_connections=[], description="x", is_mvp=True,
+        )
     async def search_by_embedding(self, q, limit=10): return []
 
 

@@ -35,8 +35,15 @@ from common_schemas.transport import (
     WorkflowDraftFrame,
 )
 
+from ai_agent.domain.services.skeleton_assembler import SkeletonAssembler
+
 from .records import UNKNOWN_NODE_TYPE, RunRecord, Snapshot, save_snapshot
 from .scenarios import SCENARIOS, Scenario
+
+# 스켈레톤 발동 여부 계측 — composer가 산출을 결정적 스켈레톤으로 짰는지(vs LLM 폴백) 귀속용.
+# composer가 직접 기록하지 않으므로 동일 조립기로 발화 적격성을 재계산(파라미터 채움 실패 시
+# 폴백하는 드문 경우는 "eligible이지만 미사용"으로 과대계상 가능 — 커버리지 상한 지표).
+_SKELETON_ASSEMBLER = SkeletonAssembler()
 
 # ── 세션/조립 (main.py 미러) ──────────────────────────────────────────────────
 
@@ -174,6 +181,7 @@ def _frames_to_record(scenario: Scenario, frames: list, node_type_by_id: dict[UU
     # avg_retry 과소·validator_pass 오보 — PR #409 리뷰 MED #1.)
     qa_score = last_qa.score if last_qa else 0.0
     retry_count = max(0, len(draft_frames) - 1)
+    skeleton = _SKELETON_ASSEMBLER.assemble(scenario.utterance)
 
     return RunRecord(
         scenario_id=scenario.scenario_id,
@@ -194,6 +202,8 @@ def _frames_to_record(scenario: Scenario, frames: list, node_type_by_id: dict[UU
             "n_drafts": len(draft_frames),
             "n_nodes": len(node_types),
             "n_edges": len(edges),
+            "skeleton_eligible": skeleton is not None,
+            "skeleton_name": skeleton.skeleton_name if skeleton else None,
         },
     )
 

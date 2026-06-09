@@ -5,11 +5,12 @@
     2. GET /{id}     — DB 조회 + GCS presigned download URL
     3. POST /{id}/analyze — Celery task `execution_engine.analyze_document` dispatch
        (worker가 GCS download → ParsingPipeline → save UPSERT)
+    4. DELETE /{id}  — hard delete: GCS 원본 + DB(blocks/chunks/quality_log) 영구 삭제
 
 ADR-0017 이중 저장 패턴(skills_marketplace SKILL.md)과 별개. documents는 단일 저장
 (원본 파일=GCS, 메타+blocks=DB)이고 ParsingPipeline 결과가 같은 document_id로 UPSERT(merge).
 
-인가: POST /upload는 인증된 사용자(`PermissionSource.user_id` 기록). GET/POST analyze는
+인가: POST /upload는 인증된 사용자(`PermissionSource.user_id` 기록). GET/POST analyze/DELETE는
 본인 소유만(`document.user_id != permission.user_id` → 403).
 """
 from __future__ import annotations
@@ -32,7 +33,7 @@ from common_schemas import (
 from common_schemas.broker_tasks import QUEUE_DEFAULT, TASK_ANALYZE_DOCUMENT
 from common_schemas.exceptions import NotFoundError
 from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from storage.domain.ports.object_storage_port import ObjectStoragePort
 
 from app.dependencies.celery_client import get_celery
@@ -252,3 +253,40 @@ async def analyze_document(
     return AnalyzeDispatchResponse(
         document_id=document_id, task_id=async_result.id, action="analyze"
     )
+
+
+@router.delete("/{document_id}", status_code=204)
+async def delete_document(
+    document_id: UUID,
+    permission: PermissionSource = Depends(get_permission_source),
+    object_storage: ObjectStoragePort = Depends(get_documents_object_storage),
+    repo: DocumentRepositoryPort = Depends(get_document_repository),
+) -> Response:
+    """문서 hard delete — owner만. GCS 원본 + DB(blocks/chunks/quality_log) 영구 삭제.
+
+    되돌릴 수 없음. 미존재 404, 타인 소유 403, 성공 204(No Content).
+    순서: owner 검증 → GCS 삭제(멱등) → DB 삭제.
+
+    GCS 삭제는 키 부재(이전 부분실패/업로드 실패/이중요청) 시 NotFoundError(E-STORAGE-001)를
+    swallow하고 DB 삭제로 진행한다 — 안 그러면 GCS 객체가 이미 없을 때 404가 나서 DB row를
+    영영 못 지우는 "삭제 불가 고착"이 발생(1차 GCS성공+DB실패 → 재시도 시 GCS 404).
+    GcsSkillDocumentStore.delete와 동일한 멱등 패턴.
+    """
+    document = await repo.get_by_id(document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+    if document.user_id != permission.user_id:
+        raise HTTPException(status_code=403, detail="Document belongs to another user")
+
+    # GCS 원본 먼저 삭제 — 키 부재면 swallow(멱등). DB는 있는데 GCS만 남는 고아 방지를 우선하되,
+    # 객체가 이미 없을 때도 DB 삭제를 막지 않아 재시도로 정합 회복 가능.
+    key = _gcs_key(document_id, document.file_meta.file_name)
+    try:
+        await object_storage.delete(key)
+    except NotFoundError:
+        pass
+
+    # DB hard delete (chunks/quality_log는 repo가 명시 cascade 처리).
+    await repo.delete(document_id)
+
+    return Response(status_code=204)
