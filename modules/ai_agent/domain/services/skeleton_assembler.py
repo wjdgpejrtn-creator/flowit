@@ -34,12 +34,14 @@ class SkeletonAssembler:
         self._extractor = extractor or SkeletonEntityExtractor()
 
     # ── 선택 ────────────────────────────────────────────────────────────────
-    def _select(self, entities: ExtractedEntities, text: str) -> Skeleton:
-        """발화·엔티티로 스켈레톤을 결정적으로 고른다.
+    def _select(self, entities: ExtractedEntities, text: str) -> Skeleton | None:
+        """발화·엔티티로 선형 계열 스켈레톤을 결정적으로 고른다. 확신 없으면 None(LLM 폴백).
 
-        규칙: ① 검증 루프 함의(needs_gate) → quality_loop(gate+generator 불변 보장).
-        ② 아니면 intent 키워드 최다 매칭. ③ 무매칭이면 트리거 종류로 유추(이벤트성→
-        event_response, 그 외→scheduled_pipeline = 최범용).
+        규칙: ① 검증 루프 함의(needs_gate) → quality_loop. ② intent 키워드 최다 매칭(>0).
+        ③ 이벤트/스케줄 트리거 명시 → event_response/scheduled_pipeline. ④ 그 외엔 **실제
+        파이프라인(source 또는 transform 추출)일 때만** scheduled_pipeline, sink만 있거나 빈
+        trivial이면 **None**(catch-all 강제 금지 — RC1). 근거: 무조건 scheduled_pipeline 폴백이
+        분기·희소 발화를 선형으로 납작화해 if_condition/노드를 소실시켰다(skeleton-regressor-fix).
         """
         if entities.needs_gate:
             gate_skel = find_skeleton("quality_loop")
@@ -67,7 +69,13 @@ class SkeletonAssembler:
 
         if entities.trigger in ("webhook_trigger", "event_trigger", "file_watch_trigger"):
             return find_skeleton("event_response") or SKELETONS[0]
-        return find_skeleton("scheduled_pipeline") or SKELETONS[0]
+        if entities.trigger == "schedule_trigger":
+            return find_skeleton("scheduled_pipeline") or SKELETONS[0]
+        # catch-all 제거(RC1): source/transform 둘 다 없는 trivial(sink만/빈) 발화는 스켈레톤이
+        # 구조를 못 살린다(transform 드롭→trigger+sink 토막). 실제 파이프라인일 때만 조립.
+        if entities.sources or entities.transforms:
+            return find_skeleton("scheduled_pipeline") or SKELETONS[0]
+        return None
 
     # ── 슬롯 충전 재료 ────────────────────────────────────────────────────────
     @staticmethod
@@ -136,11 +144,15 @@ class SkeletonAssembler:
             return None
 
         # shape 라우팅. approval은 "승인되면…아니면" 구조라 branch 신호를 동반하므로 branch를
-        # 포섭(approval 우선). 그 외 서로 다른 shape가 2개 이상이면 중첩 합성 → flat 표현 불가
-        # → LLM bail(억지 끼워맞춤 방지, §6.6 측정 게이트).
+        # 포섭(approval 우선). guard("넘으면")는 branch("아니면")·approval("승인")이 동반되면
+        # 그쪽이 더 구체적이므로 양보(명시 2-way 분기/승인 우선). 그 외 서로 다른 shape가 2개
+        # 이상이면 중첩 합성 → flat 표현 불가 → LLM bail(억지 끼워맞춤 방지, §6.6 측정 게이트).
         shapes = entities.shape_signals()
         if "approval" in shapes:
             shapes.discard("branch")
+            shapes.discard("guard")
+        if "branch" in shapes:
+            shapes.discard("guard")
         if len(shapes) >= 2:
             return None
         if "approval" in shapes:
@@ -151,8 +163,12 @@ class SkeletonAssembler:
             return self._assemble_fanout(entities)
         if "branch" in shapes:
             return self._assemble_branch(entities)
+        if "guard" in shapes:
+            return self._assemble_conditional(entities)
 
         skeleton = self._select(entities, text)
+        if skeleton is None:
+            return None  # 확신 가는 선형 매칭 없음 — LLM 폴백(catch-all 강제 금지, RC1)
         draft = self._assemble_linear(skeleton, entities)
         if any("미충전" in w for w in draft.warnings):
             return None  # 불완전 커버리지(출력 채널 등) — LLM 폴백
@@ -245,6 +261,45 @@ class SkeletonAssembler:
         return AssembledDraft(
             skeleton_name=skeleton.name,
             nodes=tuple(trigger + sources + classifier + router + sinks),
+            edges=tuple(edges), warnings=(),
+        )
+
+    # ── 단일 가드 조건문 ──────────────────────────────────────────────────────
+    def _assemble_conditional(self, entities: ExtractedEntities) -> AssembledDraft | None:
+        """conditional_action — (transform?)→router(if_condition)→[true]→sink /[false]→terminal.
+
+        "임계치 넘으면 경보" 류 단일 가드. transform optional(가드는 분류기 불필요 — if_condition이
+        입력 직접 평가). action 채널(sink)을 발화에서 못 채우면 LLM bail. false→stop_workflow 자동
+        부착으로 router outgoing=2 → motif(branch_on_classification) 통과. approval_gate와 동형이나
+        transform이 optional이고 발동이 임계/비교 가드 어휘다.
+        """
+        if not entities.sinks:
+            return None
+        skeleton = find_skeleton("conditional_action")
+        if skeleton is None:
+            return None
+        by_role, warnings = self._collect(skeleton, entities)
+        if warnings:  # required(router/terminal/sink) 미충전 — 이론상 sink뿐이나 방어
+            return None
+        trigger = by_role[SlotRole.TRIGGER]
+        sources = by_role.get(SlotRole.SOURCE, [])
+        transform = by_role.get(SlotRole.TRANSFORM, [])  # optional — 분류기 동반 시만
+        router = by_role[SlotRole.ROUTER]
+        terminal = by_role[SlotRole.TERMINAL]
+        sinks = by_role[SlotRole.SINK]
+
+        edges: list[DraftEdge] = []
+        spine = trigger + sources + transform
+        self._chain(edges, spine)
+        edges.append(DraftEdge(from_ref=spine[-1].ref, to_ref=router[0].ref))
+        # 가드 미충족(false) → 종료 / 충족(true) → action sink 병렬 분기
+        edges.append(DraftEdge(from_ref=router[0].ref, to_ref=terminal[0].ref, from_handle="false"))
+        for s in sinks:
+            edges.append(DraftEdge(from_ref=router[0].ref, to_ref=s.ref, from_handle="true"))
+
+        return AssembledDraft(
+            skeleton_name=skeleton.name,
+            nodes=tuple(trigger + sources + transform + router + sinks + terminal),
             edges=tuple(edges), warnings=(),
         )
 

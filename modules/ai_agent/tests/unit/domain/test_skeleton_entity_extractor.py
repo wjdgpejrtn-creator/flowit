@@ -104,6 +104,25 @@ def test_approval_signal_detected() -> None:
     assert "approval" in e.shape_signals()
 
 
+def test_guard_signal_detected() -> None:
+    e = _X.extract("온도 값이 임계치를 넘으면 경보 메일을 보내줘")
+    assert e.has_guard is True
+    assert "guard" in e.shape_signals()
+
+
+def test_guard_threshold_variants() -> None:
+    for u in ("100을 초과하면 알림", "재고가 10개 이하이면 발주", "점수가 80 이상이면 통과 메일",
+              "잔액이 0보다 작으면 경고", "목표치에 도달하면 보고"):
+        assert _X.extract(u).has_guard is True, u
+
+
+def test_guard_not_overactivated() -> None:
+    # 가드 어휘 없는 발화는 has_guard False (빈출 "~면" 단독 과활성 금지 회귀 가드).
+    for u in ("매주 시트 읽어서 슬랙으로", "안녕 반가워", "고객에게 안내 메일 보내줘",
+              "회의록 정리해서 저장", "각 항목마다 요약"):
+        assert _X.extract(u).has_guard is False, u
+
+
 def test_plain_pipeline_has_no_shape_signal() -> None:
     e = _X.extract("매주 시트 읽어서 요약해서 슬랙으로 보내줘")
     assert e.shape_signals() == set()
