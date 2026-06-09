@@ -17,7 +17,10 @@ from ai_agent.domain.services.drafter_service import (
     _EditNodeDraft,
     _EditResponse,
     _NodeDraft,
+    _NodeParamFill,
+    _ParamFillResponse,
 )
+from ai_agent.domain.services.skeleton_assembler import SkeletonAssembler
 
 
 def _node_config(node_type: str) -> NodeConfig:
@@ -725,3 +728,61 @@ async def test_refine_rewrites_ref_token_to_instance_id():
     http_id = next(n.instance_id for n in result.nodes if n.node_id == cfg_a.node_id)
     slack = next(n for n in result.nodes if n.node_id == cfg_b.node_id)
     assert slack.parameters["text"] == f"${{{http_id}.body}}"
+
+
+class TestScaffoldParamFill:
+    """ADR-0026 §6.6: 스켈레톤 scaffold 경로 — 구조는 코드 결정, LLM은 파라미터만."""
+
+    def _scaffold_and_candidates(self, utterance: str):
+        scaffold = SkeletonAssembler().assemble(utterance)
+        assert scaffold is not None
+        node_types = list(dict.fromkeys(n.node_type for n in scaffold.nodes))
+        return scaffold, [_node_config(nt) for nt in node_types]
+
+    @pytest.mark.asyncio
+    async def test_structure_deterministic_params_from_llm(self):
+        scaffold, candidates = self._scaffold_and_candidates(
+            "매주 시트 읽어서 요약해서 슬랙으로 보내줘"
+        )
+        first_ref = scaffold.nodes[0].ref
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured = AsyncMock(
+            return_value=_ParamFillResponse(
+                name="주간요약", nodes=[_NodeParamFill(ref=first_ref, parameters={"cron": "0 9 * * 1"})]
+            )
+        )
+        wf = await DrafterService(llm).draft(_spec(), candidates, uuid4(), skeleton_scaffold=scaffold)
+
+        # 구조는 scaffold 그대로(결정적) — LLM은 파라미터만.
+        assert len(wf.nodes) == len(scaffold.nodes)
+        assert len(wf.connections) == len(scaffold.edges)
+        assert wf.name == "주간요약"
+        assert any(n.parameters.get("cron") == "0 9 * * 1" for n in wf.nodes)
+        # 파라미터 채움 전용 스키마로 호출됐는지(구조 생성 LLM 아님).
+        assert llm.generate_structured.call_args.args[1] is _ParamFillResponse
+
+    @pytest.mark.asyncio
+    async def test_llm_cannot_alter_structure(self):
+        # LLM이 엉뚱한 ref/노드를 반환해도 구조는 불변(코드가 만든 인스턴스에만 적용).
+        scaffold, candidates = self._scaffold_and_candidates("웹훅 들어오면 분석해서 이메일로")
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured = AsyncMock(
+            return_value=_ParamFillResponse(nodes=[_NodeParamFill(ref="GHOST_ref", parameters={"x": 1})])
+        )
+        wf = await DrafterService(llm).draft(_spec(), candidates, uuid4(), skeleton_scaffold=scaffold)
+        assert len(wf.nodes) == len(scaffold.nodes)
+        assert all("x" not in n.parameters for n in wf.nodes)  # 유령 ref 무시
+
+    @pytest.mark.asyncio
+    async def test_param_fill_failure_falls_back_to_normal_draft(self):
+        scaffold, candidates = self._scaffold_and_candidates("매주 시트 읽어서 요약해서 슬랙으로")
+        candidates = [*candidates, _node_config("A")]
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured = AsyncMock(side_effect=[
+            RuntimeError("param-fill boom"),                       # scaffold 경로 실패
+            _DraftResponse(name="fallback", nodes=[_NodeDraft(node_type="A")], connections=[]),
+        ])
+        wf = await DrafterService(llm).draft(_spec(), candidates, uuid4(), skeleton_scaffold=scaffold)
+        # 일반 LLM draft로 폴백 — 두 번째 응답이 반영됨.
+        assert wf.name == "fallback"
+        assert llm.generate_structured.await_count == 2
