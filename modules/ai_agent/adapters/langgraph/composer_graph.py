@@ -325,6 +325,8 @@ class LangGraphOrchestrator:
             "output_quality_feedback": "",
             "validation_issues": None,
             "retry_count": 0,
+            "last_draft_sig": None,
+            "draft_repeated": False,
             "round": round,
             "selected_skill_id": selected_skill_id,
             "awaiting_skill_selection": False,
