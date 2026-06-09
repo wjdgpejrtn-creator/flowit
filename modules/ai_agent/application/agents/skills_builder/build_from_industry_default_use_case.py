@@ -171,16 +171,20 @@ class BuildFromIndustryDefaultUseCase:
                 continue
 
             upserted_node_types.append(node_def.node_type)
-            # ADR-0017: seed에 instructions가 있으면 SkillDocument 수집 (선택 — ② seed 채우기 전엔 미수집).
-            # common_schemas.SkillDocument 객체 (type-safe). SkillDocument≠Node라
-            # node_type 없이 skill_id로 NodeDefinition 연결 (조장 PR #106/#113).
-            instructions = entry.get("instructions")
-            if instructions:
+            # ADR-0017/0024: seed에 instructions(SKILL.md) 또는 composer_instructions(COMPOSER.md)가
+            # 있으면 SkillDocument 수집 (선택 — ② seed 채우기 전엔 미수집). common_schemas.SkillDocument
+            # 객체 (type-safe). SkillDocument≠Node라 node_type 없이 skill_id로 NodeDefinition 연결
+            # (조장 PR #106/#113). composer_instructions = ADR-0024 2-md 중 COMPOSER.md 본문 — drafter가
+            # 워크플로우 생성 시 주입(#372 결함 A 해소). 둘 다 optional이라 하나라도 있으면 방출.
+            instructions = entry.get("instructions") or ""
+            composer_instructions = entry.get("composer_instructions") or ""
+            if instructions or composer_instructions:
                 skill_documents.append(SkillDocument(
                     skill_id=node_def.node_id,
                     name=node_def.name,
                     description=node_def.description,
                     instructions=instructions,
+                    composer_instructions=composer_instructions,
                 ))
 
         # 4. 결과 프레임
