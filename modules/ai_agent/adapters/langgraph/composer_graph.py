@@ -666,7 +666,9 @@ class LangGraphOrchestrator:
         t0 = time.monotonic()
         # 상태 인지 분류(#369): 이 세션에 사용자 확인 대기 draft가 있으면 그 사실을 분류기에
         # 주입해 "url 바꿔줘"/"채널 #general로 해줘" 같은 수정 발화가 새 워크플로우 생성(draft)으로
-        # 오분류되는 것을 막는다. prior는 drafter가 재사용하도록 state에 실어 이중 GCS load를 막는다.
+        # 오분류되는 것을 막는다. draft load는 여기 1회로 일원화(state에 stash → drafter 재사용,
+        # refine 경로 중복 load 방지). create(draft 부재) 요청도 has_pending_draft 판정 위해 1회
+        # GET(None) — create 경로는 0→1이나 100~300s 파이프라인 대비 무시 가능.
         prior_workflow: WorkflowSchema | None = None
         if self._workflow_draft_store is not None:
             try:
@@ -1194,7 +1196,7 @@ class LangGraphOrchestrator:
         # NodeRegistry.get_schema로 복원해 합쳐야 drafter가 그 노드를 직렬화·보존할 수 있다.
         prior_workflow: WorkflowSchema | None = None
         if state.get("intent") == "refine":
-            # intent_node가 이미 load한 prior를 재사용(이중 GCS load 방지). 부재 시에만 직접 load.
+            # intent_node가 load해 stash한 prior 재사용(refine 경로 중복 load 방지). 부재 시에만 직접 load.
             prior_workflow = state.get("loaded_prior_workflow")
             if prior_workflow is None and self._workflow_draft_store is not None:
                 try:
