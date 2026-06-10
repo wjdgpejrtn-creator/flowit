@@ -7,6 +7,12 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.23.0] - 2026-06-11
+
+### Added — SkillOption.is_personal (REQ-013 개인화 스킬 추천)
+
+- `transport/sse.py` `SkillOption.is_personal: bool = False` 추가 — composer `_suggest_skill_select_node`가 `execute_accessible`로 병합한 후보 중 **본인 소유 개인 스킬**을 표시해 프론트가 "⭐ 자주 사용" 배지를 렌더하도록 한다(개인화 추천 강조). 신규 optional 필드 → MINOR. TS `SkillOption` regenerate 반영.
+
 ## [0.22.0] - 2026-06-09
 
 ### Added — 비실재 노드 검증 코드 (ADR-0026 §6.6)

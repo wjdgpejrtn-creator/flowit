@@ -119,12 +119,14 @@ def _state(**overrides) -> dict:
     return base
 
 
-def _skill(skill_id=None, name="요약 전문가", description="문서 요약 지침서", node_definition_id=None):
+def _skill(skill_id=None, name="요약 전문가", description="문서 요약 지침서", node_definition_id=None,
+           owner_user_id=None):
     s = MagicMock()
     s.skill_id = skill_id or uuid4()
     s.name = name
     s.description = description
     s.node_definition_id = node_definition_id
+    s.owner_user_id = owner_user_id  # 개인 스킬이면 owner 지정(company/team은 None) — is_personal 판별
     return s
 
 
@@ -158,6 +160,26 @@ class TestSuggestSkillSelect:
         assert saved_blob["user_id"] == str(st["user_id"])
         offered = {o.skill_id for o in frames[0].options}
         assert set(saved_blob["offered_skill_ids"]) == {str(s) for s in offered}
+
+    @pytest.mark.asyncio
+    async def test_personal_skill_flagged_company_not(self):
+        """본인 소유 개인 스킬만 is_personal=True (프론트 ⭐ 자주 사용 배지 — REQ-013 개인화 추천)."""
+        embedder = AsyncMock()
+        embedder.embed = AsyncMock(return_value=[0.1] * 768)
+        st = _state()
+        mine = st["user_id"]
+        skill_search = AsyncMock()
+        skill_search.execute_accessible = AsyncMock(return_value=[
+            _skill(name="내 개인 스킬", owner_user_id=mine),       # 본인 소유 → ⭐
+            _skill(name="전사 스킬", owner_user_id=None),           # company → 배지 없음
+            _skill(name="남의 개인 스킬", owner_user_id=uuid4()),   # 타인 소유 → 배지 없음
+        ])
+        oc = _build_orchestrator(embedder=embedder, skill_search=skill_search, composer_state_store=AsyncMock())
+
+        result = await oc._suggest_skill_select_node(st)
+
+        opts = {o.name: o.is_personal for o in result["collected_frames"][0].options}
+        assert opts == {"내 개인 스킬": True, "전사 스킬": False, "남의 개인 스킬": False}
 
     @pytest.mark.asyncio
     async def test_refine_skips_skill_suggestion_without_search(self):
