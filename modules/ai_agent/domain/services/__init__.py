@@ -3,12 +3,17 @@ from .intent_analyzer_service import IntentAnalyzerService
 from .qa_evaluator_service import QAEvaluatorService
 from .slot_filling_service import SlotFillingService
 from .supervisor_router import RECIPES, make_plan, recovery_target, route
+from .workflow_edit_planner import WorkflowEditPlanner
+from .workflow_edit_service import EditPlan, WorkflowEditService
 
 __all__ = [
     "IntentAnalyzerService",
     "DrafterService",
     "QAEvaluatorService",
     "SlotFillingService",
+    "WorkflowEditPlanner",
+    "WorkflowEditService",
+    "EditPlan",
     "route",
     "recovery_target",
     "make_plan",
