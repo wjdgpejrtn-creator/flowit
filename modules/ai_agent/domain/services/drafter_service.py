@@ -336,11 +336,20 @@ class DrafterService:
         # (리뷰 MED #1), 우선 카테고리는 전수 보존하고 나머지에서만 잘라 합을 캡 이하로 맞춘다.
         # 우선 노드만으로 캡을 넘으면 정확성(바인딩) 우선으로 전수 유지한다.
         if len(candidates) > _MAX_CANDIDATES:
-            priority = [c for c in candidates if getattr(c, "category", None) in _PRIORITY_CATEGORIES]
-            rest = [c for c in candidates if getattr(c, "category", None) not in _PRIORITY_CATEGORIES]
+            # **refine 편집 시 prior 워크플로우 노드는 캡에서 무조건 보존(#369)**. augment가 prior
+            # 노드를 풀 '끝'에 덧붙이는데, 비-우선 카테고리(integration/action 등)면 순서 무지 캡이
+            # 1순위로 떨궜다 → `_serialize_for_edit`이 그 노드를 candidates에서 못 찾아 편집 직렬화가
+            # 실패(E_REFINE_SERIALIZE)했다(google_sheets_read 등). prior 노드를 우선군에 포함시킨다.
+            prior_ids = {n.node_id for n in prior_workflow.nodes} if prior_workflow else frozenset()
+
+            def _is_priority(c: NodeConfig) -> bool:
+                return getattr(c, "category", None) in _PRIORITY_CATEGORIES or c.node_id in prior_ids
+
+            priority = [c for c in candidates if _is_priority(c)]
+            rest = [c for c in candidates if not _is_priority(c)]
             capped = priority + rest[: max(0, _MAX_CANDIDATES - len(priority))]
             _logger.warning(
-                "후보 %d건 → %d건 캡 적용 (prompt diet; 우선 카테고리 %d건 보존)",
+                "후보 %d건 → %d건 캡 적용 (prompt diet; 우선/prior %d건 보존)",
                 len(candidates),
                 len(capped),
                 len(priority),

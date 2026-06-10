@@ -716,6 +716,31 @@ class TestDrafterCandidateCap:
         assert "action24" not in prompt
         assert "action0" in prompt
 
+    @pytest.mark.asyncio
+    async def test_cap_preserves_prior_workflow_nodes(self):
+        # **#369 회귀**: refine 편집 시 prior 워크플로우 노드(비-우선 카테고리)가 후보 풀 '끝'에
+        # 덧붙는데, 순서 무지 캡이 1순위로 떨궜다 → _serialize_for_edit이 못 찾아 E_REFINE_SERIALIZE.
+        # 이제 prior 노드는 카테고리 무관 캡에서 보존되어 편집이 성공한다.
+        cfg_a = _node_config_cat("google_sheets_read", "integration")  # 비-우선 카테고리
+        cfg_b = _node_config_cat("slack_send", "action")               # 비-우선 카테고리
+        prior = _prior_workflow(cfg_a, cfg_b)
+        filler = [_node_config_cat(f"action{i}", "action") for i in range(25)]
+        candidates = [*filler, cfg_a, cfg_b]  # prior 노드가 맨 끝 (augment가 덧붙이는 위치)
+
+        llm = _mock_llm(_EditResponse(
+            name="W",
+            nodes=[
+                _EditNodeDraft(ref="n0", node_type="google_sheets_read"),
+                _EditNodeDraft(ref="n1", node_type="slack_send"),
+            ],
+            connections=[_EditEdgeDraft(from_ref="n0", to_ref="n1")],
+        ))
+        # 캡이 prior 노드를 떨구면 직렬화 None → E_REFINE_SERIALIZE. 보존 시 편집 성공.
+        result = await DrafterService(llm).draft(_spec(), candidates, uuid4(), prior_workflow=prior)
+        assert len(result.nodes) == 2
+        node_ids = {n.node_id for n in result.nodes}
+        assert cfg_a.node_id in node_ids and cfg_b.node_id in node_ids
+
 
 @pytest.mark.asyncio
 async def test_refine_rewrites_ref_token_to_instance_id():
