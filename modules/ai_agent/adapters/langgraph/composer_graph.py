@@ -1198,8 +1198,10 @@ class LangGraphOrchestrator:
         if spec is None:
             return {"error": "DraftSpec 없음"}
         candidates = state["node_candidates"]
-        # refine(대화형 수정) — 이전 워크플로우를 불러와 "지시한 부분만" 고친다(처음부터 재생성 X).
-        # 로드/조회 실패는 fresh draft로 폴백(non-fatal). search 후보에 없는 기존 노드는
+        # refine(편집 모드) — 이전 워크플로우를 불러와 "지시한 부분만" 고친다(처음부터 재생성 X).
+        # **편집 잠금(조장 지시 2026-06-10)**: confirm 카드가 나온 세션은 편집 전용이다. refine인데
+        # prior를 못 불러오면 **새로 만들지 않고 에러로 중단**한다 — 사용자가 쌓은 워크플로우를
+        # 조용히 2노드 fresh로 갈아엎던 회귀(#369) 차단. search 후보에 없는 기존 노드는
         # NodeRegistry.get_schema로 복원해 합쳐야 drafter가 그 노드를 직렬화·보존할 수 있다.
         prior_workflow: WorkflowSchema | None = None
         if state.get("intent") == "refine":
@@ -1209,10 +1211,17 @@ class LangGraphOrchestrator:
                 try:
                     prior_workflow = await self._workflow_draft_store.load_draft(state["session_id"])
                 except Exception as exc:
-                    _logger.warning("refine: 이전 워크플로우 로드 실패 (fresh로 진행): %s", exc)
+                    _logger.warning("refine: 이전 워크플로우 로드 실패: %s", exc)
                     prior_workflow = None
-            if prior_workflow is not None:
-                candidates = await self._augment_candidates_with_prior(candidates, prior_workflow)
+            if prior_workflow is None:
+                # 편집 모드인데 기존 워크플로우 부재 → fresh 생성 금지. "error"만 반환하면
+                # 스트리밍 핸들러가 E_COMPOSER 프레임 emit 후 즉시 종료한다(아래 노드 미실행 →
+                # 새 워크플로우 안 만들어짐). 사용자에겐 새 대화 안내.
+                _logger.warning("refine인데 prior 워크플로우 없음 — 새 생성 잠금, 에러 반환")
+                return {
+                    "error": "수정할 기존 워크플로우를 찾지 못했어요. 새로 만들려면 '새 대화'를 눌러 주세요.",
+                }
+            candidates = await self._augment_candidates_with_prior(candidates, prior_workflow)
         # 스킬이 선택되면(two-shot 2차) 그 지침서를 주입할 LLM 노드(category=="ai")가 반드시
         # 필요하다 (#372 결함 A). 후보에 LLM 노드가 없으면 확보해 넣고 drafter에 포함을 지시
         # → drafter가 LLM 노드를 배치 → `_bind_skill_node`가 skill_id를 바인딩한다.

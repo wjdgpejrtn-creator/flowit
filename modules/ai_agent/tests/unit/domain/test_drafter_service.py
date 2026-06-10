@@ -253,14 +253,21 @@ class TestDrafterServiceRefine:
         assert DrafterService._serialize_for_edit(prior, [cfg_a]) is None
 
     @pytest.mark.asyncio
-    async def test_unmappable_prior_falls_back_to_fresh(self):
+    async def test_unmappable_prior_raises_never_regenerates(self):
+        # **편집 잠금(#369)**: prior가 주어지면 절대 fresh로 재생성하지 않는다. 직렬화 불가
+        # (기존 노드가 후보에 없음)면 fresh 폴백 대신 에러 — 사용자가 쌓은 워크플로우를 조용히
+        # 2노드로 갈아엎던 회귀 차단. (정상 경로는 composer가 prior 노드를 후보에 보강해 직렬화 성공.)
+        from common_schemas.exceptions import ExecutionError
+
         cfg_a, cfg_b = _node_config("http"), _node_config("slack")
         prior = _prior_workflow(cfg_a, cfg_b)
         llm = _mock_llm(_DraftResponse(name="W", nodes=[_NodeDraft(node_type="http")], connections=[]))
         svc = DrafterService(llm)
-        # 후보에 slack 빠짐 → 편집 컨텍스트 생략하고 fresh로 진행(기존 노드 유실 방지)
-        await svc.draft(_spec(), [cfg_a], self.owner_id, prior_workflow=prior)
-        assert llm.generate_structured.call_args.args[1] is _DraftResponse  # fresh 스키마
+        # 후보에 slack 빠짐 → 직렬화 None → fresh 생성 금지, 에러
+        with pytest.raises(ExecutionError) as ei:
+            await svc.draft(_spec(), [cfg_a], self.owner_id, prior_workflow=prior)
+        assert ei.value.code == "E_REFINE_SERIALIZE"
+        llm.generate_structured.assert_not_awaited()  # fresh draft LLM 호출조차 없음
 
     def test_duplicate_node_type_preserved_via_refs(self):
         # 동일 node_type 노드 2개도 ref로 구분 → 직렬화/빌드 모두 모호하지 않다(LOW~MED 해소).

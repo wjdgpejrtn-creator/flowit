@@ -371,26 +371,34 @@ class DrafterService:
         binding_block = self._skill_binding_block(skill_selected, skill_composer_instructions)
         retry_block = self._retry_feedback_block(retry_feedback)
         motif_block = self._motif_block(capped_motifs)
-        # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
-        # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
+        # refine 편집 경로 — ref 기반 편집 응답으로 "지시한 부분만" 고친다(중복 node_type 안전).
+        # **편집 잠금(조장 지시 2026-06-10)**: prior가 주어지면 절대 fresh draft로 재생성하지
+        # 않는다. 직렬화 불가(기존 노드가 후보에 없음)면 폴백 대신 **에러** — 사용자가 쌓은
+        # 워크플로우를 조용히 2노드로 갈아엎던 회귀(#369) 차단. 호출부가 prior 노드를
+        # candidates에 보강(`_augment_candidates_with_prior`)하므로 정상 경로에선 직렬화 성공.
         if prior_workflow is not None:
             current = self._serialize_for_edit(prior_workflow, candidates)
-            if current is not None:
-                edit_prompt = (
-                    _EDIT_SYSTEM_PROMPT
-                    + patterns_block
-                    + binding_block
-                    + motif_block
-                    + retry_block
-                    + f"\nDraftSpec: {spec_json}"
-                    + f"\nAvailable nodes: {catalog_json}"
-                    + f"\nCURRENT WORKFLOW: {json.dumps(current, ensure_ascii=False)}"
+            if current is None:
+                raise ExecutionError(
+                    "기존 워크플로우를 편집용으로 직렬화하지 못했습니다(노드 복원 실패) — "
+                    "새로 생성하지 않습니다.",
+                    code="E_REFINE_SERIALIZE",
                 )
-                try:
-                    edit_resp = await self._llm.generate_structured(edit_prompt, _EditResponse)
-                except Exception as e:
-                    raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
-                return self._build_from_edit(edit_resp, candidates, owner_user_id)
+            edit_prompt = (
+                _EDIT_SYSTEM_PROMPT
+                + patterns_block
+                + binding_block
+                + motif_block
+                + retry_block
+                + f"\nDraftSpec: {spec_json}"
+                + f"\nAvailable nodes: {catalog_json}"
+                + f"\nCURRENT WORKFLOW: {json.dumps(current, ensure_ascii=False)}"
+            )
+            try:
+                edit_resp = await self._llm.generate_structured(edit_prompt, _EditResponse)
+            except Exception as e:
+                raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE") from e
+            return self._build_from_edit(edit_resp, candidates, owner_user_id)
 
         prompt = (
             _SYSTEM_PROMPT
