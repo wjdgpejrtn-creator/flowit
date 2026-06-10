@@ -12,8 +12,11 @@ LLM 호출은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base
       → 사용자 카드 그리드 표시, 1건 선택
     [extract_detail] DocumentBlock + 선택된 meta dict
       → JSON prompt 구성 (target_skill_meta 명시)
-      → LLM.generate_structured(prompt, _ExtractedSkillNodeDetail)
-      → ResultFrame(payload.skill_detail) — detail(inputs/outputs/instructions/composer_instructions/...) + staging
+      → LLM.generate_structured(prompt, _ExtractedSkillNodeDetail)  ← inputs/outputs/instructions(SKILL.md) "LLM 보강"
+      → T4: SOP 텍스트를 SkeletonEntityExtractor "발화"로 결정적 스켈레톤 조립(ADR-0028 D2/D3)
+      → T5: AssembledDraft → COMPOSER.md(결정적) + 정밀 BINDS(bound_node_types) 매핑(D4)
+            (스켈레톤 미매칭 시 LLM composer_instructions 폴백)
+      → ResultFrame(payload.skill_detail) — detail + staging + skeleton_name + bound_node_types
       → 사용자 폼 prefill (frontend가 메타와 합쳐서)
     [confirm] 편집된 skills (메타 + detail 합친 형태)
       → embed(description) + CreateDraftSkillUseCase로 personal DRAFT 생성
@@ -78,6 +81,8 @@ from skills_marketplace.domain.value_objects import NodeSpecStaging
 
 from ....domain.entities.skill_node import SkillNode
 from ....domain.ports.llm_port import LLMPort
+from ....domain.services.skeleton_assembler import SkeletonAssembler
+from ....domain.services.skeleton_composer_mapper import SkeletonComposerMapper
 
 # DB CHECK 영문 8종 (`009_node_definitions.sql`).
 _ALLOWED_CATEGORIES = {"trigger", "action", "condition", "transform", "ai", "integration", "utility", "output"}
@@ -157,10 +162,17 @@ class BuildFromSOPUseCase:
         create_draft_skill: CreateDraftSkillUseCase,
         embedder: EmbedderPort,
         llm: LLMPort,
+        assembler: SkeletonAssembler | None = None,
+        composer_mapper: SkeletonComposerMapper | None = None,
     ) -> None:
         self._create_draft_skill = create_draft_skill
         self._embedder = embedder
         self._llm = llm
+        # T4/T5(ADR-0028): SOP 텍스트를 결정적 스켈레톤으로 조립(assembler)하고 그 구조를
+        # COMPOSER.md + 정밀 BINDS로 매핑(composer_mapper)한다. 둘 다 순수 도메인 서비스라
+        # 기본 생성(의존성 무, composition root 주입 불요 — 기존 3-인자 와이어링 호환).
+        self._assembler = assembler or SkeletonAssembler()
+        self._composer_mapper = composer_mapper or SkeletonComposerMapper()
 
     async def extract_metadata(
         self,
@@ -304,6 +316,29 @@ class BuildFromSOPUseCase:
             )
             return
 
+        # T4(ADR-0028) — SOP 텍스트를 SkeletonEntityExtractor "발화" 자리에 넣어 결정적 스켈레톤
+        # 조립. 추출기는 순수 키워드 매칭이라 발화 대신 SOP 본문+스킬 메타를 먹여도 동작(D2).
+        yield AgentNodeFrame(agent_node_name="skills_builder.sop.search_skeleton")
+        utterance = self._build_skill_utterance(meta_obj, document)
+        draft = self._assembler.assemble(utterance)
+
+        if draft is not None:
+            # T5(ADR-0028 D2/D4) — 결정적 조립 구조 → COMPOSER.md(결정적) + 정밀 BINDS.
+            # 구조는 코드가 결정(§6.6), LLM의 자유 composer_instructions를 대체한다.
+            yield AgentNodeFrame(
+                agent_node_name=f"skills_builder.sop.assemble_skill.{draft.skeleton_name}"
+            )
+            mapping = self._composer_mapper.map(draft)
+            composer_instructions = mapping.composer_instructions
+            bound_node_types = list(mapping.bound_node_types)
+            skeleton_name: str | None = mapping.skeleton_name
+        else:
+            # 확신 가는 스켈레톤 매칭 없음(중첩 합성·불완전 커버리지 등) → 구조 결정 불가 →
+            # LLM 자유추출 composer_instructions로 폴백(정밀 BINDS 없음, coarse BINDS 유지).
+            composer_instructions = detail.composer_instructions
+            bound_node_types = []
+            skeleton_name = None
+
         yield ResultFrame(
             intent="build_skill",
             payload={
@@ -313,12 +348,16 @@ class BuildFromSOPUseCase:
                 "skill_detail": {
                     "node_type": meta_obj.node_type,            # 식별용 echo
                     "instructions": detail.instructions,
-                    "composer_instructions": detail.composer_instructions,  # COMPOSER.md (ADR-0024)
+                    "composer_instructions": composer_instructions,  # COMPOSER.md (결정적 또는 LLM 폴백)
                     "inputs": detail.inputs,
                     "outputs": detail.outputs,
                     "required_connections": detail.required_connections,
                     "service_type": detail.service_type,
                     "staging": staging.model_dump(mode="json"),
+                    # ADR-0028 D4 — 스켈레톤 유래 정밀 BINDS 원천(스캐폴드 실노드). 영속화/projector
+                    # 정밀화는 O3(조장 합의) 후속 — 현재는 산출물 노출만(콜러블 use case 우선).
+                    "skeleton_name": skeleton_name,
+                    "bound_node_types": bound_node_types,
                 },
                 "user_id": str(user_id),
             },
@@ -411,6 +450,25 @@ class BuildFromSOPUseCase:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_skill_utterance(
+        meta: _ExtractedSkillNodeMeta,
+        document: DocumentBlock,
+    ) -> str:
+        """SOP 텍스트를 SkeletonEntityExtractor "발화" 자리에 넣을 텍스트로 합성 (ADR-0028 T4).
+
+        스킬이 무엇인지(name·description) + SOP 본문(도메인 노드 어휘)을 합쳐 렉시컬 추출기에
+        먹인다 — 추출기는 순수 키워드 매칭이라 발화 대신 SOP를 먹여도 그대로 동작(D2). 메타를
+        앞에 두어 "이 스킬"의 동작 어휘(예: "슬랙으로 알림")가 sink/source 슬롯에 먼저 진입하게 한다.
+        """
+        parts = [meta.name, meta.description]
+        parts.extend(
+            b.content
+            for b in document.blocks
+            if b.block_type in {"text", "heading", "table"} and b.content
+        )
+        return "\n".join(p for p in parts if p)
 
     @staticmethod
     def _build_prompt_metadata(
