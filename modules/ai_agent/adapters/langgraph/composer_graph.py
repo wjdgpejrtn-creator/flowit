@@ -1202,7 +1202,16 @@ class LangGraphOrchestrator:
         skeleton_scaffold = None
         if prior_workflow is None and not skill_selected:
             try:
-                skeleton_scaffold = self._skeleton_assembler.assemble(spec.natural_language_intent)
+                # retriever 후보(BGE-M3 의미매칭)를 함께 전달 — 렉시컬이 비운 source/sink 슬롯을
+                # 의미검색 결과로 그라운딩한다(어휘 갭을 손 사전 대신 retriever가 닫음,
+                # ADR-0026 §6.6, #453). candidates는 `_retriever_node`의 `_dedup_union` 결과
+                # (BGE rank + structural + core-LLM 합집합)지만, 그라운딩은 source/sink
+                # `slot.candidates` 멤버십으로 필터라 structural/core-LLM은 빠져 **실효 순서는
+                # BGE rank**다. scaffold 후보 보강(아래) 전이라 보강 노드는 미포함.
+                skeleton_scaffold = self._skeleton_assembler.assemble(
+                    spec.natural_language_intent,
+                    candidate_node_types=[c.node_type for c in candidates],
+                )
             except Exception as exc:
                 _logger.warning("스켈레톤 조립 실패 (LLM draft로 진행): %s", exc)
                 skeleton_scaffold = None
