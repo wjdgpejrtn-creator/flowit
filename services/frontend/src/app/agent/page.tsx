@@ -516,6 +516,10 @@ function AgentPageContent() {
   const setLoadedWorkflow = useWorkflowStore((s) => s.setWorkflow);
   const loadedWorkflow = useWorkflowStore((s) => s.workflow);
   const [editCatalog, setEditCatalog] = useState<NodeConfig[] | null>(null);
+  // refine(편집)은 같은 workflow_id를 유지(버전 업데이트)하므로 workflowId만으론 캔버스 재로드
+  // effect가 재발화하지 않는다 → 수정본이 안 그려지고 이전 워크플로우가 stale로 남는다. 결과
+  // 프레임이 올 때마다 증가하는 nonce를 effect 의존성에 넣어 id 불변이어도 재로드를 강제한다.
+  const [canvasReloadKey, setCanvasReloadKey] = useState(0);
 
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
@@ -576,7 +580,8 @@ function AgentPageContent() {
         showToast(`워크플로우 불러오기 실패: ${err instanceof Error ? err.message : '저장본을 찾을 수 없습니다'}`);
       });
     return () => { cancelled = true; };
-  }, [readyToExecute?.workflowId, setLoadedWorkflow]);
+    // canvasReloadKey: refine이 같은 workflowId로 편집을 반환해도(버전 업데이트) 재로드되게 한다.
+  }, [readyToExecute?.workflowId, canvasReloadKey, setLoadedWorkflow]);
 
   useSSEStream(sessionId, {
     onResult: (frame) => {
@@ -587,6 +592,8 @@ function AgentPageContent() {
           message: (payload.message as string) ?? '워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.',
           explanation: payload.explanation as WorkflowExplanation | undefined,
         });
+        // 결과가 올 때마다 캔버스 재로드 강제 — refine의 동일 workflow_id 편집도 반영(버전 업데이트).
+        setCanvasReloadKey((k) => k + 1);
       }
     },
   });
