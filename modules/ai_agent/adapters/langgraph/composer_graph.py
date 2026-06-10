@@ -946,6 +946,13 @@ class LangGraphOrchestrator:
         반환해 한 라운드 안에서 draft로 진행(one-shot 폴백, 회귀 보존).
         후보가 있으면 그래프 상태를 GCS에 영속(2차 resume 재료)하고 옵션 frame을 emit한다.
         """
+        # refine(기존 워크플로우 편집)은 스킬 제안 대상이 아니다 — two-shot 스킬 선택은 **새 draft
+        # 생성** 시에만 의미가 있다(#369 후속). refine을 스킬 선택으로 우회시키면 "url/채널 수정해줘"
+        # 같은 편집 발화가 "워크플로우 작성을 시작" + (무관한) 스킬 카드로 끊겨 사용자에겐 새 생성처럼
+        # 보이고 편집 흐름이 깨진다. 바로 draft_workflow로 보내 `_drafter_node`가 prior_workflow를
+        # 로드해 제자리 편집하게 한다(intent는 이미 _intent_node에서 refine으로 상태 인지 분류됨).
+        if state.get("intent") == "refine":
+            return {"awaiting_skill_selection": False}
         if self._skill_search is None or self._embedder is None:
             return {"awaiting_skill_selection": False}
 
