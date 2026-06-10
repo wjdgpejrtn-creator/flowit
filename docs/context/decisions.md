@@ -47,3 +47,9 @@
 | 0024 | [SkillDocument 2-md 디렉토리 (SKILL.md + COMPOSER.md) — 스킬 사용 모델 단일화](./adr/ADR-0024-skill-document-dual-md-directory.md) | Proposed | 2026-06-05 |
 | 0025 | [재개 가능한 실행 — 협조적 pause + 체크포인트 resume](./adr/ADR-0025-resumable-execution-cooperative-pause.md) | Proposed | 2026-06-05 |
 | 0026 | [온톨로지 기반 그래프 DB (Neo4j AuraDB) + GraphRAG — composer/skill-builder 품질 향상](./adr/ADR-0026-ontology-graph-db-graphrag.md) | Accepted | 2026-06-06 |
+
+## 구현 결정 메모 (비-ADR)
+
+ADR로 올리기엔 가벼우나 동작 반전이라 드리프트 방지용으로 기록하는 항목.
+
+- **draft↔refine = 결정적 편집 잠금** (2026-06-10, #369 / PR #468·#470): confirm 카드가 뜬 세션은 **편집 전용**이다. `IntentAnalyzerService`는 `has_pending_draft`면 intent를 **결정적 REFINE으로 고정**(LLM 분류 경로 폐지)하고, composer `_drafter_node`·`DrafterService`는 prior 워크플로우가 없으면 **새로 만들지 않고 에러**(fresh 생성 금지). 새 워크플로우는 "새 대화"(새 session_id)로만. → **#466이 도입한 "상태 인지 Gemma draft↔refine 분류"를 supersede** — 소형 모델 오분류로 편집 발화가 새 생성으로 새며 기존 워크플로우를 통째로 잃던 회귀(#369) 때문. 스킬 제안(two-shot)도 refine은 우회(#468).
