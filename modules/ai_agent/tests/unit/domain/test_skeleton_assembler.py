@@ -328,6 +328,64 @@ def test_multiple_sinks_fan_out_in_parallel() -> None:
     assert not any(e.from_ref in sink_refs and e.to_ref in sink_refs for e in d.edges)
 
 
+# ── 의미검색 후보 그라운딩 (#453, ADR-0026 §6.6) ─────────────────────────────
+# 렉시컬이 비운 source/sink 슬롯을 retriever 후보(BGE-M3 의미매칭, rank 순)로 채운다 —
+# 어휘 갭(스펠링 변형·신규 표현)을 손 사전 대신 의미검색 결과로 닫는다.
+def test_saream2_full_chain_with_calc_keyword() -> None:
+    # #453 블로커 직격: "전주 대비 증감 계산 → 정산 구글독스" 4노드 풀체인. "계산"이 transform
+    # (AI)을 켜고, transform 종단에 default 문서 sink가 붙어 schedule→sheets→ai→docs 완성.
+    d = _A.assemble(
+        "매주 월요일 아침에 구글 '주간매출' 시트 읽어서 전주 대비 증감 계산해서 정산 구글독스로 써줘"
+    )
+    assert d is not None
+    assert d.skeleton_name == "scheduled_pipeline"
+    assert _node_types(d) == [
+        "schedule_trigger", "google_sheets_read", "anthropic_chat", "google_docs_write",
+    ]
+
+
+def test_candidate_grounding_fills_lexically_missed_sink() -> None:
+    # transform 없음(default-docs-sink 마스킹 배제) + sink "구글독스" 렉시컬 미매칭 →
+    # 그라운딩 없으면 2노드(토막), 후보에 google_docs_write 있으면 3노드로 채움.
+    intent = "매주 시트 데이터를 구글독스로 옮겨줘"
+    assert _node_types(_A.assemble(intent)) == ["schedule_trigger", "google_sheets_read"]
+    grounded = _A.assemble(
+        intent, candidate_node_types=["google_sheets_read", "google_docs_write", "anthropic_chat"]
+    )
+    assert _node_types(grounded) == [
+        "schedule_trigger", "google_sheets_read", "google_docs_write",
+    ]
+
+
+def test_grounding_does_not_override_lexical_sink() -> None:
+    # 렉시컬이 이미 sink("슬랙")를 채우면 후보에 다른 sink가 있어도 안 건드린다(정밀 보존·over-add 0).
+    d = _A.assemble(
+        "매주 시트 읽어서 요약해서 슬랙으로 보내줘",
+        candidate_node_types=["google_sheets_read", "google_docs_write", "email_send", "anthropic_chat"],
+    )
+    assert _node_types(d) == [
+        "schedule_trigger", "google_sheets_read", "anthropic_chat", "slack_post_message",
+    ]
+
+
+def test_grounding_excludes_transform_slot() -> None:
+    # transform 후보(anthropic_chat)는 retriever가 항상 후보에 넣어(#418) 비변별적 → 그라운딩
+    # 제외. transform 의도어("계산/요약") 없는 발화엔 후보에 anthropic_chat이 있어도 AI 노드를
+    # 끼우지 않는다(over-add 방지).
+    d = _A.assemble(
+        "매주 시트 데이터를 구글독스로 옮겨줘",
+        candidate_node_types=["google_sheets_read", "google_docs_write", "anthropic_chat", "gemma_chat"],
+    )
+    assert "anthropic_chat" not in _node_types(d) and "gemma_chat" not in _node_types(d)
+
+
+def test_grounding_absent_preserves_legacy_behavior() -> None:
+    # candidate_node_types 미전달(=None) → 순수 렉시컬(기존 동작). 기존 호출처·테스트 호환.
+    base = _A.assemble("매주 광고 시트 읽어서 요약해서 슬랙으로 보내줘")
+    with_none = _A.assemble("매주 광고 시트 읽어서 요약해서 슬랙으로 보내줘", candidate_node_types=None)
+    assert _node_types(base) == _node_types(with_none)
+
+
 # ── 변환기 ─────────────────────────────────────────────────────────────────
 def test_to_workflow_schema_maps_node_ids_and_edges() -> None:
     d = _A.assemble("매주 광고 시트 읽어서 요약해서 슬랙으로 보내줘")
@@ -344,6 +402,8 @@ def test_to_workflow_schema_maps_node_ids_and_edges() -> None:
 # ── 엔진 계약 파리티 ────────────────────────────────────────────────────────
 _PARITY_UTTERANCES = [
     "매주 월요일에 광고 시트 읽어서 요약해서 슬랙으로 보내줘",
+    "매주 월요일 아침에 구글 '주간매출' 시트 읽어서 전주 대비 증감 계산해서 정산 구글독스로 써줘",  # #453
+
     "웹훅 들어오면 내용 분석해서 이메일로 보내줘",
     "보고서 초안 생성하고 품질 기준 통과할 때까지 재생성한 다음 구글 docs에 저장",
     "매주 보고서 생성하고 기준 충족할 때까지 검증해서 슬랙 알림",
