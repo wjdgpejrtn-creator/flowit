@@ -98,7 +98,11 @@ T2 `parse_document`는 **ai_agent → doc_parser `ParserPort`(domain/ports) impo
 
 ## 빌드 순서 (제안)
 
-1. **T5+T4 결정적 스켈레톤 조립** — 박아름 영역 단독, 프레임 결정과 독립, 최대 효과. **즉시 착수 가능.**
+1. **T5+T4 결정적 스켈레톤 조립** — 박아름 영역 단독, 프레임 결정과 독립, 최대 효과. ✅ **착수 완료(2026-06-10)**:
+   - T4 = `BuildFromSOPUseCase.extract_detail`이 SOP 텍스트(메타 name/description + 문서 본문)를 `_build_skill_utterance`로 합성해 `SkeletonAssembler.assemble("발화")`에 주입(추출기 무수정 재사용, D2).
+   - T5 = `SkeletonComposerMapper`(신규 순수 도메인 서비스) — `AssembledDraft` → COMPOSER.md 본문(결정적) + 정밀 BINDS(`bound_node_types`, 스캐폴드 실노드). O4 "빌더 쪽 어댑팅" 지점.
+   - 통합 = `extract_detail`의 자유 LLM `composer_instructions`를 스켈레톤 매칭 시 결정적 산출로 대체(미매칭 시 LLM 폴백). `skeleton_name`/`bound_node_types`를 페이로드 노출(영속화·projector 정밀화는 O3 후속).
+   - 재사용은 intra-module(ai_agent application → ai_agent domain/services)이라 의존성·CLAUDE.md import 표 변경 0.
 2. **T1 문서검색 use case** — chunk 임베딩 재사용.
 3. **(조장/신정혜) tool-calling 프레임** 결정 → T1~T5를 에이전트 루프로 wrap.
 

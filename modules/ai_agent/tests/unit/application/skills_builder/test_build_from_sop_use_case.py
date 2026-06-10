@@ -270,6 +270,76 @@ def test_build_prompt_detail_requests_composer_instructions():
     assert "COMPOSER.md" in prompt
 
 
+# ----------------------------------------------------------------------
+# extract_detail — T4/T5 결정적 스켈레톤 조립 (ADR-0028 D2/D3/D4)
+# ----------------------------------------------------------------------
+
+
+def _skeleton_meta_dict() -> dict:
+    # 발화 어휘(매주/구글 시트/요약/슬랙)가 메타에 들어가 scheduled_pipeline에 결정적 매칭
+    return {
+        "node_type": "weekly_sales_summary_slack",
+        "name": "주간 매출 요약 슬랙 발송",
+        "description": "매주 구글 시트에서 매출 데이터를 읽어 요약해서 슬랙으로 보낸다",
+        "category": "action",
+        "risk_level": "Low",
+    }
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_skeleton_match_overrides_composer_instructions():
+    # 스켈레톤 매칭 시 COMPOSER.md는 LLM 자유추출이 아니라 결정적 조립에서 나온다(D3 §6.6)
+    llm = _FakeLLM(structured_response=_make_detail(
+        composer_instructions="## 필수 노드\nLLM이 자유 생성한 (무시돼야 할) 지침",
+    ))
+    frames = [f async for f in _make_uc(llm=llm).extract_detail(
+        uuid4(), _make_document(), _skeleton_meta_dict()
+    )]
+    detail = frames[-1].payload["skill_detail"]
+    # 결정적 스켈레톤 산출 — LLM 자유 지침은 대체됨
+    assert "LLM이 자유 생성한" not in detail["composer_instructions"]
+    assert "scheduled_pipeline" in detail["composer_instructions"]
+    assert detail["skeleton_name"] == "scheduled_pipeline"
+    # 정밀 BINDS — 발화 도메인 노드가 결정적으로 포함
+    assert "google_sheets_read" in detail["bound_node_types"]
+    assert "slack_post_message" in detail["bound_node_types"]
+    assert "anthropic_chat" in detail["bound_node_types"]
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_skeleton_match_emits_assemble_frame():
+    llm = _FakeLLM(structured_response=_make_detail())
+    frames = [f async for f in _make_uc(llm=llm).extract_detail(
+        uuid4(), _make_document(), _skeleton_meta_dict()
+    )]
+    names = {f.agent_node_name for f in frames if isinstance(f, AgentNodeFrame)}
+    assert "skills_builder.sop.search_skeleton" in names
+    assert any(n.startswith("skills_builder.sop.assemble_skill.") for n in names)
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_no_skeleton_match_falls_back_to_llm_composer():
+    # 스켈레톤 미매칭(고객 응대 SOP — sink-only) → LLM composer_instructions 폴백, BINDS 없음
+    llm = _FakeLLM(structured_response=_make_detail(
+        composer_instructions="## 필수 노드\nLLM 폴백 지침",
+    ))
+    frames = [f async for f in _make_uc(llm=llm).extract_detail(
+        uuid4(), _make_document(), _meta_dict()
+    )]
+    detail = frames[-1].payload["skill_detail"]
+    assert detail["composer_instructions"] == "## 필수 노드\nLLM 폴백 지침"
+    assert detail["skeleton_name"] is None
+    assert detail["bound_node_types"] == []
+
+
+def test_build_skill_utterance_combines_meta_and_document():
+    meta = _make_meta(name="주간 요약", node_type="weekly")
+    utterance = BuildFromSOPUseCase._build_skill_utterance(meta, _make_document())
+    assert "주간 요약" in utterance                     # 메타 name
+    assert "Slack 채널로 알림" in utterance              # 메타 description
+    assert "고객 문의 접수 시 Slack 알림" in utterance   # 문서 본문 블록
+
+
 @pytest.mark.asyncio
 async def test_extract_detail_progress_frames():
     llm = _FakeLLM(structured_response=_make_detail())
