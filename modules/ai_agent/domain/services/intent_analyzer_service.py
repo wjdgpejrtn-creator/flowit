@@ -114,6 +114,10 @@ _STATEFUL_INTENTS = frozenset({IntentType.DRAFT, IntentType.REFINE})
 
 class IntentAnalyzerService:
     def __init__(self, llm: LLMPort) -> None:
+        # `analyze`는 정규식 + 편집 잠금만 쓰는 결정적 분류라 현재 LLM을 호출하지 않는다
+        # (draft↔refine Gemma 분류는 편집 잠금으로 폐지 — decisions.md "구현 결정 메모"). `llm`은
+        # 생성자 시그니처/composition root(agent-composer·orchestrator) 안정성 + 향후 LLM 분류
+        # 재도입 대비로 보존한다. 미사용이지만 의도된 보존(dead dependency 아님).
         self._llm = llm
 
     async def analyze(self, messages: list[dict[str, Any]], context: dict[str, Any]) -> IntentResult | None:
