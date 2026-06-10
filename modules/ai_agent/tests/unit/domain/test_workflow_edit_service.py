@@ -209,6 +209,8 @@ class TestGeneral:
         )
         assert out.name == "새 이름"
         assert out.workflow_id == prior.workflow_id
+        # workflow_id 유지 시 저장은 UPDATE(merge) → version NOT NULL 충족 위해 +1 (None→1).
+        assert out.version == 1
         # prior(frozen) 원본 불변
         assert prior.nodes[0].parameters == {"k": "v"}
         assert prior.name == "Prior"

@@ -122,12 +122,17 @@ class WorkflowEditService:
 
         nodes = list(nodes_by_iid.values())
         nodes = self._reground_dataflow(nodes, candidates)
+        # workflow_id를 유지하므로 저장 시 repo가 같은 row를 UPDATE(merge)한다. version 컬럼은
+        # NOT NULL(server_default는 INSERT에만 적용) → 편집본에 non-null version을 실어야 UPDATE가
+        # 깨지지 않는다(NotNullViolation). 같은 논리적 워크플로우의 버전 업데이트 의미로 +1.
+        next_version = (prior.version or 0) + 1
         return prior.model_copy(
             update={
                 "name": plan.name or prior.name,
                 "is_draft": True,
                 "nodes": nodes,
                 "connections": edges,
+                "version": next_version,
             }
         )
 
