@@ -96,6 +96,11 @@ class EnsembleSlotResolver:
             ranked_candidates=tuple(ranked_candidates),
             ontology_allowed=frozenset(ontology_allowed),
         )
+        # 잡담/빈 발화(트리거 외 재료 전무)는 조립기가 어차피 None으로 bail → 앙상블·LLM escalation
+        # 생략(이미 느린 LLM draft 폴백 경로에 Gemma 1콜 낭비 방지, #463 리뷰 LOW#2). is_empty는
+        # 렉시컬 결과 기반이라 값싼 결정.
+        if ctx.entities.is_empty():
+            return ResolvedSlots()
         return await self._resolve_ctx(ctx, trace=trace)
 
     async def _resolve_ctx(

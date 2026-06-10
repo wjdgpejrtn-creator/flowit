@@ -213,6 +213,16 @@ async def test_llm_escalates_only_uncertain_roles_and_folds_pick() -> None:
 
 
 @pytest.mark.asyncio
+async def test_empty_utterance_short_circuits_no_escalation() -> None:
+    # 잡담/빈 발화는 voter·LLM escalation 생략(폴백 경로 Gemma 낭비 방지, #463 리뷰 LOW#2).
+    mapper = _StubMapper({SlotRole.SOURCE: (("gmail_read", 1.0),)})
+    resolver = EnsembleSlotResolver([LexicalVoter(), SemanticVoter()], llm_mapper=mapper)
+    resolved = await _resolve(resolver, "안녕 오늘 날씨 좋네")
+    assert not resolved.has_pick(SlotRole.SOURCE) and not resolved.has_pick(SlotRole.SINK)
+    assert mapper.called_with is None  # LLM 미호출(short-circuit)
+
+
+@pytest.mark.asyncio
 async def test_llm_pick_outside_pool_discarded() -> None:
     # LLM이 풀 밖 node_type을 주면 폐기(환각 가드).
     mapper = _StubMapper({SlotRole.SOURCE: (("not_a_real_node", 1.0),)})
