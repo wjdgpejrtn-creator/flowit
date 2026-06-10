@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from ..ports.slot_mapper_port import SlotMapperPort
 from ..value_objects.skeleton import ResolvedSlots, SlotRole
-from .skeleton_entity_extractor import SkeletonEntityExtractor
+from .skeleton_entity_extractor import SkeletonEntityExtractor, suppressed_sink_variants
 from .skeleton_library import ROLE_CANDIDATE_POOLS
 from .slot_voters import SlotVoter, VoteContext
 
@@ -110,6 +110,15 @@ class EnsembleSlotResolver:
             pool = ROLE_CANDIDATE_POOLS.get(role, ())
             if not pool:
                 continue
+            # 방향성 소스-블리드 차단(semantic 표까지): read-service가 source로 잡혔는데 그
+            # 서비스 write의 send-cue가 없으면 SINK 풀에서 그 write를 제거(렉시컬과 동일 규칙
+            # 공유). SOURCE를 먼저 풀어 by_role에 있으므로 SINK 시점에 참조 가능.
+            if role == SlotRole.SINK:
+                drop = suppressed_sink_variants(
+                    ctx.utterance.lower(), by_role.get(SlotRole.SOURCE, ())
+                )
+                if drop:
+                    pool = tuple(nt for nt in pool if nt not in drop)
             scores, breakdown = self._combine(ctx, role, pool)
             picks = self._select(scores)
             state[role] = (scores, breakdown, picks, False)

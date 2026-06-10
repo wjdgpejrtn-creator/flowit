@@ -110,44 +110,65 @@ _SINK_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("file_write", ("파일로 저장", "파일로 내보", "파일에 저장", "파일로 출력", "파일에 기록")),
 )
 
-# 양방향 서비스 소스-블리드 차단 (read_node, write_nodes, send_cues).
-# read 변형이 source로 잡혔는데(읽기 맥락) 그 서비스의 **send-cue(도착 격조사/발송 동사)가
-# 발화에 없으면** write 변형을 sink에서 제거한다 — "슬랙 공지 읽어서…"의 슬랙이 slack_post_message로
-# 새는 것 차단. send-cue가 있으면(예 "gmail에서 읽고 gmail로 회신") 유지(양끝 정당). send-cue는
-# "에서"(source)와 겹치지 않는 도착 토큰만 — "리니어에 등록된"(source)에 안 걸리게 bare "…에 등록" 금지.
-_DUAL_ROLE_SUPPRESS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
-    ("gmail_read", ("gmail_send",), (
-        "gmail로", "gmail 로", "gmail으로", "지메일로", "gmail에 보내", "gmail로 회신",
-        "gmail로 발송", "gmail로 전송", "gmail에 회신", "지메일에 보내",
+# 양방향 서비스 소스-블리드 차단: read_node → ((write_node, send_cues), …).
+# read 변형이 source로 잡혔는데 그 write_node의 **send-cue(도착 격조사/발송 동사)가 발화에
+# 없으면** 그 write를 sink에서 제거 — "슬랙 공지 읽어서…"의 슬랙이 slack_post_message로 새는 것
+# 차단. send-cue가 있으면(예 "gmail에서 읽고 gmail로 회신") 유지(양끝 정당). **채널별(per-write)
+# cue** — "gmail로"는 gmail_send만, "이메일로"는 email_send만 보존(채널 혼선 방지). send-cue는
+# "에서"(source)와 안 겹치는 도착 토큰만(예 "리니어에 등록된"=source에 안 걸리게 bare "…에 등록" 금지).
+_SLACK_SEND = (
+    "슬랙으로", "슬랙 으로", "슬랙에 보내", "슬랙에 올려", "슬랙에 게시", "슬랙에 전송",
+    "슬랙 알림", "슬랙으로 알림", "슬랙 채널로", "슬랙 채널에 보내", "슬랙에다", "슬랙에 던",
+)
+_DUAL_ROLE_SUPPRESS: tuple[tuple[str, tuple[tuple[str, tuple[str, ...]], ...]], ...] = (
+    ("gmail_read", (
+        ("gmail_send", (
+            "gmail로", "gmail 로", "gmail으로", "지메일로", "gmail에 보내", "gmail로 회신",
+            "gmail로 발송", "gmail로 전송", "gmail에 회신", "지메일에 보내",
+        )),
+        ("email_send", (
+            "이메일로", "이메일 보내", "이메일로 보내", "이메일로 발송", "이메일로 전송",
+            "이메일에 보내", "메일로 보내", "메일로 발송", "메일로 전송", "메일로 회신",
+        )),
     )),
-    ("slack_read", ("slack_post_message", "slack_notify"), (
-        "슬랙으로", "슬랙 으로", "슬랙에 보내", "슬랙에 올려", "슬랙에 게시", "슬랙에 전송",
-        "슬랙 알림", "슬랙으로 알림", "슬랙 채널로", "슬랙 채널에 보내", "슬랙에다",
-    )),
-    ("linear_read", ("linear_create_issue",), (
+    ("slack_read", (("slack_post_message", _SLACK_SEND), ("slack_notify", _SLACK_SEND))),
+    ("linear_read", (("linear_create_issue", (
         "리니어로", "리니어에 새", "리니어 이슈 생성", "리니어에 티켓 생성", "리니어에 만들",
         "리니어에 추가", "리니어에 생성", "리니어로 등록",
-    )),
-    ("google_docs_read", ("google_docs_write",), (
+    )),)),
+    ("google_docs_read", (("google_docs_write", (
         "문서로 저장", "문서에 저장", "닥스에 저장", "문서로 기록", "문서로 써", "구글독스로",
         "구글 docs로", "docs에 저장", "문서로 만들", "닥스로",
-    )),
-    ("google_calendar_read", ("google_calendar_create_event",), (
+    )),)),
+    ("google_calendar_read", (("google_calendar_create_event", (
         "일정 등록", "일정 추가", "일정 잡", "캘린더에 등록", "캘린더에 추가", "캘린더로",
         "캘린더에 새", "캘린더에 일정",
-    )),
+    )),)),
 )
+
+
+def suppressed_sink_variants(text: str, sources: tuple[str, ...]) -> set[str]:
+    """read-service가 source인데 해당 write의 send-cue가 발화에 없으면 그 write를 억제 대상으로.
+
+    렉시컬 추출(`_suppress_source_bleed`)과 앙상블 resolver(semantic 표까지 차단)가 공유 —
+    한 곳에서 방향성 규칙을 정의(drift 방지). ``text``는 소문자화된 발화.
+    """
+    src_set = set(sources)
+    drop: set[str] = set()
+    for read_node, writes in _DUAL_ROLE_SUPPRESS:
+        if read_node not in src_set:
+            continue
+        for write_node, send_cues in writes:
+            if not any(cue in text for cue in send_cues):
+                drop.add(write_node)
+    return drop
 
 
 def _suppress_source_bleed(
     text: str, sources: tuple[str, ...], sinks: tuple[str, ...]
 ) -> tuple[str, ...]:
     """read-service가 source인데 send-cue 부재면 그 write-variant를 sink에서 제거(방향성)."""
-    src_set = set(sources)
-    drop: set[str] = set()
-    for read_node, write_nodes, send_cues in _DUAL_ROLE_SUPPRESS:
-        if read_node in src_set and not any(cue in text for cue in send_cues):
-            drop.update(write_nodes)
+    drop = suppressed_sink_variants(text, sources)
     return tuple(s for s in sinks if s not in drop)
 
 # ── 게이트(검증 루프 함의) ──────────────────────────────────────────────────

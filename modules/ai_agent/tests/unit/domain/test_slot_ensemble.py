@@ -148,6 +148,24 @@ async def test_top_ratio_suppresses_weak_secondary_source() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolver_excludes_semantic_bled_sink_variant() -> None:
+    # slack_read가 source(읽기)인데 슬랙 send-cue 없음 → SemanticVoter가 slack_post_message를
+    # sink 상위로 올리고 ontology에 있어도 resolver가 풀에서 제외(렉시컬뿐 아니라 semantic 표까지
+    # 차단). 진짜 sink(email)만 남는다 — sink over-match(소스-블리드) 완전 차단.
+    resolver = EnsembleSlotResolver([LexicalVoter(), SemanticVoter(), OntologyVoter()])
+    resolved = await _resolve(
+        resolver,
+        "슬랙 공지 채널 글들 읽어서 요약해서 이메일로 보내줘",
+        ranked=["slack_read", "slack_post_message", "slack_notify", "email_send"],
+        allowed={"slack_post_message", "email_send"},
+    )
+    assert resolved.for_role(SlotRole.SOURCE) == ("slack_read",)
+    snk = resolved.for_role(SlotRole.SINK)
+    assert "slack_post_message" not in snk and "slack_notify" not in snk
+    assert "email_send" in snk
+
+
+@pytest.mark.asyncio
 async def test_resolver_skips_transform_and_trigger() -> None:
     # SOURCE/SINK만 앙상블 — transform(_AI 항상 후보라 비변별)·trigger는 조립기 기존 경로.
     resolved = await _resolve(
