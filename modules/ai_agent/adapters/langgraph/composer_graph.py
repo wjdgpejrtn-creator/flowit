@@ -175,6 +175,10 @@ class _State(TypedDict):
     # fixed DAG 필드
     validation_issues: str | None           # validator 실패 사유 (non-fatal — error 필드와 분리)
     retry_count: int                        # draft/validate/qa 재시도 횟수
+    # no-progress 감지 — 재시도 draft가 직전 실패본과 구조 동일하면 재시도가 무의미(결정적 스켈레톤
+    # 재조립 / LLM이 없는 노드 invent→drop→동일 불완전 반복). 헛바퀴 차단 + out-of-scope 빠른 실패.
+    last_draft_sig: tuple[Any, ...] | None  # 직전 draft 구조 시그니처(node_id 집합 + node_id 엣지)
+    draft_repeated: bool                    # 현재 draft == 직전 draft (futile retry → 즉시 종결)
     # two-shot HITL 스킬 선택 필드 (REQ-013)
     round: int                              # 1=옵션 제시 라운드, 2=선택 입력 후 재개 라운드
     selected_skill_id: UUID | None          # 2차 라운드에서 사용자가 선택한 스킬 (LLM 노드 바인딩 대상)
@@ -321,6 +325,8 @@ class LangGraphOrchestrator:
             "output_quality_feedback": "",
             "validation_issues": None,
             "retry_count": 0,
+            "last_draft_sig": None,
+            "draft_repeated": False,
             "round": round,
             "selected_skill_id": selected_skill_id,
             "awaiting_skill_selection": False,
@@ -548,6 +554,9 @@ class LangGraphOrchestrator:
     def _route_after_validate(state: _State) -> str:
         if state.get("pass_flag"):
             return "qa_evaluator"
+        # no-progress: 재시도 draft가 직전과 동일하면 재시도 무의미 → 즉시 종결(헛바퀴 차단).
+        if state.get("draft_repeated"):
+            return "validation_failed"
         if state.get("retry_count", 0) < _QA_MAX_RETRY:
             return "retry_draft"
         return "validation_failed"
@@ -556,6 +565,10 @@ class LangGraphOrchestrator:
     def _route_after_qa(state: _State) -> str:
         if state.get("pass_flag"):
             return "promote"
+        # no-progress: 재시도 draft가 직전과 동일하면 같은 QA 실패 반복 → 즉시 종결. 결정적 스켈레톤
+        # 재조립이나 LLM의 없는-노드 invent→drop→동일 불완전 케이스(out-of-scope)를 빠르게 실패.
+        if state.get("draft_repeated"):
+            return "qa_failed"
         if state.get("qa_attempts", 0) < _QA_MAX_RETRY:
             return "retry_draft"
         return "qa_failed"
@@ -1240,11 +1253,32 @@ class LangGraphOrchestrator:
             WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
             PipelineStatusFrame(service_name="drafter", status="completed", elapsed_ms=elapsed),
         ])
+        # no-progress 시그니처 — node_id 멀티셋 + node_id 수준 엣지(instance_id는 매 draft 랜덤이라
+        # node_id로 환산). 재시도 draft가 직전 실패본과 동일하면 재시도해도 같은 결과 → 헛바퀴.
+        cur_sig = self._draft_signature(workflow)
+        prev_sig = state.get("last_draft_sig")
         return {
             "workflow_draft": workflow,
             "dropped_node_types": dropped,
+            "last_draft_sig": cur_sig,
+            "draft_repeated": prev_sig is not None and cur_sig == prev_sig,
             "collected_frames": frames,
         }
+
+    @staticmethod
+    def _draft_signature(workflow: WorkflowSchema) -> tuple[Any, ...]:
+        """draft 구조 시그니처(node_id 집합 + node_id 수준 엣지) — 재시도 진전 판정용.
+
+        instance_id는 draft마다 랜덤이므로 node_id로 환산해 구조만 비교한다(파라미터·위치 무관).
+        동일 구조면 재조립/재드래프트가 같은 QA 결과를 낼 것이므로 재시도가 무의미.
+        """
+        id_to_nodeid = {n.instance_id: n.node_id for n in workflow.nodes}
+        node_sig = tuple(sorted(str(n.node_id) for n in workflow.nodes))
+        edge_sig = tuple(sorted(
+            (str(id_to_nodeid.get(c.from_instance_id)), str(id_to_nodeid.get(c.to_instance_id)))
+            for c in workflow.connections
+        ))
+        return (node_sig, edge_sig)
 
     async def _autobind_connections(
         self, workflow: WorkflowSchema, candidates: list[NodeConfig], user_id: UUID
@@ -1730,27 +1764,30 @@ class LangGraphOrchestrator:
             ]
         }
 
-    # 16-a. validation_failed_node — 검증 재시도 소진 시 종결
+    # 16-a. validation_failed_node — 검증 실패 종결 (재시도 소진 또는 no-progress)
     async def _validation_failed_node(self, state: _State) -> dict:
-        return {
-            "collected_frames": [
-                ErrorFrame(
-                    code="E_VALIDATION_EXHAUSTED",
-                    message=f"워크플로우 검증 {_QA_MAX_RETRY}회 실패 — 요청을 다시 말씀해 주세요.",
-                )
-            ]
-        }
+        repeated = state.get("draft_repeated")
+        detail = state.get("validation_issues") or ""
+        reason = (
+            "동일한 구조가 반복돼 더 진행해도 해결되지 않습니다 — 현재 노드로 만들 수 없는 요청일 수 있어요."
+            if repeated
+            else f"워크플로우 검증 {_QA_MAX_RETRY}회 실패"
+        )
+        msg = f"{reason}{(' — ' + detail) if detail else ''} 요청을 더 구체적으로 말씀해 주세요."
+        return {"collected_frames": [ErrorFrame(code="E_VALIDATION_EXHAUSTED", message=msg)]}
 
-    # 16-b. qa_failed_node — QA 재시도 소진 시 종결
+    # 16-b. qa_failed_node — QA 실패 종결 (재시도 소진 또는 no-progress)
     async def _qa_failed_node(self, state: _State) -> dict:
-        return {
-            "collected_frames": [
-                ErrorFrame(
-                    code="E_QA_EXHAUSTED",
-                    message=f"품질 평가 {_QA_MAX_RETRY}회 실패 — 요청을 다시 말씀해 주세요.",
-                )
-            ]
-        }
+        # no-progress면 솔직하게: 같은 결과가 반복돼 충족 못 한 능력(qa_feedback의 누락 채널/노드)을
+        # 그대로 노출 — out-of-scope(없는 노드 필요) 요청을 5회 헛돌지 않고 빠르게 정직하게 실패.
+        repeated = state.get("draft_repeated")
+        feedback = (state.get("qa_feedback") or "").strip()
+        if repeated:
+            base = "동일한 결과가 반복돼 품질 기준을 충족하지 못했습니다 — 현재 노드로 만들 수 없는 요청일 수 있어요."
+        else:
+            base = f"품질 평가 {_QA_MAX_RETRY}회 실패"
+        msg = f"{base}{(' (' + feedback + ')') if feedback else ''} 요청을 더 구체적으로 말씀해 주세요."
+        return {"collected_frames": [ErrorFrame(code="E_QA_EXHAUSTED", message=msg)]}
 
     # 16. memory_save_node — 워크플로우 생성 패턴을 GCS PersonalMemoryStore에 저장
     async def _memory_save_node(self, state: _State) -> dict:

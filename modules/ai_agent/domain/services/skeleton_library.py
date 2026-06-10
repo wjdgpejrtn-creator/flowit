@@ -142,6 +142,33 @@ SKELETONS: tuple[Skeleton, ...] = (
             SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
         ),
     ),
+    # ── conditional_action (단일 가드) ────────────────────────────────────────
+    # van der Aalst Exclusive Choice의 1-action 특수화 — "임계치 넘으면 경보" 류. 분류
+    # (branch_on_classification, 2-way)도 승인(approval_gate, HITL)도 아닌 **단일 가드 조건문**:
+    # router(if_condition)가 가드 조건을 평가해 [true]→action sink, [false]→stop_workflow 종료.
+    # transform optional — 가드는 분류기 불필요(if_condition이 입력 직접 평가, 자유조립이
+    # "webhook→if_condition→email"로 푼 모양과 정합). false→terminal 자동 부착으로 router
+    # outgoing=2 → motif(branch_on_classification: router outgoing≥2 + 무순환) 통과. approval과
+    # 동형 구조이나 발동 어휘(임계/비교 가드 vs 검토/승인)와 transform 필수성(approval=proposer
+    # 필수)이 다르다. 측정(skeleton-regressor-fix): branch_threshold_alert가 폴백으로 if_condition
+    # 소실(qa10→4)되던 회귀의 직격 대상.
+    Skeleton(
+        name="conditional_action",
+        # 선택은 shape(has_guard) 라우팅 전담(control 슬롯이라 _select linear_family 제외) — 아래
+        # 키워드는 :Skeleton 투영/문서용 대표 가드 토큰(추출기 _GUARD_KEYWORDS와 동기 관리).
+        intent_keywords=("넘으면", "초과하면", "이상이면", "미만이면", "도달하면", "임계치"),
+        slots=(
+            SlotSpec(SlotRole.TRIGGER, required=True, cardinality="one",
+                     default_node_type="manual_trigger", candidates=_TRIGGERS),
+            SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
+            SlotSpec(SlotRole.TRANSFORM, required=False, cardinality="one", candidates=_AI),
+            SlotSpec(SlotRole.ROUTER, required=True, cardinality="one",
+                     default_node_type="if_condition", candidates=_ROUTERS),
+            SlotSpec(SlotRole.TERMINAL, required=True, cardinality="one",
+                     default_node_type="stop_workflow", candidates=_TERMINALS),
+            SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
+        ),
+    ),
     # ── fan_out_map ─────────────────────────────────────────────────────────
     # van der Aalst Parallel Split + Synchronization + agentic Orchestrator-Workers. "각 항목마다
     # 처리" — splitter(loop_list)가 목록을 펼치고 worker(ai)가 항목별 처리, merger(merge_branch)가

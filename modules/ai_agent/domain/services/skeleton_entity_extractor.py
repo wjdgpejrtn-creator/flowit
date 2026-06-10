@@ -105,6 +105,16 @@ _APPROVAL_KEYWORDS: tuple[str, ...] = (
     "승인", "검토 후", "컨펌", "결재", "허가", "승인되면", "승인받아", "결재 후",
     "승인 후", "승인 요청", "재가",
 )
+# 단일 가드 조건문(conditional_action) — 임계/비교 가드. "넘으면 경보"처럼 분류·승인 아닌
+# 1-action 조건. 빈출 부분문자열("~면" 단독) 과활성을 피해 **비교어가 명시된 토큰만** 둔다
+# (skeleton-regressor-fix RC2). 양자택일("아니면")은 has_branch가, 승인은 has_approval가 우선
+# 포섭하므로(조립기 라우팅) 여기엔 순수 임계/비교 가드만.
+_GUARD_KEYWORDS: tuple[str, ...] = (
+    "넘으면", "넘어가면", "넘어서면", "초과하면", "초과 시", "초과되면",
+    "이상이면", "이상일 때", "이하이면", "이하일 때", "미만이면", "미만일 때",
+    "보다 크면", "보다 작으면", "보다 높으면", "보다 낮으면",
+    "도달하면", "임계치", "임계값", "기준치를 넘", "기준을 초과",
+)
 
 
 def _match_single(text: str, rules: tuple[tuple[str, tuple[str, ...]], ...]) -> str | None:
@@ -159,4 +169,5 @@ class SkeletonEntityExtractor:
             has_fanout=any(kw in text for kw in _FANOUT_KEYWORDS),
             has_retry=any(kw in text for kw in _RETRY_KEYWORDS),
             has_approval=any(kw in text for kw in _APPROVAL_KEYWORDS),
+            has_guard=any(kw in text for kw in _GUARD_KEYWORDS),
         )
