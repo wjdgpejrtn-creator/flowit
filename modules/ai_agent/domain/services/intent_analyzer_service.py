@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
 from common_schemas import IntentResult
 from common_schemas.enums import IntentType
-from common_schemas.exceptions import ExecutionError
+from pydantic import BaseModel, Field
 
 from ..ports.llm_port import LLMPort
 from ..value_objects.route_plan import RECIPE_SKILL_THEN_COMPOSE
@@ -130,6 +129,28 @@ Return JSON only, no explanation:
 """
 
 
+class _IntentLLMResponse(BaseModel):
+    """Gemma 분류 출력 (generate_structured 스키마)."""
+
+    intent: str
+    confidence: float = 0.8
+    analyzed_entities: dict[str, Any] = Field(default_factory=dict)
+
+
+# draft/refine는 **상태 의존** 의도 — 같은 발화도 세션에 확인 대기 draft가 있는지에 따라
+# 정답이 갈린다("채널 #general로 해줘" = draft無→새 생성 / draft有→수정). 정규식만으론
+# 절대 못 가르므로(#369) 이 둘로 분류되거나 미분류면 상태를 주입해 Gemma로 정밀 재분류한다.
+_STATEFUL_INTENTS = frozenset({IntentType.DRAFT, IntentType.REFINE})
+
+
+def _coerce_intent(value: str) -> IntentType | None:
+    """LLM이 돌려준 문자열을 IntentType으로. 미상값은 None."""
+    try:
+        return IntentType(value.strip().lower())
+    except (ValueError, AttributeError):
+        return None
+
+
 class IntentAnalyzerService:
     def __init__(self, llm: LLMPort) -> None:
         self._llm = llm
@@ -143,13 +164,55 @@ class IntentAnalyzerService:
 
         # fast-path: 키워드 분류 (LLM 0 call)
         fast_intent = _fast_classify(user_message)
-        if fast_intent is not None:
-            return IntentResult(
-                intent=fast_intent,
-                confidence=0.95,
-                analyzed_entities={},
-            )
 
-        # 미분류 → None 반환 (supervisor가 general_chat으로 처리)
-        # LLM 분류 호출 제거 — 분류 실패 시 응답 생성 LLM으로 흡수
+        # 무상태·명시적 의도(제어/실행/인사/승인/안내/스킬빌드)는 정규식으로 확정한다 —
+        # 발화 표면만으로 정답이 정해지므로 LLM이 불필요하다.
+        if fast_intent is not None and fast_intent not in _STATEFUL_INTENTS:
+            return IntentResult(intent=fast_intent, confidence=0.95, analyzed_entities={})
+
+        # 여기 도달 = draft/refine/미분류 = '워크플로우 구성' 의도(상태 의존).
+        has_draft = context.get("has_pending_draft")
+        if has_draft is not None:
+            # 핵심 불변식: refine은 확인 대기 draft가 있어야만 성립한다.
+            if has_draft:
+                # draft 존재 → draft↔refine이 진짜 모호 → Gemma 상태 인지 분류(#369).
+                return await self._llm_classify(user_message, True, fallback=fast_intent)
+            # draft 없음 → refine 불가능 → refine 오탐은 새 생성(draft)으로 교정한다.
+            # create 핫패스엔 Gemma 호출을 더하지 않는다(불필요한 지연 방지).
+            if fast_intent is IntentType.REFINE:
+                fast_intent = IntentType.DRAFT
+
+        # 무상태 호출부(supervisor)이거나 draft 없는 경우 — 정규식 결과 그대로.
+        # supervisor는 draft/refine이 동일 레시피(→COMPOSER)라 정규식으로 충분하다.
+        if fast_intent is not None:
+            return IntentResult(intent=fast_intent, confidence=0.95, analyzed_entities={})
         return None
+
+    async def _llm_classify(
+        self, user_message: str, has_pending_draft: bool, fallback: IntentType | None
+    ) -> IntentResult:
+        """Gemma 상태 인지 분류 — 죽어 있던 `_SYSTEM_PROMPT`를 실제로 사용한다.
+
+        대화 상태(확인 대기 draft 존재 여부)를 프롬프트에 주입해 draft↔refine을 가른다.
+        LLM 실패/미상값은 상태 기반 안전 폴백(draft 있으면 refine).
+        """
+        safe_default = IntentType.REFINE if has_pending_draft else (fallback or IntentType.DRAFT)
+        state_hint = (
+            "현재 세션에는 사용자 확인(승인/수정)을 기다리는 워크플로우 초안이 이미 있습니다. "
+            "따라서 노드·파라미터·연결을 바꾸거나 추가/삭제하거나 특정 값을 지정하는 발화는 "
+            "기존 초안 수정이므로 'refine'입니다. 완전히 다른 새 자동화를 처음부터 요청할 때만 'draft'입니다."
+            if has_pending_draft
+            else "현재 세션에는 진행 중인 워크플로우 초안이 없습니다. 워크플로우 작성 요청은 'draft'입니다."
+        )
+        prompt = f"{_SYSTEM_PROMPT}\n[Session context]\n{state_hint}\n\n[User message]\n{user_message}"
+        try:
+            resp = await self._llm.generate_structured(prompt, _IntentLLMResponse)
+        except Exception:
+            return IntentResult(intent=safe_default, confidence=0.4, analyzed_entities={})
+
+        intent = _coerce_intent(resp.intent) or safe_default
+        return IntentResult(
+            intent=intent,
+            confidence=resp.confidence,
+            analyzed_entities=resp.analyzed_entities or {},
+        )
