@@ -24,12 +24,13 @@ class GraphValidator:
     """워크플로우 그래프 무결성 검증 서비스.
 
     검증 항목:
-    1. 중복 instance_id
-    2. 사이클 감지 (Kahn's algorithm)
-    3. 노드 타입 불일치 (from_handle ↔ to_handle)
-    4. 고립 노드 검출
-    5. 필수 연결 누락 (required_connections)
-    6. 필수 파라미터 누락 (input_schema.required 중 NodeInstance.parameters에 없는 필드)
+    1. 비실재 노드 (node_id가 카탈로그에 없음 = 실행 불가)
+    2. 중복 instance_id
+    3. 사이클 감지 (Kahn's algorithm)
+    4. 노드 타입 불일치 (from_handle ↔ to_handle)
+    5. 고립 노드 검출
+    6. 필수 연결 누락 (required_connections)
+    7. 필수 파라미터 누락 (input_schema.required 중 NodeInstance.parameters에 없는 필드)
     """
 
     def __init__(self, node_def_repo: NodeDefinitionRepository) -> None:
@@ -38,6 +39,9 @@ class GraphValidator:
     async def validate(self, workflow: WorkflowSchema) -> ValidationErrorResponse:
         errors: list[ValidationErrorItem] = []
 
+        # 비실재 노드는 가장 먼저 본다 — get_by_id None인 노드는 이후 검사들이 조용히 skip해
+        # (definition None → continue) 통과해버리므로, 여기서 명시적으로 거부해야 한다.
+        errors.extend(await self._check_node_existence(workflow.nodes))
         errors.extend(self._check_duplicate_ids(workflow.nodes))
         errors.extend(await self._detect_cycles(workflow.nodes, workflow.connections))
         errors.extend(self._check_type_compatibility(workflow.connections))
@@ -49,6 +53,29 @@ class GraphValidator:
             validation_status="failed" if errors else "passed",
             errors=errors,
         )
+
+    async def _check_node_existence(
+        self, nodes: list[NodeInstance]
+    ) -> list[ValidationErrorItem]:
+        """node_id가 카탈로그에 실재하는지 검증 (ADR-0026 §6.6 검증 게이트).
+
+        LLM이 임시 생성한 비실재 노드(executor 없음)가 QA를 통과한 뒤 실행 단계에서 죽는
+        것을 차단한다. 다른 검사들은 ``definition is None``이면 조용히 skip하므로(연결/파라미터
+        검증이 미존재 노드를 그냥 통과시킴), 비실재 노드는 본 검사가 단일 책임으로 거부한다.
+        execution_engine도 동일 GraphValidator를 쓰므로 compose+execute 공통 게이트가 된다.
+        """
+        unknown: list[str] = []
+        for node in nodes:
+            if await self._repo.get_by_id(node.node_id) is None:
+                unknown.append(str(node.instance_id))
+        if not unknown:
+            return []
+        return [ValidationErrorItem(
+            code=ErrorCode.E_UNKNOWN_NODE_TYPE,
+            message="Unknown node — node_id not found in catalog (non-executable)",
+            node_ids=unknown,
+            validator="SchemaValidation",
+        )]
 
     def _check_duplicate_ids(self, nodes: list[NodeInstance]) -> list[ValidationErrorItem]:
         seen: set[UUID] = set()

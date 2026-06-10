@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
@@ -14,6 +14,7 @@ import {
   getDocumentBlocks,
   getDownloadUrl,
   analyzeDocument,
+  deleteDocument,
   type DocumentResponse,
 } from '@/lib/api/documentApi';
 import { AnalysisStatus, type ContentBlock, type ParseCoverage } from '@common/generated';
@@ -51,6 +52,8 @@ function StatusBadge({ status }: { status: AnalysisStatus }) {
 export default function DocumentDetailPage({ params }: { params: { id: string } }) {
   const { id } = params;
   const router = useRouter();
+  // 목록의 "분석하기"로 진입하면 ?analyze=1 — 도착 즉시 분석을 자동 시작한다(아직 미분석일 때만).
+  const autoAnalyze = useSearchParams().get('analyze') === '1';
 
   const [doc, setDoc] = useState<DocumentResponse | null>(null);
   const [blocks, setBlocks] = useState<ContentBlock[]>([]);
@@ -59,10 +62,13 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
   const [error, setError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // 폴링 lifecycle 관리 — 컴포넌트 언마운트 / 새 분석 dispatch 시 기존 타이머 정리.
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartRef = useRef<number>(0);
+  // ?analyze=1 자동 분석은 마운트당 1회만 — router.replace 후 effect 재실행 시 이중 dispatch 방지.
+  const autoAnalyzeFiredRef = useRef(false);
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -123,13 +129,27 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
           await fetchBlocksOnce(id);
         } else if (fresh.analysis_status === AnalysisStatus.RUNNING) {
           startPolling();
+        } else if (autoAnalyze && !autoAnalyzeFiredRef.current) {
+          // 목록 "분석하기"로 진입(?analyze=1) — 위에서 COMPLETED/RUNNING은 걸러졌으므로
+          // 여기는 미분석/실패 상태. 분석을 자동 dispatch하고 폴링 시작(handleAnalyze와 동일).
+          // ref 가드로 마운트당 1회만 실행(리뷰 LOW#1: 이론적 이중 dispatch 윈도우 차단).
+          autoAnalyzeFiredRef.current = true;
+          try {
+            await analyzeDocument(id);
+            setDoc((prev) => prev ? { ...prev, analysis_status: AnalysisStatus.RUNNING, is_analyzed: false } : prev);
+            startPolling();
+            // 분석 신호 소비 후 쿼리 제거 — 새로고침 시 의도치 않은 재분석 방지(리뷰 LOW#1).
+            router.replace(`/documents/${id}`);
+          } catch (e) {
+            setError(e instanceof Error ? e.message : '분석 요청 실패');
+          }
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : '문서 조회 실패'))
       .finally(() => setLoading(false));
 
     return () => stopPolling();
-  }, [id, fetchBlocksOnce, startPolling, stopPolling]);
+  }, [id, autoAnalyze, router, fetchBlocksOnce, startPolling, stopPolling]);
 
   const handleAnalyze = async () => {
     if (!doc) return;
@@ -161,6 +181,22 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
     }
   };
 
+  const handleDelete = async () => {
+    if (!doc) return;
+    if (!window.confirm(`"${doc.file_name}"을(를) 영구 삭제할까요?\n원본 파일과 분석 결과가 모두 삭제되며 되돌릴 수 없습니다.`)) {
+      return;
+    }
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteDocument(id);
+      router.push('/documents');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '삭제 실패');
+      setDeleting(false);
+    }
+  };
+
   const status: AnalysisStatus = doc?.analysis_status ?? AnalysisStatus.PENDING;
   const isRunning = status === AnalysisStatus.RUNNING || analyzing;
   const isFailed = status === AnalysisStatus.FAILED;
@@ -185,6 +221,9 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
         <div className="flex-1" />
         <Btn ghost onClick={handleDownload} disabled={downloading || !doc}>
           {downloading ? '준비 중…' : '⬇ 다운로드'}
+        </Btn>
+        <Btn ghost onClick={handleDelete} disabled={deleting || !doc}>
+          {deleting ? '삭제 중…' : '🗑 삭제'}
         </Btn>
         <Btn onClick={handleAnalyze} disabled={isRunning || !doc}>
           {isRunning ? '분석 중…' : isFailed ? '🔁 다시 분석' : '🔍 분석'}

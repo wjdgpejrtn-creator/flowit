@@ -69,7 +69,10 @@ from ...domain.ports.workflow_repository import WorkflowRepository
 from ...domain.services.drafter_service import DrafterService
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 from ...domain.services.qa_evaluator_service import QAEvaluatorService
+from ...domain.services.skeleton_assembler import SkeletonAssembler
+from ...domain.services.slot_ensemble import EnsembleSlotResolver
 from ...domain.services.slot_filling_service import SlotFillingService
+from ...domain.services.slot_voters import LexicalVoter, OntologyVoter, SemanticVoter
 from ...domain.services.workflow_explanation_service import WorkflowExplanationService
 from ...domain.services.workflow_layout_service import WorkflowLayoutService
 from ...domain.value_objects.turn_limit import TurnLimit
@@ -89,7 +92,9 @@ _EXPAND_ADD_LIMIT = 3    # CAN_FOLLOW로 추가하는 신규 후보 상한
 # → drafter가 쓰려다 `후보 목록에 없는 node_type drop`으로 끊긴 워크플로우 산출(평가 진단 ②,
 # anthropic_chat이 카탈로그에 있는데도 드롭). 구조 노드(#378)와 동일하게 관련도 무관 항상-포함한다.
 # 카탈로그 ai 노드와 동기화는 test_core_llm_nodes_drift가 가드.
-_CORE_LLM_NODE_TYPES: tuple[str, ...] = ("anthropic_chat", "gemma_chat")
+# llm_judge: 콘텐츠를 기준에 따라 채점(score:number)하는 scorer — 품질 루프
+# (generator→llm_judge→if_condition gte)의 게이트 노드라 항상-포함해야 composer가 누락 없이 배선한다(#438 §6.6).
+_CORE_LLM_NODE_TYPES: tuple[str, ...] = ("anthropic_chat", "gemma_chat", "llm_judge")
 
 # 스킬 검색 관련성 컷 — 코사인 거리(0=동일, 2=정반대) 상한. 이 거리 밖 후보는 제외해
 # 무관한 스킬이 옵션/노드 후보에 딸려 나오는 것을 막는다.
@@ -146,6 +151,9 @@ class _State(TypedDict):
     intent_analyzed_entities: dict[str, Any]
     draft_spec: DraftSpec | None
     node_candidates: list[NodeConfig]
+    # 온톨로지 CAN_FOLLOW 서브그래프 허용 node_type — retriever→drafter 전달(같은 라운드 transient,
+    # 앙상블 OntologyVoter 입력). resume 시 부재면 빈 리스트로 graceful degrade.
+    ontology_allowed: list[str]
     workflow_draft: WorkflowSchema | None
     qa_attempts: int
     qa_score: float
@@ -172,6 +180,10 @@ class _State(TypedDict):
     # fixed DAG 필드
     validation_issues: str | None           # validator 실패 사유 (non-fatal — error 필드와 분리)
     retry_count: int                        # draft/validate/qa 재시도 횟수
+    # no-progress 감지 — 재시도 draft가 직전 실패본과 구조 동일하면 재시도가 무의미(결정적 스켈레톤
+    # 재조립 / LLM이 없는 노드 invent→drop→동일 불완전 반복). 헛바퀴 차단 + out-of-scope 빠른 실패.
+    last_draft_sig: tuple[Any, ...] | None  # 직전 draft 구조 시그니처(node_id 집합 + node_id 엣지)
+    draft_repeated: bool                    # 현재 draft == 직전 draft (futile retry → 즉시 종결)
     # two-shot HITL 스킬 선택 필드 (REQ-013)
     round: int                              # 1=옵션 제시 라운드, 2=선택 입력 후 재개 라운드
     selected_skill_id: UUID | None          # 2차 라운드에서 사용자가 선택한 스킬 (LLM 노드 바인딩 대상)
@@ -214,9 +226,20 @@ class LangGraphOrchestrator:
         connection_resolver: ConnectionResolver | None = None,
         ontology_retriever: OntologyRetrieverPort | None = None,
         skill_doc_store: SkillDocumentStore | None = None,
+        skeleton_assembler: SkeletonAssembler | None = None,
+        slot_resolver: EnsembleSlotResolver | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
+        # ADR-0026 §6.6 결정적 스켈레톤 — 순수(무의존)라 미주입 시 기본 생성. assemble None이면
+        # 일반 LLM draft로 폴백하므로 항상 안전(소비처 _drafter_node).
+        self._skeleton_assembler = skeleton_assembler or SkeletonAssembler()
+        # ADR-0026 §6.6 Phase 2 앙상블 슬롯 채움 — 미주입 시 싼 voter 3종(lexical+semantic+ontology)
+        # 으로 기본 생성. LLM voter(SlotMapperPort)는 composition root에서 주입(미주입=graceful
+        # degrade). resolve 실패/픽 없음이면 assemble이 lexical/grounding으로 폴백하므로 항상 안전.
+        self._slot_resolver = slot_resolver or EnsembleSlotResolver(
+            [LexicalVoter(), SemanticVoter(), OntologyVoter()]
+        )
         self._qa_evaluator = qa_evaluator
         self._slot_filler = slot_filler
         self._node_registry = node_registry
@@ -295,6 +318,7 @@ class LangGraphOrchestrator:
             "intent_analyzed_entities": {},
             "draft_spec": None,
             "node_candidates": [],
+            "ontology_allowed": [],
             "workflow_draft": None,
             "qa_attempts": 0,
             "qa_score": 0.0,
@@ -314,6 +338,8 @@ class LangGraphOrchestrator:
             "output_quality_feedback": "",
             "validation_issues": None,
             "retry_count": 0,
+            "last_draft_sig": None,
+            "draft_repeated": False,
             "round": round,
             "selected_skill_id": selected_skill_id,
             "awaiting_skill_selection": False,
@@ -541,6 +567,9 @@ class LangGraphOrchestrator:
     def _route_after_validate(state: _State) -> str:
         if state.get("pass_flag"):
             return "qa_evaluator"
+        # no-progress: 재시도 draft가 직전과 동일하면 재시도 무의미 → 즉시 종결(헛바퀴 차단).
+        if state.get("draft_repeated"):
+            return "validation_failed"
         if state.get("retry_count", 0) < _QA_MAX_RETRY:
             return "retry_draft"
         return "validation_failed"
@@ -549,6 +578,10 @@ class LangGraphOrchestrator:
     def _route_after_qa(state: _State) -> str:
         if state.get("pass_flag"):
             return "promote"
+        # no-progress: 재시도 draft가 직전과 동일하면 같은 QA 실패 반복 → 즉시 종결. 결정적 스켈레톤
+        # 재조립이나 LLM의 없는-노드 invent→drop→동일 불완전 케이스(out-of-scope)를 빠르게 실패.
+        if state.get("draft_repeated"):
+            return "qa_failed"
         if state.get("qa_attempts", 0) < _QA_MAX_RETRY:
             return "retry_draft"
         return "qa_failed"
@@ -770,7 +803,7 @@ class LangGraphOrchestrator:
 
     async def _expand_can_follow(
         self, seed_candidates: list[NodeConfig], existing_pool: list[NodeConfig]
-    ) -> list[NodeConfig]:
+    ) -> tuple[list[NodeConfig], list[str]]:
         """검색 상위 hit의 CAN_FOLLOW 후행 노드를 회수해 NodeConfig로 ADD 보강 (§4.2a).
 
         **풀 비대 가드(평가 하니스 실측 회귀 대응)**: seed는 검색 상위 ``_EXPAND_SEED_LIMIT``
@@ -778,18 +811,20 @@ class LangGraphOrchestrator:
         ``_EXPAND_ADD_LIMIT``개로 cap한다. ADD-all은 후보 풀을 부풀려 작은 LLM 드래프터의
         structured JSON을 잘리게 해 품질을 떨어뜨렸다.
 
-        반환값은 호출부 ``_dedup_union``으로 합쳐진다. 온톨로지 미주입/실패/미투영은 전부 빈
-        리스트로 비치명적 degrade(검색 후보만으로 진행).
+        반환: ``(보강 후보, 서브그래프 허용 node_type)``. 첫 값은 호출부 ``_dedup_union``으로
+        합쳐지고, 둘째 값은 앙상블 OntologyVoter 입력으로 state에 실린다(seed+1-hop 허용집합).
+        온톨로지 미주입/실패/미투영은 전부 ``([], [])``로 비치명적 degrade(검색 후보만으로 진행).
         """
         if self._ontology_retriever is None or not seed_candidates:
-            return []
+            return [], []
         grounder = getattr(self._node_registry, "list_by_node_types", None)
         if grounder is None:  # 구버전 NodeRegistry — 그라운딩 불가
-            return []
+            return [], []
         seeds = [c.node_type for c in seed_candidates[:_EXPAND_SEED_LIMIT]]
         existing = {c.node_type for c in existing_pool}
         try:
             subgraph = await self._ontology_retriever.expand_candidates(seeds)
+            allowed = sorted(subgraph.allowed_node_types())
             # seed 관련도 순서를 보존(상위 hit의 후행 우선)하며 신규 후행만 cap까지 모은다.
             picked: list[str] = []
             seen: set[str] = set()
@@ -804,12 +839,12 @@ class LangGraphOrchestrator:
                 if len(picked) >= _EXPAND_ADD_LIMIT:
                     break
             if not picked:
-                return []
+                return [], allowed
             grounded = await grounder(picked)
-            return list(grounded) if grounded else []
+            return (list(grounded) if grounded else []), allowed
         except Exception as exc:
             _logger.warning("CAN_FOLLOW 확장 실패 (후보 보강 생략): %s", exc)
-            return []
+            return [], []
 
     # 6. retriever_node — 노드 후보 검색 + 구조 노드 합산 + 개인 패턴 RAG 회수
     async def _retriever_node(self, state: _State) -> dict:
@@ -853,9 +888,8 @@ class LangGraphOrchestrator:
         # csv_build, file_read 뒤 json_extract)를 쓸 수 있게 해 누락을 줄인다. seed는 raw_candidates
         # (검색 hit)만 — 구조/개인 노드의 후행은 노이즈라 제외. cap으로 풀 비대 억제(위 상수).
         # ADD 전용(subtract 금지) — ETL stale 시에도 유효 후보를 지우지 않는다. 비치명적.
-        candidates = self._dedup_union(
-            candidates, await self._expand_can_follow(raw_candidates, candidates)
-        )
+        expanded, ontology_allowed = await self._expand_can_follow(raw_candidates, candidates)
+        candidates = self._dedup_union(candidates, expanded)
 
         # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
         # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는
@@ -882,6 +916,7 @@ class LangGraphOrchestrator:
         )
         return {
             "node_candidates": candidates,
+            "ontology_allowed": ontology_allowed,
             "personal_patterns": personal_patterns,
             "pattern_templates": pattern_templates,
             "collected_frames": frames,
@@ -1108,6 +1143,31 @@ class LangGraphOrchestrator:
                 return [*candidates, cfg]
         return candidates
 
+    async def _ensure_scaffold_candidates(
+        self, candidates: list[NodeConfig], scaffold: Any
+    ) -> list[NodeConfig]:
+        """scaffold node_type 중 후보에 없는 것을 NodeRegistry에서 정확 조회해 보강 (ADR-0026 §6.6).
+
+        scaffold 노드는 카탈로그 실재(그라운딩 가드)지만 의미검색 후보엔 빠질 수 있다. drafter의
+        node_type→node_id 해소를 위해 누락분만 ``list_by_node_types``로 채운다. 실패 시 무변경
+        (non-fatal) — 미해소 노드는 scaffold 빌드에서 드롭되고 drafter가 일반 경로로 폴백한다.
+        """
+        have = {c.node_type for c in candidates}
+        missing = list(dict.fromkeys(dn.node_type for dn in scaffold.nodes if dn.node_type not in have))
+        if not missing:
+            return candidates
+        # 기존 호출부(_retriever 보강)와 동일하게 getattr 가드 — port에 메서드가 있어도
+        # 테스트 더블/구버전 어댑터가 미구현일 수 있어 일관 방어(#439 리뷰 LOW).
+        grounder = getattr(self._node_registry, "list_by_node_types", None)
+        if grounder is None:
+            return candidates
+        try:
+            extra = await grounder(missing)
+        except Exception as exc:
+            _logger.warning("scaffold 후보 보강 실패 (일부 노드 드롭 가능): %s", exc)
+            return candidates
+        return [*candidates, *extra]
+
     # 7. drafter_node — 워크플로우 초안 생성
     async def _drafter_node(self, state: _State) -> dict:
         t0 = time.monotonic()
@@ -1151,6 +1211,37 @@ class LangGraphOrchestrator:
                     skill_composer_instructions = skill_doc.composer_instructions
             except Exception as exc:
                 _logger.warning("COMPOSER.md 로드 실패 (건너뜀): %s", exc)
+        # ADR-0026 §6.6: 결정적 스켈레톤 조립 — 구조는 코드가 결정, LLM은 파라미터만 채운다.
+        # refine(prior_workflow)·two-shot 스킬 바인딩 경로는 제외(기존 편집/바인딩 흐름 보존).
+        # assemble None(확신 없음/미지원 shape/잡담)이면 일반 LLM draft로 폴백(drafter가 처리).
+        skeleton_scaffold = None
+        if prior_workflow is None and not skill_selected:
+            # ADR-0026 §6.6 Phase 2: SOURCE/SINK 노드 선택을 다중신호 앙상블(lexical+semantic+
+            # ontology[+LLM])로 의미화 — 렉시컬 손사전이 못 따라잡는 발화 어휘 변형("gmail에서…")에
+            # 강건. resolve 실패/픽 없음이면 assemble이 lexical/grounding으로 폴백(비치명적).
+            ranked = tuple(c.node_type for c in candidates)
+            resolved = None
+            try:
+                resolved = await self._slot_resolver.resolve(
+                    spec.natural_language_intent,
+                    ranked_candidates=ranked,
+                    ontology_allowed=frozenset(state.get("ontology_allowed") or ()),
+                )
+            except Exception as exc:
+                _logger.warning("앙상블 슬롯 채움 실패 (렉시컬로 진행): %s", exc)
+            try:
+                # 앙상블 픽을 우선 주입(resolved_slots). candidate_node_types는 앙상블 미해소
+                # source/sink의 레거시 그라운딩 폴백(#453). candidates는 BGE rank 프리픽스 보존.
+                skeleton_scaffold = self._skeleton_assembler.assemble(
+                    spec.natural_language_intent,
+                    candidate_node_types=list(ranked),
+                    resolved_slots=resolved,
+                )
+            except Exception as exc:
+                _logger.warning("스켈레톤 조립 실패 (LLM draft로 진행): %s", exc)
+                skeleton_scaffold = None
+            if skeleton_scaffold is not None:
+                candidates = await self._ensure_scaffold_candidates(candidates, skeleton_scaffold)
         # degrade로 버린 node_type을 수집할 요청-로컬 sink(동시 요청 안전). 재시도 retriever가
         # 이 ground-truth로 재검색하도록 state에 실어 보낸다(리뷰 #2 — QA-LLM 재인지 의존 제거).
         dropped: list[str] = []
@@ -1163,6 +1254,7 @@ class LangGraphOrchestrator:
                 retry_feedback=state.get("retry_feedback"),
                 dropped_node_types=dropped,
                 pattern_templates=state.get("pattern_templates"),
+                skeleton_scaffold=skeleton_scaffold,
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:
@@ -1195,11 +1287,32 @@ class LangGraphOrchestrator:
             WorkflowDraftFrame(nodes=nodes_data, connections=connections_data),
             PipelineStatusFrame(service_name="drafter", status="completed", elapsed_ms=elapsed),
         ])
+        # no-progress 시그니처 — node_id 멀티셋 + node_id 수준 엣지(instance_id는 매 draft 랜덤이라
+        # node_id로 환산). 재시도 draft가 직전 실패본과 동일하면 재시도해도 같은 결과 → 헛바퀴.
+        cur_sig = self._draft_signature(workflow)
+        prev_sig = state.get("last_draft_sig")
         return {
             "workflow_draft": workflow,
             "dropped_node_types": dropped,
+            "last_draft_sig": cur_sig,
+            "draft_repeated": prev_sig is not None and cur_sig == prev_sig,
             "collected_frames": frames,
         }
+
+    @staticmethod
+    def _draft_signature(workflow: WorkflowSchema) -> tuple[Any, ...]:
+        """draft 구조 시그니처(node_id 집합 + node_id 수준 엣지) — 재시도 진전 판정용.
+
+        instance_id는 draft마다 랜덤이므로 node_id로 환산해 구조만 비교한다(파라미터·위치 무관).
+        동일 구조면 재조립/재드래프트가 같은 QA 결과를 낼 것이므로 재시도가 무의미.
+        """
+        id_to_nodeid = {n.instance_id: n.node_id for n in workflow.nodes}
+        node_sig = tuple(sorted(str(n.node_id) for n in workflow.nodes))
+        edge_sig = tuple(sorted(
+            (str(id_to_nodeid.get(c.from_instance_id)), str(id_to_nodeid.get(c.to_instance_id)))
+            for c in workflow.connections
+        ))
+        return (node_sig, edge_sig)
 
     async def _autobind_connections(
         self, workflow: WorkflowSchema, candidates: list[NodeConfig], user_id: UUID
@@ -1685,27 +1798,30 @@ class LangGraphOrchestrator:
             ]
         }
 
-    # 16-a. validation_failed_node — 검증 재시도 소진 시 종결
+    # 16-a. validation_failed_node — 검증 실패 종결 (재시도 소진 또는 no-progress)
     async def _validation_failed_node(self, state: _State) -> dict:
-        return {
-            "collected_frames": [
-                ErrorFrame(
-                    code="E_VALIDATION_EXHAUSTED",
-                    message=f"워크플로우 검증 {_QA_MAX_RETRY}회 실패 — 요청을 다시 말씀해 주세요.",
-                )
-            ]
-        }
+        repeated = state.get("draft_repeated")
+        detail = state.get("validation_issues") or ""
+        reason = (
+            "동일한 구조가 반복돼 더 진행해도 해결되지 않습니다 — 현재 노드로 만들 수 없는 요청일 수 있어요."
+            if repeated
+            else f"워크플로우 검증 {_QA_MAX_RETRY}회 실패"
+        )
+        msg = f"{reason}{(' — ' + detail) if detail else ''} 요청을 더 구체적으로 말씀해 주세요."
+        return {"collected_frames": [ErrorFrame(code="E_VALIDATION_EXHAUSTED", message=msg)]}
 
-    # 16-b. qa_failed_node — QA 재시도 소진 시 종결
+    # 16-b. qa_failed_node — QA 실패 종결 (재시도 소진 또는 no-progress)
     async def _qa_failed_node(self, state: _State) -> dict:
-        return {
-            "collected_frames": [
-                ErrorFrame(
-                    code="E_QA_EXHAUSTED",
-                    message=f"품질 평가 {_QA_MAX_RETRY}회 실패 — 요청을 다시 말씀해 주세요.",
-                )
-            ]
-        }
+        # no-progress면 솔직하게: 같은 결과가 반복돼 충족 못 한 능력(qa_feedback의 누락 채널/노드)을
+        # 그대로 노출 — out-of-scope(없는 노드 필요) 요청을 5회 헛돌지 않고 빠르게 정직하게 실패.
+        repeated = state.get("draft_repeated")
+        feedback = (state.get("qa_feedback") or "").strip()
+        if repeated:
+            base = "동일한 결과가 반복돼 품질 기준을 충족하지 못했습니다 — 현재 노드로 만들 수 없는 요청일 수 있어요."
+        else:
+            base = f"품질 평가 {_QA_MAX_RETRY}회 실패"
+        msg = f"{base}{(' (' + feedback + ')') if feedback else ''} 요청을 더 구체적으로 말씀해 주세요."
+        return {"collected_frames": [ErrorFrame(code="E_QA_EXHAUSTED", message=msg)]}
 
     # 16. memory_save_node — 워크플로우 생성 패턴을 GCS PersonalMemoryStore에 저장
     async def _memory_save_node(self, state: _State) -> dict:

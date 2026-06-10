@@ -167,3 +167,65 @@ class TestQARetryReSearch:
         if "node_candidates" in result:
             names = {c.name for c in result["node_candidates"]}
             assert names == {"google_sheets_read"}
+
+
+class TestNoProgressRetryGuard:
+    """재시도 무한 헛바퀴 차단 — draft가 직전과 동일하면(결정적 스켈레톤 재조립 / LLM invent→drop
+    동일 불완전) 재시도 여력이 남아도 즉시 종결. out-of-scope(없는 노드 필요) 요청 빠른 실패."""
+
+    def test_qa_promotes_on_pass(self):
+        assert LangGraphOrchestrator._route_after_qa({"pass_flag": True}) == "promote"
+
+    def test_qa_fails_fast_when_draft_repeated(self):
+        # qa_attempts=0 (여력 충분)인데도 draft_repeated면 retry_draft 아닌 qa_failed.
+        s = {"pass_flag": False, "draft_repeated": True, "qa_attempts": 0}
+        assert LangGraphOrchestrator._route_after_qa(s) == "qa_failed"
+
+    def test_qa_retries_when_progress(self):
+        s = {"pass_flag": False, "draft_repeated": False, "qa_attempts": 0}
+        assert LangGraphOrchestrator._route_after_qa(s) == "retry_draft"
+
+    def test_validate_fails_fast_when_draft_repeated(self):
+        s = {"pass_flag": False, "draft_repeated": True, "retry_count": 0}
+        assert LangGraphOrchestrator._route_after_validate(s) == "validation_failed"
+
+    def test_validate_retries_when_progress(self):
+        s = {"pass_flag": False, "draft_repeated": False, "retry_count": 0}
+        assert LangGraphOrchestrator._route_after_validate(s) == "retry_draft"
+
+
+class TestDraftSignature:
+    """구조 시그니처 — instance_id(매 draft 랜덤) 무관하게 node_id 구조만 비교."""
+
+    @staticmethod
+    def _wf(node_ids, edges):
+        from common_schemas.workflow import Edge, NodeInstance, Position, WorkflowSchema
+
+        insts = [
+            NodeInstance(instance_id=uuid4(), node_id=nid, parameters={}, position=Position(x=0.0, y=0.0))
+            for nid in node_ids
+        ]
+        conns = [
+            Edge(
+                from_instance_id=insts[a].instance_id, to_instance_id=insts[b].instance_id,
+                from_handle="output", to_handle="input",
+            )
+            for a, b in edges
+        ]
+        return WorkflowSchema(
+            workflow_id=uuid4(), name="t", scope="private", is_draft=True,
+            nodes=insts, connections=conns, owner_user_id=uuid4(),
+        )
+
+    def test_identical_structure_same_signature(self):
+        n1, n2 = uuid4(), uuid4()
+        # 같은 node_id 구성 + 같은 엣지, instance_id만 다름 → 시그니처 동일.
+        a = self._wf([n1, n2], [(0, 1)])
+        b = self._wf([n1, n2], [(0, 1)])
+        assert LangGraphOrchestrator._draft_signature(a) == LangGraphOrchestrator._draft_signature(b)
+
+    def test_different_nodes_different_signature(self):
+        n1, n2, n3 = uuid4(), uuid4(), uuid4()
+        a = self._wf([n1, n2], [(0, 1)])
+        b = self._wf([n1, n3], [(0, 1)])
+        assert LangGraphOrchestrator._draft_signature(a) != LangGraphOrchestrator._draft_signature(b)

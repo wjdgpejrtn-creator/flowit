@@ -48,10 +48,23 @@ def _edge(f, t):
     return Edge(from_instance_id=f, to_instance_id=t, from_handle="out", to_handle="in")
 
 
+def _register(repo, *nodes, category="x"):
+    """노드들의 node_id로 generic NodeDefinition을 repo에 등록 (존재 검증 충족용).
+
+    E_UNKNOWN_NODE_TYPE 추가(ADR-0026 §6.6)로 '통과' 기대 테스트의 모든 노드는 카탈로그
+    (repo)에 실재해야 한다. 검증 초점이 아닌 보조 노드를 일괄 등록한다. validator는 get_by_id
+    결과의 category/required_connections/input_schema만 보므로 def.node_id 불일치는 무관.
+    """
+    for n in nodes:
+        repo._store[str(n.node_id)] = _make_node_def(category=category)
+
+
 @pytest.mark.asyncio
 async def test_valid_graph_passes():
+    repo = _InMemoryRepo()
     n1, n2 = _node(), _node()
-    result = await GraphValidator(_InMemoryRepo()).validate(_wf([n1, n2], [_edge(n1.instance_id, n2.instance_id)]))
+    _register(repo, n1, n2)
+    result = await GraphValidator(repo).validate(_wf([n1, n2], [_edge(n1.instance_id, n2.instance_id)]))
     assert result.validation_status == "passed"
 
 
@@ -86,6 +99,7 @@ async def test_cycle_with_condition_node_passes():
     cond_def = _make_node_def(category="condition")
     await repo.upsert(cond_def)
     gen, cond = _node(), _condition_node(cond_def)
+    _register(repo, gen)
     edges = [_edge(gen.instance_id, cond.instance_id), _edge(cond.instance_id, gen.instance_id)]
     result = await GraphValidator(repo).validate(_wf([gen, cond], edges))
     assert not any(e.code == ErrorCode.E_CYCLE_DETECTED for e in result.errors)
@@ -181,6 +195,7 @@ async def test_required_connection_with_credential_passes():
     await repo.upsert(node_def)
     ni = _node(node_id=node_def.node_id, credential_id=uuid4())
     other = _node()
+    _register(repo, other)
     result = await GraphValidator(repo).validate(_wf([ni, other], [_edge(ni.instance_id, other.instance_id)]))
     assert result.validation_status == "passed"
 
@@ -255,9 +270,11 @@ async def test_required_parameter_skipped_when_no_required_key():
 @pytest.mark.asyncio
 async def test_type_compatibility_returns_no_errors():
     # _check_type_compatibility는 현재 stub — 항상 빈 리스트 반환
+    repo = _InMemoryRepo()
     n1, n2 = _node(), _node()
+    _register(repo, n1, n2)
     edge = _edge(n1.instance_id, n2.instance_id)
-    result = await GraphValidator(_InMemoryRepo()).validate(_wf([n1, n2], [edge]))
+    result = await GraphValidator(repo).validate(_wf([n1, n2], [edge]))
     assert not any(e.code for e in result.errors if e.validator == "TypeCompatibility")
     assert result.validation_status == "passed"
 
@@ -290,6 +307,7 @@ async def test_multi_connection_full_binding_passes():
         credential_ids={"slack": uuid4(), "google": uuid4()}, position=Position(x=0, y=0),
     )
     other = _node()
+    _register(repo, other)
     result = await GraphValidator(repo).validate(_wf([ni, other], [_edge(ni.instance_id, other.instance_id)]))
     assert result.validation_status == "passed"
 
@@ -305,5 +323,33 @@ async def test_credential_ids_single_provider_passes():
         credential_ids={"google": uuid4()}, position=Position(x=0, y=0),
     )
     other = _node()
+    _register(repo, other)
     result = await GraphValidator(repo).validate(_wf([ni, other], [_edge(ni.instance_id, other.instance_id)]))
     assert result.validation_status == "passed"
+
+
+# ── ADR-0026 §6.6: 비실재 노드 검증 게이트 ──────────────────────────────────
+@pytest.mark.asyncio
+async def test_unknown_node_rejected():
+    """node_id가 카탈로그에 없으면 E_UNKNOWN_NODE_TYPE으로 거부 (LLM 비실재 노드 차단)."""
+    repo = _InMemoryRepo()
+    known, unknown = _node(), _node()
+    _register(repo, known)  # unknown은 일부러 미등록
+    result = await GraphValidator(repo).validate(
+        _wf([known, unknown], [_edge(known.instance_id, unknown.instance_id)])
+    )
+    assert result.validation_status == "failed"
+    err = next(e for e in result.errors if e.code == ErrorCode.E_UNKNOWN_NODE_TYPE)
+    assert str(unknown.instance_id) in err.node_ids
+    assert str(known.instance_id) not in err.node_ids
+
+
+@pytest.mark.asyncio
+async def test_all_known_nodes_no_unknown_error():
+    repo = _InMemoryRepo()
+    n1, n2 = _node(), _node()
+    _register(repo, n1, n2)
+    result = await GraphValidator(repo).validate(
+        _wf([n1, n2], [_edge(n1.instance_id, n2.instance_id)])
+    )
+    assert not any(e.code == ErrorCode.E_UNKNOWN_NODE_TYPE for e in result.errors)

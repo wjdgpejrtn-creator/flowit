@@ -1,4 +1,4 @@
-"""Load initial seed data (node_definitions 54 MVP types).
+"""Load initial seed data (node_definitions 62 MVP types).
 
 Usage:
     DATABASE_URL=postgresql+asyncpg://... python -m database.scripts.seed

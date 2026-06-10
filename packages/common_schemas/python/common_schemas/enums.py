@@ -35,6 +35,10 @@ class ErrorCode(str, Enum):
     E_MISSING_CONNECTION = "E_MISSING_CONNECTION"
     E_MISSING_REQUIRED_PARAMETER = "E_MISSING_REQUIRED_PARAMETER"
     E_INVALID_TRIGGER = "E_INVALID_TRIGGER"
+    # 워크플로우 노드가 카탈로그에 실재하지 않는(=실행 불가) node_type/node_id를 참조 —
+    # GraphValidator가 검증 시점에 거부해, LLM이 임시 생성한 비실재 노드가 QA를 통과한 뒤
+    # 실행 단계에서 executor 없어 실패하는 것을 차단한다 (ADR-0026 §6.6 검증 게이트).
+    E_UNKNOWN_NODE_TYPE = "E_UNKNOWN_NODE_TYPE"
 
 
 class AnalysisStatus(str, Enum):

@@ -50,7 +50,7 @@ from common_schemas.enums import RiskLevel
 
 @dataclass
 class NodeDefinition:
-    """53종 노드 타입의 카탈로그 엔티티 (gemma_chat 추가, PR #68 5/15 머지).
+    """62종 노드 타입의 카탈로그 엔티티 (gemma_chat #68 / llm_judge #438 / read·write 8종 #438).
     
     NodeConfig(REQ-012)의 필드를 모두 포함하며,
     추가로 embedding, service_type 등 REQ-003 전용 필드를 확장한다.
@@ -70,14 +70,14 @@ class NodeDefinition:
     risk_level: RiskLevel                   # REQ-002가 참조하는 필드
     required_connections: list[str]         # REQ-002가 참조 (e.g. ["google", "slack"])
     description: str                        # 노드 설명
-    is_mvp: bool                            # MVP 53종 여부 (gemma_chat 포함)
+    is_mvp: bool                            # MVP 62종 여부 (gemma_chat·llm_judge·read/write 포함)
     
     # === REQ-003 확장 필드 ===
     service_type: Optional[str] = None      # REQ-002가 참조 (e.g. "google_workspace")
     embedding: Optional[list[float]] = None # BGE-M3 벡터 (768차원) — 검색용
 
     # === ADR-0020 (i) scope 격리 ===
-    owner_user_id: Optional[UUID] = None    # None=company 전역(기존 53종) / 값=personal 스킬 소유자
+    owner_user_id: Optional[UUID] = None    # None=company 전역(기존 62종) / 값=personal 스킬 소유자
     team_id: Optional[UUID] = None          # None=비team / 값=team 스킬
 ```
 
@@ -131,7 +131,7 @@ TOutput = TypeVar("TOutput")
 class BaseNode(Generic[TInput, TOutput], ABC):
     """모든 노드의 추상 기본 클래스.
     
-    53종 노드가 이 클래스를 상속하여 process()를 구현한다.
+    62종 노드가 이 클래스를 상속하여 process()를 구현한다.
     """
     metadata: NodeMetadata
     input_schema: type[TInput]
@@ -162,6 +162,8 @@ class GraphValidator:
     3. 노드 타입 불일치 (from_handle ↔ to_handle 타입 호환)
     4. 중복 instance_id 검출
     5. 필수 연결 누락 (required_connections 확인)
+    6. 비실재 노드 (node_id가 카탈로그에 없음 = 실행 불가, E_UNKNOWN_NODE_TYPE,
+       ADR-0026 §6.6 — 가장 먼저 검사; 다른 검사는 정의 미존재를 skip하므로)
     """
     
     def __init__(self, node_def_repo: NodeDefinitionRepository):
@@ -237,7 +239,7 @@ class NodeDefinitionRepository(ABC):
     @abstractmethod
     async def upsert(self, definition: NodeDefinition) -> NodeDefinition:
         """노드 정의 생성 또는 갱신. 
-        Plugin discovery 시 53종 노드를 일괄 등록할 때 사용."""
+        Plugin discovery 시 62종 노드를 일괄 등록할 때 사용."""
         ...
     
     @abstractmethod
@@ -355,7 +357,7 @@ class CatalogRegistry:
     """
 
     def get_all_node_definitions(self) -> list[NodeDefinition]:
-        """카탈로그 전체 53종 NodeDefinition 반환.
+        """카탈로그 전체 62종 NodeDefinition 반환.
         RegisterNodesUseCase.execute()의 입력으로 사용."""
         ...
 ```
@@ -369,7 +371,7 @@ class CatalogRegistry:
 > 5/15 햄햄·박아름 합의 + 5/19 조장 안 반영. toolset 14종(http_request_tool/conditional/loop 중복 3종 제외)
 > 모두 `adapters/catalog/external/`에 개별 BaseNode 파일로 등록. 실행 흐름은 ADR-0018에 따라
 > `services/execution_engine.CatalogNodeExecutor`가 `node_type`으로 `BaseNode.process()`를 직접
-> 호출한다 (`ToolsetExecutor` 경로 폐기). **Phase 3d 완료로 external 25종 + domain 28종 = 53종
+> 호출한다 (`ToolsetExecutor` 경로 폐기). **external 34종 + domain 28종 = 62종
 > 전부 `process()` 실구현** — `NotImplementedError` 스텁은 남아 있지 않다.
 
 #### 노드별 `connection_token` 기대 형식 (ADR-0018)
@@ -410,7 +412,7 @@ class EmbedderPort(ABC):
     
     @abstractmethod
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """배치 임베딩. Plugin discovery 시 53종 노드 일괄 임베딩에 사용."""
+        """배치 임베딩. Plugin discovery 시 62종 노드 일괄 임베딩에 사용."""
         ...
 ```
 
@@ -492,7 +494,7 @@ modules/nodes_graph/
 │       └── register_nodes_use_case.py
 ├── adapters/
 │   └── catalog/
-│       ├── external/                # 25종 NodeDefinition (기존 14 + 신규 11 REQ-005 연동)
+│       ├── external/                # 34종 NodeDefinition (기존 14 + REQ-005 11 + llm_judge + read/write 8, #438)
 │       └── registry.py              # Plugin discovery
 └── tests/
     ├── test_graph_validator.py
@@ -502,11 +504,11 @@ modules/nodes_graph/
 
 ---
 
-## 노드 카탈로그 요약 (Sprint 3 2주차 — 53종)
+## 노드 카탈로그 요약 (Sprint 3 2주차 — 62종)
 
 > 카테고리는 DB `node_definitions.category` CHECK 제약(영문 8종: `trigger`, `action`, `condition`, `transform`, `ai`, `integration`, `utility`, `output`)에 맞춤. Microsoft(Outlook/Teams/OneDrive), Notion, OpenAI는 데모 버전 후속 개발로 보류 (2026-05-11 조장 결정).
 >
-> 박아름 1주차 작업분 41종(28 domain + 13 external) + 박아름 5/14 야간 추가 `gemma_chat` 1종 (PR #68) + 박아름 5/19 toolset 정리 PR로 REQ-005 toolset 연동 11종을 `adapters/catalog/external/`로 이전 = **합계 53종**.
+> 박아름 1주차 작업분 41종(28 domain + 13 external) + 박아름 5/14 야간 추가 `gemma_chat` 1종 (PR #68) + 박아름 5/19 toolset 정리 PR로 REQ-005 toolset 연동 11종을 `adapters/catalog/external/`로 이전 + #438 §6.6 품질 루프 scorer `llm_judge` 1종 + #438 §6.6 read/write 비대칭 해소 8종 = **합계 62종**.
 >
 > 5/15 햄햄·박아름 합의 + 5/19 조장 안: toolset 14 중 중복 3종(`http_request_tool` ↔ `external/http_request`, `conditional` ↔ `domain/control/if_condition`, `loop` ↔ `domain/control/loop_list`)은 양쪽 제거. 나머지 11종은 `external/`에 개별 NodeDefinition 파일로 등록.
 
@@ -515,11 +517,11 @@ modules/nodes_graph/
 | `trigger` | 6 | `schedule_trigger`, `webhook_trigger`, `manual_trigger`, `event_trigger`, `api_poll_trigger`, `file_watch_trigger` | — |
 | `condition` | 8 | `if_condition`, `switch_case`, `loop_count`, `loop_list`, `retry`, `merge_branch`, `stop_workflow`, `delay` | — |
 | `transform` | 18 | `text_transform`, `json_extract`, `json_merge`, `csv_parse`, `csv_build`, `number_calc`, `date_format`, `list_filter`, `list_map`, `string_template`, `regex_extract`, `regex_replace`, `base64_encode`, `base64_decode` | + `file_transform`, `json_transform`, `text_template`, `data_mapping` |
-| `ai` | 2 (+후속) | `anthropic_chat` (외부 LLM, API key 자격증명), `gemma_chat` (시스템 내장 Gemma 4, 자격증명 불필요 — 5/14 야간 추가) — `openai_chat`은 데모 후속 보류 | — |
-| `integration` | 10 | `http_request`, `google_drive_read`, `google_sheets_read`, `postgresql_query`, `mysql_query`, `bigquery_query`, `google_calendar_create_event`, `linear_create_issue` | + `rest_api`, `graphql` |
+| `ai` | 3 (+후속) | `anthropic_chat` (외부 LLM, API key 자격증명), `gemma_chat` (시스템 내장 Gemma 4, 자격증명 불필요 — 5/14 야간 추가) — `openai_chat`은 데모 후속 보류 | + `llm_judge` (#438 §6.6 scorer — 콘텐츠+기준→score:number, 품질 루프 게이트) |
+| `integration` | 18 | `http_request`, `google_drive_read`, `google_sheets_read`, `postgresql_query`, `mysql_query`, `bigquery_query`, `google_calendar_create_event`, `linear_create_issue` | + `rest_api`, `graphql` / **+ #438 §6.6 read/write 8**: `google_sheets_write`, `google_calendar_read`, `google_docs_read`, `google_drive_upload`, `gmail_read`, `slack_read`, `linear_read`, `linear_update` |
 | `output` | 2 | `pdf_generate`, `google_docs_write` | — |
 | `action` | 5 (+후속) | `slack_post_message`, `gmail_send` (Microsoft `outlook_send`/`teams_post_message` 후속 보류) | + `webhook`, `slack_notify`, `email_send` |
 | `utility` | 2 | (박아름 1주차엔 utility 분류 없음) | + `file_read`, `file_write` |
-| **합계** | **53** | **42** (28 domain + 14 external, gemma_chat 포함) | **+11** (toolset 연동) |
+| **합계** | **62** | **42** (28 domain + 14 external, gemma_chat 포함) | **+11** (toolset 연동) + **1** (#438 llm_judge) + **8** (#438 read/write) |
 
-각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. 신규 11종은 `modules/nodes_graph/adapters/catalog/external/` 아래 개별 파일로 등록된다. `BaseNode.process()` 실행은 ADR-0018에 따라 `services/execution_engine.CatalogNodeExecutor`가 `node_type`으로 직접 호출한다 (`ToolsetExecutor`·`toolset.execute_tool()` 경로 폐기). `process()` 실구현은 ADR-0018 Phase 3d 완료로 external 25종 전부 끝났다 (DB 3종은 asyncpg/aiomysql, Google 5종·bigquery는 REST httpx, file 3종은 샌드박스 로컬 FS).
+각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. 신규 11종은 `modules/nodes_graph/adapters/catalog/external/` 아래 개별 파일로 등록된다. `BaseNode.process()` 실행은 ADR-0018에 따라 `services/execution_engine.CatalogNodeExecutor`가 `node_type`으로 직접 호출한다 (`ToolsetExecutor`·`toolset.execute_tool()` 경로 폐기). `process()` 실구현은 external 34종 전부 끝났다 (DB 3종은 asyncpg/aiomysql, Google R/W·bigquery는 REST httpx, file 3종은 샌드박스 로컬 FS, `llm_judge`는 Anthropic REST httpx, #438 read/write 8종은 Google/Slack/Linear REST·GraphQL httpx).

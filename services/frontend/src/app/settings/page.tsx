@@ -1,10 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Icon from '@/components/common/Icon';
 import { showToast } from '@/stores/toastStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useAuth } from '@/hooks/useAuth';
+import {
+  getConnections,
+  getAvailableConnections,
+  startConnection,
+  revokeConnection,
+  type ConnectionStatus,
+  type AvailableConnection,
+  type ConnectionAuthType,
+} from '@/lib/api/connectionApi';
 
 type Panel = 'profile' | 'integration' | 'alert' | 'security';
 
@@ -114,14 +124,88 @@ function IntegrationRow({
   iconBg,
   name,
   detail,
+  authType,
+  available,
   connected,
+  busy,
+  onConnect,
+  onRevoke,
+  onManageKey,
 }: {
   icon: string;
   iconBg: string;
   name: string;
   detail: string;
+  authType: ConnectionAuthType;
+  available: boolean;
   connected: boolean;
+  busy: boolean;
+  onConnect: () => void;
+  onRevoke: () => void;
+  onManageKey: () => void;
 }) {
+  // 연결 모델별 우측 액션 분기:
+  //   oauth + 연결됨        → 연결됨 배지 + 해제
+  //   oauth + 가능          → 연결(동의화면 이동)
+  //   oauth + 미배선        → 준비 중(비활성)
+  //   api_key/connection_string → 키 관리(자격증명 페이지)
+  const renderAction = () => {
+    if (authType === 'oauth') {
+      if (connected) {
+        return (
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold"
+              style={{ background: '#E7F6EF', color: '#10B981' }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#10B981' }} />
+              연결됨
+            </span>
+            <button
+              type="button"
+              onClick={onRevoke}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-lg border border-line-soft text-ink3 text-[10px] font-bold hover:bg-paper/60 hover:text-danger disabled:opacity-50"
+            >
+              {busy ? '처리 중…' : '해제'}
+            </button>
+          </div>
+        );
+      }
+      if (!available) {
+        return (
+          <button
+            type="button"
+            disabled
+            className="px-3 py-1.5 rounded-lg border border-line-soft text-ink3 text-[10px] font-bold opacity-50 cursor-not-allowed"
+          >
+            준비 중
+          </button>
+        );
+      }
+      return (
+        <button
+          type="button"
+          onClick={onConnect}
+          disabled={busy}
+          className="px-3 py-1.5 rounded-lg bg-accent text-white text-[10px] font-bold shadow-sm hover:bg-accent3 disabled:opacity-50"
+        >
+          {busy ? '연결 중…' : '연결'}
+        </button>
+      );
+    }
+    // api_key / connection_string — 자격증명 페이지에서 키 입력으로 연동.
+    return (
+      <button
+        type="button"
+        onClick={onManageKey}
+        className="px-3 py-1.5 rounded-lg border border-line-soft text-ink text-[10px] font-bold hover:bg-paper/60"
+      >
+        키 관리
+      </button>
+    );
+  };
+
   return (
     <div className="flex items-center justify-between p-3.5 rounded-xl border border-line-soft bg-white">
       <div className="flex items-center space-x-3">
@@ -136,38 +220,148 @@ function IntegrationRow({
           <p className="text-[10px] text-ink3 font-bold">{detail}</p>
         </div>
       </div>
-      {connected ? (
-        <span
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold"
-          style={{ background: '#E7F6EF', color: '#10B981' }}
-        >
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#10B981' }} />
-          연결됨
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => showToast('ERP 연동을 시작합니다.')}
-          className="px-3 py-1.5 rounded-lg bg-accent text-white text-[10px] font-bold shadow-sm hover:bg-accent3"
-        >
-          연결
-        </button>
-      )}
+      {renderAction()}
     </div>
   );
 }
 
+// 연결 가능 목록(이름·auth_type)은 GET /connections/available에서 도출. 아이콘·색만 프론트 표시 메타로
+// 보유하고, 미정 service는 기본 아이콘으로 폴백(백엔드가 새 provider를 추가해도 깨지지 않게).
+const SERVICE_STYLE: Record<string, { icon: string; iconBg: string }> = {
+  slack: { icon: 'message-square', iconBg: '#4A154B' },
+  google: { icon: 'sheet', iconBg: '#0F9D58' },
+  linear: { icon: 'check-square', iconBg: '#5E6AD2' },
+  anthropic: { icon: 'cpu', iconBg: '#D97757' },
+  postgresql: { icon: 'database', iconBg: '#336791' },
+  mysql: { icon: 'database', iconBg: '#00758F' },
+};
+const DEFAULT_STYLE = { icon: 'plug', iconBg: '#A2917F' };
+const styleOf = (service: string) => SERVICE_STYLE[service] ?? DEFAULT_STYLE;
+
+// 연결 모델별 비연결 상태 설명.
+const detailForAuthType = (authType: ConnectionAuthType): string =>
+  authType === 'api_key'
+    ? 'API 키로 연동 — 자격증명에서 관리'
+    : authType === 'connection_string'
+      ? '접속 정보로 연동 — 자격증명에서 관리'
+      : '연결되지 않음';
+
+// callback 복귀 시그널(?connected / ?error)을 토스트로 표시하고 URL에서 정리한다.
+// 백엔드 callback이 /settings?connected={service} 또는 ?error=connect_failed 로 리다이렉트한다.
+function consumeConnectCallback(serviceLabel: (s: string) => string): void {
+  if (typeof window === 'undefined') return;
+  const params = new URLSearchParams(window.location.search);
+  const connected = params.get('connected');
+  const error = params.get('error');
+  if (!connected && !error) return;
+
+  if (connected) showToast(`${serviceLabel(connected)} 연결이 완료되었습니다.`);
+  else if (error === 'connect_failed') showToast('연결에 실패했습니다. 다시 시도해주세요.');
+
+  // 새로고침/뒤로가기 시 토스트 재발생 방지 — 쿼리만 제거.
+  window.history.replaceState({}, '', window.location.pathname);
+}
+
 function IntegrationPanel() {
+  const router = useRouter();
+  const [available, setAvailable] = useState<AvailableConnection[]>([]);
+  const [connections, setConnections] = useState<ConnectionStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [busyServices, setBusyServices] = useState<Set<string>>(new Set());
+
+  // 서비스별 처리 중 상태를 독립적으로 토글 — 여러 서비스 동시 연결/해제 시 각자 busy 표시.
+  const setBusy = (service: string, busy: boolean) =>
+    setBusyServices((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(service);
+      else next.delete(service);
+      return next;
+    });
+
+  // 연결 가능 목록(카탈로그 도출) + 현재 연결 상태를 함께 로드. 로드된 available를 반환해
+  // 콜백 토스트가 친근명(예: "Google Workspace")으로 표시되게 한다.
+  const load = async (): Promise<AvailableConnection[]> => {
+    try {
+      const [avail, conns] = await Promise.all([getAvailableConnections(), getConnections()]);
+      setAvailable(avail);
+      setConnections(conns);
+      setError(false);
+      return avail;
+    } catch {
+      setError(true);
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // 로드 완료 후 콜백 토스트 표시 — available에서 service→표시명 매핑(미발견 시 키 폴백).
+    void load().then((avail) => {
+      consumeConnectCallback((svc) => avail.find((a) => a.service === svc)?.name ?? svc);
+    });
+  }, []);
+
+  const handleConnect = async (service: string) => {
+    setBusy(service, true);
+    try {
+      // 성공 시 OAuth 동의 화면으로 전체 페이지 이동(반환 없음).
+      await startConnection(service);
+    } catch {
+      showToast('연결을 시작하지 못했습니다. 잠시 후 다시 시도해주세요.');
+      setBusy(service, false);
+    }
+  };
+
+  const handleRevoke = async (service: string) => {
+    setBusy(service, true);
+    try {
+      await revokeConnection(service);
+      showToast('연결을 해제했습니다.');
+      await load();
+    } catch {
+      showToast('연결 해제에 실패했습니다. 다시 시도해주세요.');
+    } finally {
+      setBusy(service, false);
+    }
+  };
+
+  const byService = new Map(connections.map((c) => [c.service, c]));
+
   return (
     <div className="space-y-5">
       <div className="border-b border-line-soft pb-2">
         <h3 className="text-sm font-bold text-ink">통합 연동</h3>
         <p className="text-[11px] text-ink3 font-bold">워크플로우에서 사용할 외부 서비스 계정을 연결하고 관리합니다.</p>
       </div>
+      {error && <p className="text-[11px] text-danger font-bold">연결 상태를 불러오지 못했습니다.</p>}
+      {loading && <p className="text-[11px] text-ink3 font-bold">불러오는 중…</p>}
       <div className="space-y-2.5">
-        <IntegrationRow icon="message-square" iconBg="#4A154B" name="Slack" detail="workspace · flowit-team" connected />
-        <IntegrationRow icon="sheet" iconBg="#0F9D58" name="Google Workspace" detail="gawon.data@flowit.io" connected />
-        <IntegrationRow icon="database" iconBg="#A2917F" name="사내 ERP" detail="연결되지 않음" connected={false} />
+        {available.map((s) => {
+          const style = styleOf(s.service);
+          const conn = byService.get(s.service);
+          const connected = conn?.connected ?? false;
+          const detail = connected
+            ? conn?.display || '연결됨'
+            : detailForAuthType(s.auth_type);
+          return (
+            <IntegrationRow
+              key={s.service}
+              icon={style.icon}
+              iconBg={style.iconBg}
+              name={s.name}
+              detail={detail}
+              authType={s.auth_type}
+              available={s.available}
+              connected={connected}
+              busy={busyServices.has(s.service)}
+              onConnect={() => void handleConnect(s.service)}
+              onRevoke={() => void handleRevoke(s.service)}
+              onManageKey={() => router.push('/admin/credentials')}
+            />
+          );
+        })}
       </div>
       <button
         type="button"

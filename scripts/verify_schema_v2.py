@@ -135,7 +135,7 @@ check("node_logs partitions >= 4",
     lambda v: v >= 4)
 
 # 12. Seeds
-check("node_definitions = 53", "SELECT count(*) FROM node_definitions", lambda v: v == 53)
+check("node_definitions = 62", "SELECT count(*) FROM node_definitions", lambda v: v == 62)
 check("system user exists",
     "SELECT count(*) FROM users WHERE email='system@workflow-automation.internal'",
     lambda v: v == 1)

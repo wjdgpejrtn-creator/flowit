@@ -48,3 +48,12 @@ export async function analyzeDocument(id: string): Promise<AnalyzeDispatchRespon
     method: 'POST',
   });
 }
+
+export async function deleteDocument(id: string): Promise<void> {
+  // hard delete — 성공 시 서버가 204(No Content) 반환(본문 없음).
+  const res = await apiFetch(`/api/v1/documents/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status}: ${body}`);
+  }
+}

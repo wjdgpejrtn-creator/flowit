@@ -84,6 +84,7 @@ from common_schemas import (
 | | `save_chunks(chunks: list[Chunk]) -> None` | |
 | | `save_quality_log(result: QualityGateResult, document_id: UUID) -> None` | |
 | | `get_by_id(document_id: UUID) -> DocumentBlock \| None` | `GET /api/v1/documents/{id}` + worker analyze가 메타 조회에 사용. 인가는 호출자(`PermissionSource.user_id` 비교) 책임 (PR #197, 조장 — Update/Delete 동일 패턴으로 owner-검사 라우터 분산 방지) |
+| | `delete(document_id: UUID) -> bool` | `DELETE /api/v1/documents/{id}` (응답 204/404/403)가 사용. hard delete — GCS 원본 + 자식(document_chunks/quality_gate_logs) 명시 제거 후 부모 row 삭제(DDL CASCADE 비의존, GCS는 NotFoundError swallow로 멱등). 성공 True/미존재 False. 인가는 호출자(owner 비교) 책임 |
 | `ConfigLoaderPort` | `load_quality_config() -> QualityConfig` | `adapters/config/` |
 | | `load_chunking_strategy() -> ChunkingStrategy` | |
 | | `load_pii_rules() -> list[PIIMaskRule]` | |
