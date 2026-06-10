@@ -4,31 +4,19 @@
 before(현행 3섹션) vs after(9섹션+trigger description)를 같은 HR 노드·SOP로 각각 생성해
 출력을 나란히 출력한다. 형식 준수·description trigger 여부를 사람이 판정 → 조장 제안 근거.
 
-실행: .venv\\Scripts\\python scripts/test_skill_instructions_quality.py
-필요 env: LLM_BASE_URL (.env 런타임 로드)
+실행: LLM_BASE_URL=<llm-base /v1/generate 호스트> .venv\\Scripts\\python scripts/test_skill_instructions_quality.py
+필요 env: LLM_BASE_URL (shell env로 주입 — .env 파싱하지 않음, CLAUDE.md 보안 규칙 정합)
 """
 # ruff: noqa: E501  — 테스트 데이터(긴 한국어 프롬프트/SOP 문자열) 가독성 위해 줄길이 예외
 from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
+import sys
 
 import httpx
 
 _MAX_TOKENS = 8192
-
-
-def _load_env() -> None:
-    """.env 런타임 로드 (파일 직접 열람 아님 — 스크립트 로드는 허용). LLM_BASE_URL 등 주입."""
-    p = Path(".env")
-    if not p.exists():
-        return
-    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 # ── 공통 입력: 테스트 대상 노드 메타 + SOP 문서 컨텍스트 ─────────────────────────
 TARGET_META = {
@@ -182,8 +170,15 @@ def run(label: str, instruction: str, few_shot: dict | None, meta: dict, doc: di
 
 
 if __name__ == "__main__":
-    _load_env()
-    # 굳히기 — AFTER(9섹션) 프롬프트가 노드 종류·도메인·문서 품질이 달라도 형식을 유지하나
+    if not os.getenv("LLM_BASE_URL"):
+        sys.exit(
+            "LLM_BASE_URL 미설정 — shell env로 llm-base /v1/generate 호스트를 주입하세요. "
+            "예: LLM_BASE_URL=https://<host> .venv\\Scripts\\python scripts/test_skill_instructions_quality.py"
+        )
+    # CASE1: 동일 입력(온보딩)에 instruction만 BEFORE(3섹션) vs AFTER(9섹션+trigger) — 핵심 A/B
+    run("CASE1 BEFORE — 온보딩 · 현행 3섹션", INSTRUCTION_OLD, None, TARGET_META, SOP_DOCUMENT)
+    run("CASE1 AFTER — 온보딩 · 9섹션 + trigger description", INSTRUCTION_NEW, FEW_SHOT_NEW, TARGET_META, SOP_DOCUMENT)
+    # 굳히기 — AFTER(9섹션)가 노드 종류·도메인·문서 품질이 달라도 형식을 유지하나
     run("CASE2 AFTER — 휴가 승인 (분기 condition + 슬랙)", INSTRUCTION_NEW, FEW_SHOT_NEW, META_PTO, SOP_PTO)
     run("CASE3 AFTER — 이커머스 환불 승인 (다른 도메인 + 얕고 지저분한 한 줄 SOP)",
         INSTRUCTION_NEW, FEW_SHOT_NEW, META_REFUND, SOP_REFUND)
