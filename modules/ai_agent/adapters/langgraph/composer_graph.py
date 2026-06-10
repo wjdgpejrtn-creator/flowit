@@ -155,6 +155,8 @@ class _State(TypedDict):
     # 앙상블 OntologyVoter 입력). resume 시 부재면 빈 리스트로 graceful degrade.
     ontology_allowed: list[str]
     workflow_draft: WorkflowSchema | None
+    # intent_node가 load한 확인 대기 draft — refine 시 drafter가 재사용(이중 GCS load 방지, #369)
+    loaded_prior_workflow: WorkflowSchema | None
     qa_attempts: int
     qa_score: float
     pass_flag: bool
@@ -320,6 +322,7 @@ class LangGraphOrchestrator:
             "node_candidates": [],
             "ontology_allowed": [],
             "workflow_draft": None,
+            "loaded_prior_workflow": None,
             "qa_attempts": 0,
             "qa_score": 0.0,
             "pass_flag": False,
@@ -661,9 +664,21 @@ class LangGraphOrchestrator:
     # 3. intent_node
     async def _intent_node(self, state: _State) -> dict:
         t0 = time.monotonic()
+        # 상태 인지 분류(#369): 이 세션에 사용자 확인 대기 draft가 있으면 그 사실을 분류기에
+        # 주입해 "url 바꿔줘"/"채널 #general로 해줘" 같은 수정 발화가 새 워크플로우 생성(draft)으로
+        # 오분류되는 것을 막는다. draft load는 여기 1회로 일원화(state에 stash → drafter 재사용,
+        # refine 경로 중복 load 방지). create(draft 부재) 요청도 has_pending_draft 판정 위해 1회
+        # GET(None) — create 경로는 0→1이나 100~300s 파이프라인 대비 무시 가능.
+        prior_workflow: WorkflowSchema | None = None
+        if self._workflow_draft_store is not None:
+            try:
+                prior_workflow = await self._workflow_draft_store.load_draft(state["session_id"])
+            except Exception as exc:
+                _logger.warning("intent: prior draft 조회 실패 (무시): %s", exc)
+                prior_workflow = None
         try:
             result = await self._intent_analyzer.analyze(
-                state["messages"], context={}
+                state["messages"], context={"has_pending_draft": prior_workflow is not None}
             )
         except Exception as exc:
             return {"intent": "clarify", "error": f"intent 분석 실패: {exc}"}
@@ -685,6 +700,7 @@ class LangGraphOrchestrator:
             "intent": result.intent,
             "intent_analyzed_entities": result.analyzed_entities,
             "draft_spec": draft_spec,
+            "loaded_prior_workflow": prior_workflow,
             "collected_frames": [
                 IntentResultFrame(intent=result.intent, entities=result.analyzed_entities),
                 PipelineStatusFrame(service_name="intent", status="completed", elapsed_ms=elapsed),
@@ -1179,12 +1195,15 @@ class LangGraphOrchestrator:
         # 로드/조회 실패는 fresh draft로 폴백(non-fatal). search 후보에 없는 기존 노드는
         # NodeRegistry.get_schema로 복원해 합쳐야 drafter가 그 노드를 직렬화·보존할 수 있다.
         prior_workflow: WorkflowSchema | None = None
-        if state.get("intent") == "refine" and self._workflow_draft_store is not None:
-            try:
-                prior_workflow = await self._workflow_draft_store.load_draft(state["session_id"])
-            except Exception as exc:
-                _logger.warning("refine: 이전 워크플로우 로드 실패 (fresh로 진행): %s", exc)
-                prior_workflow = None
+        if state.get("intent") == "refine":
+            # intent_node가 load해 stash한 prior 재사용(refine 경로 중복 load 방지). 부재 시에만 직접 load.
+            prior_workflow = state.get("loaded_prior_workflow")
+            if prior_workflow is None and self._workflow_draft_store is not None:
+                try:
+                    prior_workflow = await self._workflow_draft_store.load_draft(state["session_id"])
+                except Exception as exc:
+                    _logger.warning("refine: 이전 워크플로우 로드 실패 (fresh로 진행): %s", exc)
+                    prior_workflow = None
             if prior_workflow is not None:
                 candidates = await self._augment_candidates_with_prior(candidates, prior_workflow)
         # 스킬이 선택되면(two-shot 2차) 그 지침서를 주입할 LLM 노드(category=="ai")가 반드시
