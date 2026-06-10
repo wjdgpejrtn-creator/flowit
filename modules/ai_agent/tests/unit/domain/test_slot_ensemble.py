@@ -61,16 +61,22 @@ def test_ontology_voter_scores_subgraph_members() -> None:
 
 
 # ── 앙상블 결합/기권 ─────────────────────────────────────────────────────────
+async def _resolve(resolver, utterance, ranked=None, allowed=None):
+    return await resolver.resolve(
+        utterance, tuple(ranked or ()), frozenset(allowed or set())
+    )
+
+
 @pytest.mark.asyncio
 async def test_ensemble_resolves_gmail_read_from_semantic_when_lexical_silent() -> None:
     # 이슈 직격: "gmail에서 …" source 렉시컬 미인식 → 의미검색 1등(gmail_read)이 슬롯을 차지.
     # google_sheets_read는 하위 랭킹이라 임계 미달 → 배제(오선택 차단).
-    ctx = _ctx(
+    resolver = EnsembleSlotResolver([LexicalVoter(), SemanticVoter(), OntologyVoter()])
+    resolved = await _resolve(
+        resolver,
         "내 gmail에서 결제 내역 모아서 보고서 작성해서 pdf로 gmail로 보내줘",
         ranked=["gmail_read", "manual_trigger", "google_sheets_read", "pdf_generate", "gmail_send"],
     )
-    resolver = EnsembleSlotResolver([LexicalVoter(), SemanticVoter(), OntologyVoter()])
-    resolved = await resolver.resolve(ctx)
     assert resolved.for_role(SlotRole.SOURCE) == ("gmail_read",)
     assert "google_sheets_read" not in resolved.for_role(SlotRole.SOURCE)
     # sink는 렉시컬(gmail_send·pdf_generate)이 잡아 둘 다 채워진다.
@@ -80,8 +86,9 @@ async def test_ensemble_resolves_gmail_read_from_semantic_when_lexical_silent() 
 @pytest.mark.asyncio
 async def test_lexical_hit_always_survives_threshold() -> None:
     # 렉시컬 적중(weight 1.0)은 의미신호가 0이어도 임계(0.5) 통과 — 정밀 보존.
-    ctx = _ctx("매주 광고 시트 읽어서 슬랙으로", ranked=[])
-    resolved = await EnsembleSlotResolver([LexicalVoter(), SemanticVoter()]).resolve(ctx)
+    resolved = await _resolve(
+        EnsembleSlotResolver([LexicalVoter(), SemanticVoter()]), "매주 광고 시트 읽어서 슬랙으로"
+    )
     assert resolved.for_role(SlotRole.SOURCE) == ("google_sheets_read",)
     assert resolved.for_role(SlotRole.SINK) == ("slack_post_message",)
 
@@ -89,16 +96,33 @@ async def test_lexical_hit_always_survives_threshold() -> None:
 @pytest.mark.asyncio
 async def test_weak_signal_alone_abstains() -> None:
     # 온톨로지 멤버십(0.25)만으로는 임계 미달 → 기권(빈 픽). 약신호 단독 바인딩 방지.
-    ctx = _ctx("아무 발화", ranked=[], allowed={"google_sheets_read"})
-    resolved = await EnsembleSlotResolver([LexicalVoter(), SemanticVoter(), OntologyVoter()]).resolve(ctx)
+    resolved = await _resolve(
+        EnsembleSlotResolver([LexicalVoter(), SemanticVoter(), OntologyVoter()]),
+        "아무 발화", allowed={"google_sheets_read"},
+    )
     assert not resolved.has_pick(SlotRole.SOURCE)
+
+
+@pytest.mark.asyncio
+async def test_top_ratio_suppresses_weak_secondary_source() -> None:
+    # 온톨로지 멤버십(0.25)에 업힌 차순위 source(google_sheets_read=0.55)가 floor(0.5)는 넘어도
+    # 최고점(gmail_read=0.85)의 70%(=0.595) 미만이라 탈락 — over-add(잉여 노드) 방지.
+    resolved = await _resolve(
+        EnsembleSlotResolver([LexicalVoter(), SemanticVoter(), OntologyVoter()]),
+        "내 gmail에서 결제 내역 모아서 슬랙으로",
+        ranked=["gmail_read", "google_sheets_read"],
+        allowed={"gmail_read", "google_sheets_read"},
+    )
+    assert resolved.for_role(SlotRole.SOURCE) == ("gmail_read",)
 
 
 @pytest.mark.asyncio
 async def test_resolver_skips_transform_and_trigger() -> None:
     # SOURCE/SINK만 앙상블 — transform(_AI 항상 후보라 비변별)·trigger는 조립기 기존 경로.
-    ctx = _ctx("요약해줘", ranked=["anthropic_chat", "schedule_trigger"])
-    resolved = await EnsembleSlotResolver([LexicalVoter(), SemanticVoter()]).resolve(ctx)
+    resolved = await _resolve(
+        EnsembleSlotResolver([LexicalVoter(), SemanticVoter()]),
+        "요약해줘", ranked=["anthropic_chat", "schedule_trigger"],
+    )
     assert not resolved.has_pick(SlotRole.TRANSFORM)
     assert not resolved.has_pick(SlotRole.TRIGGER)
 
@@ -106,9 +130,9 @@ async def test_resolver_skips_transform_and_trigger() -> None:
 @pytest.mark.asyncio
 async def test_select_is_deterministic_on_ties() -> None:
     # 동점은 node_type 사전순 — 같은 입력 같은 출력.
-    ctx = _ctx("x", allowed=set(_SOURCE_POOL))  # 전부 동점(ontology 0.25)…임계 미달이라 빈 픽
-    r1 = await EnsembleSlotResolver([OntologyVoter(weight=1.0)]).resolve(ctx)  # weight↑로 임계 통과
-    r2 = await EnsembleSlotResolver([OntologyVoter(weight=1.0)]).resolve(ctx)
+    resolver = EnsembleSlotResolver([OntologyVoter(weight=1.0)])  # weight↑로 임계 통과
+    r1 = await _resolve(resolver, "x", allowed=set(_SOURCE_POOL))
+    r2 = await _resolve(resolver, "x", allowed=set(_SOURCE_POOL))
     assert r1.for_role(SlotRole.SOURCE) == r2.for_role(SlotRole.SOURCE)
     assert list(r1.for_role(SlotRole.SOURCE)) == sorted(r1.for_role(SlotRole.SOURCE))
 
@@ -130,10 +154,9 @@ class _StubMapper:
 async def test_llm_escalates_only_uncertain_roles_and_folds_pick() -> None:
     # 싼 voter는 source 기권(렉시컬·랭킹 무신호), sink는 렉시컬로 확정. LLM은 source만 받아
     # gmail_read를 confidence 1.0으로 매핑 → 폴딩 후 source 바인딩. sink는 LLM 미escalate.
-    ctx = _ctx("받은 편지함 내용 슬랙으로 정리해줘", ranked=[])
     mapper = _StubMapper({SlotRole.SOURCE: (("gmail_read", 1.0),)})
     resolver = EnsembleSlotResolver([LexicalVoter(), SemanticVoter()], llm_mapper=mapper)
-    resolved = await resolver.resolve(ctx)
+    resolved = await _resolve(resolver, "받은 편지함 내용 슬랙으로 정리해줘")
     assert mapper.called_with is not None
     assert SlotRole.SOURCE in mapper.called_with and SlotRole.SINK not in mapper.called_with
     assert resolved.for_role(SlotRole.SOURCE) == ("gmail_read",)
@@ -143,15 +166,18 @@ async def test_llm_escalates_only_uncertain_roles_and_folds_pick() -> None:
 @pytest.mark.asyncio
 async def test_llm_pick_outside_pool_discarded() -> None:
     # LLM이 풀 밖 node_type을 주면 폐기(환각 가드).
-    ctx = _ctx("뭔가 가져와서 어딘가로", ranked=[])
     mapper = _StubMapper({SlotRole.SOURCE: (("not_a_real_node", 1.0),)})
-    resolved = await EnsembleSlotResolver([LexicalVoter()], llm_mapper=mapper).resolve(ctx)
+    resolved = await _resolve(
+        EnsembleSlotResolver([LexicalVoter()], llm_mapper=mapper), "뭔가 가져와서 어딘가로"
+    )
     assert not resolved.has_pick(SlotRole.SOURCE)
 
 
 @pytest.mark.asyncio
 async def test_no_llm_mapper_degrades_to_cheap_voters() -> None:
     # llm_mapper 미주입 → 싼 voter만으로 동작(graceful degrade), 에러 없음.
-    ctx = _ctx("매주 시트 읽어서 슬랙으로", ranked=["google_sheets_read", "slack_post_message"])
-    resolved = await EnsembleSlotResolver([LexicalVoter(), SemanticVoter()]).resolve(ctx)
+    resolved = await _resolve(
+        EnsembleSlotResolver([LexicalVoter(), SemanticVoter()]),
+        "매주 시트 읽어서 슬랙으로", ranked=["google_sheets_read", "slack_post_message"],
+    )
     assert resolved.for_role(SlotRole.SOURCE) == ("google_sheets_read",)
