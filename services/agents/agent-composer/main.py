@@ -139,6 +139,8 @@ class AgentComposer:
         from ai_agent.domain.services.qa_evaluator_service import QAEvaluatorService
         from ai_agent.domain.services.slot_filling_service import SlotFillingService
         from ai_agent.domain.services.workflow_diff_service import WorkflowDiffService
+        from ai_agent.domain.services.workflow_edit_planner import WorkflowEditPlanner
+        from ai_agent.domain.services.workflow_edit_service import WorkflowEditService
         from nodes_graph.domain.services.graph_validator import GraphValidator
         from storage.repositories.pg_node_definition_repository import PgNodeDefinitionRepository
         from storage.repositories.pg_workflow_repository import PgWorkflowRepository
@@ -167,6 +169,9 @@ class AgentComposer:
         self._drafter = DrafterService(llm)
         self._qa_evaluator = QAEvaluatorService(llm)
         self._slot_filler = SlotFillingService()
+        # refine 전용 op 기반 편집 (PR-2) — planner는 LLM, applier는 순수. boot에서 1회 생성·공유.
+        self._edit_planner = WorkflowEditPlanner(llm)
+        self._edit_service = WorkflowEditService()
         # ADR-0026 §6.6 Phase 2: SOURCE/SINK 노드 선택 앙상블 — 싼 voter 3종 + Gemma LLM voter
         # (지연 escalation, 방향성 디스앰비규에이션). resolver는 무상태라 boot에서 1회 생성·공유.
         from ai_agent.adapters.llm.llm_slot_mapper import LlmSlotMapper
@@ -289,6 +294,8 @@ class AgentComposer:
                             ontology_retriever=self._ontology_retriever,
                             skill_doc_store=self._skill_doc_store,
                             slot_resolver=self._slot_resolver,
+                            workflow_edit_planner=self._edit_planner,
+                            workflow_edit_service=self._edit_service,
                         )
                         async for frame in await graph.stream(
                             user_id=req.user_id,
