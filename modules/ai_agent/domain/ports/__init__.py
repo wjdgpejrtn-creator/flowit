@@ -7,6 +7,7 @@ from .ontology_retriever import OntologyRetrieverPort
 from .personal_memory_store import PersonalMemoryStore
 from .session_frame_store import SessionFrameStore
 from .sub_agent_client import SubAgentClient
+from .user_document_search import UserDocumentSearchPort
 from .workflow_draft_store import WorkflowDraftStore
 from .workflow_repository import WorkflowRepository
 
@@ -20,6 +21,7 @@ __all__ = [
     "PersonalMemoryStore",
     "SessionFrameStore",
     "SubAgentClient",
+    "UserDocumentSearchPort",
     "WorkflowDraftStore",
     "WorkflowRepository",
 ]

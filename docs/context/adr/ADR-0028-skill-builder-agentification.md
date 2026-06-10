@@ -103,7 +103,10 @@ T2 `parse_document`는 **ai_agent → doc_parser `ParserPort`(domain/ports) impo
    - T5 = `SkeletonComposerMapper`(신규 순수 도메인 서비스) — `AssembledDraft` → COMPOSER.md 본문(결정적) + 정밀 BINDS(`bound_node_types`, 스캐폴드 실노드). O4 "빌더 쪽 어댑팅" 지점.
    - 통합 = `extract_detail`의 자유 LLM `composer_instructions`를 스켈레톤 매칭 시 결정적 산출로 대체(미매칭 시 LLM 폴백). `skeleton_name`/`bound_node_types`를 페이로드 노출(영속화·projector 정밀화는 O3 후속).
    - 재사용은 intra-module(ai_agent application → ai_agent domain/services)이라 의존성·CLAUDE.md import 표 변경 0.
-2. **T1 문서검색 use case** — chunk 임베딩 재사용.
+2. **T1 문서검색 use case** — chunk 임베딩 재사용. ✅ **착수 완료(2026-06-10)**:
+   - `SearchUserDocumentsUseCase`(application/skills_builder) — 발화 → `EmbedderPort.embed`(BGE-M3 재사용) → `UserDocumentSearchPort.search_chunks_by_embedding`(chunk-level 적중) → use case가 `parent_document_id`로 **문서 단위 집계**(`DocumentHit`: best_distance·chunk_hit_count, 랭킹·관련성 컷).
+   - `UserDocumentSearchPort`(domain/ports) + `DocumentChunkHit`/`DocumentHit`(domain/value_objects) 신설. 소비자(ai_agent) 소유 포트, **storage 어댑터(`document_chunks` pgvector HNSW 쿼리)는 조장 후속**(AgentMemoryRepository·SkillRepository와 동일 분담). 인가=`documents.user_id` 스코프(IDOR 차단, 포트 docstring 명세).
+   - 임베딩 인프라(vector(768) HNSW 인덱스 `006_doc_parser.sql`)·EmbedderPort 재사용 — 신설 0. 테스트 6건.
 3. **(조장/신정혜) tool-calling 프레임** 결정 → T1~T5를 에이전트 루프로 wrap.
 
 ## References
