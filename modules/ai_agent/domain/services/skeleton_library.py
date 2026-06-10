@@ -24,9 +24,18 @@ _TRIGGERS: tuple[str, ...] = (
     "file_watch_trigger",
     "api_poll_trigger",
 )
+# source 풀 = 카탈로그의 "데이터 읽기·수집" 노드 전수. 풀 멤버십은 유한·카탈로그-bound라
+# (발화 어휘 문제가 아님) 카탈로그에 read 노드가 추가되면 여기도 보강한다 — 앙상블 슬롯
+# 채움이 풀 안에서만 선택하므로 풀에 없는 노드는 source로 영영 못 뽑힌다(2026-06-10 감사:
+# gmail_read·google_calendar_read·google_docs_read·linear_read·slack_read 누락 보강).
 _SOURCES: tuple[str, ...] = (
     "google_sheets_read",
     "google_drive_read",
+    "google_docs_read",
+    "gmail_read",
+    "google_calendar_read",
+    "slack_read",
+    "linear_read",
     "bigquery_query",
     "postgresql_query",
     "mysql_query",
@@ -63,6 +72,17 @@ _DELAYS: tuple[str, ...] = ("delay", "retry")
 _TERMINALS: tuple[str, ...] = ("stop_workflow",)
 # 재시도 대상(worker)은 통상 외부 호출 — source 풀 + ai를 후보로(실패할 수 있는 연산).
 _RETRY_WORKERS: tuple[str, ...] = _SOURCES + _AI
+
+# 역할별 후보 풀 (앙상블 슬롯 채움용, ADR-0026 §6.6 Phase 2). 모든 스켈레톤의 동일 역할
+# 슬롯이 같은 풀을 공유하므로(SOURCE→_SOURCES 등 전 스켈레톤 공통) 앙상블은 스켈레톤 선택
+# **전에** 역할별로 노드를 결정할 수 있다. 도메인 채움 역할(trigger/source/transform/sink)만
+# — control/gate/scorer는 코드가 default로 결정(사용자가 if_condition/llm_judge를 발화 안 함).
+ROLE_CANDIDATE_POOLS: dict[SlotRole, tuple[str, ...]] = {
+    SlotRole.TRIGGER: _TRIGGERS,
+    SlotRole.SOURCE: _SOURCES,
+    SlotRole.TRANSFORM: _AI,
+    SlotRole.SINK: _SINKS,
+}
 
 
 SKELETONS: tuple[Skeleton, ...] = (
