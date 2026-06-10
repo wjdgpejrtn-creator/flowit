@@ -66,13 +66,17 @@ from ...domain.ports.personal_memory_store import PersonalMemoryStore
 from ...domain.ports.session_frame_store import SessionFrameStore
 from ...domain.ports.workflow_draft_store import WorkflowDraftStore
 from ...domain.ports.workflow_repository import WorkflowRepository
-from ...domain.services.drafter_service import DrafterService
+from ...domain.services.dataflow_grounding import outputs_of as _outputs_of
+from ...domain.services.drafter_service import DrafterService, _slim_schema
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 from ...domain.services.qa_evaluator_service import QAEvaluatorService
 from ...domain.services.skeleton_assembler import SkeletonAssembler
 from ...domain.services.slot_ensemble import EnsembleSlotResolver
 from ...domain.services.slot_filling_service import SlotFillingService
 from ...domain.services.slot_voters import LexicalVoter, OntologyVoter, SemanticVoter
+from ...domain.services.workflow_diff_service import WorkflowDiffService
+from ...domain.services.workflow_edit_planner import WorkflowEditPlanner
+from ...domain.services.workflow_edit_service import EditPlan, WorkflowEditService
 from ...domain.services.workflow_explanation_service import WorkflowExplanationService
 from ...domain.services.workflow_layout_service import WorkflowLayoutService
 from ...domain.value_objects.turn_limit import TurnLimit
@@ -81,6 +85,9 @@ _logger = logging.getLogger(__name__)
 
 _QA_MAX_RETRY = 3
 _MAX_AGENT_ITERATIONS = 15  # 무한 루프 방지
+# refine op 편집 — planner 총 실행 횟수 상한(초기 1 + replan). validate 실패/불량 node_type 시
+# 1회 재계획 후 실패 처리(사용자 확정 정책 2026-06-10).
+_REFINE_PLAN_MAX_ATTEMPTS = 2
 # CAN_FOLLOW 확장 cap (ADR-0026 §4.2a) — ADD-all은 후보 풀을 부풀려 작은 LLM(Gemma) 드래프터의
 # structured JSON 생성을 잘리게 만든다(평가 하니스 실측: drafter 실패 6→23, qa pass 64%→29%).
 # seed를 검색 상위 hit으로 제한 + 추가 후보 상한으로 풀 비대를 억제한다.
@@ -197,6 +204,11 @@ class _State(TypedDict):
     # GraphRAG — ADR-0026 Phase 2a (모티프 그라운딩). expand_candidates(서브그래프) 소비는
     # CAN_FOLLOW 호환 필터(박아름 §4.2) 머지 후 ADD 방식으로 배선 예정 — 그 전까지 호출 보류.
     pattern_templates: list[Any] | None     # list[PatternTemplate] — 모티프 그라운딩 (ADR-0026 Phase 2a)
+    # refine 전용 서브그래프 (op 기반 편집) — fresh QA 게이트 미경유로 부정 발화 오작동 차단
+    edit_plan: EditPlan | None              # planner가 만든 편집 연산 리스트
+    refine_plan_attempts: int               # planner 총 실행 횟수 (validate 실패/불량 type 시 1회 replan)
+    edit_fallback: bool                     # op 적용 실패 → drafter ref-edit 폴백을 탔는지 (관측용)
+    refine_route: str | None                # refine_plan 다음 분기 신호: "apply" | "replan"
 
 
 class LangGraphOrchestrator:
@@ -230,9 +242,15 @@ class LangGraphOrchestrator:
         skill_doc_store: SkillDocumentStore | None = None,
         skeleton_assembler: SkeletonAssembler | None = None,
         slot_resolver: EnsembleSlotResolver | None = None,
+        workflow_edit_planner: WorkflowEditPlanner | None = None,
+        workflow_edit_service: WorkflowEditService | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
+        # refine 전용 op 기반 편집 (PR-2). applier는 순수라 미주입 시 기본 생성. planner는 llm
+        # 있으면 기본 생성·없으면 None → _refine_plan_node가 drafter ref-edit 폴백으로 graceful degrade.
+        self._edit_service = workflow_edit_service or WorkflowEditService()
+        self._edit_planner = workflow_edit_planner or (WorkflowEditPlanner(llm) if llm else None)
         # ADR-0026 §6.6 결정적 스켈레톤 — 순수(무의존)라 미주입 시 기본 생성. assemble None이면
         # 일반 LLM draft로 폴백하므로 항상 안전(소비처 _drafter_node).
         self._skeleton_assembler = skeleton_assembler or SkeletonAssembler()
@@ -349,6 +367,10 @@ class LangGraphOrchestrator:
             "resume_ok": False,
             "offered_skill_ids": [],
             "workflow_explanation": None,
+            "edit_plan": None,
+            "refine_plan_attempts": 0,
+            "edit_fallback": False,
+            "refine_route": None,
         }
 
         try:
@@ -568,6 +590,15 @@ class LangGraphOrchestrator:
 
     @staticmethod
     def _route_after_validate(state: _State) -> str:
+        # refine(op 편집)은 QA 커버리지 게이트를 타지 않는다 — 그 게이트가 편집 발화의 부정/제거
+        # 노드명을 '필수'로 오인해 무한 재시도를 일으켰다(E_QA_EXHAUSTED 근본). 구조 검증만 거쳐
+        # 바로 promote. 검증 실패 시 1회 재계획(refine_plan) 후 실패.
+        if state.get("intent") == "refine":
+            if state.get("pass_flag"):
+                return "promote"
+            if state.get("refine_plan_attempts", 0) < _REFINE_PLAN_MAX_ATTEMPTS:
+                return "refine_plan"
+            return "validation_failed"
         if state.get("pass_flag"):
             return "qa_evaluator"
         # no-progress: 재시도 draft가 직전과 동일하면 재시도 무의미 → 즉시 종결(헛바퀴 차단).
@@ -576,6 +607,12 @@ class LangGraphOrchestrator:
         if state.get("retry_count", 0) < _QA_MAX_RETRY:
             return "retry_draft"
         return "validation_failed"
+
+    @staticmethod
+    def _route_after_refine_plan(state: _State) -> str:
+        if state.get("error"):
+            return "end"
+        return state.get("refine_route") or "apply"
 
     @staticmethod
     def _route_after_qa(state: _State) -> str:
@@ -603,8 +640,14 @@ class LangGraphOrchestrator:
 
     @staticmethod
     def _route_after_suggest(state: _State) -> str:
-        """옵션 emit + 중단(two-shot) → END, 옵션 없음/skill_search 미주입 → 한 라운드 내 draft(one-shot 폴백)."""
-        return "wait" if state.get("awaiting_skill_selection") else "draft"
+        """refine → op 기반 편집 서브그래프(refine_plan), 옵션 emit+중단(two-shot) → END,
+        그 외 → 한 라운드 내 draft(fresh, one-shot 폴백). planner 미주입 시에도 refine_plan이
+        drafter ref-edit 폴백으로 graceful degrade하므로 여기선 intent만 본다."""
+        if state.get("awaiting_skill_selection"):
+            return "wait"
+        if state.get("intent") == "refine":
+            return "refine"
+        return "draft"
 
     # ------------------------------------------------------------------ preprocessing nodes
 
@@ -973,16 +1016,21 @@ class LangGraphOrchestrator:
             return {"awaiting_skill_selection": False}
 
         options: list[SkillOption] = []
+        # owner_user_id는 개인 스킬 엔티티(MarketplacePersonalSkill)에만 존재 — 본인 소유면
+        # 프론트에 "⭐ 자주 사용" 배지로 개인화 추천을 강조한다(REQ-013, execute_accessible personal 병합).
+        user_id_str = str(state["user_id"])
         for skill in skill_results:
             skill_id = getattr(skill, "skill_id", None)
             if skill_id is None:  # 지침서형/노드형 무관 — skill_id만 있으면 선택지로 노출(필터 제거)
                 continue
+            owner = getattr(skill, "owner_user_id", None)
             options.append(
                 SkillOption(
                     skill_id=skill_id,
                     name=getattr(skill, "name", ""),
                     description=getattr(skill, "description", ""),
                     node_definition_id=getattr(skill, "node_definition_id", None),
+                    is_personal=owner is not None and str(owner) == user_id_str,
                 )
             )
 
@@ -1413,6 +1461,141 @@ class LangGraphOrchestrator:
             existing_ids.add(node.node_id)
         return merged
 
+    # ---- refine 전용 서브그래프 (op 기반 결정적 편집, PR-2) ----
+
+    async def _load_prior_for_refine(self, state: _State) -> WorkflowSchema | None:
+        """refine 대상 prior 워크플로우 로드 — intent_node가 stash한 것 우선, 부재 시 GCS 직접."""
+        prior = state.get("loaded_prior_workflow")
+        if prior is None and self._workflow_draft_store is not None:
+            try:
+                prior = await self._workflow_draft_store.load_draft(state["session_id"])
+            except Exception as exc:
+                _logger.warning("refine: 이전 워크플로우 로드 실패: %s", exc)
+                prior = None
+        return prior
+
+    async def _refine_plan_node(self, state: _State) -> dict:
+        """발화를 편집 연산(EditPlan)으로 번역. 불량 node_type/직렬화 실패/planner 부재 시
+        graceful: 1회 재계획(replan) 또는 drafter ref-edit 폴백으로 보낸다. **편집 잠금(#369)**:
+        prior 부재면 새로 만들지 않고 에러."""
+        attempts = state.get("refine_plan_attempts", 0) + 1
+        instruction = state["messages"][-1].get("content", "") if state["messages"] else ""
+        prior = await self._load_prior_for_refine(state)
+        if prior is None:
+            _logger.warning("refine_plan: prior 워크플로우 없음 — 새 생성 잠금, 에러 반환")
+            return {"error": "수정할 기존 워크플로우를 찾지 못했어요. 새로 만들려면 '새 대화'를 눌러 주세요."}
+
+        candidates = await self._augment_candidates_with_prior(state["node_candidates"], prior)
+        base = {"refine_plan_attempts": attempts, "node_candidates": candidates}
+        serialized = DrafterService._serialize_for_edit(prior, candidates)
+        if serialized is None or self._edit_planner is None:
+            # 직렬화 불가(후보 복원 실패)나 planner 미주입 → drafter ref-edit 폴백(노드 보존).
+            return {**base, "edit_fallback": True, "refine_route": "apply"}
+
+        catalog = [
+            {
+                "node_type": c.node_type,
+                "name": c.name,
+                "input_schema": _slim_schema(c.input_schema),
+                "outputs": _outputs_of(c),
+                "required_connections": c.required_connections,
+            }
+            for c in candidates
+        ]
+        catalog_types = {c.node_type for c in candidates}
+        feedback = state.get("retry_feedback") or state.get("validation_issues")
+        try:
+            plan = await self._edit_planner.plan(serialized, catalog, instruction, retry_feedback=feedback)
+        except Exception as exc:
+            _logger.warning("refine_plan: planner 실패 → drafter 폴백: %s", exc)
+            return {**base, "edit_fallback": True, "refine_route": "apply"}
+
+        bad = sorted({
+            getattr(op, "new_node_type", None)
+            for op in plan.ops
+            if getattr(op, "new_node_type", None) and getattr(op, "new_node_type") not in catalog_types
+        })
+        if bad:
+            if attempts < _REFINE_PLAN_MAX_ATTEMPTS:
+                return {
+                    **base,
+                    "edit_plan": None,
+                    "refine_route": "replan",
+                    "retry_feedback": f"Unknown node_type(s) {bad} — use only catalog node_types.",
+                }
+            # 재계획 소진 → drafter ref-edit 폴백.
+            return {**base, "edit_fallback": True, "refine_route": "apply"}
+
+        n_ops = len(plan.ops)
+        return {
+            **base,
+            "edit_plan": plan,
+            "refine_route": "apply",
+            "collected_frames": [
+                RationaleDeltaFrame(delta=f"✏️ 편집 연산 {n_ops}건 계획 완료 — 지시한 부분만 수정합니다"),
+                PipelineStatusFrame(service_name="refine_plan", status="completed", elapsed_ms=0),
+            ],
+        }
+
+    async def _refine_apply_node(self, state: _State) -> dict:
+        """EditPlan을 prior에 결정적 적용. 적용 실패/플랜부재 시 drafter ref-edit 폴백(노드 보존,
+        절대 fresh 생성 안 함). 이후 layout+autobind는 fresh draft와 동일 후처리."""
+        t0 = time.monotonic()
+        prior = await self._load_prior_for_refine(state)
+        if prior is None:
+            return {"error": "수정할 기존 워크플로우를 찾지 못했어요. 새로 만들려면 '새 대화'를 눌러 주세요."}
+        candidates = state["node_candidates"]
+        plan = state.get("edit_plan")
+        spec = state.get("draft_spec")
+        edit_fallback = bool(state.get("edit_fallback"))
+
+        try:
+            if plan is not None and not edit_fallback and plan.ops:
+                workflow = self._edit_service.apply(prior, plan, candidates)
+            else:
+                # 폴백: drafter ref 기반 전체 편집(노드 보존). prior 직렬화 불가 시 E_REFINE_SERIALIZE.
+                edit_fallback = True
+                if spec is None:
+                    return {"error": "DraftSpec 없음"}
+                workflow = await self._drafter.draft(
+                    spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior,
+                    personal_patterns=state.get("personal_patterns"),
+                )
+        except Exception as exc:
+            _logger.warning("refine_apply: 편집 적용 실패 → 폴백 시도: %s", exc)
+            try:
+                if spec is None:
+                    return {"error": f"편집 적용 실패: {exc}"}
+                edit_fallback = True
+                workflow = await self._drafter.draft(
+                    spec, candidates, owner_user_id=state["user_id"], prior_workflow=prior,
+                    personal_patterns=state.get("personal_patterns"),
+                )
+            except Exception as exc2:
+                return {"error": f"편집 적용 실패: {exc2}"}
+
+        workflow = self._layout.apply_layout(workflow)
+        workflow, bound_services = await self._autobind_connections(workflow, candidates, state["user_id"])
+        elapsed = int((time.monotonic() - t0) * 1000)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        node_summary = ", ".join(type_by_id.get(n.node_id, str(n.node_id)) for n in workflow.nodes)
+        frames: list[AnySSEFrame] = [
+            RationaleDeltaFrame(
+                delta=f"✏️ 워크플로우 수정 적용 — 노드 {len(workflow.nodes)}개 ({node_summary}), "
+                      f"연결 {len(workflow.connections)}개"
+            )
+        ]
+        if bound_services:
+            frames.append(RationaleDeltaFrame(delta=f"🔌 보유 연결 자동 바인딩 — {', '.join(sorted(bound_services))}"))
+        frames.extend([
+            WorkflowDraftFrame(
+                nodes=[n.model_dump(mode="json") for n in workflow.nodes],
+                connections=[c.model_dump(mode="json") for c in workflow.connections],
+            ),
+            PipelineStatusFrame(service_name="refine_apply", status="completed", elapsed_ms=elapsed),
+        ])
+        return {"workflow_draft": workflow, "edit_fallback": edit_fallback, "collected_frames": frames}
+
     # 8. validator_node — 그래프 구조 검증 + RiskLevel 강제
     async def _validator_node(self, state: _State) -> dict:
         t0 = time.monotonic()
@@ -1768,6 +1951,8 @@ class LangGraphOrchestrator:
 
         intent_text = spec.natural_language_intent[:80] if spec else "없음"
 
+        is_refine = str(intent) == "refine"
+        section3_title = "**③ 워크플로우 수정**" if is_refine else "**③ 워크플로우 작성**"
         lines = [
             "📋 **AI 검증 완료 보고서**",
             "",
@@ -1780,16 +1965,37 @@ class LangGraphOrchestrator:
             f"- 후보 {len(candidates)}개 검색 완료",
             f"- 최종 선정: {len(final_nodes)}개 노드 ({selected_types or '없음'})",
             "",
-            "**③ 워크플로우 작성** ✅",
+            f"{section3_title} ✅",
             f"- 노드 {len(final_nodes)}개, 연결 {len(final_connections)}개",
             "- DAG 구조 검증 완료 (사이클 없음, 고립 노드 없음)",
             "",
-            f"**④ QA 품질 평가 통과** ✅ (점수: {qa_score:.1f}/10)",
-            "- 완성도: 사용자 의도가 노드로 완전히 표현됐는지 검증",
-            "- 안전성: 위험 노드 정당성 및 권한 적정성 검증",
         ]
-        if qa_feedback:
-            lines.append(f"- 평가 의견: {qa_feedback}")
+
+        # refine은 QA 커버리지 게이트를 타지 않는다(부정 발화 오작동 차단) — 대신 prior 대비
+        # 실제 변경(diff)을 ④로 보여 "지시한 부분만 고쳤다"를 사용자가 검증하게 한다.
+        prior = state.get("loaded_prior_workflow")
+        if is_refine and prior is not None and workflow is not None:
+            diff = WorkflowDiffService().compute(prior, workflow)
+            lines.append(
+                f"**④ 수정 적용 완료** ✅ (추가 {len(diff.added_nodes)} / 삭제 "
+                f"{len(diff.removed_nodes)} / 파라미터 변경 {len(diff.modified_params)})"
+            )
+            detail: list[str] = []
+            for n in diff.removed_nodes[:5]:
+                detail.append(f"- 삭제: {type_by_id.get(n.node_id, str(n.node_id))}")
+            for n in diff.added_nodes[:5]:
+                detail.append(f"- 추가: {type_by_id.get(n.node_id, str(n.node_id))}")
+            for p in diff.modified_params[:5]:
+                detail.append(f"- 변경: {type_by_id.get(p.node_id, str(p.node_id))}.{p.param_key} → {p.after!r}")
+            lines.extend(detail or ["- 구조·파라미터 변경 없음"])
+        else:
+            lines.extend([
+                f"**④ QA 품질 평가 통과** ✅ (점수: {qa_score:.1f}/10)",
+                "- 완성도: 사용자 의도가 노드로 완전히 표현됐는지 검증",
+                "- 안전성: 위험 노드 정당성 및 권한 적정성 검증",
+            ])
+            if qa_feedback:
+                lines.append(f"- 평가 의견: {qa_feedback}")
 
         return "\n".join(lines)
 
@@ -1935,6 +2141,8 @@ class LangGraphOrchestrator:
         graph.add_node("resume", self._resume_node)                              # two-shot 2차 진입
         graph.add_node("bind_skill", self._bind_skill_node)                      # 2차 skill_id 바인딩
         graph.add_node("draft_workflow", self._drafter_node)
+        graph.add_node("refine_plan", self._refine_plan_node)        # refine 전용 — op 계획
+        graph.add_node("refine_apply", self._refine_apply_node)      # refine 전용 — 결정적 적용
         graph.add_node("validate_workflow", self._validator_node)
         graph.add_node("retry_draft", self._qa_retry_node)
         graph.add_node("qa_evaluator", self._qa_evaluator_node)
@@ -1976,19 +2184,34 @@ class LangGraphOrchestrator:
         graph.add_edge("slot_fill", END)
         # 1차: 노드 검색 직후 스킬 옵션 제시 단계로 (draft는 아직 미생성)
         graph.add_edge("search_nodes", "suggest_skill_select")
-        # 옵션 emit+중단(two-shot) → END / 옵션 없음·미주입(one-shot 폴백) → draft
+        # refine → op 편집 서브그래프 / 옵션 emit+중단(two-shot) → END / 그 외 → draft(fresh).
+        # **fresh 경로(draft→bind→validate→qa) 엣지는 불변** — refine만 suggest에서 분기.
         graph.add_conditional_edges(
             "suggest_skill_select",
             self._route_after_suggest,
-            {"wait": END, "draft": "draft_workflow"},
+            {"wait": END, "draft": "draft_workflow", "refine": "refine_plan"},
         )
+        # refine: 계획 → (불량 type 1회 replan) → 적용 → validate. prior 부재 시 error로 END.
+        graph.add_conditional_edges(
+            "refine_plan",
+            self._route_after_refine_plan,
+            {"apply": "refine_apply", "replan": "refine_plan", "end": END},
+        )
+        graph.add_edge("refine_apply", "validate_workflow")
         # draft 직후 항상 bind_skill 경유 (1차 폴백=no-op, 2차=skill_id 주입)
         graph.add_edge("draft_workflow", "bind_skill")
         graph.add_edge("bind_skill", "validate_workflow")
+        # validate 후: fresh→qa_evaluator, refine→promote(QA 스킵)/실패 시 1회 refine_plan 재계획.
         graph.add_conditional_edges(
             "validate_workflow",
             self._route_after_validate,
-            {"qa_evaluator": "qa_evaluator", "retry_draft": "retry_draft", "validation_failed": "validation_failed"},
+            {
+                "qa_evaluator": "qa_evaluator",
+                "retry_draft": "retry_draft",
+                "validation_failed": "validation_failed",
+                "promote": "promote",
+                "refine_plan": "refine_plan",
+            },
         )
         graph.add_edge("retry_draft", "draft_workflow")
         graph.add_conditional_edges(

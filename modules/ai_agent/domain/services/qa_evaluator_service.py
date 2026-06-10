@@ -11,6 +11,27 @@ from ..value_objects.quality_threshold import QualityThreshold
 
 _THRESHOLD = QualityThreshold()
 
+# QA LLM(Gemma)이 "누락 없음"을 빈 리스트 []가 아니라 ["none"]/["없음"]/["N/A"] 같은 센티넬
+# 문자열로 채워 반환하는 경우가 잦다. 이를 실제 누락으로 오인하면 만점(score≥8)이어도
+# 의도-노드 게이트가 pass_flag를 False로 막아, 완성된 워크플로우가 동일 draft를 무한
+# 재시도(no-progress)→E_QA_EXHAUSTED("누락된 필수 노드/채널: none")로 헛돈다. 센티넬을
+# 걸러 진짜 누락만 게이트에 반영한다.
+_NO_MISSING_SENTINELS = frozenset(
+    {
+        "", "none", "n/a", "na", "null", "nil", "-", "—",
+        "없음", "해당 없음", "해당없음", "no missing capabilities", "no missing",
+    }
+)
+
+
+def _real_missing_capabilities(items: list[str]) -> list[str]:
+    real: list[str] = []
+    for item in items:
+        normalized = str(item).strip().rstrip(".。!").lower()
+        if normalized and normalized not in _NO_MISSING_SENTINELS:
+            real.append(item)
+    return real
+
 _SYSTEM_PROMPT = """You are a QA evaluator for workflow drafts.
 Score the workflow on a scale of 0-10 based on:
 - Completeness: nodes and connections cover the user's intent (required parameters are enforced separately by graph validation, so do not penalize optional parameters left as "" for values the user did not specify)
@@ -55,7 +76,7 @@ class QAEvaluatorService:
         # 의도-노드 게이트: 요청 채널/액션에 대응 노드가 빠졌으면(missing_capabilities) 점수와
         # 무관하게 fail — LLM이 만점 주면서 "노드 추가하라"는 자기모순(#378) 차단. missing은
         # feedback에 합쳐 retry 루프(→ drafter retry_feedback)가 교정하게 한다.
-        missing = list(getattr(result, "missing_capabilities", []) or [])
+        missing = _real_missing_capabilities(list(getattr(result, "missing_capabilities", []) or []))
         feedback = result.feedback
         if missing:
             gap = "누락된 필수 노드/채널: " + ", ".join(missing)

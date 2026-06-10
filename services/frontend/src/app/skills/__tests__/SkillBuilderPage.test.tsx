@@ -17,12 +17,14 @@ jest.mock('next/navigation', () => ({
 }));
 
 const mockStreamExtract = jest.fn();
+const mockExtractDetail = jest.fn();
 const mockCreatePersonal = jest.fn();
 const mockListTemplates = jest.fn();
 const mockSelfPublish = jest.fn();
 const mockGetPersonal = jest.fn();
 jest.mock('../../../lib/api/skillApi', () => ({
   streamExtractSkill: (...args: unknown[]) => mockStreamExtract(...args),
+  extractSkillDetail: (...args: unknown[]) => mockExtractDetail(...args),
   createPersonalSkill: (...args: unknown[]) => mockCreatePersonal(...args),
   listSkillTemplates: (...args: unknown[]) => mockListTemplates(...args),
   selfPublishPersonalSkill: (...args: unknown[]) => mockSelfPublish(...args),
@@ -53,6 +55,7 @@ const DOC = {
 
 beforeEach(() => {
   mockStreamExtract.mockReset();
+  mockExtractDetail.mockReset();
   mockCreatePersonal.mockReset();
   mockListTemplates.mockReset();
   mockListDocuments.mockReset();
@@ -62,6 +65,8 @@ beforeEach(() => {
   mockListDocuments.mockResolvedValue([]);
   mockListTemplates.mockResolvedValue([]);
   mockSelfPublish.mockResolvedValue(undefined);
+  // 메타 선택 시 2차 detail 호출 — 기본은 instructions/staging 채움(#353 2단계). 테스트가 덮어쓸 수 있다.
+  mockExtractDetail.mockResolvedValue({ node_type: 'a', instructions: '## A', staging: STAGING });
   window.history.pushState({}, '', '/skills/builder');
 });
 
@@ -80,8 +85,8 @@ test('첫 화면에 문서 有無 분기가 노출된다', async () => {
 
 test('핸드오프 진입 시 첫 화면을 건너뛰고 자동 추출 + 단일 prefill', async () => {
   mockStreamExtract.mockImplementation(async (_material: unknown, onFrame: (f: Record<string, unknown>) => void) => {
-    onFrame({ frame_type: 'result', payload: { skills: [
-      { node_type: 'send_report', name: '주간 리포트 발송', description: '리포트 발송', instructions: '## When' },
+    onFrame({ frame_type: 'result', payload: { skill_metas: [
+      { node_type: 'send_report', name: '주간 리포트 발송', description: '리포트 발송', category: 'action', risk_level: 'Low' },
     ] } });
   });
   window.history.pushState({}, '', '/skills/builder?source_document_id=doc-1');
@@ -99,8 +104,8 @@ test('핸드오프 진입 시 첫 화면을 건너뛰고 자동 추출 + 단일 
 test('문서 분기: 문서 선택 → source_document_id로 추출', async () => {
   mockListDocuments.mockResolvedValue([DOC]);
   mockStreamExtract.mockImplementation(async (_material: unknown, onFrame: (f: Record<string, unknown>) => void) => {
-    onFrame({ frame_type: 'result', payload: { skills: [
-      { node_type: 'a', name: '스킬 A', description: 'A 설명', instructions: '## A' },
+    onFrame({ frame_type: 'result', payload: { skill_metas: [
+      { node_type: 'a', name: '스킬 A', description: 'A 설명', category: 'action', risk_level: 'Low' },
     ] } });
   });
   const user = userEvent.setup();
@@ -124,8 +129,8 @@ test('템플릿 분기: 직접 만들기 → 카드 선택 → template_code로 
     { code: 'marketing', name: '마케팅', description: '캠페인·리드', kind: 'functional' },
   ]);
   mockStreamExtract.mockImplementation(async (_material: unknown, onFrame: (f: Record<string, unknown>) => void) => {
-    onFrame({ frame_type: 'result', payload: { skills: [
-      { node_type: 'x', name: '스킬 X', description: 'X 설명', instructions: '## X' },
+    onFrame({ frame_type: 'result', payload: { skill_metas: [
+      { node_type: 'x', name: '스킬 X', description: 'X 설명', category: 'action', risk_level: 'Low' },
     ] } });
   });
   const user = userEvent.setup();
@@ -158,8 +163,9 @@ const STAGING = {
 };
 
 function _draftFrame(onFrame: (f: Record<string, unknown>) => void) {
-  onFrame({ frame_type: 'result', payload: { skills: [
-    { node_type: 'a', name: '스킬 A', description: 'A 설명', instructions: '## A', staging: STAGING },
+  // 1차는 메타 5필드만 — instructions/staging은 선택 후 2차 extractSkillDetail(mock)이 채운다(#353).
+  onFrame({ frame_type: 'result', payload: { skill_metas: [
+    { node_type: 'a', name: '스킬 A', description: 'A 설명', category: 'integration', risk_level: 'Medium' },
   ] } });
 }
 
@@ -203,4 +209,36 @@ test('초안 저장: create만 호출, self-publish 미실행 / 템플릿갈래�
   expect((mockCreatePersonal.mock.calls[0][0] as Record<string, unknown>).source_document_id).toBeUndefined();
   // 초안 저장은 self-publish 안 함
   expect(mockSelfPublish).not.toHaveBeenCalled();
+});
+
+test('다건 메타: payload.skill_metas로 카드 노출 → 선택 시 extractSkillDetail로 detail 채움 (#353 계약)', async () => {
+  // #353 회귀 가드: 백엔드가 1차에 payload.skill_metas(메타 목록)를 보내고, 사용자가 1건
+  // 선택하면 2차 extractSkillDetail로 instructions/staging을 채운다. 과거엔 프론트가 payload.skills를
+  // 읽어 항상 빈 목록이 됐다(추출 초안이 안 떴다). 다건이라 자동선택 없이 카드 클릭 경로를 검증한다.
+  mockStreamExtract.mockImplementation(async (_m: unknown, onFrame: (f: Record<string, unknown>) => void) => {
+    onFrame({ frame_type: 'result', payload: { skill_metas: [
+      { node_type: 'a', name: '스킬 A', description: 'A 설명', category: 'action', risk_level: 'Low' },
+      { node_type: 'b', name: '스킬 B', description: 'B 설명', category: 'integration', risk_level: 'Medium' },
+    ] } });
+  });
+  mockExtractDetail.mockResolvedValue({ node_type: 'b', instructions: '## B 지침', staging: STAGING });
+  const user = userEvent.setup();
+
+  window.history.pushState({}, '', '/skills/builder?source_document_id=doc-9');
+  render(<SkillBuilderPage />);
+
+  // 다건이므로 자동 prefill 없음 — 두 카드가 모두 떠야 한다(skill_metas를 읽었다는 증거).
+  await waitFor(() => expect(screen.getByText('2개의 초안이 추출됐습니다. 하나를 선택하면 아래 폼에 채워집니다.')).toBeInTheDocument());
+  expect(screen.getByText('스킬 A')).toBeInTheDocument();
+  expect(screen.getByText('스킬 B')).toBeInTheDocument();
+  expect(mockExtractDetail).not.toHaveBeenCalled();
+
+  // 스킬 B 카드 선택 → 2차 detail 호출(material + 선택 meta) → instructions 폼 채움.
+  await user.click(screen.getByText('스킬 B'));
+  await waitFor(() => expect(mockExtractDetail).toHaveBeenCalledWith(
+    { source_document_id: 'doc-9' },
+    expect.objectContaining({ node_type: 'b', name: '스킬 B' }),
+  ));
+  await waitFor(() => expect(screen.getByPlaceholderText(/주간 리포트 자동화/)).toHaveValue('스킬 B'));
+  await waitFor(() => expect(screen.getByDisplayValue('## B 지침')).toBeInTheDocument());
 });

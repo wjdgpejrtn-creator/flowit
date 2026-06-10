@@ -43,6 +43,7 @@ class SkillOption(BaseModel):
     description: str
     document_preview: Optional[str] = None    # SkillDocument.instructions 앞부분(선택)
     node_definition_id: Optional[UUID] = None  # 노드형 스킬 호환(지침서형은 None)
+    is_personal: bool = False                  # 본인 소유 개인 스킬 — 프론트 "⭐ 자주 사용" 배지 (REQ-013 개인화 추천)
 
 
 class SkillSelectionFrame(SSEFrame):
