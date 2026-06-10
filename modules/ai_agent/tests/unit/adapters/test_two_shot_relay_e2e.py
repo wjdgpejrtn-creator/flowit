@@ -94,8 +94,11 @@ def _node_config(node_id, category, name) -> NodeConfig:
     )
 
 
-def _build_composer(store, ai_node_id, skill_id):
-    """round 1 검색→옵션, round 2 resume→draft(ai 노드)→bind 가능한 composer."""
+def _build_composer(store, ai_node_id, skill_id, intent=IntentType.DRAFT):
+    """round 1 검색→옵션, round 2 resume→draft(ai 노드)→bind 가능한 composer.
+
+    intent를 REFINE으로 주면 composer intent_node가 편집으로 분류 → suggest_skill_select
+    게이트가 작동하는지(스킬 제안 우회) 검증할 수 있다(#369 후속)."""
     from nodes_graph.domain.services.graph_validator import GraphValidator
 
     trigger_id = uuid4()
@@ -138,10 +141,11 @@ def _build_composer(store, ai_node_id, skill_id):
     repo = AsyncMock(spec=WorkflowRepository)
     repo.save = AsyncMock(return_value=uuid4())
 
-    # composer 내부 intent_node도 DRAFT로 분류해야 search_nodes→suggest_skill_select 도달
+    # composer 내부 intent_node 분류 — DRAFT면 search_nodes→suggest_skill_select 도달,
+    # REFINE이면 suggest_skill_select 게이트가 우회시켜 바로 draft로 가야 한다(#369).
     composer_intent = AsyncMock(spec=IntentAnalyzerService)
     composer_intent.analyze = AsyncMock(
-        return_value=IntentResult(intent=IntentType.DRAFT, confidence=0.9, analyzed_entities={})
+        return_value=IntentResult(intent=intent, confidence=0.9, analyzed_entities={})
     )
 
     composer = LangGraphOrchestrator(
@@ -214,6 +218,35 @@ class TestTwoShotRelayE2E:
         ai_nodes = [n for n in saved.nodes if n.node_id == ai_node_id]
         assert ai_nodes and ai_nodes[0].skill_id == skill_id
         # 2차 성공 종료 → 상태 정리됨
+        assert str(session_id) not in store.blobs
+
+    @pytest.mark.asyncio
+    async def test_refine_skips_skill_selection_and_drafts_in_one_round(self):
+        """#369: refine(편집)은 two-shot 스킬 제안을 우회하고 한 라운드에 바로 draft한다.
+
+        실제 composer 그래프를 supervisor relay로 전 구간 구동(외부만 페이크) — 재배포 없이
+        '수정 발화가 스킬 카드로 끊겨 새 생성처럼 보이던' 회귀를 코드로 고정한다.
+        """
+        store = _MemComposerStateStore()
+        ai_node_id, skill_id = uuid4(), uuid4()
+        composer, repo = _build_composer(store, ai_node_id, skill_id, intent=IntentType.REFINE)
+        supervisor = _build_supervisor(composer)
+        user_id, session_id = uuid4(), uuid4()
+
+        frames = [
+            f async for f in await supervisor.stream(
+                user_id, session_id, "이거 slack 말고 gmail로 보내는 것으로 수정해줘"
+            )
+        ]
+
+        # 게이트 작동: 스킬 선택 카드가 뜨지 않아야 한다(편집은 스킬 제안 대상 아님).
+        assert not [f for f in frames if isinstance(f, SkillSelectionFrame)], (
+            "refine은 SkillSelectionFrame을 띄우면 안 됨 — 새 생성처럼 끊기던 버그"
+        )
+        # 같은 라운드에서 곧장 draft까지 진행(중단 없음).
+        assert [f for f in frames if isinstance(f, WorkflowDraftFrame)], "refine은 한 라운드에 draft돼야 함"
+        assert [f for f in frames if isinstance(f, ResultFrame)]
+        # round 2 재료를 영속하지 않았다(중단 없이 완주).
         assert str(session_id) not in store.blobs
 
     @pytest.mark.asyncio

@@ -160,6 +160,25 @@ class TestSuggestSkillSelect:
         assert set(saved_blob["offered_skill_ids"]) == {str(s) for s in offered}
 
     @pytest.mark.asyncio
+    async def test_refine_skips_skill_suggestion_without_search(self):
+        # #369 후속: refine(기존 워크플로우 편집)은 two-shot 스킬 제안을 타면 안 된다.
+        # "url/채널 수정해줘" 같은 편집 발화가 스킬 카드로 끊겨 새 생성처럼 보이던 버그 차단 —
+        # intent=refine이면 검색조차 하지 않고 바로 draft로 진행(awaiting_skill_selection=False).
+        embedder = AsyncMock()
+        embedder.embed = AsyncMock(return_value=[0.1] * 768)
+        skill_search = AsyncMock()
+        skill_search.execute_accessible = AsyncMock(return_value=[_skill(name="요약가")])
+        store = AsyncMock()
+
+        oc = _build_orchestrator(embedder=embedder, skill_search=skill_search, composer_state_store=store)
+        result = await oc._suggest_skill_select_node(_state(intent="refine"))
+
+        assert result == {"awaiting_skill_selection": False}
+        # 스킬 검색·상태 영속 자체가 호출되지 않아야 한다(편집 흐름 보존).
+        skill_search.execute_accessible.assert_not_called()
+        store.save_state.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_fallback_when_skill_search_not_injected(self):
         oc = _build_orchestrator(embedder=None, skill_search=None, composer_state_store=AsyncMock())
         result = await oc._suggest_skill_select_node(_state())
