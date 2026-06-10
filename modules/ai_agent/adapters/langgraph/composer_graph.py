@@ -1016,16 +1016,21 @@ class LangGraphOrchestrator:
             return {"awaiting_skill_selection": False}
 
         options: list[SkillOption] = []
+        # owner_user_id는 개인 스킬 엔티티(MarketplacePersonalSkill)에만 존재 — 본인 소유면
+        # 프론트에 "⭐ 자주 사용" 배지로 개인화 추천을 강조한다(REQ-013, execute_accessible personal 병합).
+        user_id_str = str(state["user_id"])
         for skill in skill_results:
             skill_id = getattr(skill, "skill_id", None)
             if skill_id is None:  # 지침서형/노드형 무관 — skill_id만 있으면 선택지로 노출(필터 제거)
                 continue
+            owner = getattr(skill, "owner_user_id", None)
             options.append(
                 SkillOption(
                     skill_id=skill_id,
                     name=getattr(skill, "name", ""),
                     description=getattr(skill, "description", ""),
                     node_definition_id=getattr(skill, "node_definition_id", None),
+                    is_personal=owner is not None and str(owner) == user_id_str,
                 )
             )
 
