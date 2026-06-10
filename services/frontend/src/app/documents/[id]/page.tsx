@@ -67,6 +67,8 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
   // 폴링 lifecycle 관리 — 컴포넌트 언마운트 / 새 분석 dispatch 시 기존 타이머 정리.
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartRef = useRef<number>(0);
+  // ?analyze=1 자동 분석은 마운트당 1회만 — router.replace 후 effect 재실행 시 이중 dispatch 방지.
+  const autoAnalyzeFiredRef = useRef(false);
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -127,13 +129,17 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
           await fetchBlocksOnce(id);
         } else if (fresh.analysis_status === AnalysisStatus.RUNNING) {
           startPolling();
-        } else if (autoAnalyze) {
+        } else if (autoAnalyze && !autoAnalyzeFiredRef.current) {
           // 목록 "분석하기"로 진입(?analyze=1) — 위에서 COMPLETED/RUNNING은 걸러졌으므로
           // 여기는 미분석/실패 상태. 분석을 자동 dispatch하고 폴링 시작(handleAnalyze와 동일).
+          // ref 가드로 마운트당 1회만 실행(리뷰 LOW#1: 이론적 이중 dispatch 윈도우 차단).
+          autoAnalyzeFiredRef.current = true;
           try {
             await analyzeDocument(id);
             setDoc((prev) => prev ? { ...prev, analysis_status: AnalysisStatus.RUNNING, is_analyzed: false } : prev);
             startPolling();
+            // 분석 신호 소비 후 쿼리 제거 — 새로고침 시 의도치 않은 재분석 방지(리뷰 LOW#1).
+            router.replace(`/documents/${id}`);
           } catch (e) {
             setError(e instanceof Error ? e.message : '분석 요청 실패');
           }
@@ -143,7 +149,7 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
       .finally(() => setLoading(false));
 
     return () => stopPolling();
-  }, [id, autoAnalyze, fetchBlocksOnce, startPolling, stopPolling]);
+  }, [id, autoAnalyze, router, fetchBlocksOnce, startPolling, stopPolling]);
 
   const handleAnalyze = async () => {
     if (!doc) return;

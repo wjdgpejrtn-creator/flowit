@@ -14,7 +14,7 @@ from nodes_graph.application.catalog_registry import get_all_node_definitions
 from nodes_graph.domain.services.graph_validator import GraphValidator
 
 from ai_agent.domain.services.skeleton_assembler import SkeletonAssembler, to_workflow_schema
-from ai_agent.domain.value_objects.skeleton import SlotRole
+from ai_agent.domain.value_objects.skeleton import ResolvedSlots, SlotRole
 
 _A = SkeletonAssembler()
 
@@ -314,6 +314,48 @@ def test_real_pipeline_with_sink_still_assembles() -> None:
     assert "google_sheets_read" in types and "email_send" in types
 
 
+# ── 앙상블 resolved_slots 주입 (ADR-0026 §6.6 Phase 2) ───────────────────────
+def test_assemble_uses_resolved_slots_over_lexical_source() -> None:
+    # 이슈 직격: "gmail에서 …" source 렉시컬 미인식 → 앙상블이 gmail_read로 확정해 주입하면
+    # google_sheets_read 오선택 없이 gmail_read source로 풀체인 조립.
+    resolved = ResolvedSlots(by_role={
+        SlotRole.SOURCE: ("gmail_read",),
+        SlotRole.SINK: ("pdf_generate", "gmail_send"),
+    })
+    d = _A.assemble(
+        "내 gmail에서 매주 결제 내역 모아서 보고서 작성을 pdf로 해서 gmail로 보내줘",
+        resolved_slots=resolved,
+    )
+    assert d is not None
+    assert d.skeleton_name == "scheduled_pipeline"
+    types = _node_types(d)
+    assert "gmail_read" in types and "google_sheets_read" not in types
+    assert types[0] == "schedule_trigger"
+    assert "anthropic_chat" in types and "gmail_send" in types and "pdf_generate" in types
+
+
+def test_resolved_slots_none_preserves_lexical_behavior() -> None:
+    # resolved_slots 미주입(=None) → 순수 렉시컬(기존 동작 보존, 회귀 0).
+    u = "매주 광고 시트 읽어서 요약해서 슬랙으로 보내줘"
+    assert _node_types(_A.assemble(u)) == _node_types(_A.assemble(u, resolved_slots=None))
+
+
+def test_resolved_abstain_falls_back_to_lexical() -> None:
+    # 앙상블이 전 역할 기권(빈 ResolvedSlots)이면 렉시컬 유지 — 의미픽 없을 때 폴백.
+    d = _A.assemble("매주 광고 시트 읽어서 슬랙으로 보내줘", resolved_slots=ResolvedSlots(by_role={}))
+    assert d is not None
+    assert "google_sheets_read" in _node_types(d)
+
+
+def test_resolved_only_overrides_its_roles_not_transform() -> None:
+    # SOURCE만 앙상블 픽 주입 → source는 대체되나 transform/sink는 렉시컬 유지.
+    resolved = ResolvedSlots(by_role={SlotRole.SOURCE: ("gmail_read",)})
+    d = _A.assemble("매주 시트 읽어서 요약해서 슬랙으로 보내줘", resolved_slots=resolved)
+    types = _node_types(d)
+    assert "gmail_read" in types and "google_sheets_read" not in types
+    assert "anthropic_chat" in types and "slack_post_message" in types
+
+
 def test_multiple_sinks_fan_out_in_parallel() -> None:
     # 복수 sink는 직렬(sink→sink)이 아니라 마지막 처리 노드에서 병렬 분기.
     d = _A.assemble("매주 시트 읽어서 요약해서 슬랙이랑 이메일 둘 다 보내줘")
@@ -326,6 +368,64 @@ def test_multiple_sinks_fan_out_in_parallel() -> None:
         assert any(e.from_ref == transform.ref and e.to_ref == s.ref for e in d.edges)
     sink_refs = {s.ref for s in sinks}
     assert not any(e.from_ref in sink_refs and e.to_ref in sink_refs for e in d.edges)
+
+
+# ── 의미검색 후보 그라운딩 (#453, ADR-0026 §6.6) ─────────────────────────────
+# 렉시컬이 비운 source/sink 슬롯을 retriever 후보(BGE-M3 의미매칭, rank 순)로 채운다 —
+# 어휘 갭(스펠링 변형·신규 표현)을 손 사전 대신 의미검색 결과로 닫는다.
+def test_saream2_full_chain_with_calc_keyword() -> None:
+    # #453 블로커 직격: "전주 대비 증감 계산 → 정산 구글독스" 4노드 풀체인. "계산"이 transform
+    # (AI)을 켜고, transform 종단에 default 문서 sink가 붙어 schedule→sheets→ai→docs 완성.
+    d = _A.assemble(
+        "매주 월요일 아침에 구글 '주간매출' 시트 읽어서 전주 대비 증감 계산해서 정산 구글독스로 써줘"
+    )
+    assert d is not None
+    assert d.skeleton_name == "scheduled_pipeline"
+    assert _node_types(d) == [
+        "schedule_trigger", "google_sheets_read", "anthropic_chat", "google_docs_write",
+    ]
+
+
+def test_candidate_grounding_fills_lexically_missed_sink() -> None:
+    # transform 없음(default-docs-sink 마스킹 배제) + sink "구글독스" 렉시컬 미매칭 →
+    # 그라운딩 없으면 2노드(토막), 후보에 google_docs_write 있으면 3노드로 채움.
+    intent = "매주 시트 데이터를 구글독스로 옮겨줘"
+    assert _node_types(_A.assemble(intent)) == ["schedule_trigger", "google_sheets_read"]
+    grounded = _A.assemble(
+        intent, candidate_node_types=["google_sheets_read", "google_docs_write", "anthropic_chat"]
+    )
+    assert _node_types(grounded) == [
+        "schedule_trigger", "google_sheets_read", "google_docs_write",
+    ]
+
+
+def test_grounding_does_not_override_lexical_sink() -> None:
+    # 렉시컬이 이미 sink("슬랙")를 채우면 후보에 다른 sink가 있어도 안 건드린다(정밀 보존·over-add 0).
+    d = _A.assemble(
+        "매주 시트 읽어서 요약해서 슬랙으로 보내줘",
+        candidate_node_types=["google_sheets_read", "google_docs_write", "email_send", "anthropic_chat"],
+    )
+    assert _node_types(d) == [
+        "schedule_trigger", "google_sheets_read", "anthropic_chat", "slack_post_message",
+    ]
+
+
+def test_grounding_excludes_transform_slot() -> None:
+    # transform 후보(anthropic_chat)는 retriever가 항상 후보에 넣어(#418) 비변별적 → 그라운딩
+    # 제외. transform 의도어("계산/요약") 없는 발화엔 후보에 anthropic_chat이 있어도 AI 노드를
+    # 끼우지 않는다(over-add 방지).
+    d = _A.assemble(
+        "매주 시트 데이터를 구글독스로 옮겨줘",
+        candidate_node_types=["google_sheets_read", "google_docs_write", "anthropic_chat", "gemma_chat"],
+    )
+    assert "anthropic_chat" not in _node_types(d) and "gemma_chat" not in _node_types(d)
+
+
+def test_grounding_absent_preserves_legacy_behavior() -> None:
+    # candidate_node_types 미전달(=None) → 순수 렉시컬(기존 동작). 기존 호출처·테스트 호환.
+    base = _A.assemble("매주 광고 시트 읽어서 요약해서 슬랙으로 보내줘")
+    with_none = _A.assemble("매주 광고 시트 읽어서 요약해서 슬랙으로 보내줘", candidate_node_types=None)
+    assert _node_types(base) == _node_types(with_none)
 
 
 # ── 변환기 ─────────────────────────────────────────────────────────────────
@@ -344,6 +444,8 @@ def test_to_workflow_schema_maps_node_ids_and_edges() -> None:
 # ── 엔진 계약 파리티 ────────────────────────────────────────────────────────
 _PARITY_UTTERANCES = [
     "매주 월요일에 광고 시트 읽어서 요약해서 슬랙으로 보내줘",
+    "매주 월요일 아침에 구글 '주간매출' 시트 읽어서 전주 대비 증감 계산해서 정산 구글독스로 써줘",  # #453
+
     "웹훅 들어오면 내용 분석해서 이메일로 보내줘",
     "보고서 초안 생성하고 품질 기준 통과할 때까지 재생성한 다음 구글 docs에 저장",
     "매주 보고서 생성하고 기준 충족할 때까지 검증해서 슬랙 알림",

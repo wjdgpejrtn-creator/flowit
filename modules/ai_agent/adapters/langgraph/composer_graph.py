@@ -70,7 +70,9 @@ from ...domain.services.drafter_service import DrafterService
 from ...domain.services.intent_analyzer_service import IntentAnalyzerService
 from ...domain.services.qa_evaluator_service import QAEvaluatorService
 from ...domain.services.skeleton_assembler import SkeletonAssembler
+from ...domain.services.slot_ensemble import EnsembleSlotResolver
 from ...domain.services.slot_filling_service import SlotFillingService
+from ...domain.services.slot_voters import LexicalVoter, OntologyVoter, SemanticVoter
 from ...domain.services.workflow_explanation_service import WorkflowExplanationService
 from ...domain.services.workflow_layout_service import WorkflowLayoutService
 from ...domain.value_objects.turn_limit import TurnLimit
@@ -149,6 +151,9 @@ class _State(TypedDict):
     intent_analyzed_entities: dict[str, Any]
     draft_spec: DraftSpec | None
     node_candidates: list[NodeConfig]
+    # 온톨로지 CAN_FOLLOW 서브그래프 허용 node_type — retriever→drafter 전달(같은 라운드 transient,
+    # 앙상블 OntologyVoter 입력). resume 시 부재면 빈 리스트로 graceful degrade.
+    ontology_allowed: list[str]
     workflow_draft: WorkflowSchema | None
     qa_attempts: int
     qa_score: float
@@ -222,12 +227,19 @@ class LangGraphOrchestrator:
         ontology_retriever: OntologyRetrieverPort | None = None,
         skill_doc_store: SkillDocumentStore | None = None,
         skeleton_assembler: SkeletonAssembler | None = None,
+        slot_resolver: EnsembleSlotResolver | None = None,
     ) -> None:
         self._intent_analyzer = intent_analyzer
         self._drafter = drafter
         # ADR-0026 §6.6 결정적 스켈레톤 — 순수(무의존)라 미주입 시 기본 생성. assemble None이면
         # 일반 LLM draft로 폴백하므로 항상 안전(소비처 _drafter_node).
         self._skeleton_assembler = skeleton_assembler or SkeletonAssembler()
+        # ADR-0026 §6.6 Phase 2 앙상블 슬롯 채움 — 미주입 시 싼 voter 3종(lexical+semantic+ontology)
+        # 으로 기본 생성. LLM voter(SlotMapperPort)는 composition root에서 주입(미주입=graceful
+        # degrade). resolve 실패/픽 없음이면 assemble이 lexical/grounding으로 폴백하므로 항상 안전.
+        self._slot_resolver = slot_resolver or EnsembleSlotResolver(
+            [LexicalVoter(), SemanticVoter(), OntologyVoter()]
+        )
         self._qa_evaluator = qa_evaluator
         self._slot_filler = slot_filler
         self._node_registry = node_registry
@@ -306,6 +318,7 @@ class LangGraphOrchestrator:
             "intent_analyzed_entities": {},
             "draft_spec": None,
             "node_candidates": [],
+            "ontology_allowed": [],
             "workflow_draft": None,
             "qa_attempts": 0,
             "qa_score": 0.0,
@@ -790,7 +803,7 @@ class LangGraphOrchestrator:
 
     async def _expand_can_follow(
         self, seed_candidates: list[NodeConfig], existing_pool: list[NodeConfig]
-    ) -> list[NodeConfig]:
+    ) -> tuple[list[NodeConfig], list[str]]:
         """검색 상위 hit의 CAN_FOLLOW 후행 노드를 회수해 NodeConfig로 ADD 보강 (§4.2a).
 
         **풀 비대 가드(평가 하니스 실측 회귀 대응)**: seed는 검색 상위 ``_EXPAND_SEED_LIMIT``
@@ -798,18 +811,20 @@ class LangGraphOrchestrator:
         ``_EXPAND_ADD_LIMIT``개로 cap한다. ADD-all은 후보 풀을 부풀려 작은 LLM 드래프터의
         structured JSON을 잘리게 해 품질을 떨어뜨렸다.
 
-        반환값은 호출부 ``_dedup_union``으로 합쳐진다. 온톨로지 미주입/실패/미투영은 전부 빈
-        리스트로 비치명적 degrade(검색 후보만으로 진행).
+        반환: ``(보강 후보, 서브그래프 허용 node_type)``. 첫 값은 호출부 ``_dedup_union``으로
+        합쳐지고, 둘째 값은 앙상블 OntologyVoter 입력으로 state에 실린다(seed+1-hop 허용집합).
+        온톨로지 미주입/실패/미투영은 전부 ``([], [])``로 비치명적 degrade(검색 후보만으로 진행).
         """
         if self._ontology_retriever is None or not seed_candidates:
-            return []
+            return [], []
         grounder = getattr(self._node_registry, "list_by_node_types", None)
         if grounder is None:  # 구버전 NodeRegistry — 그라운딩 불가
-            return []
+            return [], []
         seeds = [c.node_type for c in seed_candidates[:_EXPAND_SEED_LIMIT]]
         existing = {c.node_type for c in existing_pool}
         try:
             subgraph = await self._ontology_retriever.expand_candidates(seeds)
+            allowed = sorted(subgraph.allowed_node_types())
             # seed 관련도 순서를 보존(상위 hit의 후행 우선)하며 신규 후행만 cap까지 모은다.
             picked: list[str] = []
             seen: set[str] = set()
@@ -824,12 +839,12 @@ class LangGraphOrchestrator:
                 if len(picked) >= _EXPAND_ADD_LIMIT:
                     break
             if not picked:
-                return []
+                return [], allowed
             grounded = await grounder(picked)
-            return list(grounded) if grounded else []
+            return (list(grounded) if grounded else []), allowed
         except Exception as exc:
             _logger.warning("CAN_FOLLOW 확장 실패 (후보 보강 생략): %s", exc)
-            return []
+            return [], []
 
     # 6. retriever_node — 노드 후보 검색 + 구조 노드 합산 + 개인 패턴 RAG 회수
     async def _retriever_node(self, state: _State) -> dict:
@@ -873,9 +888,8 @@ class LangGraphOrchestrator:
         # csv_build, file_read 뒤 json_extract)를 쓸 수 있게 해 누락을 줄인다. seed는 raw_candidates
         # (검색 hit)만 — 구조/개인 노드의 후행은 노이즈라 제외. cap으로 풀 비대 억제(위 상수).
         # ADD 전용(subtract 금지) — ETL stale 시에도 유효 후보를 지우지 않는다. 비치명적.
-        candidates = self._dedup_union(
-            candidates, await self._expand_can_follow(raw_candidates, candidates)
-        )
+        expanded, ontology_allowed = await self._expand_can_follow(raw_candidates, candidates)
+        candidates = self._dedup_union(candidates, expanded)
 
         # 스킬은 더 이상 노드 후보로 합산하지 않는다 (#372 결함 B — 스킬 이중 정체성 해소).
         # 스킬은 "실행 노드"가 아니라 "LLM 노드에 주입되는 지침서"(모델 A)다. 검색·제시는
@@ -902,6 +916,7 @@ class LangGraphOrchestrator:
         )
         return {
             "node_candidates": candidates,
+            "ontology_allowed": ontology_allowed,
             "personal_patterns": personal_patterns,
             "pattern_templates": pattern_templates,
             "collected_frames": frames,
@@ -1201,8 +1216,27 @@ class LangGraphOrchestrator:
         # assemble None(확신 없음/미지원 shape/잡담)이면 일반 LLM draft로 폴백(drafter가 처리).
         skeleton_scaffold = None
         if prior_workflow is None and not skill_selected:
+            # ADR-0026 §6.6 Phase 2: SOURCE/SINK 노드 선택을 다중신호 앙상블(lexical+semantic+
+            # ontology[+LLM])로 의미화 — 렉시컬 손사전이 못 따라잡는 발화 어휘 변형("gmail에서…")에
+            # 강건. resolve 실패/픽 없음이면 assemble이 lexical/grounding으로 폴백(비치명적).
+            ranked = tuple(c.node_type for c in candidates)
+            resolved = None
             try:
-                skeleton_scaffold = self._skeleton_assembler.assemble(spec.natural_language_intent)
+                resolved = await self._slot_resolver.resolve(
+                    spec.natural_language_intent,
+                    ranked_candidates=ranked,
+                    ontology_allowed=frozenset(state.get("ontology_allowed") or ()),
+                )
+            except Exception as exc:
+                _logger.warning("앙상블 슬롯 채움 실패 (렉시컬로 진행): %s", exc)
+            try:
+                # 앙상블 픽을 우선 주입(resolved_slots). candidate_node_types는 앙상블 미해소
+                # source/sink의 레거시 그라운딩 폴백(#453). candidates는 BGE rank 프리픽스 보존.
+                skeleton_scaffold = self._skeleton_assembler.assemble(
+                    spec.natural_language_intent,
+                    candidate_node_types=list(ranked),
+                    resolved_slots=resolved,
+                )
             except Exception as exc:
                 _logger.warning("스켈레톤 조립 실패 (LLM draft로 진행): %s", exc)
                 skeleton_scaffold = None
