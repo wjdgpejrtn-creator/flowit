@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import AppBar from '@/components/common/AppBar';
 import Btn from '@/components/common/Btn';
 import ErrorBanner from '@/components/common/ErrorBanner';
@@ -52,6 +52,8 @@ function StatusBadge({ status }: { status: AnalysisStatus }) {
 export default function DocumentDetailPage({ params }: { params: { id: string } }) {
   const { id } = params;
   const router = useRouter();
+  // 목록의 "분석하기"로 진입하면 ?analyze=1 — 도착 즉시 분석을 자동 시작한다(아직 미분석일 때만).
+  const autoAnalyze = useSearchParams().get('analyze') === '1';
 
   const [doc, setDoc] = useState<DocumentResponse | null>(null);
   const [blocks, setBlocks] = useState<ContentBlock[]>([]);
@@ -125,13 +127,23 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
           await fetchBlocksOnce(id);
         } else if (fresh.analysis_status === AnalysisStatus.RUNNING) {
           startPolling();
+        } else if (autoAnalyze) {
+          // 목록 "분석하기"로 진입(?analyze=1) — 위에서 COMPLETED/RUNNING은 걸러졌으므로
+          // 여기는 미분석/실패 상태. 분석을 자동 dispatch하고 폴링 시작(handleAnalyze와 동일).
+          try {
+            await analyzeDocument(id);
+            setDoc((prev) => prev ? { ...prev, analysis_status: AnalysisStatus.RUNNING, is_analyzed: false } : prev);
+            startPolling();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : '분석 요청 실패');
+          }
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : '문서 조회 실패'))
       .finally(() => setLoading(false));
 
     return () => stopPolling();
-  }, [id, fetchBlocksOnce, startPolling, stopPolling]);
+  }, [id, autoAnalyze, fetchBlocksOnce, startPolling, stopPolling]);
 
   const handleAnalyze = async () => {
     if (!doc) return;

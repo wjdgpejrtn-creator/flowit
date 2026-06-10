@@ -200,7 +200,9 @@ export default function DocumentsPage() {
   };
 
   const handleOpen = (id: string) => router.push(`/documents/${id}`);
-  const handleAnalyze = () => showToast('문서 분석을 시작합니다.');
+  // 목록의 "분석하기" — 상세페이지로 이동해 거기서 분석을 시작한다(?analyze=1).
+  // 상세페이지가 분석 진행/결과(blocks·coverage·폴링) UI를 이미 갖추고 있어 진입점만 담당.
+  const handleAnalyze = (id: string) => router.push(`/documents/${id}?analyze=1`);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
