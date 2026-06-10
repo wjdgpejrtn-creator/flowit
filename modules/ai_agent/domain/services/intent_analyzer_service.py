@@ -5,7 +5,6 @@ from typing import Any
 
 from common_schemas import IntentResult
 from common_schemas.enums import IntentType
-from pydantic import BaseModel, Field
 
 from ..ports.llm_port import LLMPort
 from ..value_objects.route_plan import RECIPE_SKILL_THEN_COMPOSE
@@ -105,50 +104,12 @@ def _fast_classify(message: str) -> IntentType | None:
     return None
 
 
-# ── LLM fallback prompt ───────────────────────────────────────────────────────
-
-_SYSTEM_PROMPT = """You are an intent classifier for a workflow automation assistant.
-Classify the user's latest message into one of these intents:
-- chitchat: greeting, thanks, casual conversation ("안녕", "고마워")
-- control: cancel, reset, stop ("취소", "초기화", "중단")
-- workflow_execute: user wants to run/execute the current workflow ("실행해줘")
-- info_question: asking about features or existing workflows ("이게 뭐야", "어떻게 써")
-- draft: user wants a NEW workflow created
-- refine: user wants to MODIFY an existing workflow draft
-- clarify: input is ambiguous, needs more information
-- propose: user accepts/approves the current proposal
-- build_skill: user wants to build a reusable skill
-
-When intent is "build_skill", include source_type in analyzed_entities:
-- "industry_default": user mentions an industry → include "industry_code"
-- "functional_domain": user mentions a department → include "domain_code"
-- "sop": user provides a SOP document text
-
-Return JSON only, no explanation:
-{"intent": "<intent>", "confidence": <0.0-1.0>, "analyzed_entities": {}}
-"""
-
-
-class _IntentLLMResponse(BaseModel):
-    """Gemma 분류 출력 (generate_structured 스키마)."""
-
-    intent: str
-    confidence: float = 0.8
-    analyzed_entities: dict[str, Any] = Field(default_factory=dict)
-
-
 # draft/refine는 **상태 의존** 의도 — 같은 발화도 세션에 확인 대기 draft가 있는지에 따라
-# 정답이 갈린다("채널 #general로 해줘" = draft無→새 생성 / draft有→수정). 정규식만으론
-# 절대 못 가르므로(#369) 이 둘로 분류되거나 미분류면 상태를 주입해 Gemma로 정밀 재분류한다.
+# 정답이 갈린다("채널 #general로 해줘" = draft無→새 생성 / draft有→수정). 정규식 표면만으론
+# 못 가르므로, 호출부가 `has_pending_draft`를 주면 **편집 잠금**(draft 존재 시 결정적 refine
+# 고정)으로 해소한다(#369). draft↔refine을 Gemma로 가르던 경로는 작은 모델 오분류로 편집이
+# 새 생성으로 새던 회귀 때문에 제거됨.
 _STATEFUL_INTENTS = frozenset({IntentType.DRAFT, IntentType.REFINE})
-
-
-def _coerce_intent(value: str) -> IntentType | None:
-    """LLM이 돌려준 문자열을 IntentType으로. 미상값은 None."""
-    try:
-        return IntentType(value.strip().lower())
-    except (ValueError, AttributeError):
-        return None
 
 
 class IntentAnalyzerService:
@@ -175,8 +136,12 @@ class IntentAnalyzerService:
         if has_draft is not None:
             # 핵심 불변식: refine은 확인 대기 draft가 있어야만 성립한다.
             if has_draft:
-                # draft 존재 → draft↔refine이 진짜 모호 → Gemma 상태 인지 분류(#369).
-                return await self._llm_classify(user_message, True, fallback=fast_intent)
+                # **편집 잠금(조장 지시 2026-06-10)**: 확인 대기 draft가 있으면 이 세션은
+                # 편집 모드다. draft/refine/미분류 발화는 전부 기존 draft 수정(refine)으로
+                # **결정적 확정** — 새 워크플로우 생성을 잠근다(새로 만들려면 "새 대화"로 세션 초기화).
+                # Gemma 상태 분류 제거: 작은 모델 오분류로 편집이 새 생성으로 새던 회귀
+                # (#369 — 4노드가 2노드로 재생성)를 원천 차단 + 핫패스 LLM 지연 0.
+                return IntentResult(intent=IntentType.REFINE, confidence=1.0, analyzed_entities={})
             # draft 없음 → refine 불가능 → refine 오탐은 새 생성(draft)으로 교정한다.
             # create 핫패스엔 Gemma 호출을 더하지 않는다(불필요한 지연 방지).
             if fast_intent is IntentType.REFINE:
@@ -187,32 +152,3 @@ class IntentAnalyzerService:
         if fast_intent is not None:
             return IntentResult(intent=fast_intent, confidence=0.95, analyzed_entities={})
         return None
-
-    async def _llm_classify(
-        self, user_message: str, has_pending_draft: bool, fallback: IntentType | None
-    ) -> IntentResult:
-        """Gemma 상태 인지 분류 — 죽어 있던 `_SYSTEM_PROMPT`를 실제로 사용한다.
-
-        대화 상태(확인 대기 draft 존재 여부)를 프롬프트에 주입해 draft↔refine을 가른다.
-        LLM 실패/미상값은 상태 기반 안전 폴백(draft 있으면 refine).
-        """
-        safe_default = IntentType.REFINE if has_pending_draft else (fallback or IntentType.DRAFT)
-        state_hint = (
-            "현재 세션에는 사용자 확인(승인/수정)을 기다리는 워크플로우 초안이 이미 있습니다. "
-            "따라서 노드·파라미터·연결을 바꾸거나 추가/삭제하거나 특정 값을 지정하는 발화는 "
-            "기존 초안 수정이므로 'refine'입니다. 완전히 다른 새 자동화를 처음부터 요청할 때만 'draft'입니다."
-            if has_pending_draft
-            else "현재 세션에는 진행 중인 워크플로우 초안이 없습니다. 워크플로우 작성 요청은 'draft'입니다."
-        )
-        prompt = f"{_SYSTEM_PROMPT}\n[Session context]\n{state_hint}\n\n[User message]\n{user_message}"
-        try:
-            resp = await self._llm.generate_structured(prompt, _IntentLLMResponse)
-        except Exception:
-            return IntentResult(intent=safe_default, confidence=0.4, analyzed_entities={})
-
-        intent = _coerce_intent(resp.intent) or safe_default
-        return IntentResult(
-            intent=intent,
-            confidence=resp.confidence,
-            analyzed_entities=resp.analyzed_entities or {},
-        )

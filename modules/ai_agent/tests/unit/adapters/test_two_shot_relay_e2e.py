@@ -18,7 +18,7 @@ import pytest
 from common_schemas.agent import IntentResult
 from common_schemas.agent_protocol import AgentProtocolRequest, AgentProtocolResponse
 from common_schemas.enums import IntentType, RiskLevel
-from common_schemas.transport import ResultFrame, SkillSelectionFrame, WorkflowDraftFrame
+from common_schemas.transport import ErrorFrame, ResultFrame, SkillSelectionFrame, WorkflowDraftFrame
 from common_schemas.workflow import NodeConfig, NodeInstance, Position, WorkflowSchema
 
 from ai_agent.adapters.langgraph.composer_graph import LangGraphOrchestrator
@@ -94,11 +94,12 @@ def _node_config(node_id, category, name) -> NodeConfig:
     )
 
 
-def _build_composer(store, ai_node_id, skill_id, intent=IntentType.DRAFT):
+def _build_composer(store, ai_node_id, skill_id, intent=IntentType.DRAFT, draft_store=None):
     """round 1 검색→옵션, round 2 resume→draft(ai 노드)→bind 가능한 composer.
 
     intent를 REFINE으로 주면 composer intent_node가 편집으로 분류 → suggest_skill_select
-    게이트가 작동하는지(스킬 제안 우회) 검증할 수 있다(#369 후속)."""
+    게이트가 작동하는지(스킬 제안 우회) 검증할 수 있다(#369 후속).
+    draft_store(WorkflowDraftStore)를 주면 refine 경로가 prior를 로드해 편집한다(편집 잠금)."""
     from nodes_graph.domain.services.graph_validator import GraphValidator
 
     trigger_id = uuid4()
@@ -159,6 +160,7 @@ def _build_composer(store, ai_node_id, skill_id, intent=IntentType.DRAFT):
         embedder=embedder,
         skill_search=skill_search,
         composer_state_store=store,
+        workflow_draft_store=draft_store,
     )
     return composer, repo
 
@@ -221,15 +223,26 @@ class TestTwoShotRelayE2E:
         assert str(session_id) not in store.blobs
 
     @pytest.mark.asyncio
-    async def test_refine_skips_skill_selection_and_drafts_in_one_round(self):
-        """#369: refine(편집)은 two-shot 스킬 제안을 우회하고 한 라운드에 바로 draft한다.
+    async def test_refine_with_prior_skips_skill_and_edits_in_one_round(self):
+        """#369: prior가 있는 refine은 스킬 제안을 우회하고 한 라운드에 바로 편집 draft한다.
 
         실제 composer 그래프를 supervisor relay로 전 구간 구동(외부만 페이크) — 재배포 없이
         '수정 발화가 스킬 카드로 끊겨 새 생성처럼 보이던' 회귀를 코드로 고정한다.
         """
         store = _MemComposerStateStore()
         ai_node_id, skill_id = uuid4(), uuid4()
-        composer, repo = _build_composer(store, ai_node_id, skill_id, intent=IntentType.REFINE)
+        # 편집 대상 prior 워크플로우(draft store에 존재) — 편집 잠금이 이걸 로드해 수정한다.
+        prior = WorkflowSchema(
+            workflow_id=uuid4(), owner_user_id=uuid4(), name="원본", description=None,
+            scope="private", is_draft=True,
+            nodes=[NodeInstance(instance_id=uuid4(), node_id=uuid4(), parameters={}, position=Position(x=0, y=0))],
+            connections=[],
+        )
+        draft_store = AsyncMock()
+        draft_store.load_draft = AsyncMock(return_value=prior)
+        composer, _ = _build_composer(
+            store, ai_node_id, skill_id, intent=IntentType.REFINE, draft_store=draft_store
+        )
         supervisor = _build_supervisor(composer)
         user_id, session_id = uuid4(), uuid4()
 
@@ -243,11 +256,35 @@ class TestTwoShotRelayE2E:
         assert not [f for f in frames if isinstance(f, SkillSelectionFrame)], (
             "refine은 SkillSelectionFrame을 띄우면 안 됨 — 새 생성처럼 끊기던 버그"
         )
-        # 같은 라운드에서 곧장 draft까지 진행(중단 없음).
-        assert [f for f in frames if isinstance(f, WorkflowDraftFrame)], "refine은 한 라운드에 draft돼야 함"
+        # prior를 로드해 한 라운드에서 편집 draft까지 진행(중단·에러 없음).
+        assert [f for f in frames if isinstance(f, WorkflowDraftFrame)], "refine은 한 라운드에 편집 draft돼야 함"
         assert [f for f in frames if isinstance(f, ResultFrame)]
-        # round 2 재료를 영속하지 않았다(중단 없이 완주).
+        assert not [f for f in frames if isinstance(f, ErrorFrame)]
+        draft_store.load_draft.assert_awaited()  # 편집 대상 prior를 실제로 로드함
         assert str(session_id) not in store.blobs
+
+    @pytest.mark.asyncio
+    async def test_refine_without_prior_locks_no_new_workflow(self):
+        """#369 편집 잠금: refine인데 prior가 없으면 새로 만들지 않고 에러로 중단한다.
+
+        confirm 카드 세션은 편집 전용 — prior 로드 실패 시 fresh 2노드로 갈아엎던 회귀 차단.
+        """
+        store = _MemComposerStateStore()
+        draft_store = AsyncMock()
+        draft_store.load_draft = AsyncMock(return_value=None)  # prior 없음
+        composer, _ = _build_composer(
+            store, uuid4(), uuid4(), intent=IntentType.REFINE, draft_store=draft_store
+        )
+        supervisor = _build_supervisor(composer)
+        user_id, session_id = uuid4(), uuid4()
+
+        frames = [
+            f async for f in await supervisor.stream(user_id, session_id, "gmail로 바꿔줘")
+        ]
+
+        # 새 워크플로우를 만들지 않는다 — draft 프레임 없음 + 에러 안내.
+        assert not [f for f in frames if isinstance(f, WorkflowDraftFrame)], "prior 없으면 새로 만들면 안 됨"
+        assert [f for f in frames if isinstance(f, ErrorFrame)], "편집 불가 안내(ErrorFrame) 필요"
 
     @pytest.mark.asyncio
     async def test_round2_rejects_skill_not_offered(self):
