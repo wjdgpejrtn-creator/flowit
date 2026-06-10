@@ -22,6 +22,16 @@ class DocumentRepositoryPort(ABC):
     async def save_chunks(self, chunks: list[Chunk]) -> None: ...
 
     @abstractmethod
+    async def get_chunks(self, document_id: UUID) -> list[Chunk]:
+        """문서의 청킹 결과를 chunk_index 오름차순으로 조회 — SOP→스킬 추출(REQ-004 map-reduce)이 사용.
+
+        분석 워커가 `save_chunks`로 영속한 청크(`document_chunks`, 임베딩 포함)를 읽는다. 청크가
+        없으면(구 문서/미분석) 빈 리스트. `token_count`/`chunk_type`은 테이블에 없어 기본값으로
+        복원된다(호출자는 block.content 길이로 토큰을 추정). 인가는 호출자가 수행 (Port는 read-only).
+        """
+        ...
+
+    @abstractmethod
     async def save_quality_log(self, result: QualityGateResult, document_id: UUID) -> None: ...
 
     @abstractmethod
