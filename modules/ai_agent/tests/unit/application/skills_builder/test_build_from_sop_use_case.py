@@ -652,3 +652,22 @@ async def test_extract_detail_chunked_uses_embedding_rag():
     assert isinstance(result, ResultFrame)
     # RAG: 선택 메타(name+description)를 임베딩해 관련 청크를 골랐다.
     assert embedder.calls and "고객 문의 Slack 알림" in embedder.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_embedding_failure_with_only_nonrelevant_chunks_no_crash():
+    # #483 리뷰 MED #1 회귀: 임베딩 실패 폴백에서 비관련 타입(image)만 있으면 필터 결과가 비어
+    # `[][0]` IndexError로 제너레이터가 크래시하던 버그. 이제 빈 블록으로 graceful 진행해야 한다.
+    doc = _make_document()
+    img_chunk = Chunk(
+        block=ContentBlock(block_id=uuid4(), block_type="image", content=None, page=1),
+        chunk_index=0, parent_document_id=doc.document_id, embedding=[1.0, 0.0],
+    )
+    embedder = _FakeEmbedder(raise_on_call=RuntimeError("modal embed down"))
+    llm = _FakeLLM(structured_response=_make_detail())
+    uc = BuildFromSOPUseCase(create_draft_skill=_FakeCreateDraftSkill(), embedder=embedder, llm=llm)
+
+    frames = [f async for f in uc.extract_detail(uuid4(), doc, _meta_dict(), chunks=[img_chunk])]
+
+    # 크래시 없이 detail 결과 산출(컨텍스트 블록이 비어도 LLM 호출은 진행).
+    assert isinstance(frames[-1], ResultFrame)

@@ -107,6 +107,9 @@ _DETAIL_OUTPUT_MAX_TOKENS = 3500
 # 폭주(거대 문서) 방지 — 초과 배치는 절단하고 log로 노출한다(무음 캡 금지).
 _MAX_EXTRACT_BATCHES = 24
 _REL_BLOCK_TYPES = {"text", "heading", "table"}
+# personal_memory도 프롬프트에 들어가므로 상한이 없으면(메모리 많은 사용자) 입력 예산을 무너뜨려
+# 우리가 막은 ctx 초과를 재유발할 수 있다 — 최근 N건으로 cap(문서 블록 예산과 별개 방어).
+_MAX_MEMORY_ENTRIES = 10
 
 
 def _estimate_tokens(text: str) -> int:
@@ -131,6 +134,12 @@ def _batch_blocks_by_budget(
     if current:
         batches.append(current)
     return batches
+
+
+def _first_batch_or_empty(blocks: list[ContentBlock], budget: int) -> list[ContentBlock]:
+    """예산 첫 배치(없으면 빈 리스트) — 빈 입력에 `[0]` 인덱싱하던 IndexError 방지."""
+    batches = _batch_blocks_by_budget(blocks, budget)
+    return batches[0] if batches else []
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -411,15 +420,14 @@ class BuildFromSOPUseCase:
                     chunks, query_embedding, _DETAIL_INPUT_TOKEN_BUDGET
                 )
             except Exception as e:
-                # 임베딩 실패는 비치명적 — chunk_index 순 예산 절단으로 폴백.
+                # 임베딩 실패는 비치명적 — chunk_index 순 예산 절단으로 폴백. 비관련 타입만 있으면
+                # 필터 결과가 비어 _first_batch_or_empty가 []를 반환(폴백 안에서 IndexError 방지).
                 _logger.warning("detail RAG 임베딩 실패(예산 절단 폴백): %s", e)
-                detail_blocks = _batch_blocks_by_budget(
-                    [c.block for c in chunks if c.block.block_type in _REL_BLOCK_TYPES],
-                    _DETAIL_INPUT_TOKEN_BUDGET,
-                )[0] if chunks else []
+                rel_blocks = [c.block for c in chunks if c.block.block_type in _REL_BLOCK_TYPES]
+                detail_blocks = _first_batch_or_empty(rel_blocks, _DETAIL_INPUT_TOKEN_BUDGET)
         else:
             relevant = [b for b in document.blocks if b.block_type in _REL_BLOCK_TYPES]
-            detail_blocks = _batch_blocks_by_budget(relevant, _DETAIL_INPUT_TOKEN_BUDGET)[0] if relevant else []
+            detail_blocks = _first_batch_or_empty(relevant, _DETAIL_INPUT_TOKEN_BUDGET)
 
         prompt = self._build_prompt_detail(
             document.file_meta.file_name, detail_blocks, personal_memory, meta_obj
@@ -617,7 +625,7 @@ class BuildFromSOPUseCase:
         `blocks`는 호출자가 이미 관련 타입 필터 + 토큰 예산 배치를 적용한 부분집합이다(map-reduce).
         """
         relevant_blocks = [b.model_dump(mode="json") for b in blocks]
-        memory_json = [m.model_dump(mode="json") for m in personal_memory]
+        memory_json = [m.model_dump(mode="json") for m in personal_memory[:_MAX_MEMORY_ENTRIES]]
 
         instruction = (
             "당신은 사내 업무 자동화 SOP 문서를 분석해 워크플로우 노드(SkillNode)를 추출하는 어시스턴트입니다. "
@@ -707,7 +715,7 @@ class BuildFromSOPUseCase:
         메타는 LLM에 echo하지 않음 — frontend가 1차 메타와 합쳐 사용.
         """
         relevant_blocks = [b.model_dump(mode="json") for b in blocks]
-        memory_json = [m.model_dump(mode="json") for m in personal_memory]
+        memory_json = [m.model_dump(mode="json") for m in personal_memory[:_MAX_MEMORY_ENTRIES]]
 
         instruction = (
             "당신은 사내 업무 자동화 SOP 문서에서 추출된 SkillNode의 **상세 스펙(detail)을 채우는** 어시스턴트입니다. "
