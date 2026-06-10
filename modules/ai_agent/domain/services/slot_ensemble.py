@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 
 from ..ports.slot_mapper_port import SlotMapperPort
 from ..value_objects.skeleton import ResolvedSlots, SlotRole
@@ -22,6 +23,23 @@ from .slot_voters import SlotVoter, VoteContext
 #
 # LLM voter는 async라 싼 voter(sync)와 분리 — 싼 voter가 확신 못 한 역할만 1콜로 지연
 # escalation(레이턴시 절약). llm_mapper 미주입이면 싼 voter만으로 동작(graceful degrade).
+
+@dataclass(frozen=True)
+class SlotDecision:
+    """역할별 앙상블 결정 트레이스 (opt-in 텔레메트리 — 성능지표 수집용).
+
+    어느 voter가 1순위 픽을 캐리했는지(``contributors``), LLM escalation이 떴는지
+    (``escalated``), 확신 마진(``top_score``/``margin``)을 기록한다. 프로덕션은 trace 미요청
+    시 미생성(무부하). 집계하면 escalation율·voter 귀속 분포·기권율·마진 분포가 나온다.
+    """
+
+    role: SlotRole
+    picks: tuple[str, ...]                 # 최종 바인딩 node_type(기권 시 빈 튜플)
+    escalated: bool                        # 이 역할에 LLM voter가 개입했나
+    contributors: tuple[str, ...]          # 1순위 픽에 점수>0 기여한 voter 이름(escalation 시 "llm" 포함)
+    top_score: float                       # 최고 가중합
+    margin: float                          # 최고 − 차순위(확신도)
+
 
 # 앙상블이 의미신호로 채우는 역할 — 나머지(transform/trigger/control)는 조립기 기존 경로.
 _RESOLVE_ROLES: tuple[SlotRole, ...] = (SlotRole.SOURCE, SlotRole.SINK)
@@ -64,11 +82,13 @@ class EnsembleSlotResolver:
         utterance: str,
         ranked_candidates: tuple[str, ...] = (),
         ontology_allowed: frozenset[str] = frozenset(),
+        trace: list[SlotDecision] | None = None,
     ) -> ResolvedSlots:
         """발화 + 리트리버 랭킹(+온톨로지 허용집합)으로 역할별 앙상블 픽을 계산한다.
 
         싼 voter(lexical/semantic/ontology)로 먼저 풀고, 기권한 역할만 LLM으로 escalate.
-        렉시컬 추출은 내부에서 1회 수행(조립기와 동일 발화라 결과 동일).
+        렉시컬 추출은 내부에서 1회 수행(조립기와 동일 발화라 결과 동일). ``trace``(opt-in sink)를
+        주면 역할별 SlotDecision을 append한다(성능지표 수집 — 프로덕션 미요청 시 무부하).
         """
         ctx = VoteContext(
             utterance=utterance,
@@ -76,17 +96,23 @@ class EnsembleSlotResolver:
             ranked_candidates=tuple(ranked_candidates),
             ontology_allowed=frozenset(ontology_allowed),
         )
-        return await self._resolve_ctx(ctx)
+        return await self._resolve_ctx(ctx, trace=trace)
 
-    async def _resolve_ctx(self, ctx: VoteContext) -> ResolvedSlots:
+    async def _resolve_ctx(
+        self, ctx: VoteContext, trace: list[SlotDecision] | None = None
+    ) -> ResolvedSlots:
         by_role: dict[SlotRole, tuple[str, ...]] = {}
         uncertain: dict[SlotRole, tuple[str, ...]] = {}
+        # 역할 → (scores, breakdown, picks, escalated) — trace 생성용 최종 상태 보존.
+        state: dict[SlotRole, tuple[dict[str, float], dict[str, dict[str, float]], tuple[str, ...], bool]] = {}
 
         for role in self._roles:
             pool = ROLE_CANDIDATE_POOLS.get(role, ())
             if not pool:
                 continue
-            picks = self._select(self._combine(ctx, role, pool))
+            scores, breakdown = self._combine(ctx, role, pool)
+            picks = self._select(scores)
+            state[role] = (scores, breakdown, picks, False)
             if picks:
                 by_role[role] = picks
             else:
@@ -97,9 +123,16 @@ class EnsembleSlotResolver:
             llm = await self._llm_mapper.map_slots(ctx.utterance, uncertain)
             for role, pool in uncertain.items():
                 extra = {nt: conf for nt, conf in llm.get(role, ()) if nt in set(pool)}
-                picks = self._select(self._combine(ctx, role, pool, extra=extra))
+                scores, breakdown = self._combine(ctx, role, pool, extra=extra)
+                picks = self._select(scores)
+                state[role] = (scores, breakdown, picks, True)
                 if picks:
                     by_role[role] = picks
+
+        if trace is not None:
+            for role in self._roles:
+                if role in state:
+                    trace.append(self._decision(role, *state[role]))
 
         return ResolvedSlots(by_role=by_role)
 
@@ -109,16 +142,39 @@ class EnsembleSlotResolver:
         role: SlotRole,
         pool: tuple[str, ...],
         extra: dict[str, float] | None = None,
-    ) -> dict[str, float]:
-        """voter별 점수를 가중합. ``extra``(LLM confidence)는 llm_weight로 가산."""
+    ) -> tuple[dict[str, float], dict[str, dict[str, float]]]:
+        """voter별 점수를 가중합 + per-voter 기여 breakdown. ``extra``(LLM)는 "llm"으로 가산."""
         scores: dict[str, float] = defaultdict(float)
+        breakdown: dict[str, dict[str, float]] = defaultdict(dict)
         for voter in self._voters:
             for nt, s in voter.vote(ctx, role, pool).items():
-                scores[nt] += voter.weight * s
+                contrib = voter.weight * s
+                scores[nt] += contrib
+                breakdown[nt][voter.name] = breakdown[nt].get(voter.name, 0.0) + contrib
         if extra:
             for nt, conf in extra.items():
-                scores[nt] += self._llm_weight * conf
-        return scores
+                contrib = self._llm_weight * conf
+                scores[nt] += contrib
+                breakdown[nt]["llm"] = breakdown[nt].get("llm", 0.0) + contrib
+        return dict(scores), {k: dict(v) for k, v in breakdown.items()}
+
+    @staticmethod
+    def _decision(
+        role: SlotRole,
+        scores: dict[str, float],
+        breakdown: dict[str, dict[str, float]],
+        picks: tuple[str, ...],
+        escalated: bool,
+    ) -> SlotDecision:
+        """1순위 픽 기여 voter + 마진으로 SlotDecision 구성(기권이면 빈 픽)."""
+        if not picks:
+            return SlotDecision(role, (), escalated, (), 0.0, 0.0)
+        top = picks[0]
+        contributors = tuple(sorted(v for v, c in breakdown.get(top, {}).items() if c > 0))
+        ordered = sorted(scores.values(), reverse=True)
+        top_score = ordered[0]
+        second = ordered[1] if len(ordered) > 1 else 0.0
+        return SlotDecision(role, picks, escalated, contributors, top_score, top_score - second)
 
     def _select(self, scores: dict[str, float]) -> tuple[str, ...]:
         """floor 통과 + 최고점의 top_ratio 이상 후보를 점수 내림차순(동점은 node_type 사전순)으로.

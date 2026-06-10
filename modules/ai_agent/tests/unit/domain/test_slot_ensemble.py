@@ -104,6 +104,36 @@ async def test_weak_signal_alone_abstains() -> None:
 
 
 @pytest.mark.asyncio
+async def test_trace_records_contributors_and_escalation() -> None:
+    # trace sink — lexical 무음 + semantic이 캐리한 source 결정의 귀속/마진 기록.
+    from ai_agent.domain.services.slot_ensemble import SlotDecision
+    trace: list[SlotDecision] = []
+    resolver = EnsembleSlotResolver([LexicalVoter(), SemanticVoter(), OntologyVoter()])
+    await resolver.resolve(
+        "내 gmail에서 결제 내역 모아서 슬랙으로",
+        tuple(["gmail_read", "google_sheets_read", "slack_post_message"]),
+        frozenset(),
+        trace=trace,
+    )
+    src = next(d for d in trace if d.role == SlotRole.SOURCE)
+    assert src.picks == ("gmail_read",)
+    assert "semantic" in src.contributors and "lexical" not in src.contributors  # 의미가 캐리
+    assert src.escalated is False  # 싼 voter로 해소 → LLM 미개입
+    assert src.margin > 0
+
+
+@pytest.mark.asyncio
+async def test_trace_marks_llm_escalation() -> None:
+    from ai_agent.domain.services.slot_ensemble import SlotDecision
+    trace: list[SlotDecision] = []
+    mapper = _StubMapper({SlotRole.SOURCE: (("gmail_read", 1.0),)})
+    resolver = EnsembleSlotResolver([LexicalVoter(), SemanticVoter()], llm_mapper=mapper)
+    await resolver.resolve("받은 편지함 내용 슬랙으로 정리해줘", (), frozenset(), trace=trace)
+    src = next(d for d in trace if d.role == SlotRole.SOURCE)
+    assert src.escalated is True and "llm" in src.contributors and src.picks == ("gmail_read",)
+
+
+@pytest.mark.asyncio
 async def test_top_ratio_suppresses_weak_secondary_source() -> None:
     # 온톨로지 멤버십(0.25)에 업힌 차순위 source(google_sheets_read=0.55)가 floor(0.5)는 넘어도
     # 최고점(gmail_read=0.85)의 70%(=0.595) 미만이라 탈락 — over-add(잉여 노드) 방지.
