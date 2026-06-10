@@ -110,6 +110,20 @@ class ExtractedEntities:
     has_approval: bool = False   # 승인 게이트 — "검토 후 승인" (Deferred Choice / Human-in-the-loop)
     has_guard: bool = False      # 단일 가드 조건문 — "임계치 넘으면 …" (분류·승인 아닌 1-action, conditional_action)
 
+    def nodes_for_role(self, role: SlotRole) -> tuple[str, ...]:
+        """역할별 렉시컬 추출 node_type(발화 등장 순). 도메인 채움 역할만 — gate/control은
+        조립기가 default로 결정하므로 여기선 (). 조립기 `_materials`와 LexicalVoter의 공유
+        매핑(drift 방지)."""
+        if role == SlotRole.TRIGGER:
+            return (self.trigger,) if self.trigger else ()
+        if role == SlotRole.SOURCE:
+            return self.sources
+        if role == SlotRole.TRANSFORM:
+            return self.transforms
+        if role == SlotRole.SINK:
+            return self.sinks
+        return ()
+
     def is_empty(self) -> bool:
         """트리거 외에 아무 슬롯 재료도 없으면 True(조립 무의미 — fast-path/폴백 판단용)."""
         return not (self.sources or self.transforms or self.sinks or self.needs_gate)
@@ -161,3 +175,24 @@ class AssembledDraft:
     edges: tuple[DraftEdge, ...] = ()
     # 채우지 못한 required 슬롯 등 조립 경고(폴백/관측용). 비면 완전 조립.
     warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class ResolvedSlots:
+    """앙상블이 역할별로 확정한 노드 선택 (ADR-0026 §6.6 Phase 2 — 의미 슬롯 채움).
+
+    순수 렉시컬 추출(`SkeletonEntityExtractor`)을 대체/보강하는 다중 신호 가중투표
+    (lexical·semantic·ontology·LLM) 결과. 각 역할에 확신 임계(τ)를 넘긴 node_type만
+    relevance 순으로 담는다 — 빈 역할은 앙상블 **기권**(조립기가 렉시컬/그라운딩/default로
+    폴백). 순수 데이터라 조립기(sync)가 그대로 소비하고, 앙상블 계산은 composer(async)가
+    수행해 주입한다. 어휘 갭을 손 사전 대신 의미신호가 닫는다(§6.6.4 e2e 누락 버그 후속).
+    """
+
+    by_role: dict[SlotRole, tuple[str, ...]] = field(default_factory=dict)
+
+    def for_role(self, role: SlotRole) -> tuple[str, ...]:
+        """역할에 대해 앙상블이 확정한 node_type 목록(relevance 순). 기권 시 빈 튜플."""
+        return self.by_role.get(role, ())
+
+    def has_pick(self, role: SlotRole) -> bool:
+        return bool(self.by_role.get(role))

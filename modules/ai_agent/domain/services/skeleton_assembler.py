@@ -9,6 +9,7 @@ from ..value_objects.skeleton import (
     DraftEdge,
     DraftNode,
     ExtractedEntities,
+    ResolvedSlots,
     Skeleton,
     SlotRole,
 )
@@ -108,24 +109,31 @@ class SkeletonAssembler:
         skeleton: Skeleton,
         entities: ExtractedEntities,
         grounding: tuple[str, ...] = (),
+        resolved: ResolvedSlots | None = None,
     ) -> tuple[dict[SlotRole, list[DraftNode]], list[str]]:
-        """스켈레톤 슬롯을 추출 엔티티(렉시컬)로 채우되, 비면 retriever 후보로 그라운딩한다.
+        """스켈레톤 슬롯을 채운다. 우선순위: ① 앙상블(resolved) > ② 렉시컬 > ③ 그라운딩 > ④ default.
 
         반환: (역할→DraftNode 목록, 경고 목록). control 슬롯(router/splitter/merger)과
         scorer는 _materials가 () → required+default로 항상 채워진다(사용자가 loop_list나
         llm_judge를 발화하지 않으므로 구조 슬롯은 코드가 결정).
 
-        그라운딩(ADR-0026 §6.6, #453): 렉시컬이 비운 source/sink 슬롯을 ``grounding``(retriever가
-        이미 BGE-M3 의미매칭한 후보 node_type, rank 순)으로 메운다. 스펠링 변형·신규 표현으로
-        렉시컬이 놓친 노드("구글독스"→google_docs_write 등)를 사전에 손으로 추가하지 않고
-        의미검색 결과를 재사용 — 어휘 갭을 손 사전 대신 retriever가 닫는다. **렉시컬 우선**(정밀
-        보존, 현재 통과 케이스 회귀 0) → 비었을 때만 그라운딩, rank 최상위 1개만(과생성 방지 —
-        다채널 그라운딩은 측정 게이트 후속).
+        앙상블(ADR-0026 §6.6 Phase 2): ``resolved``가 주어지면 SOURCE/SINK는 다중신호 가중투표
+        (lexical+semantic+ontology+LLM)가 확정한 노드로 채운다 — 렉시컬은 앙상블의 한 voter라
+        이미 반영(렉시컬 적중 노드는 weight 1.0이라 항상 임계 통과·보존). 앙상블이 그 역할에
+        기권하면(빈 픽) 아래 렉시컬/그라운딩으로 폴백.
+
+        그라운딩(#453, 레거시 폴백): 앙상블 미주입/기권 시 렉시컬이 비운 source/sink 슬롯을
+        ``grounding``(BGE-M3 rank 순 후보)으로 메운다 — 어휘 갭을 손 사전 대신 retriever가 닫는다.
+        ``resolved``/``grounding`` 모두 없으면 순수 렉시컬(기존 동작 — 단위테스트 호환).
         """
         warnings: list[str] = []
         by_role: dict[SlotRole, list[DraftNode]] = {}
         for slot in skeleton.slots:
             mats = [m for m in self._materials(slot.role, entities) if m in slot.candidates]
+            if resolved is not None and resolved.has_pick(slot.role):
+                ens = [nt for nt in resolved.for_role(slot.role) if nt in slot.candidates]
+                if ens:
+                    mats = ens
             if not mats and grounding and slot.role in self._GROUNDABLE_ROLES:
                 mats = [t for t in grounding if t in slot.candidates][:1]
             if slot.cardinality == "one":
@@ -150,7 +158,10 @@ class SkeletonAssembler:
 
     # ── 조립 (shape 라우팅) ───────────────────────────────────────────────────
     def assemble(
-        self, utterance: str, candidate_node_types: list[str] | None = None
+        self,
+        utterance: str,
+        candidate_node_types: list[str] | None = None,
+        resolved_slots: ResolvedSlots | None = None,
     ) -> AssembledDraft | None:
         """발화를 결정적 워크플로우 골격으로 조립. 확신이 없으면 None(LLM drafter 폴백).
 
@@ -159,10 +170,13 @@ class SkeletonAssembler:
         불완전 커버리지, 잡담)는 None을 반환해 composer가 기존 LLM drafter로 폴백하게 한다 —
         억지로 끼워맞춰 confident-wrong 워크플로우를 내는 것보다 낫다.
 
+        ``resolved_slots``(선택, ADR-0026 §6.6 Phase 2): 앙상블(EnsembleSlotResolver)이 SOURCE/SINK
+        를 다중신호 가중투표로 확정한 결과. 주어지면 lexical보다 우선해 슬롯을 채운다(`_collect`)
+        — 발화 어휘 변형에 강건한 의미 기반 노드 선택. shape 라우팅은 여전히 렉시컬 신호 기준.
+
         ``candidate_node_types``(선택): retriever가 의미매칭한 후보 node_type을 **relevance rank
-        순**으로 받는다. 렉시컬 추출이 비운 source/sink 슬롯을 이 후보로 그라운딩해(`_collect`)
-        손 사전이 못 따라잡는 어휘 갭(스펠링 변형·신규 표현)을 닫는다(#453). None이면 순수
-        렉시컬(기존 동작 — 단위테스트 호환).
+        순**으로 받는다. 렉시컬·앙상블이 비운 source/sink 슬롯을 이 후보로 그라운딩(#453, 레거시
+        폴백). 둘 다 None이면 순수 렉시컬(기존 동작 — 단위테스트 호환).
 
         ⚠️ 중첩 합성(팬아웃 안 분기 등)은 현재 flat 라이브러리로 결정적 표현 불가 → LLM bail.
         실측상 흔하면 모티프 연산자 합성으로 진화(§6.6 로드맵, 측정 게이트).
@@ -172,6 +186,7 @@ class SkeletonAssembler:
         if entities.is_empty():
             return None
         grounding = tuple(candidate_node_types or ())
+        resolved = resolved_slots
 
         # shape 라우팅. approval은 "승인되면…아니면" 구조라 branch 신호를 동반하므로 branch를
         # 포섭(approval 우선). guard("넘으면")는 branch("아니면")·approval("승인")이 동반되면
@@ -186,29 +201,30 @@ class SkeletonAssembler:
         if len(shapes) >= 2:
             return None
         if "approval" in shapes:
-            return self._assemble_approval(entities, grounding)
+            return self._assemble_approval(entities, grounding, resolved)
         if "retry" in shapes:
-            return self._assemble_retry(entities, grounding)
+            return self._assemble_retry(entities, grounding, resolved)
         if "fanout" in shapes:
-            return self._assemble_fanout(entities, grounding)
+            return self._assemble_fanout(entities, grounding, resolved)
         if "branch" in shapes:
-            return self._assemble_branch(entities, grounding)
+            return self._assemble_branch(entities, grounding, resolved)
         if "guard" in shapes:
-            return self._assemble_conditional(entities, grounding)
+            return self._assemble_conditional(entities, grounding, resolved)
 
         skeleton = self._select(entities, text)
         if skeleton is None:
             return None  # 확신 가는 선형 매칭 없음 — LLM 폴백(catch-all 강제 금지, RC1)
-        draft = self._assemble_linear(skeleton, entities, grounding)
+        draft = self._assemble_linear(skeleton, entities, grounding, resolved)
         if any("미충전" in w for w in draft.warnings):
             return None  # 불완전 커버리지(출력 채널 등) — LLM 폴백
         return draft
 
     # ── 선형 / 검증 루프 ──────────────────────────────────────────────────────
     def _assemble_linear(
-        self, skeleton: Skeleton, entities: ExtractedEntities, grounding: tuple[str, ...] = ()
+        self, skeleton: Skeleton, entities: ExtractedEntities, grounding: tuple[str, ...] = (),
+        resolved: ResolvedSlots | None = None,
     ) -> AssembledDraft:
-        by_role, warnings = self._collect(skeleton, entities, grounding)
+        by_role, warnings = self._collect(skeleton, entities, grounding, resolved)
         trigger = by_role.get(SlotRole.TRIGGER, [])
         sources = by_role.get(SlotRole.SOURCE, [])
         transforms = by_role.get(SlotRole.TRANSFORM, [])
@@ -263,7 +279,8 @@ class SkeletonAssembler:
 
     # ── 분기 (XOR) ────────────────────────────────────────────────────────────
     def _assemble_branch(
-        self, entities: ExtractedEntities, grounding: tuple[str, ...] = ()
+        self, entities: ExtractedEntities, grounding: tuple[str, ...] = (),
+        resolved: ResolvedSlots | None = None,
     ) -> AssembledDraft | None:
         """branch_on_classification — classifier(ai)→router(if_condition)→2갈래 sink.
 
@@ -278,7 +295,7 @@ class SkeletonAssembler:
         skeleton = find_skeleton("branch_on_classification")
         if skeleton is None:
             return None
-        by_role, warnings = self._collect(skeleton, entities, grounding)
+        by_role, warnings = self._collect(skeleton, entities, grounding, resolved)
         if warnings:  # required 미충전(이론상 sink뿐이나 방어)
             return None
         trigger = by_role[SlotRole.TRIGGER]
@@ -302,7 +319,8 @@ class SkeletonAssembler:
 
     # ── 단일 가드 조건문 ──────────────────────────────────────────────────────
     def _assemble_conditional(
-        self, entities: ExtractedEntities, grounding: tuple[str, ...] = ()
+        self, entities: ExtractedEntities, grounding: tuple[str, ...] = (),
+        resolved: ResolvedSlots | None = None,
     ) -> AssembledDraft | None:
         """conditional_action — (transform?)→router(if_condition)→[true]→sink /[false]→terminal.
 
@@ -316,7 +334,7 @@ class SkeletonAssembler:
         skeleton = find_skeleton("conditional_action")
         if skeleton is None:
             return None
-        by_role, warnings = self._collect(skeleton, entities, grounding)
+        by_role, warnings = self._collect(skeleton, entities, grounding, resolved)
         if warnings:  # required(router/terminal/sink) 미충전 — 이론상 sink뿐이나 방어
             return None
         trigger = by_role[SlotRole.TRIGGER]
@@ -343,7 +361,8 @@ class SkeletonAssembler:
 
     # ── 팬아웃 (병렬 map) ─────────────────────────────────────────────────────
     def _assemble_fanout(
-        self, entities: ExtractedEntities, grounding: tuple[str, ...] = ()
+        self, entities: ExtractedEntities, grounding: tuple[str, ...] = (),
+        resolved: ResolvedSlots | None = None,
     ) -> AssembledDraft | None:
         """fan_out_map — splitter(loop_list)→worker(ai)→merger(merge_branch)→sink.
 
@@ -355,7 +374,7 @@ class SkeletonAssembler:
         skeleton = find_skeleton("fan_out_map")
         if skeleton is None:
             return None
-        by_role, warnings = self._collect(skeleton, entities, grounding)
+        by_role, warnings = self._collect(skeleton, entities, grounding, resolved)
         if warnings:
             return None
         trigger = by_role[SlotRole.TRIGGER]
@@ -378,7 +397,8 @@ class SkeletonAssembler:
 
     # ── 재시도 (백오프 루프) ──────────────────────────────────────────────────
     def _assemble_retry(
-        self, entities: ExtractedEntities, grounding: tuple[str, ...] = ()
+        self, entities: ExtractedEntities, grounding: tuple[str, ...] = (),
+        resolved: ResolvedSlots | None = None,
     ) -> AssembledDraft | None:
         """retry_backoff — worker(실패 가능 연산)→gate(if_condition)→[false]→delay→worker 루프.
 
@@ -388,7 +408,7 @@ class SkeletonAssembler:
         skeleton = find_skeleton("retry_backoff")
         if skeleton is None:
             return None
-        by_role, _ = self._collect(skeleton, entities, grounding)
+        by_role, _ = self._collect(skeleton, entities, grounding, resolved)
         trigger = by_role[SlotRole.TRIGGER]
         sources = by_role.get(SlotRole.SOURCE, [])
         transforms = by_role.get(SlotRole.TRANSFORM, [])
@@ -418,7 +438,8 @@ class SkeletonAssembler:
 
     # ── 승인 게이트 (HITL) ────────────────────────────────────────────────────
     def _assemble_approval(
-        self, entities: ExtractedEntities, grounding: tuple[str, ...] = ()
+        self, entities: ExtractedEntities, grounding: tuple[str, ...] = (),
+        resolved: ResolvedSlots | None = None,
     ) -> AssembledDraft | None:
         """approval_gate — proposer(ai)→router(if_condition)→[true]→sink /[false]→terminal.
 
@@ -430,7 +451,7 @@ class SkeletonAssembler:
         skeleton = find_skeleton("approval_gate")
         if skeleton is None:
             return None
-        by_role, warnings = self._collect(skeleton, entities, grounding)
+        by_role, warnings = self._collect(skeleton, entities, grounding, resolved)
         if warnings:
             return None
         trigger = by_role[SlotRole.TRIGGER]
