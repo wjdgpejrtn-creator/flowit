@@ -109,8 +109,9 @@ async def test_trace_records_contributors_and_escalation() -> None:
     from ai_agent.domain.services.slot_ensemble import SlotDecision
     trace: list[SlotDecision] = []
     resolver = EnsembleSlotResolver([LexicalVoter(), SemanticVoter(), OntologyVoter()])
+    # "우편함"은 렉시컬 미등록 → semantic(gmail_read 1등)이 캐리.
     await resolver.resolve(
-        "내 gmail에서 결제 내역 모아서 슬랙으로",
+        "내 우편함 싹 뒤져서 슬랙으로",
         tuple(["gmail_read", "google_sheets_read", "slack_post_message"]),
         frozenset(),
         trace=trace,
@@ -128,7 +129,7 @@ async def test_trace_marks_llm_escalation() -> None:
     trace: list[SlotDecision] = []
     mapper = _StubMapper({SlotRole.SOURCE: (("gmail_read", 1.0),)})
     resolver = EnsembleSlotResolver([LexicalVoter(), SemanticVoter()], llm_mapper=mapper)
-    await resolver.resolve("받은 편지함 내용 슬랙으로 정리해줘", (), frozenset(), trace=trace)
+    await resolver.resolve("그것들 다 모아서 슬랙으로 정리해줘", (), frozenset(), trace=trace)
     src = next(d for d in trace if d.role == SlotRole.SOURCE)
     assert src.escalated is True and "llm" in src.contributors and src.picks == ("gmail_read",)
 
@@ -186,7 +187,7 @@ async def test_llm_escalates_only_uncertain_roles_and_folds_pick() -> None:
     # gmail_read를 confidence 1.0으로 매핑 → 폴딩 후 source 바인딩. sink는 LLM 미escalate.
     mapper = _StubMapper({SlotRole.SOURCE: (("gmail_read", 1.0),)})
     resolver = EnsembleSlotResolver([LexicalVoter(), SemanticVoter()], llm_mapper=mapper)
-    resolved = await _resolve(resolver, "받은 편지함 내용 슬랙으로 정리해줘")
+    resolved = await _resolve(resolver, "그것들 다 모아서 슬랙으로 정리해줘")
     assert mapper.called_with is not None
     assert SlotRole.SOURCE in mapper.called_with and SlotRole.SINK not in mapper.called_with
     assert resolved.for_role(SlotRole.SOURCE) == ("gmail_read",)
