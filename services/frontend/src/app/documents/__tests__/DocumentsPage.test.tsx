@@ -63,6 +63,20 @@ describe('DocumentsPage — 카드 그리드 + 업로드 패널 (디자인 SSOT)
     expect(mockPush).toHaveBeenCalledWith('/documents/doc-1');
   });
 
+  it('미분석 문서의 "분석하기" 클릭 시 상세로 이동하며 분석 신호(?analyze=1)를 붙인다', async () => {
+    const user = userEvent.setup();
+    // 분석하기 버튼은 미분석(is_analyzed=false) 문서에만 노출된다.
+    localStorage.setItem(
+      'wf_documents_list',
+      JSON.stringify([{ ...DOC, document_id: 'doc-2', is_analyzed: false, analysis_status: 'pending' }]),
+    );
+    render(<DocumentsPage />);
+
+    await user.click(screen.getByText('분석하기'));
+    // 카드 onOpen(plain /documents/doc-2)이 아니라, ?analyze=1로 상세 진입(stopPropagation + 분석 신호).
+    expect(mockPush).toHaveBeenCalledWith('/documents/doc-2?analyze=1');
+  });
+
   it('문서가 없으면 빈 상태를 보여주고 업로드 패널을 노출한다', () => {
     render(<DocumentsPage />);
 

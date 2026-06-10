@@ -162,3 +162,61 @@ def test_drive_file_dedup_drops_generic_file_read() -> None:
 def test_local_file_read_still_works() -> None:
     # 드라이브 언급이 없으면 generic file_read는 정상 동작(과교정 아님).
     assert "file_read" in _X.extract("파일을 읽어서 요약").sources
+
+
+# ── 방향성 읽기 source + 소스-블리드 차단 (적대 검증 회귀 가드, §6.6.3) ───────────
+def test_directional_read_sources_detected() -> None:
+    # 양방향 서비스의 읽기 맥락 → read 변형이 source로 진입(이전엔 source 미인식 → 오선택).
+    assert "gmail_read" in _X.extract("내 gmail에서 받은 견적 메일 모아서").sources
+    assert "slack_read" in _X.extract("슬랙 공지 채널 글들 읽어서 요약").sources
+    assert "linear_read" in _X.extract("리니어에 등록된 티켓들 긁어와서").sources
+    assert "google_docs_read" in _X.extract("구글 닥스 문서 내용 읽어다가").sources
+    assert "google_calendar_read" in _X.extract("구글 캘린더 이번주 일정 뽑아서").sources
+
+
+def test_source_bleed_suppressed_slack_read_not_slack_sink() -> None:
+    # "슬랙…읽어서…이메일로" — 슬랙은 source(읽기), sink는 이메일. slack_post_message 블리드 차단.
+    e = _X.extract("슬랙 공지 채널 글들 읽어서 요약해서 이메일로 보내줘")
+    assert "slack_read" in e.sources
+    assert "slack_post_message" not in e.sinks and "slack_notify" not in e.sinks
+    assert "email_send" in e.sinks
+
+
+def test_source_bleed_suppressed_linear_read_not_linear_sink() -> None:
+    # "리니어…긁어와서…슬랙에" — 리니어는 source, sink는 슬랙. linear_create_issue 블리드 차단.
+    e = _X.extract("리니어에 등록된 티켓들 긁어와서 요약 보고서로 만들어 슬랙에")
+    assert "linear_read" in e.sources
+    assert "linear_create_issue" not in e.sinks
+    assert "slack_post_message" in e.sinks
+
+
+def test_source_bleed_suppressed_docs_read_not_docs_sink() -> None:
+    e = _X.extract("구글 닥스 문서 내용 읽어다가 핵심만 추려서 슬랙에 올려줘")
+    assert "google_docs_read" in e.sources
+    assert "google_docs_write" not in e.sinks
+    assert "slack_post_message" in e.sinks
+
+
+def test_source_bleed_suppressed_calendar_read_not_calendar_sink() -> None:
+    e = _X.extract("구글 캘린더 이번주 일정 쭉 뽑아서 정리해서 메일로 보내줘")
+    assert "google_calendar_read" in e.sources
+    assert "google_calendar_create_event" not in e.sinks
+
+
+def test_dual_role_kept_when_send_cue_present() -> None:
+    # "gmail에서 읽고 gmail로 회신" — 양끝 정당(read source + send sink). send-cue 있으면 유지.
+    e = _X.extract("gmail에서 받은 견적 메일 모아서 정리한 다음 다시 gmail로 회신 보내줘")
+    assert "gmail_read" in e.sources
+    assert "gmail_send" in e.sinks  # send-cue "gmail로" → 미차단
+
+
+def test_write_only_service_not_falsely_source() -> None:
+    # 쓰기 전용("…에 저장/등록")은 read source로 오인 안 함(읽기 맥락 토큰 부재).
+    assert "google_docs_read" not in _X.extract("보고서 생성해서 구글 docs에 저장").sources
+    assert "google_calendar_create_event" in _X.extract("일정 잡아서 캘린더에 등록").sinks
+
+
+def test_elided_send_verb_slack_sink_preserved() -> None:
+    # "슬랙이랑 이메일 둘 다 보내줘" — 슬랙은 read 맥락 아님 → 차단 안 됨, sink 유지(생략 동사 견고).
+    e = _X.extract("매주 시트 읽어서 슬랙이랑 이메일 둘 다 보내줘")
+    assert "slack_post_message" in e.sinks

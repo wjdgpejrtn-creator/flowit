@@ -14,7 +14,7 @@ from nodes_graph.application.catalog_registry import get_all_node_definitions
 from nodes_graph.domain.services.graph_validator import GraphValidator
 
 from ai_agent.domain.services.skeleton_assembler import SkeletonAssembler, to_workflow_schema
-from ai_agent.domain.value_objects.skeleton import SlotRole
+from ai_agent.domain.value_objects.skeleton import ResolvedSlots, SlotRole
 
 _A = SkeletonAssembler()
 
@@ -312,6 +312,48 @@ def test_real_pipeline_with_sink_still_assembles() -> None:
     assert d.skeleton_name == "scheduled_pipeline"
     types = [n.node_type for n in d.nodes]
     assert "google_sheets_read" in types and "email_send" in types
+
+
+# ── 앙상블 resolved_slots 주입 (ADR-0026 §6.6 Phase 2) ───────────────────────
+def test_assemble_uses_resolved_slots_over_lexical_source() -> None:
+    # 이슈 직격: "gmail에서 …" source 렉시컬 미인식 → 앙상블이 gmail_read로 확정해 주입하면
+    # google_sheets_read 오선택 없이 gmail_read source로 풀체인 조립.
+    resolved = ResolvedSlots(by_role={
+        SlotRole.SOURCE: ("gmail_read",),
+        SlotRole.SINK: ("pdf_generate", "gmail_send"),
+    })
+    d = _A.assemble(
+        "내 gmail에서 매주 결제 내역 모아서 보고서 작성을 pdf로 해서 gmail로 보내줘",
+        resolved_slots=resolved,
+    )
+    assert d is not None
+    assert d.skeleton_name == "scheduled_pipeline"
+    types = _node_types(d)
+    assert "gmail_read" in types and "google_sheets_read" not in types
+    assert types[0] == "schedule_trigger"
+    assert "anthropic_chat" in types and "gmail_send" in types and "pdf_generate" in types
+
+
+def test_resolved_slots_none_preserves_lexical_behavior() -> None:
+    # resolved_slots 미주입(=None) → 순수 렉시컬(기존 동작 보존, 회귀 0).
+    u = "매주 광고 시트 읽어서 요약해서 슬랙으로 보내줘"
+    assert _node_types(_A.assemble(u)) == _node_types(_A.assemble(u, resolved_slots=None))
+
+
+def test_resolved_abstain_falls_back_to_lexical() -> None:
+    # 앙상블이 전 역할 기권(빈 ResolvedSlots)이면 렉시컬 유지 — 의미픽 없을 때 폴백.
+    d = _A.assemble("매주 광고 시트 읽어서 슬랙으로 보내줘", resolved_slots=ResolvedSlots(by_role={}))
+    assert d is not None
+    assert "google_sheets_read" in _node_types(d)
+
+
+def test_resolved_only_overrides_its_roles_not_transform() -> None:
+    # SOURCE만 앙상블 픽 주입 → source는 대체되나 transform/sink는 렉시컬 유지.
+    resolved = ResolvedSlots(by_role={SlotRole.SOURCE: ("gmail_read",)})
+    d = _A.assemble("매주 시트 읽어서 요약해서 슬랙으로 보내줘", resolved_slots=resolved)
+    types = _node_types(d)
+    assert "gmail_read" in types and "google_sheets_read" not in types
+    assert "anthropic_chat" in types and "slack_post_message" in types
 
 
 def test_multiple_sinks_fan_out_in_parallel() -> None:
