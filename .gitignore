@@ -258,6 +258,9 @@ _private/
 # 박아름 개인 status 보고서 (로컬 전용, commit 금지)
 modules/ai_agent/report/sprint-3-week2-2026-05-18-park-areum-status.md
 
+# 스킬빌더 구조도 (위키성 — docs/context는 docs 브랜치 관리 대상, feature 추적 제외. 박아름 2026-06-11)
+docs/context/skills_builder_architecture.md
+
 # GCP Service Account JSON keys (보안 — 절대 commit 금지, 박아름 2026-05-13 추가)
 # Modal Secret cloudsql-iam-sa 등록용 SA key 파일 패턴
 workflowauto-*.json
