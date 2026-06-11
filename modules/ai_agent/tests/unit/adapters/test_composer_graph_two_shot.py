@@ -666,3 +666,45 @@ class TestDrafterNodeSkillBinding:
 
         # 후보에 ai 노드가 없으므로 skill_selected=False로 전달(지시/후보 desync 방지)
         assert oc._drafter.draft.call_args.kwargs["skill_selected"] is False
+
+    @pytest.mark.asyncio
+    async def test_skill_selected_still_assembles_skeleton_ontology_wins(self):
+        """스킬이 선택돼도 스켈레톤이 확신 있으면(비-None) 온톨로지 구조를 draft에 전달한다 —
+        스킬 COMPOSER.md 구조 지침이 잘 짜인 온톨로지 워크플로우를 덮어쓰지 않는다(조장 2026-06-11).
+        스킬은 여전히 skill_selected=True로 그 구조 안 ai 노드에 바인딩된다(런타임 주입 보존)."""
+        oc = _build_orchestrator()
+        oc._node_registry.search = AsyncMock(return_value=[_node_config(name="gemma_chat", category="ai")])
+        oc._drafter.draft = AsyncMock(return_value=_workflow([]))
+        fake_scaffold = MagicMock()
+        fake_scaffold.nodes = []  # _ensure_scaffold_candidates가 보강 없이 통과
+        oc._skeleton_assembler.assemble = MagicMock(return_value=fake_scaffold)
+        oc._slot_resolver.resolve = AsyncMock(return_value=None)
+
+        await oc._drafter_node(_state(
+            selected_skill_id=uuid4(),
+            node_candidates=[_node_config(name="email", category="action")],
+            qa_attempts=0,
+        ))
+
+        kwargs = oc._drafter.draft.call_args.kwargs
+        assert kwargs["skeleton_scaffold"] is fake_scaffold  # 온톨로지 구조 우선(스킬에 가려지지 않음)
+        assert kwargs["skill_selected"] is True              # 스킬 바인딩 보존
+
+    @pytest.mark.asyncio
+    async def test_skill_selected_falls_back_to_skill_path_when_no_confident_skeleton(self):
+        """스켈레톤이 확신 없으면(assemble None) 기존 스킬 지침 LLM draft로 폴백한다."""
+        oc = _build_orchestrator()
+        oc._node_registry.search = AsyncMock(return_value=[_node_config(name="gemma_chat", category="ai")])
+        oc._drafter.draft = AsyncMock(return_value=_workflow([]))
+        oc._skeleton_assembler.assemble = MagicMock(return_value=None)
+        oc._slot_resolver.resolve = AsyncMock(return_value=None)
+
+        await oc._drafter_node(_state(
+            selected_skill_id=uuid4(),
+            node_candidates=[_node_config(name="email", category="action")],
+            qa_attempts=0,
+        ))
+
+        kwargs = oc._drafter.draft.call_args.kwargs
+        assert kwargs["skeleton_scaffold"] is None
+        assert kwargs["skill_selected"] is True
