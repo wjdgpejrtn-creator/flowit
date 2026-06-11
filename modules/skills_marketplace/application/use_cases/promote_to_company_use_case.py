@@ -24,7 +24,8 @@ class PromoteToCompanyUseCase:
 
     지침서(SKILL.md/COMPOSER.md)도 복제한다 — GCS 키가 skill_id에 결정적으로 묶여 있어
     `skill_document_uri` 문자열만 승계하면 신규 skill_id 경로에 객체가 없어 지침서 조회가 404가
-    된다(PromoteToTeamUseCase와 동일). doc_store 미주입·원본 문서 없음 시 non-fatal 스킵.
+    된다(PromoteToTeamUseCase와 동일). doc_store 미주입·원본 문서 없음 시에만 복사를 스킵하고,
+    GCS I/O 실패는 전파해 승격을 중단한다(fail-closed — 지침서 없는 복사본 생성 방지).
     """
 
     def __init__(self, repo: SkillRepository, doc_store: SkillDocumentStore | None = None) -> None:
@@ -74,7 +75,8 @@ class PromoteToCompanyUseCase:
     async def _copy_document(self, src_skill_id: UUID, dst_skill_id: UUID, fallback_uri: str | None) -> str | None:
         """원본 skill_id의 지침서를 신규 skill_id로 GCS 복제하고 새 URI 반환.
 
-        doc_store 미주입·원본 문서 없음 시 fallback_uri 반환(non-fatal — 승격 자체는 막지 않는다).
+        복사 대상이 없을 때만(doc_store 미주입 / 원본 문서 없음) fallback_uri를 반환한다. GCS I/O
+        예외는 잡지 않고 전파해 승격을 중단한다(fail-closed — 지침서 없는 복사본 생성 방지).
         """
         if self._doc_store is None:
             return fallback_uri
