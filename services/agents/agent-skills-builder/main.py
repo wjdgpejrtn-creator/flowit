@@ -352,7 +352,7 @@ class SkillsBuilderAgent:
         from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
             BuildFromSOPUseCase,
         )
-        from common_schemas import DocumentBlock
+        from common_schemas import Chunk, DocumentBlock
         from common_schemas.agent_protocol import AgentProtocolResponse
         from common_schemas.transport import ErrorFrame
         from skills_marketplace.application.use_cases import CreateDraftSkillUseCase
@@ -387,14 +387,20 @@ class SkillsBuilderAgent:
                     self._embedder,
                     self._llm,
                 )
+                # 청크(옵션 C map-reduce/RAG) — api_server가 document_chunks를 실어 보낸다.
+                # 부재 시 None → use case가 전체 문서로 폴백(구 문서/합성 템플릿 호환).
+                chunks = [Chunk.model_validate(c) for c in payload.get("chunks", [])] or None
                 step = payload.get("step", "metadata")
                 if step == "metadata":
                     document = DocumentBlock.model_validate(payload["document"])
-                    stream = use_case.extract_metadata(req.user_id, document, req.personal_memory)
+                    stream = use_case.extract_metadata(
+                        req.user_id, document, req.personal_memory, chunks=chunks
+                    )
                 elif step == "detail":
                     document = DocumentBlock.model_validate(payload["document"])
                     stream = use_case.extract_detail(
-                        req.user_id, document, payload.get("meta", {}), req.personal_memory
+                        req.user_id, document, payload.get("meta", {}), req.personal_memory,
+                        chunks=chunks,
                     )
                 elif step == "confirm":
                     stream = use_case.confirm(req.user_id, payload.get("skills", []))
