@@ -442,6 +442,9 @@ async def extract_skill_from_document(
         )
 
     document: DocumentBlock
+    # 청크(옵션 C) — 문서 경로에서 document_chunks를 실어 skills-builder map-reduce/RAG가 8192
+    # 컨텍스트 안에서 동작하게 한다. 합성 템플릿은 청크가 없으므로 빈 리스트(use case가 폴백).
+    chunks: list = []
     if body.template_code is not None:
         # default 위저드 — seed를 SOP 문서로 합성(영속 X). 미존재 template_code는 404.
         synthesized = synthesize_sop_document(body.template_code, permission.user_id)
@@ -461,6 +464,7 @@ async def extract_skill_from_document(
                 status_code=409,
                 detail="Document has no parsed blocks — 먼저 문서 분석을 완료하세요",
             )
+        chunks = await doc_repo.get_chunks(body.source_document_id)
 
     # AgentProtocolRequest 봉투(plain dict) — agents._build_agent_payload와 동일 패턴.
     # 수신 측 skills-builder(Modal)가 AgentProtocolRequest로 검증한다. state는 추출 경로에서
@@ -475,6 +479,7 @@ async def extract_skill_from_document(
             "source_type": "sop",
             "step": "metadata",
             "document": document.model_dump(mode="json"),
+            "chunks": [c.model_dump(mode="json") for c in chunks],
         },
         "state": {
             "session_id": session_id,
@@ -563,6 +568,7 @@ async def extract_skill_detail(
 
     # source 검증/합성 — extract 라우트와 동일 정책(소유/존재/blocks).
     document: DocumentBlock
+    chunks: list = []  # 옵션 C — detail은 메타 임베딩 RAG로 관련 청크만 사용(extract와 동일)
     if body.template_code is not None:
         synthesized = synthesize_sop_document(body.template_code, permission.user_id)
         if synthesized is None:
@@ -579,6 +585,7 @@ async def extract_skill_detail(
                 status_code=409,
                 detail="Document has no parsed blocks — 먼저 문서 분석을 완료하세요",
             )
+        chunks = await doc_repo.get_chunks(body.source_document_id)
 
     session_id = str(uuid4())
     user_id = str(permission.user_id)
@@ -591,6 +598,7 @@ async def extract_skill_detail(
             "step": "detail",
             "document": document.model_dump(mode="json"),
             "meta": body.meta,
+            "chunks": [c.model_dump(mode="json") for c in chunks],
         },
         "state": {
             "session_id": session_id,

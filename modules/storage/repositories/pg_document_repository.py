@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from common_schemas import Chunk, DocumentBlock, QualityGateResult
+from common_schemas import Chunk, ContentBlock, DocumentBlock, QualityGateResult
 from doc_parser.domain.ports.repository_port import DocumentRepositoryPort
 
 from ..mappers.document_mapper import DocumentMapper
@@ -56,6 +56,28 @@ class PgDocumentRepository(DocumentRepositoryPort):
             )
             self._session.add(model)
         await self._session.flush()
+
+    async def get_chunks(self, document_id: UUID) -> list[Chunk]:
+        # SOP→스킬 추출(REQ-004 map-reduce/RAG)이 읽는 경로. block_data(JSONB)→ContentBlock 복원.
+        # token_count/chunk_type 컬럼은 테이블에 없어 기본값(0/"structural")으로 복원된다 —
+        # 호출자는 block.content 길이로 토큰을 추정해 배치한다.
+        stmt = (
+            select(DocumentChunkModel)
+            .where(DocumentChunkModel.parent_document_id == document_id)
+            .order_by(DocumentChunkModel.chunk_index)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            Chunk(
+                chunk_id=m.chunk_id,
+                block=ContentBlock.model_validate(m.block_data),
+                chunk_index=m.chunk_index,
+                parent_document_id=m.parent_document_id,
+                importance_score=m.importance_score,
+                embedding=list(m.embedding) if m.embedding is not None else None,
+            )
+            for m in result.scalars().all()
+        ]
 
     async def save_quality_log(self, result: QualityGateResult, document_id: UUID) -> None:
         model = QualityLogModel(
