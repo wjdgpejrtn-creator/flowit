@@ -808,10 +808,19 @@ export default function SkillBuilderPage() {
                         </button>
                       </div>
                       {detailPending ? (
-                        <p className="text-[10px] text-amber-600 font-bold flex items-center gap-1">
-                          <Icon name="info" className="w-3 h-3" />
-                          상세(지침서·입출력)를 추출하는 중이에요. 완료된 뒤 저장하면 지침서가 함께 저장됩니다.
-                        </p>
+                        detailLoadingIdx !== null ? (
+                          <p className="text-[10px] text-amber-600 font-bold flex items-center gap-1">
+                            <Icon name="info" className="w-3 h-3" />
+                            상세(지침서·입출력)를 추출하는 중이에요. 완료된 뒤 저장하면 지침서가 함께 저장됩니다.
+                          </p>
+                        ) : (
+                          // detail이 실패해 staging이 영구 undefined인 경우 — "추출 중"으로 오인(무한 대기)
+                          // 하지 않도록 실패/재시도 안내로 분기한다(에러 상세는 extractError가 별도 노출).
+                          <p className="text-[10px] text-red-600 font-bold flex items-center gap-1">
+                            <Icon name="info" className="w-3 h-3" />
+                            상세 추출에 실패했어요. 위 카드를 다시 선택하거나 ‘재료 다시 선택’으로 재시도해 주세요.
+                          </p>
+                        )
                       ) : (
                         <p className="text-[10px] text-ink4 font-bold flex items-center gap-1">
                           <Icon name="info" className="w-3 h-3" />
