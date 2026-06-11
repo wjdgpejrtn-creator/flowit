@@ -119,12 +119,14 @@ def _state(**overrides) -> dict:
     return base
 
 
-def _skill(skill_id=None, name="요약 전문가", description="문서 요약 지침서", node_definition_id=None):
+def _skill(skill_id=None, name="요약 전문가", description="문서 요약 지침서", node_definition_id=None,
+           owner_user_id=None):
     s = MagicMock()
     s.skill_id = skill_id or uuid4()
     s.name = name
     s.description = description
     s.node_definition_id = node_definition_id
+    s.owner_user_id = owner_user_id  # 개인 스킬이면 owner 지정(company/team은 None) — is_personal 판별
     return s
 
 
@@ -158,6 +160,45 @@ class TestSuggestSkillSelect:
         assert saved_blob["user_id"] == str(st["user_id"])
         offered = {o.skill_id for o in frames[0].options}
         assert set(saved_blob["offered_skill_ids"]) == {str(s) for s in offered}
+
+    @pytest.mark.asyncio
+    async def test_personal_skill_flagged_company_not(self):
+        """본인 소유 개인 스킬만 is_personal=True (프론트 ⭐ 자주 사용 배지 — REQ-013 개인화 추천)."""
+        embedder = AsyncMock()
+        embedder.embed = AsyncMock(return_value=[0.1] * 768)
+        st = _state()
+        mine = st["user_id"]
+        skill_search = AsyncMock()
+        skill_search.execute_accessible = AsyncMock(return_value=[
+            _skill(name="내 개인 스킬", owner_user_id=mine),       # 본인 소유 → ⭐
+            _skill(name="전사 스킬", owner_user_id=None),           # company → 배지 없음
+            _skill(name="남의 개인 스킬", owner_user_id=uuid4()),   # 타인 소유 → 배지 없음
+        ])
+        oc = _build_orchestrator(embedder=embedder, skill_search=skill_search, composer_state_store=AsyncMock())
+
+        result = await oc._suggest_skill_select_node(st)
+
+        opts = {o.name: o.is_personal for o in result["collected_frames"][0].options}
+        assert opts == {"내 개인 스킬": True, "전사 스킬": False, "남의 개인 스킬": False}
+
+    @pytest.mark.asyncio
+    async def test_refine_skips_skill_suggestion_without_search(self):
+        # #369 후속: refine(기존 워크플로우 편집)은 two-shot 스킬 제안을 타면 안 된다.
+        # "url/채널 수정해줘" 같은 편집 발화가 스킬 카드로 끊겨 새 생성처럼 보이던 버그 차단 —
+        # intent=refine이면 검색조차 하지 않고 바로 draft로 진행(awaiting_skill_selection=False).
+        embedder = AsyncMock()
+        embedder.embed = AsyncMock(return_value=[0.1] * 768)
+        skill_search = AsyncMock()
+        skill_search.execute_accessible = AsyncMock(return_value=[_skill(name="요약가")])
+        store = AsyncMock()
+
+        oc = _build_orchestrator(embedder=embedder, skill_search=skill_search, composer_state_store=store)
+        result = await oc._suggest_skill_select_node(_state(intent="refine"))
+
+        assert result == {"awaiting_skill_selection": False}
+        # 스킬 검색·상태 영속 자체가 호출되지 않아야 한다(편집 흐름 보존).
+        skill_search.execute_accessible.assert_not_called()
+        store.save_state.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_fallback_when_skill_search_not_injected(self):
@@ -625,3 +666,45 @@ class TestDrafterNodeSkillBinding:
 
         # 후보에 ai 노드가 없으므로 skill_selected=False로 전달(지시/후보 desync 방지)
         assert oc._drafter.draft.call_args.kwargs["skill_selected"] is False
+
+    @pytest.mark.asyncio
+    async def test_skill_selected_still_assembles_skeleton_ontology_wins(self):
+        """스킬이 선택돼도 스켈레톤이 확신 있으면(비-None) 온톨로지 구조를 draft에 전달한다 —
+        스킬 COMPOSER.md 구조 지침이 잘 짜인 온톨로지 워크플로우를 덮어쓰지 않는다(조장 2026-06-11).
+        스킬은 여전히 skill_selected=True로 그 구조 안 ai 노드에 바인딩된다(런타임 주입 보존)."""
+        oc = _build_orchestrator()
+        oc._node_registry.search = AsyncMock(return_value=[_node_config(name="gemma_chat", category="ai")])
+        oc._drafter.draft = AsyncMock(return_value=_workflow([]))
+        fake_scaffold = MagicMock()
+        fake_scaffold.nodes = []  # _ensure_scaffold_candidates가 보강 없이 통과
+        oc._skeleton_assembler.assemble = MagicMock(return_value=fake_scaffold)
+        oc._slot_resolver.resolve = AsyncMock(return_value=None)
+
+        await oc._drafter_node(_state(
+            selected_skill_id=uuid4(),
+            node_candidates=[_node_config(name="email", category="action")],
+            qa_attempts=0,
+        ))
+
+        kwargs = oc._drafter.draft.call_args.kwargs
+        assert kwargs["skeleton_scaffold"] is fake_scaffold  # 온톨로지 구조 우선(스킬에 가려지지 않음)
+        assert kwargs["skill_selected"] is True              # 스킬 바인딩 보존
+
+    @pytest.mark.asyncio
+    async def test_skill_selected_falls_back_to_skill_path_when_no_confident_skeleton(self):
+        """스켈레톤이 확신 없으면(assemble None) 기존 스킬 지침 LLM draft로 폴백한다."""
+        oc = _build_orchestrator()
+        oc._node_registry.search = AsyncMock(return_value=[_node_config(name="gemma_chat", category="ai")])
+        oc._drafter.draft = AsyncMock(return_value=_workflow([]))
+        oc._skeleton_assembler.assemble = MagicMock(return_value=None)
+        oc._slot_resolver.resolve = AsyncMock(return_value=None)
+
+        await oc._drafter_node(_state(
+            selected_skill_id=uuid4(),
+            node_candidates=[_node_config(name="email", category="action")],
+            qa_attempts=0,
+        ))
+
+        kwargs = oc._drafter.draft.call_args.kwargs
+        assert kwargs["skeleton_scaffold"] is None
+        assert kwargs["skill_selected"] is True

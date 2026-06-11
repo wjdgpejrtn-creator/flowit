@@ -12,8 +12,11 @@ LLM 호출은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base
       → 사용자 카드 그리드 표시, 1건 선택
     [extract_detail] DocumentBlock + 선택된 meta dict
       → JSON prompt 구성 (target_skill_meta 명시)
-      → LLM.generate_structured(prompt, _ExtractedSkillNodeDetail)
-      → ResultFrame(payload.skill_detail) — detail(inputs/outputs/instructions/composer_instructions/...) + staging
+      → LLM.generate_structured(prompt, _ExtractedSkillNodeDetail)  ← inputs/outputs/instructions(SKILL.md) "LLM 보강"
+      → T4: SOP 텍스트를 SkeletonEntityExtractor "발화"로 결정적 스켈레톤 조립(ADR-0028 D2/D3)
+      → T5: AssembledDraft → COMPOSER.md(결정적) + 정밀 BINDS(bound_node_types) 매핑(D4)
+            (스켈레톤 미매칭 시 LLM composer_instructions 폴백)
+      → ResultFrame(payload.skill_detail) — detail + staging + skeleton_name + bound_node_types
       → 사용자 폼 prefill (frontend가 메타와 합쳐서)
     [confirm] 편집된 skills (메타 + detail 합친 형태)
       → embed(description) + CreateDraftSkillUseCase로 personal DRAFT 생성
@@ -64,11 +67,12 @@ LLM 호출은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import UUID
 
-from common_schemas import DocumentBlock, MemoryEntry
+from common_schemas import Chunk, ContentBlock, DocumentBlock, MemoryEntry
 from common_schemas.enums import RiskLevel
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame, SSEFrame
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
@@ -78,15 +82,104 @@ from skills_marketplace.domain.value_objects import NodeSpecStaging
 
 from ....domain.entities.skill_node import SkillNode
 from ....domain.ports.llm_port import LLMPort
+from ....domain.services.skeleton_assembler import SkeletonAssembler
+from ....domain.services.skeleton_composer_mapper import SkeletonComposerMapper
+
+_logger = logging.getLogger(__name__)
 
 # DB CHECK 영문 8종 (`009_node_definitions.sql`).
 _ALLOWED_CATEGORIES = {"trigger", "action", "condition", "transform", "ai", "integration", "utility", "output"}
 
-# SOP 추출은 노드 N개를 각각 긴 instructions(SKILL.md 본문) + inputs/outputs 스키마와 함께
-# 한 JSON으로 내보내므로 structured 기본 출력 예산(2048)으로는 문자열 중간에 잘려
-# "EOF while parsing a string"가 난다 (#287/#353). 입력(문서 본문)은 작으므로 출력 예산을
-# ctx 상한까지 상향해 장문 JSON을 안전하게 받는다.
-_SOP_EXTRACT_MAX_TOKENS = 8192
+# llm-base llama-server `--ctx-size`(8192)에는 입력 프롬프트 + 출력이 **함께** 들어가야 한다.
+# 전체 문서를 한 번에 넣으면 입력만 8192를 초과해 400(exceed_context_size)으로 죽는다 — 그래서
+# 청크 기반 map-reduce(메타)/RAG(detail)로 입력을 토큰 예산 안에 자른다.
+#
+# 토큰 추정: 청커가 char_estimate(char×0.7) 모드라 영속된 청크의 token_count는 신뢰 불가 +
+# 미저장(컬럼 없음)이다. cl100k 한국어는 char당 토큰이 크므로(최대 ~2.5) **char×2.5를
+# 상한 추정치**로 써서 "실제 토큰 ≤ 추정치 ≤ 예산"을 보장한다(과소추정→초과를 원천 차단).
+_CTX_SIZE = 8192
+# 한 LLM 호출에 넣을 문서 블록의 입력 토큰 예산(배치 경계). instruction/few-shot/output 여유 확보.
+_METADATA_INPUT_TOKEN_BUDGET = 2500
+_DETAIL_INPUT_TOKEN_BUDGET = 1800
+# 출력 예산 — 메타 5필드×N은 작고, detail은 instructions/composer_instructions markdown이라 크다.
+_METADATA_OUTPUT_MAX_TOKENS = 1800
+_DETAIL_OUTPUT_MAX_TOKENS = 3500
+# 폭주(거대 문서) 방지 — 초과 배치는 절단하고 log로 노출한다(무음 캡 금지).
+_MAX_EXTRACT_BATCHES = 24
+_REL_BLOCK_TYPES = {"text", "heading", "table"}
+# personal_memory도 프롬프트에 들어가므로 상한이 없으면(메모리 많은 사용자) 입력 예산을 무너뜨려
+# 우리가 막은 ctx 초과를 재유발할 수 있다 — 최근 N건으로 cap(문서 블록 예산과 별개 방어).
+_MAX_MEMORY_ENTRIES = 10
+
+
+def _estimate_tokens(text: str) -> int:
+    """cl100k 한국어 상한 추정(char×2.5). 실제 토큰 ≤ 추정치라 배치 예산으로 안전(과소추정 방지)."""
+    return int(len(text) * 2.5) + 1
+
+
+def _batch_blocks_by_budget(
+    blocks: list[ContentBlock], budget: int
+) -> list[list[ContentBlock]]:
+    """블록을 입력 토큰 예산 이하 배치들로 분할. 단일 블록이 예산을 넘어도 그 블록만 단독 배치."""
+    batches: list[list[ContentBlock]] = []
+    current: list[ContentBlock] = []
+    current_tokens = 0
+    for block in blocks:
+        t = _estimate_tokens(block.content or "")
+        if current and current_tokens + t > budget:
+            batches.append(current)
+            current, current_tokens = [], 0
+        current.append(block)
+        current_tokens += t
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _first_batch_or_empty(blocks: list[ContentBlock], budget: int) -> list[ContentBlock]:
+    """예산 첫 배치(없으면 빈 리스트) — 빈 입력에 `[0]` 인덱싱하던 IndexError 방지."""
+    batches = _batch_blocks_by_budget(blocks, budget)
+    return batches[0] if batches else []
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """순수 코사인 유사도 (numpy 미사용 — skills-builder 런타임 의존 최소화)."""
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(y * y for y in b) ** 0.5
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def _select_blocks_for_meta(
+    chunks: list[Chunk], query_embedding: list[float], budget: int
+) -> list[ContentBlock]:
+    """detail용 — 선택 메타와 임베딩 유사도 상위 청크 블록을 예산 이하로 고른다(RAG).
+
+    임베딩 있는 청크는 cosine 내림차순, 없는 청크는 뒤로. 동률·임베딩 부재 시 chunk_index 순.
+    문서 흐름(instructions의 Steps 순서)을 위해 최종 선택은 chunk_index 오름차순으로 복원한다.
+    """
+    rel = [c for c in chunks if c.block.block_type in _REL_BLOCK_TYPES]
+    scored = [
+        (
+            _cosine(query_embedding, c.embedding) if c.embedding else -1.0,
+            c.chunk_index,
+            c,
+        )
+        for c in rel
+    ]
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    picked: list[Chunk] = []
+    used = 0
+    for _score, _idx, c in scored:
+        t = _estimate_tokens(c.block.content or "")
+        if picked and used + t > budget:
+            break
+        picked.append(c)
+        used += t
+    picked.sort(key=lambda c: c.chunk_index)  # 문서 흐름 복원
+    return [c.block for c in picked]
 
 
 # ----------------------------------------------------------------------
@@ -157,21 +250,34 @@ class BuildFromSOPUseCase:
         create_draft_skill: CreateDraftSkillUseCase,
         embedder: EmbedderPort,
         llm: LLMPort,
+        assembler: SkeletonAssembler | None = None,
+        composer_mapper: SkeletonComposerMapper | None = None,
     ) -> None:
         self._create_draft_skill = create_draft_skill
         self._embedder = embedder
         self._llm = llm
+        # T4/T5(ADR-0028): SOP 텍스트를 결정적 스켈레톤으로 조립(assembler)하고 그 구조를
+        # COMPOSER.md + 정밀 BINDS로 매핑(composer_mapper)한다. 둘 다 순수 도메인 서비스라
+        # 기본 생성(의존성 무, composition root 주입 불요 — 기존 3-인자 와이어링 호환).
+        self._assembler = assembler or SkeletonAssembler()
+        self._composer_mapper = composer_mapper or SkeletonComposerMapper()
 
     async def extract_metadata(
         self,
         user_id: UUID,
         document: DocumentBlock,
         personal_memory: list[MemoryEntry] | None = None,
+        chunks: list[Chunk] | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
         """wizard 1단계 — SOP에서 SkillNode 메타만 추출(카드 그리드용). **저장 안 함**.
 
         옵션 1(2단계 분리): 응답당 토큰을 줄여 LLM JSON 잘림(EOF) 해소. 메타 5필드만
         받고, 사용자가 카드 선택 시 frontend가 `extract_detail`을 호출해 detail을 채운다.
+
+        **청크 map-reduce(옵션 C)**: `chunks`가 주어지면 청크 블록을 입력 토큰 예산 배치로 나눠
+        배치별 LLM 추출 후 메타를 node_type로 병합·dedup한다 — 전체 문서를 한 프롬프트에 넣어
+        8192 컨텍스트를 초과(exceed_context_size 400)하던 문제 해소. 청크가 없으면(구 문서/
+        합성 템플릿) 전체 문서 단일 호출로 폴백(회귀 0).
 
         Yields:
             AgentNodeFrame (진행) / ErrorFrame (실패) / ResultFrame(payload.skill_metas) — 메타 목록
@@ -186,49 +292,72 @@ class BuildFromSOPUseCase:
             return
 
         yield AgentNodeFrame(agent_node_name="skills_builder.sop.parse_document")
-        prompt = self._build_prompt_metadata(document, personal_memory)
-        yield AgentNodeFrame(agent_node_name="skills_builder.sop.llm_extract_metadata")
 
-        try:
-            extracted = await self._llm.generate_structured(
-                prompt, _ExtractedSkillNodeMetaList, max_tokens=_SOP_EXTRACT_MAX_TOKENS
+        # 입력 블록 소스: 청크 있으면 청크 블록(map-reduce), 없으면 전체 문서 블록(폴백).
+        if chunks:
+            source_blocks = [c.block for c in chunks if c.block.block_type in _REL_BLOCK_TYPES]
+        else:
+            source_blocks = [b for b in document.blocks if b.block_type in _REL_BLOCK_TYPES]
+        batches = _batch_blocks_by_budget(source_blocks, _METADATA_INPUT_TOKEN_BUDGET)
+        if len(batches) > _MAX_EXTRACT_BATCHES:
+            _logger.warning(
+                "SOP 메타 추출: 배치 %d개 → 상한 %d개로 절단(거대 문서, 후미 누락 가능)",
+                len(batches), _MAX_EXTRACT_BATCHES,
             )
-        except Exception as e:
-            yield ErrorFrame(code="E_LLM_GENERATION_FAILED", message=f"LLM 호출 실패: {e}")
-            return
+            batches = batches[:_MAX_EXTRACT_BATCHES]
 
-        if not isinstance(extracted, _ExtractedSkillNodeMetaList):
-            yield ErrorFrame(
-                code="E_LLM_RESPONSE_INVALID",
-                message=f"LLM 응답이 _ExtractedSkillNodeMetaList 형태 아님: {type(extracted).__name__}",
+        # map: 배치별 메타 추출 → reduce: node_type 기준 병합·dedup(앞 배치 우선).
+        # 배치 1건 실패는 비치명적(부분 추출 > 전체 실패)이나, **전 배치가 실패**하면 원인을
+        # 보존해 정확한 에러 코드로 노출한다(예외→GENERATION_FAILED / 형태불일치→RESPONSE_INVALID).
+        merged: dict[str, dict] = {}
+        ok_count = 0
+        last_error: tuple[str, str] | None = None  # (code, message)
+        for i, batch in enumerate(batches):
+            prompt = self._build_prompt_metadata(document.file_meta.file_name, batch, personal_memory)
+            yield AgentNodeFrame(
+                agent_node_name=f"skills_builder.sop.llm_extract_metadata.batch{i + 1}of{len(batches)}"
             )
-            return
+            try:
+                extracted = await self._llm.generate_structured(
+                    prompt, _ExtractedSkillNodeMetaList, max_tokens=_METADATA_OUTPUT_MAX_TOKENS
+                )
+            except Exception as e:
+                _logger.warning("SOP 메타 추출 배치 %d 실패(건너뜀): %s", i + 1, e)
+                last_error = ("E_LLM_GENERATION_FAILED", f"LLM 호출 실패: {e}")
+                continue
+            if not isinstance(extracted, _ExtractedSkillNodeMetaList):
+                _logger.warning("SOP 메타 추출 배치 %d 응답 형태 불일치(건너뜀)", i + 1)
+                last_error = (
+                    "E_LLM_RESPONSE_INVALID",
+                    f"LLM 응답이 _ExtractedSkillNodeMetaList 형태 아님: {type(extracted).__name__}",
+                )
+                continue
+            ok_count += 1
+            for meta in extracted.skill_node_metas:
+                try:
+                    self._validate_meta(meta)
+                except ValueError as e:
+                    _logger.warning("SOP 메타 검증 실패(건너뜀) %s: %s", meta.node_type, e)
+                    continue
+                merged.setdefault(meta.node_type, {
+                    "node_type": meta.node_type,
+                    "name": meta.name,
+                    "description": meta.description,
+                    "category": meta.category,
+                    "risk_level": meta.risk_level,
+                })
 
-        if not extracted.skill_node_metas:
+        skill_metas = list(merged.values())
+        if not skill_metas:
+            # 유효 응답이 하나도 없었으면(전 배치 예외/형태불일치) 원인 코드를 그대로 surface.
+            if ok_count == 0 and last_error is not None:
+                yield ErrorFrame(code=last_error[0], message=last_error[1])
+                return
             yield ErrorFrame(
                 code="E_NO_SKILLS_EXTRACTED",
                 message="LLM이 SkillNode 메타를 추출하지 못함 (SOP 문서에 자동화 가능 작업 없음으로 판단)",
             )
             return
-
-        # 각 메타 항목 검증 (category/risk_level은 DB CHECK 정합)
-        skill_metas: list[dict] = []
-        for meta in extracted.skill_node_metas:
-            try:
-                self._validate_meta(meta)
-            except ValueError as e:
-                yield ErrorFrame(
-                    code="E_LLM_RESPONSE_INVALID",
-                    message=f"LLM 추출 메타 검증 실패 ({meta.node_type}): {e}",
-                )
-                return
-            skill_metas.append({
-                "node_type": meta.node_type,
-                "name": meta.name,
-                "description": meta.description,
-                "category": meta.category,
-                "risk_level": meta.risk_level,
-            })
 
         yield ResultFrame(
             intent="build_skill",
@@ -247,11 +376,16 @@ class BuildFromSOPUseCase:
         document: DocumentBlock,
         meta: dict,
         personal_memory: list[MemoryEntry] | None = None,
+        chunks: list[Chunk] | None = None,
     ) -> AsyncGenerator[SSEFrame, None]:
         """wizard 1.5단계 — 선택된 메타의 detail(inputs/outputs/instructions/...) 추출.
 
         옵션 1의 2차 호출. 1차에서 받은 메타와 합쳐 사용자 폼에 prefill된다.
         Stateless: frontend가 1차 메타 + source(document) 정보를 다시 전달.
+
+        **청크 RAG(옵션 C)**: `chunks`(임베딩 포함)가 주어지면 선택 메타(name+description)를 임베딩해
+        유사도 상위 청크만 입력 토큰 예산 안에 골라 넣는다 — detail은 출력(markdown)이 커서 입력을
+        타이트하게 잡아야 8192 안에 입력+출력이 함께 들어간다. 청크가 없으면 전체 문서 블록으로 폴백.
 
         Args:
             meta: 1차에서 받은 메타 dict (node_type/name/description/category/risk_level).
@@ -277,12 +411,32 @@ class BuildFromSOPUseCase:
             return
 
         yield AgentNodeFrame(agent_node_name="skills_builder.sop.parse_document")
-        prompt = self._build_prompt_detail(document, personal_memory, meta_obj)
+
+        # 입력 블록 선택: 청크 있으면 메타 임베딩 RAG로 관련 청크만, 없으면 전체 문서(폴백).
+        if chunks:
+            try:
+                query_embedding = await self._embedder.embed(f"{meta_obj.name} {meta_obj.description}")
+                detail_blocks = _select_blocks_for_meta(
+                    chunks, query_embedding, _DETAIL_INPUT_TOKEN_BUDGET
+                )
+            except Exception as e:
+                # 임베딩 실패는 비치명적 — chunk_index 순 예산 절단으로 폴백. 비관련 타입만 있으면
+                # 필터 결과가 비어 _first_batch_or_empty가 []를 반환(폴백 안에서 IndexError 방지).
+                _logger.warning("detail RAG 임베딩 실패(예산 절단 폴백): %s", e)
+                rel_blocks = [c.block for c in chunks if c.block.block_type in _REL_BLOCK_TYPES]
+                detail_blocks = _first_batch_or_empty(rel_blocks, _DETAIL_INPUT_TOKEN_BUDGET)
+        else:
+            relevant = [b for b in document.blocks if b.block_type in _REL_BLOCK_TYPES]
+            detail_blocks = _first_batch_or_empty(relevant, _DETAIL_INPUT_TOKEN_BUDGET)
+
+        prompt = self._build_prompt_detail(
+            document.file_meta.file_name, detail_blocks, personal_memory, meta_obj
+        )
         yield AgentNodeFrame(agent_node_name=f"skills_builder.sop.llm_extract_detail.{meta_obj.node_type}")
 
         try:
             detail = await self._llm.generate_structured(
-                prompt, _ExtractedSkillNodeDetail, max_tokens=_SOP_EXTRACT_MAX_TOKENS
+                prompt, _ExtractedSkillNodeDetail, max_tokens=_DETAIL_OUTPUT_MAX_TOKENS
             )
         except Exception as e:
             yield ErrorFrame(code="E_LLM_GENERATION_FAILED", message=f"LLM 호출 실패: {e}")
@@ -304,6 +458,29 @@ class BuildFromSOPUseCase:
             )
             return
 
+        # T4(ADR-0028) — SOP 텍스트를 SkeletonEntityExtractor "발화" 자리에 넣어 결정적 스켈레톤
+        # 조립. 추출기는 순수 키워드 매칭이라 발화 대신 SOP 본문+스킬 메타를 먹여도 동작(D2).
+        yield AgentNodeFrame(agent_node_name="skills_builder.sop.search_skeleton")
+        utterance = self._build_skill_utterance(meta_obj, document)
+        draft = self._assembler.assemble(utterance)
+
+        if draft is not None:
+            # T5(ADR-0028 D2/D4) — 결정적 조립 구조 → COMPOSER.md(결정적) + 정밀 BINDS.
+            # 구조는 코드가 결정(§6.6), LLM의 자유 composer_instructions를 대체한다.
+            yield AgentNodeFrame(
+                agent_node_name=f"skills_builder.sop.assemble_skill.{draft.skeleton_name}"
+            )
+            mapping = self._composer_mapper.map(draft)
+            composer_instructions = mapping.composer_instructions
+            bound_node_types = list(mapping.bound_node_types)
+            skeleton_name: str | None = mapping.skeleton_name
+        else:
+            # 확신 가는 스켈레톤 매칭 없음(중첩 합성·불완전 커버리지 등) → 구조 결정 불가 →
+            # LLM 자유추출 composer_instructions로 폴백(정밀 BINDS 없음, coarse BINDS 유지).
+            composer_instructions = detail.composer_instructions
+            bound_node_types = []
+            skeleton_name = None
+
         yield ResultFrame(
             intent="build_skill",
             payload={
@@ -313,12 +490,16 @@ class BuildFromSOPUseCase:
                 "skill_detail": {
                     "node_type": meta_obj.node_type,            # 식별용 echo
                     "instructions": detail.instructions,
-                    "composer_instructions": detail.composer_instructions,  # COMPOSER.md (ADR-0024)
+                    "composer_instructions": composer_instructions,  # COMPOSER.md (결정적 또는 LLM 폴백)
                     "inputs": detail.inputs,
                     "outputs": detail.outputs,
                     "required_connections": detail.required_connections,
                     "service_type": detail.service_type,
                     "staging": staging.model_dump(mode="json"),
+                    # ADR-0028 D4 — 스켈레톤 유래 정밀 BINDS 원천(스캐폴드 실노드). 영속화/projector
+                    # 정밀화는 O3(조장 합의) 후속 — 현재는 산출물 노출만(콜러블 use case 우선).
+                    "skeleton_name": skeleton_name,
+                    "bound_node_types": bound_node_types,
                 },
                 "user_id": str(user_id),
             },
@@ -413,21 +594,38 @@ class BuildFromSOPUseCase:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_prompt_metadata(
+    def _build_skill_utterance(
+        meta: _ExtractedSkillNodeMeta,
         document: DocumentBlock,
+    ) -> str:
+        """SOP 텍스트를 SkeletonEntityExtractor "발화" 자리에 넣을 텍스트로 합성 (ADR-0028 T4).
+
+        스킬이 무엇인지(name·description) + SOP 본문(도메인 노드 어휘)을 합쳐 렉시컬 추출기에
+        먹인다 — 추출기는 순수 키워드 매칭이라 발화 대신 SOP를 먹여도 그대로 동작(D2). 메타를
+        앞에 두어 "이 스킬"의 동작 어휘(예: "슬랙으로 알림")가 sink/source 슬롯에 먼저 진입하게 한다.
+        """
+        parts = [meta.name, meta.description]
+        parts.extend(
+            b.content
+            for b in document.blocks
+            if b.block_type in {"text", "heading", "table"} and b.content
+        )
+        return "\n".join(p for p in parts if p)
+
+    @staticmethod
+    def _build_prompt_metadata(
+        file_name: str,
+        blocks: list[ContentBlock],
         personal_memory: list[MemoryEntry],
     ) -> str:
         """1차 LLM 프롬프트 — 메타 5필드만 추출(카드 그리드용). **JSON 형식 강제**.
 
         토큰을 가볍게 유지하기 위해 inputs/outputs JSON Schema + instructions markdown은
         2차(`_build_prompt_detail`)로 분리. 메타만으로도 사용자가 어느 노드를 선택할지 결정 가능.
+        `blocks`는 호출자가 이미 관련 타입 필터 + 토큰 예산 배치를 적용한 부분집합이다(map-reduce).
         """
-        relevant_blocks = [
-            b.model_dump(mode="json")
-            for b in document.blocks
-            if b.block_type in {"text", "heading", "table"}
-        ]
-        memory_json = [m.model_dump(mode="json") for m in personal_memory]
+        relevant_blocks = [b.model_dump(mode="json") for b in blocks]
+        memory_json = [m.model_dump(mode="json") for m in personal_memory[:_MAX_MEMORY_ENTRIES]]
 
         instruction = (
             "당신은 사내 업무 자동화 SOP 문서를 분석해 워크플로우 노드(SkillNode)를 추출하는 어시스턴트입니다. "
@@ -494,7 +692,7 @@ class BuildFromSOPUseCase:
             "instruction": instruction,
             "personal_memory": memory_json,
             "document": {
-                "file_name": document.file_meta.file_name,
+                "file_name": file_name,
                 "blocks": relevant_blocks,
             },
             "few_shot_example": few_shot_example,
@@ -505,21 +703,19 @@ class BuildFromSOPUseCase:
 
     @staticmethod
     def _build_prompt_detail(
-        document: DocumentBlock,
+        file_name: str,
+        blocks: list[ContentBlock],
         personal_memory: list[MemoryEntry],
         meta: _ExtractedSkillNodeMeta,
     ) -> str:
         """2차 LLM 프롬프트 — 선택된 메타에 대한 detail 5필드 추출(폼 prefill용).
 
-        SOP 전체 context를 함께 전달해 instructions(Steps 등)가 SOP 흐름 기반으로 생성되도록 한다.
+        SOP context를 함께 전달해 instructions(Steps 등)가 SOP 흐름 기반으로 생성되도록 한다.
+        `blocks`는 호출자가 선택 메타와 관련도 높은 청크로 RAG 선별 + 토큰 예산 적용한 부분집합이다.
         메타는 LLM에 echo하지 않음 — frontend가 1차 메타와 합쳐 사용.
         """
-        relevant_blocks = [
-            b.model_dump(mode="json")
-            for b in document.blocks
-            if b.block_type in {"text", "heading", "table"}
-        ]
-        memory_json = [m.model_dump(mode="json") for m in personal_memory]
+        relevant_blocks = [b.model_dump(mode="json") for b in blocks]
+        memory_json = [m.model_dump(mode="json") for m in personal_memory[:_MAX_MEMORY_ENTRIES]]
 
         instruction = (
             "당신은 사내 업무 자동화 SOP 문서에서 추출된 SkillNode의 **상세 스펙(detail)을 채우는** 어시스턴트입니다. "
@@ -599,7 +795,7 @@ class BuildFromSOPUseCase:
             "instruction": instruction,
             "personal_memory": memory_json,
             "document": {
-                "file_name": document.file_meta.file_name,
+                "file_name": file_name,
                 "blocks": relevant_blocks,
             },
             "target_skill_meta": meta.model_dump(mode="json"),

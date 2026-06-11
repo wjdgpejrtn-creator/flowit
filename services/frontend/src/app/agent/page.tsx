@@ -516,6 +516,10 @@ function AgentPageContent() {
   const setLoadedWorkflow = useWorkflowStore((s) => s.setWorkflow);
   const loadedWorkflow = useWorkflowStore((s) => s.workflow);
   const [editCatalog, setEditCatalog] = useState<NodeConfig[] | null>(null);
+  // refine(편집)은 같은 workflow_id를 유지(버전 업데이트)하므로 workflowId만으론 캔버스 재로드
+  // effect가 재발화하지 않는다 → 수정본이 안 그려지고 이전 워크플로우가 stale로 남는다. 결과
+  // 프레임이 올 때마다 증가하는 nonce를 effect 의존성에 넣어 id 불변이어도 재로드를 강제한다.
+  const [canvasReloadKey, setCanvasReloadKey] = useState(0);
 
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
@@ -576,7 +580,8 @@ function AgentPageContent() {
         showToast(`워크플로우 불러오기 실패: ${err instanceof Error ? err.message : '저장본을 찾을 수 없습니다'}`);
       });
     return () => { cancelled = true; };
-  }, [readyToExecute?.workflowId, setLoadedWorkflow]);
+    // canvasReloadKey: refine이 같은 workflowId로 편집을 반환해도(버전 업데이트) 재로드되게 한다.
+  }, [readyToExecute?.workflowId, canvasReloadKey, setLoadedWorkflow]);
 
   useSSEStream(sessionId, {
     onResult: (frame) => {
@@ -587,6 +592,8 @@ function AgentPageContent() {
           message: (payload.message as string) ?? '워크플로우가 완성됐습니다. 실행 버튼을 클릭해 실행하세요.',
           explanation: payload.explanation as WorkflowExplanation | undefined,
         });
+        // 결과가 올 때마다 캔버스 재로드 강제 — refine의 동일 workflow_id 편집도 반영(버전 업데이트).
+        setCanvasReloadKey((k) => k + 1);
       }
     },
   });
@@ -701,10 +708,13 @@ function AgentPageContent() {
       // 이전엔 새 세션으로 리셋해 refine 메시지가 새 채팅으로 떨어져 composer가 이전
       // 워크플로우를 못 불러왔다(같은 session_id라야 draft_store.load_draft 가능). 완전히
       // 새 워크플로우를 시작하려면 "새 대화" 버튼(handleNewChat)을 쓴다.
-      // readyToExecute/loadedWorkflow만 해제(스트리밍 중 ConfirmCard 숨김) — 새 결과가
-      // 오면 다시 채워진다. session_id·messages는 보존해 대화 맥락을 잇는다.
+      //
+      // ⚠️ loadedWorkflow(캔버스 본문)는 **지우지 않는다**. refine은 기존 워크플로우 편집이므로
+      // 스트리밍 중에도 캔버스에 현재 워크플로우가 보여야 한다. 이전엔 여기서 null로 비워
+      // refine이 에러(편집 실패)나면 캔버스가 빈 채로 남아 "워크플로우가 다 날아간 것"처럼 보였다.
+      // 편집 성공 시 새 readyToExecute가 와서 loadedWorkflow를 교체(아래 effect, line 574)하므로
+      // 지울 필요 없다. ConfirmCard만 숨겨 스트리밍 중 중복 실행 버튼을 막는다.
       setReadyToExecute(null);
-      setLoadedWorkflow(null);
       setSaveError(null);  // 카드가 사라지므로 이전 저장 검증 피드백도 함께 해제
     }
 

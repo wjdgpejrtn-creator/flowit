@@ -253,14 +253,21 @@ class TestDrafterServiceRefine:
         assert DrafterService._serialize_for_edit(prior, [cfg_a]) is None
 
     @pytest.mark.asyncio
-    async def test_unmappable_prior_falls_back_to_fresh(self):
+    async def test_unmappable_prior_raises_never_regenerates(self):
+        # **편집 잠금(#369)**: prior가 주어지면 절대 fresh로 재생성하지 않는다. 직렬화 불가
+        # (기존 노드가 후보에 없음)면 fresh 폴백 대신 에러 — 사용자가 쌓은 워크플로우를 조용히
+        # 2노드로 갈아엎던 회귀 차단. (정상 경로는 composer가 prior 노드를 후보에 보강해 직렬화 성공.)
+        from common_schemas.exceptions import ExecutionError
+
         cfg_a, cfg_b = _node_config("http"), _node_config("slack")
         prior = _prior_workflow(cfg_a, cfg_b)
         llm = _mock_llm(_DraftResponse(name="W", nodes=[_NodeDraft(node_type="http")], connections=[]))
         svc = DrafterService(llm)
-        # 후보에 slack 빠짐 → 편집 컨텍스트 생략하고 fresh로 진행(기존 노드 유실 방지)
-        await svc.draft(_spec(), [cfg_a], self.owner_id, prior_workflow=prior)
-        assert llm.generate_structured.call_args.args[1] is _DraftResponse  # fresh 스키마
+        # 후보에 slack 빠짐 → 직렬화 None → fresh 생성 금지, 에러
+        with pytest.raises(ExecutionError) as ei:
+            await svc.draft(_spec(), [cfg_a], self.owner_id, prior_workflow=prior)
+        assert ei.value.code == "E_REFINE_SERIALIZE"
+        llm.generate_structured.assert_not_awaited()  # fresh draft LLM 호출조차 없음
 
     def test_duplicate_node_type_preserved_via_refs(self):
         # 동일 node_type 노드 2개도 ref로 구분 → 직렬화/빌드 모두 모호하지 않다(LOW~MED 해소).
@@ -709,6 +716,31 @@ class TestDrafterCandidateCap:
         assert "action24" not in prompt
         assert "action0" in prompt
 
+    @pytest.mark.asyncio
+    async def test_cap_preserves_prior_workflow_nodes(self):
+        # **#369 회귀**: refine 편집 시 prior 워크플로우 노드(비-우선 카테고리)가 후보 풀 '끝'에
+        # 덧붙는데, 순서 무지 캡이 1순위로 떨궜다 → _serialize_for_edit이 못 찾아 E_REFINE_SERIALIZE.
+        # 이제 prior 노드는 카테고리 무관 캡에서 보존되어 편집이 성공한다.
+        cfg_a = _node_config_cat("google_sheets_read", "integration")  # 비-우선 카테고리
+        cfg_b = _node_config_cat("slack_send", "action")               # 비-우선 카테고리
+        prior = _prior_workflow(cfg_a, cfg_b)
+        filler = [_node_config_cat(f"action{i}", "action") for i in range(25)]
+        candidates = [*filler, cfg_a, cfg_b]  # prior 노드가 맨 끝 (augment가 덧붙이는 위치)
+
+        llm = _mock_llm(_EditResponse(
+            name="W",
+            nodes=[
+                _EditNodeDraft(ref="n0", node_type="google_sheets_read"),
+                _EditNodeDraft(ref="n1", node_type="slack_send"),
+            ],
+            connections=[_EditEdgeDraft(from_ref="n0", to_ref="n1")],
+        ))
+        # 캡이 prior 노드를 떨구면 직렬화 None → E_REFINE_SERIALIZE. 보존 시 편집 성공.
+        result = await DrafterService(llm).draft(_spec(), candidates, uuid4(), prior_workflow=prior)
+        assert len(result.nodes) == 2
+        node_ids = {n.node_id for n in result.nodes}
+        assert cfg_a.node_id in node_ids and cfg_b.node_id in node_ids
+
 
 @pytest.mark.asyncio
 async def test_refine_rewrites_ref_token_to_instance_id():
@@ -760,6 +792,28 @@ class TestScaffoldParamFill:
         assert any(n.parameters.get("cron") == "0 9 * * 1" for n in wf.nodes)
         # 파라미터 채움 전용 스키마로 호출됐는지(구조 생성 LLM 아님).
         assert llm.generate_structured.call_args.args[1] is _ParamFillResponse
+
+    @pytest.mark.asyncio
+    async def test_personal_patterns_injected_into_scaffold_prompt(self):
+        # 회귀(데모): scaffold(param-fill) 경로도 일반 draft와 동일하게 personal_patterns를
+        # 주입해야 한다. 누락 시 "매주…요일"처럼 스켈레톤에 걸리는 발화에서 개인화(빈 파라미터
+        # 채움)가 조용히 사라진다 — flowit01 미적용 버그.
+        scaffold, candidates = self._scaffold_and_candidates(
+            "매주 월요일 9시에 광고 시트를 읽어서 요약하고 슬랙으로 보내줘"
+        )
+        first_ref = scaffold.nodes[0].ref
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured = AsyncMock(
+            return_value=_ParamFillResponse(nodes=[_NodeParamFill(ref=first_ref, parameters={})])
+        )
+        await DrafterService(llm).draft(
+            _spec(), candidates, uuid4(), skeleton_scaffold=scaffold,
+            personal_patterns=["[광고 시트 ID] spreadsheet_id는 항상 flowit01"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert llm.generate_structured.call_args.args[1] is _ParamFillResponse  # scaffold 경로 확인
+        assert "USER PATTERNS" in prompt
+        assert "flowit01" in prompt
 
     @pytest.mark.asyncio
     async def test_llm_cannot_alter_structure(self):

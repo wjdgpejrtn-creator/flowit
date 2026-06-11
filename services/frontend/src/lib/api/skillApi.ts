@@ -269,14 +269,25 @@ export async function listSkillTemplates(): Promise<SkillTemplate[]> {
 
 // ── 문서/템플릿→스킬 자동 추출 (REQ-010/013, 스킬빌더 위저드 1단계) ──────────────
 
-// extract_draft 결과 1건 — SOP에서 추출된 SkillNode 초안. instructions가 전문 SKILL.md 본문.
-// staging은 노드 스펙(category/입출력/risk/연동) — 생성 시 그대로 실어 보내 publish 노드 I/O를 채운다.
-export interface ExtractedSkillDraft {
+// 1차 extract 결과 — 카드 그리드용 메타 5필드 (백엔드 ResultFrame.payload.skill_metas[i]).
+// detail(instructions/staging)은 사용자가 1건 선택하면 2차 extractSkillDetail로 채운다 —
+// 백엔드가 LLM JSON 잘림 해소를 위해 metadata/detail 2단계로 분리했다(#353).
+export interface SkillMeta {
   node_type: string;
   name: string;
   description: string;
+  category: string;
+  risk_level: string;
+}
+
+// 2차 extract/detail 결과 (백엔드 payload.skill_detail). 1차 메타와 합쳐 폼에 prefill한다.
+export interface SkillDetail {
+  node_type: string;
   instructions: string;
-  staging?: NodeSpecStagingInput;
+  staging: NodeSpecStagingInput;
+  composer_instructions?: string;
+  skeleton_name?: string | null;
+  bound_node_types?: string[];
 }
 
 // 추출 재료 — 내 문서(source_document_id) XOR default 템플릿(template_code). 백엔드 배타 검증.
@@ -329,6 +340,21 @@ export async function streamExtractSkill(
   } finally {
     reader.releaseLock();
   }
+}
+
+// 위저드 1.5단계 — 1차에서 받은 메타 1건을 선택하면 detail(instructions/staging 등)을 채운다
+// (POST /api/v1/skills/extract/detail, JSON 단건). 백엔드가 source를 다시 받아 stateless로 추출한다.
+// SSE가 아니라 일반 rewrite 경유(JSON)라 extract처럼 전용 Route Handler가 필요 없다.
+export async function extractSkillDetail(
+  material: ExtractMaterial,
+  meta: SkillMeta,
+  signal?: AbortSignal,
+): Promise<SkillDetail> {
+  const { skill_detail } = await apiJson<{ skill_detail: SkillDetail }>(
+    '/api/v1/skills/extract/detail',
+    { method: 'POST', body: JSON.stringify({ ...material, meta }), signal },
+  );
+  return skill_detail;
 }
 
 // ── 마켓플레이스 lifecycle — 개인 스킬 보관/복원 ────────────────────────────────

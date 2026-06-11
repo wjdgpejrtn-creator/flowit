@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
 from common_schemas import IntentResult
 from common_schemas.enums import IntentType
-from common_schemas.exceptions import ExecutionError
 
 from ..ports.llm_port import LLMPort
 from ..value_objects.route_plan import RECIPE_SKILL_THEN_COMPOSE
@@ -106,32 +104,20 @@ def _fast_classify(message: str) -> IntentType | None:
     return None
 
 
-# ── LLM fallback prompt ───────────────────────────────────────────────────────
-
-_SYSTEM_PROMPT = """You are an intent classifier for a workflow automation assistant.
-Classify the user's latest message into one of these intents:
-- chitchat: greeting, thanks, casual conversation ("안녕", "고마워")
-- control: cancel, reset, stop ("취소", "초기화", "중단")
-- workflow_execute: user wants to run/execute the current workflow ("실행해줘")
-- info_question: asking about features or existing workflows ("이게 뭐야", "어떻게 써")
-- draft: user wants a NEW workflow created
-- refine: user wants to MODIFY an existing workflow draft
-- clarify: input is ambiguous, needs more information
-- propose: user accepts/approves the current proposal
-- build_skill: user wants to build a reusable skill
-
-When intent is "build_skill", include source_type in analyzed_entities:
-- "industry_default": user mentions an industry → include "industry_code"
-- "functional_domain": user mentions a department → include "domain_code"
-- "sop": user provides a SOP document text
-
-Return JSON only, no explanation:
-{"intent": "<intent>", "confidence": <0.0-1.0>, "analyzed_entities": {}}
-"""
+# draft/refine는 **상태 의존** 의도 — 같은 발화도 세션에 확인 대기 draft가 있는지에 따라
+# 정답이 갈린다("채널 #general로 해줘" = draft無→새 생성 / draft有→수정). 정규식 표면만으론
+# 못 가르므로, 호출부가 `has_pending_draft`를 주면 **편집 잠금**(draft 존재 시 결정적 refine
+# 고정)으로 해소한다(#369). draft↔refine을 Gemma로 가르던 경로는 작은 모델 오분류로 편집이
+# 새 생성으로 새던 회귀 때문에 제거됨.
+_STATEFUL_INTENTS = frozenset({IntentType.DRAFT, IntentType.REFINE})
 
 
 class IntentAnalyzerService:
     def __init__(self, llm: LLMPort) -> None:
+        # `analyze`는 정규식 + 편집 잠금만 쓰는 결정적 분류라 현재 LLM을 호출하지 않는다
+        # (draft↔refine Gemma 분류는 편집 잠금으로 폐지 — decisions.md "구현 결정 메모"). `llm`은
+        # 생성자 시그니처/composition root(agent-composer·orchestrator) 안정성 + 향후 LLM 분류
+        # 재도입 대비로 보존한다. 미사용이지만 의도된 보존(dead dependency 아님).
         self._llm = llm
 
     async def analyze(self, messages: list[dict[str, Any]], context: dict[str, Any]) -> IntentResult | None:
@@ -143,13 +129,30 @@ class IntentAnalyzerService:
 
         # fast-path: 키워드 분류 (LLM 0 call)
         fast_intent = _fast_classify(user_message)
-        if fast_intent is not None:
-            return IntentResult(
-                intent=fast_intent,
-                confidence=0.95,
-                analyzed_entities={},
-            )
 
-        # 미분류 → None 반환 (supervisor가 general_chat으로 처리)
-        # LLM 분류 호출 제거 — 분류 실패 시 응답 생성 LLM으로 흡수
+        # 무상태·명시적 의도(제어/실행/인사/승인/안내/스킬빌드)는 정규식으로 확정한다 —
+        # 발화 표면만으로 정답이 정해지므로 LLM이 불필요하다.
+        if fast_intent is not None and fast_intent not in _STATEFUL_INTENTS:
+            return IntentResult(intent=fast_intent, confidence=0.95, analyzed_entities={})
+
+        # 여기 도달 = draft/refine/미분류 = '워크플로우 구성' 의도(상태 의존).
+        has_draft = context.get("has_pending_draft")
+        if has_draft is not None:
+            # 핵심 불변식: refine은 확인 대기 draft가 있어야만 성립한다.
+            if has_draft:
+                # **편집 잠금(조장 지시 2026-06-10)**: 확인 대기 draft가 있으면 이 세션은
+                # 편집 모드다. draft/refine/미분류 발화는 전부 기존 draft 수정(refine)으로
+                # **결정적 확정** — 새 워크플로우 생성을 잠근다(새로 만들려면 "새 대화"로 세션 초기화).
+                # Gemma 상태 분류 제거: 작은 모델 오분류로 편집이 새 생성으로 새던 회귀
+                # (#369 — 4노드가 2노드로 재생성)를 원천 차단 + 핫패스 LLM 지연 0.
+                return IntentResult(intent=IntentType.REFINE, confidence=1.0, analyzed_entities={})
+            # draft 없음 → refine 불가능 → refine 오탐은 새 생성(draft)으로 교정한다.
+            # create 핫패스엔 Gemma 호출을 더하지 않는다(불필요한 지연 방지).
+            if fast_intent is IntentType.REFINE:
+                fast_intent = IntentType.DRAFT
+
+        # 무상태 호출부(supervisor)이거나 draft 없는 경우 — 정규식 결과 그대로.
+        # supervisor는 draft/refine이 동일 레시피(→COMPOSER)라 정규식으로 충분하다.
+        if fast_intent is not None:
+            return IntentResult(intent=fast_intent, confidence=0.95, analyzed_entities={})
         return None

@@ -197,6 +197,7 @@ export interface SkillOption {
   description: string;
   document_preview?: string | null;
   node_definition_id?: string | null;
+  is_personal: boolean;
 }
 
 export interface SkillSelectionFrame {

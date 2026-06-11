@@ -11,15 +11,19 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from common_schemas import ContentBlock, DocumentBlock, FileMeta, ParserMeta
+from common_schemas import Chunk, ContentBlock, DocumentBlock, FileMeta, ParserMeta
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
 
 from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
+    _DETAIL_INPUT_TOKEN_BUDGET,
+    _METADATA_INPUT_TOKEN_BUDGET,
     BuildFromSOPUseCase,
+    _batch_blocks_by_budget,
     _ExtractedSkillNodeDetail,
     _ExtractedSkillNodeMeta,
     _ExtractedSkillNodeMetaList,
+    _select_blocks_for_meta,
 )
 from ai_agent.domain.ports.llm_port import LLMPort
 
@@ -180,7 +184,8 @@ async def test_extract_metadata_progress_frames():
     frames = [f async for f in _make_uc(llm=llm).extract_metadata(uuid4(), _make_document())]
     names = {f.agent_node_name for f in frames if isinstance(f, AgentNodeFrame)}
     assert "skills_builder.sop.parse_document" in names
-    assert "skills_builder.sop.llm_extract_metadata" in names
+    # map-reduce: 배치별 추출 노드(청크 없으면 단일 배치 batch1of1)
+    assert any(n.startswith("skills_builder.sop.llm_extract_metadata") for n in names)
 
 
 @pytest.mark.asyncio
@@ -207,11 +212,27 @@ async def test_extract_metadata_llm_response_invalid():
 
 
 @pytest.mark.asyncio
-async def test_extract_metadata_bad_category_yields_error():
-    bad_meta = _make_meta(category="not_a_category")
-    llm = _FakeLLM(structured_response=_ExtractedSkillNodeMetaList(skill_node_metas=[bad_meta]))
+async def test_extract_metadata_bad_category_skipped_keeps_valid():
+    # map-reduce(옵션 C): 잘못된 category 메타는 건너뛰고 유효 메타는 보존한다 — 메타 1건 때문에
+    # 전체 추출이 실패하지 않는다(부분 추출 > 전체 실패).
+    good = _make_meta(node_type="good_node")
+    bad = _make_meta(node_type="bad_node", category="not_a_category")
+    llm = _FakeLLM(structured_response=_ExtractedSkillNodeMetaList(skill_node_metas=[good, bad]))
     frames = [f async for f in _make_uc(llm=llm).extract_metadata(uuid4(), _make_document())]
-    assert any(isinstance(f, ErrorFrame) and f.code == "E_LLM_RESPONSE_INVALID" for f in frames)
+    result = frames[-1]
+    assert isinstance(result, ResultFrame)
+    node_types = {m["node_type"] for m in result.payload["skill_metas"]}
+    assert "good_node" in node_types
+    assert "bad_node" not in node_types
+
+
+@pytest.mark.asyncio
+async def test_extract_metadata_all_bad_category_yields_no_skills():
+    # 전부 무효 category면 결과가 비어 E_NO_SKILLS_EXTRACTED(유효 응답은 받았으나 추출물 0).
+    bad = _make_meta(category="not_a_category")
+    llm = _FakeLLM(structured_response=_ExtractedSkillNodeMetaList(skill_node_metas=[bad]))
+    frames = [f async for f in _make_uc(llm=llm).extract_metadata(uuid4(), _make_document())]
+    assert any(isinstance(f, ErrorFrame) and f.code == "E_NO_SKILLS_EXTRACTED" for f in frames)
 
 
 # ----------------------------------------------------------------------
@@ -265,9 +286,79 @@ async def test_extract_detail_returns_composer_instructions():
 
 def test_build_prompt_detail_requests_composer_instructions():
     # 프롬프트가 COMPOSER.md(composer_instructions) 합성을 요청 — 2-md 추출 계약(ADR-0024 D3)
-    prompt = BuildFromSOPUseCase._build_prompt_detail(_make_document(), [], _make_meta())
+    prompt = BuildFromSOPUseCase._build_prompt_detail("sop.pdf", [], [], _make_meta())
     assert "composer_instructions" in prompt
     assert "COMPOSER.md" in prompt
+
+
+# ----------------------------------------------------------------------
+# extract_detail — T4/T5 결정적 스켈레톤 조립 (ADR-0028 D2/D3/D4)
+# ----------------------------------------------------------------------
+
+
+def _skeleton_meta_dict() -> dict:
+    # 발화 어휘(매주/구글 시트/요약/슬랙)가 메타에 들어가 scheduled_pipeline에 결정적 매칭
+    return {
+        "node_type": "weekly_sales_summary_slack",
+        "name": "주간 매출 요약 슬랙 발송",
+        "description": "매주 구글 시트에서 매출 데이터를 읽어 요약해서 슬랙으로 보낸다",
+        "category": "action",
+        "risk_level": "Low",
+    }
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_skeleton_match_overrides_composer_instructions():
+    # 스켈레톤 매칭 시 COMPOSER.md는 LLM 자유추출이 아니라 결정적 조립에서 나온다(D3 §6.6)
+    llm = _FakeLLM(structured_response=_make_detail(
+        composer_instructions="## 필수 노드\nLLM이 자유 생성한 (무시돼야 할) 지침",
+    ))
+    frames = [f async for f in _make_uc(llm=llm).extract_detail(
+        uuid4(), _make_document(), _skeleton_meta_dict()
+    )]
+    detail = frames[-1].payload["skill_detail"]
+    # 결정적 스켈레톤 산출 — LLM 자유 지침은 대체됨
+    assert "LLM이 자유 생성한" not in detail["composer_instructions"]
+    assert "scheduled_pipeline" in detail["composer_instructions"]
+    assert detail["skeleton_name"] == "scheduled_pipeline"
+    # 정밀 BINDS — 발화 도메인 노드가 결정적으로 포함
+    assert "google_sheets_read" in detail["bound_node_types"]
+    assert "slack_post_message" in detail["bound_node_types"]
+    assert "anthropic_chat" in detail["bound_node_types"]
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_skeleton_match_emits_assemble_frame():
+    llm = _FakeLLM(structured_response=_make_detail())
+    frames = [f async for f in _make_uc(llm=llm).extract_detail(
+        uuid4(), _make_document(), _skeleton_meta_dict()
+    )]
+    names = {f.agent_node_name for f in frames if isinstance(f, AgentNodeFrame)}
+    assert "skills_builder.sop.search_skeleton" in names
+    assert any(n.startswith("skills_builder.sop.assemble_skill.") for n in names)
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_no_skeleton_match_falls_back_to_llm_composer():
+    # 스켈레톤 미매칭(고객 응대 SOP — sink-only) → LLM composer_instructions 폴백, BINDS 없음
+    llm = _FakeLLM(structured_response=_make_detail(
+        composer_instructions="## 필수 노드\nLLM 폴백 지침",
+    ))
+    frames = [f async for f in _make_uc(llm=llm).extract_detail(
+        uuid4(), _make_document(), _meta_dict()
+    )]
+    detail = frames[-1].payload["skill_detail"]
+    assert detail["composer_instructions"] == "## 필수 노드\nLLM 폴백 지침"
+    assert detail["skeleton_name"] is None
+    assert detail["bound_node_types"] == []
+
+
+def test_build_skill_utterance_combines_meta_and_document():
+    meta = _make_meta(name="주간 요약", node_type="weekly")
+    utterance = BuildFromSOPUseCase._build_skill_utterance(meta, _make_document())
+    assert "주간 요약" in utterance                     # 메타 name
+    assert "Slack 채널로 알림" in utterance              # 메타 description
+    assert "고객 문의 접수 시 Slack 알림" in utterance   # 문서 본문 블록
 
 
 @pytest.mark.asyncio
@@ -455,3 +546,128 @@ async def test_confirm_create_draft_failure_isolated():
     frames = [f async for f in _make_uc(draft=draft).confirm(uuid4(), [_valid_skill()])]
     assert any(isinstance(f, ErrorFrame) and f.code == "E_CREATE_DRAFT_FAILED" for f in frames)
     assert frames[-1].payload["failed_count"] == 1
+
+
+# ----------------------------------------------------------------------
+# 옵션 C — 청크 기반 map-reduce(metadata) + RAG(detail)
+# 8192 컨텍스트 초과(exceed_context_size) 회귀 차단: 전체 문서 대신 청크를 토큰 예산 배치/선별.
+# ----------------------------------------------------------------------
+
+
+class _SeqLLM(LLMPort):
+    """호출마다 다음 응답을 반환하는 LLM fake — 배치별(map) 응답 시뮬레이션."""
+
+    def __init__(self, responses: list[Any]) -> None:
+        self._responses = list(responses)
+        self.received_prompts: list[str] = []
+        self.call_count = 0
+
+    async def generate(self, prompt: str, **kwargs: Any) -> str:
+        return "stub"
+
+    async def generate_structured(self, prompt: str, schema: type, max_tokens: int | None = None) -> Any:
+        self.received_prompts.append(prompt)
+        idx = min(self.call_count, len(self._responses) - 1)
+        self.call_count += 1
+        return self._responses[idx]
+
+
+def _chunk(content: str, idx: int, doc_id: UUID, embedding: list[float] | None = None) -> Chunk:
+    return Chunk(
+        block=ContentBlock(block_id=uuid4(), block_type="text", content=content, page=1),
+        chunk_index=idx,
+        parent_document_id=doc_id,
+        embedding=embedding,
+    )
+
+
+def test_batch_blocks_by_budget_splits_over_budget():
+    # 각 블록이 예산을 넘기는 길이 → 블록마다 단독 배치. estimate=len*2.5라 1100자≈2750토큰>2500.
+    blocks = [
+        ContentBlock(block_id=uuid4(), block_type="text", content="가" * 1100, page=1),
+        ContentBlock(block_id=uuid4(), block_type="text", content="나" * 1100, page=1),
+    ]
+    batches = _batch_blocks_by_budget(blocks, _METADATA_INPUT_TOKEN_BUDGET)
+    assert len(batches) == 2
+    # 작은 블록들은 한 배치로 합쳐진다.
+    small = [ContentBlock(block_id=uuid4(), block_type="text", content="짧음", page=1) for _ in range(3)]
+    assert len(_batch_blocks_by_budget(small, _METADATA_INPUT_TOKEN_BUDGET)) == 1
+
+
+def test_select_blocks_for_meta_ranks_by_cosine_within_budget():
+    doc_id = uuid4()
+    # query=[1,0]에 가까운 c0, 먼 c1. 예산이 1건만 허용하도록 긴 content.
+    c0 = _chunk("가" * 800, 0, doc_id, embedding=[1.0, 0.0])
+    c1 = _chunk("나" * 800, 1, doc_id, embedding=[0.0, 1.0])
+    picked = _select_blocks_for_meta([c1, c0], query_embedding=[1.0, 0.0], budget=_DETAIL_INPUT_TOKEN_BUDGET)
+    assert picked[0].content.startswith("가")  # 유사도 높은 청크 선택
+
+
+@pytest.mark.asyncio
+async def test_extract_metadata_chunked_mapreduce_merges_and_dedups():
+    doc = _make_document()
+    # 2개 청크 각각 예산 초과 길이 → 2배치 → 2 LLM 호출. 응답: 배치1=A,공통 / 배치2=공통,B → dedup후 A,공통,B.
+    chunks = [_chunk("가" * 1100, 0, doc.document_id), _chunk("나" * 1100, 1, doc.document_id)]
+    r1 = _ExtractedSkillNodeMetaList(skill_node_metas=[_make_meta(node_type="a"), _make_meta(node_type="common")])
+    r2 = _ExtractedSkillNodeMetaList(skill_node_metas=[_make_meta(node_type="common"), _make_meta(node_type="b")])
+    llm = _SeqLLM([r1, r2])
+    uc = BuildFromSOPUseCase(create_draft_skill=_FakeCreateDraftSkill(), embedder=_FakeEmbedder(), llm=llm)
+
+    frames = [f async for f in uc.extract_metadata(uuid4(), doc, chunks=chunks)]
+
+    assert llm.call_count == 2  # 배치당 1회 (map)
+    result = frames[-1]
+    assert isinstance(result, ResultFrame)
+    node_types = [m["node_type"] for m in result.payload["skill_metas"]]
+    assert sorted(node_types) == ["a", "b", "common"]  # 병합 + node_type dedup
+
+
+@pytest.mark.asyncio
+async def test_extract_metadata_chunked_partial_batch_failure_tolerated():
+    doc = _make_document()
+    chunks = [_chunk("가" * 1100, 0, doc.document_id), _chunk("나" * 1100, 1, doc.document_id)]
+    # 배치1 형태불일치(skip) + 배치2 정상 → 배치2 메타만 반환(부분 추출).
+    llm = _SeqLLM([{"not": "a model"}, _ExtractedSkillNodeMetaList(skill_node_metas=[_make_meta(node_type="b")])])
+    uc = BuildFromSOPUseCase(create_draft_skill=_FakeCreateDraftSkill(), embedder=_FakeEmbedder(), llm=llm)
+    frames = [f async for f in uc.extract_metadata(uuid4(), doc, chunks=chunks)]
+    result = frames[-1]
+    assert isinstance(result, ResultFrame)
+    assert [m["node_type"] for m in result.payload["skill_metas"]] == ["b"]
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_chunked_uses_embedding_rag():
+    doc = _make_document()
+    chunks = [
+        _chunk("Slack 알림 발송 절차", 0, doc.document_id, embedding=[1.0, 0.0]),
+        _chunk("무관한 휴가 규정", 1, doc.document_id, embedding=[0.0, 1.0]),
+    ]
+    embedder = _FakeEmbedder()
+    llm = _FakeLLM(structured_response=_make_detail())
+    uc = BuildFromSOPUseCase(create_draft_skill=_FakeCreateDraftSkill(), embedder=embedder, llm=llm)
+
+    frames = [f async for f in uc.extract_detail(uuid4(), doc, _meta_dict(), chunks=chunks)]
+
+    result = frames[-1]
+    assert isinstance(result, ResultFrame)
+    # RAG: 선택 메타(name+description)를 임베딩해 관련 청크를 골랐다.
+    assert embedder.calls and "고객 문의 Slack 알림" in embedder.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_embedding_failure_with_only_nonrelevant_chunks_no_crash():
+    # #483 리뷰 MED #1 회귀: 임베딩 실패 폴백에서 비관련 타입(image)만 있으면 필터 결과가 비어
+    # `[][0]` IndexError로 제너레이터가 크래시하던 버그. 이제 빈 블록으로 graceful 진행해야 한다.
+    doc = _make_document()
+    img_chunk = Chunk(
+        block=ContentBlock(block_id=uuid4(), block_type="image", content=None, page=1),
+        chunk_index=0, parent_document_id=doc.document_id, embedding=[1.0, 0.0],
+    )
+    embedder = _FakeEmbedder(raise_on_call=RuntimeError("modal embed down"))
+    llm = _FakeLLM(structured_response=_make_detail())
+    uc = BuildFromSOPUseCase(create_draft_skill=_FakeCreateDraftSkill(), embedder=embedder, llm=llm)
+
+    frames = [f async for f in uc.extract_detail(uuid4(), doc, _meta_dict(), chunks=[img_chunk])]
+
+    # 크래시 없이 detail 결과 산출(컨텍스트 블록이 비어도 LLM 호출은 진행).
+    assert isinstance(frames[-1], ResultFrame)

@@ -11,12 +11,13 @@ import {
   selfPublishPersonalSkill,
   getPersonalSkill,
   streamExtractSkill,
+  extractSkillDetail,
   listSkillTemplates,
 } from '@/lib/api/skillApi';
 import type {
   PersonalSkill,
   SkillLifecycleState,
-  ExtractedSkillDraft,
+  SkillMeta,
   ExtractMaterial,
   NodeSpecStagingInput,
   SkillTemplate,
@@ -111,21 +112,38 @@ export default function SkillBuilderPage() {
   const [extracting, setExtracting] = useState(false);
   const [extractStep, setExtractStep] = useState<string | null>(null);
   const [extractError, setExtractError] = useState<string | null>(null);
-  const [extractedSkills, setExtractedSkills] = useState<ExtractedSkillDraft[]>([]);
+  const [extractedSkills, setExtractedSkills] = useState<SkillMeta[]>([]);
   const [selectedDraftIdx, setSelectedDraftIdx] = useState<number | null>(null);
+  // 선택한 메타의 detail(instructions/staging)을 2차 호출로 가져오는 중인 카드 인덱스 (진행 표시용).
+  const [detailLoadingIdx, setDetailLoadingIdx] = useState<number | null>(null);
   // 선택한 초안의 노드 스펙 — 생성 시 node_spec_staging으로 전송(publish 노드 I/O, #290). 수동 폼이면 undefined.
   const [selectedStaging, setSelectedStaging] = useState<NodeSpecStagingInput | undefined>(undefined);
   const extractAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => extractAbortRef.current?.abort(), []);
 
-  // 추출된 초안 1건을 폼에 채운다(검토·수정용). 선택 강조용 인덱스 + 노드 스펙(staging) 보관.
-  const applyDraft = useCallback((draft: ExtractedSkillDraft, idx: number) => {
-    setName(draft.name);
-    setDescription(draft.description);
-    setInstructions(draft.instructions);
-    setSelectedStaging(draft.staging);
+  // 추출 메타 1건 선택 → 폼에 채운다(검토·수정용). 메타(name/description)는 즉시 채우고,
+  // instructions/staging은 2차 detail 호출로 채운다(#353 metadata/detail 2단계). 재료(m)는 stale
+  // closure 회피를 위해 인자로 직접 받는다(runExtract의 단건 자동선택 + 카드 클릭 모두 안전).
+  const selectDraft = useCallback(async (meta: SkillMeta, idx: number, m: Material | null) => {
     setSelectedDraftIdx(idx);
+    setName(meta.name);
+    setDescription(meta.description);
+    // detail이 올 때까지 이전 선택의 잔재를 비운다(혼동 방지).
+    setInstructions('');
+    setSelectedStaging(undefined);
+    if (!m) return;
+    setDetailLoadingIdx(idx);
+    setExtractError(null);
+    try {
+      const detail = await extractSkillDetail(toExtractBody(m), meta);
+      setInstructions(detail.instructions);
+      setSelectedStaging(detail.staging);
+    } catch (err) {
+      setExtractError(err instanceof Error ? `상세 추출 실패: ${err.message}` : '상세 추출 실패');
+    } finally {
+      setDetailLoadingIdx(null);
+    }
   }, []);
 
   // 위저드 1단계 — 재료(문서/템플릿)에서 SkillNode 초안 추출(SSE). 결과를 목록으로 보여주고
@@ -141,6 +159,7 @@ export default function SkillBuilderPage() {
       setExtractStep(null);
       setExtractedSkills([]);
       setSelectedDraftIdx(null);
+      setDetailLoadingIdx(null);
 
       try {
         await streamExtractSkill(
@@ -153,10 +172,12 @@ export default function SkillBuilderPage() {
                 break;
               }
               case 'result': {
-                const payload = frame.payload as { skills?: ExtractedSkillDraft[] } | undefined;
-                const skills = payload?.skills ?? [];
-                setExtractedSkills(skills);
-                if (skills.length === 1) applyDraft(skills[0], 0);
+                // 백엔드는 metadata 단계에서 payload.skill_metas(5필드 메타 목록)를 보낸다(#353).
+                const payload = frame.payload as { skill_metas?: SkillMeta[] } | undefined;
+                const metas = payload?.skill_metas ?? [];
+                setExtractedSkills(metas);
+                // 단건이면 자동 선택 → 곧장 detail까지 채운다(재료는 인자 m으로 전달, stale 회피).
+                if (metas.length === 1) void selectDraft(metas[0], 0, m);
                 break;
               }
               case 'error':
@@ -174,7 +195,7 @@ export default function SkillBuilderPage() {
         setExtractStep(null);
       }
     },
-    [applyDraft],
+    [selectDraft],
   );
 
   // build 단계 진입 + 추출 시작. 재료를 인자로 직접 받아 stale closure 회피.
@@ -187,6 +208,7 @@ export default function SkillBuilderPage() {
       setInstructions('');
       setExtractedSkills([]);
       setSelectedDraftIdx(null);
+      setDetailLoadingIdx(null);
       setSelectedStaging(undefined);
       void runExtract(m);
     },
@@ -266,6 +288,8 @@ export default function SkillBuilderPage() {
   // staging(추출 노드 스펙)을 함께 보내 publish 시 NodeDefinition I/O를 채운다(#290).
   const handleCreate = async (publish: boolean) => {
     if (!name.trim() || !description.trim()) return;
+    // 방어선 — 버튼 disabled를 우회한 제출(엔터 등)도 미완 detail 상태면 차단(빈 지침서 방지).
+    if (selectedDraftIdx !== null && selectedStaging === undefined) return;
     setLoading(true);
     setError(null);
     try {
@@ -306,7 +330,12 @@ export default function SkillBuilderPage() {
 
   const industryTemplates = templates.filter((t) => t.kind === 'industry');
   const functionalTemplates = templates.filter((t) => t.kind === 'functional');
-  const submitDisabled = loading || !name.trim() || !description.trim();
+  // 추출 초안(카드)을 선택했으나 상세(instructions/staging)가 아직 도착하지 않은 상태 —
+  // detail 로딩 중이거나 실패한 경우다. 이때 생성을 막지 않으면 instructions=undefined +
+  // node_spec_staging=undefined로 저장돼 지침서 없이 placeholder I/O 스킬이 만들어진다(빈 지침서 버그).
+  // detail이 빈 스키마({})로 정상 도착한 경우는 staging이 정의(truthy)되므로 차단하지 않는다.
+  const detailPending = selectedDraftIdx !== null && selectedStaging === undefined;
+  const submitDisabled = loading || !name.trim() || !description.trim() || detailPending;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -617,9 +646,10 @@ export default function SkillBuilderPage() {
                                 <button
                                   key={`${s.node_type}-${idx}`}
                                   type="button"
-                                  onClick={() => applyDraft(s, idx)}
+                                  onClick={() => void selectDraft(s, idx, material)}
+                                  disabled={detailLoadingIdx !== null}
                                   className={[
-                                    'text-left rounded-xl px-3 py-2 transition-colors bg-white border',
+                                    'text-left rounded-xl px-3 py-2 transition-colors bg-white border disabled:opacity-60',
                                     selectedDraftIdx === idx
                                       ? 'border-accent'
                                       : 'border-line-soft hover:border-accent',
@@ -627,7 +657,9 @@ export default function SkillBuilderPage() {
                                 >
                                   <div className="flex items-center gap-2">
                                     <span className="font-bold text-xs text-ink">{s.name}</span>
-                                    {selectedDraftIdx === idx && (
+                                    {detailLoadingIdx === idx ? (
+                                      <span className="text-[10px] text-ink3 font-bold">상세 불러오는 중…</span>
+                                    ) : selectedDraftIdx === idx && (
                                       <span className="text-[10px] text-accent font-bold">✓ 선택됨</span>
                                     )}
                                   </div>
@@ -775,10 +807,26 @@ export default function SkillBuilderPage() {
                           취소
                         </button>
                       </div>
-                      <p className="text-[10px] text-ink4 font-bold flex items-center gap-1">
-                        <Icon name="info" className="w-3 h-3" />
-                        검토 & 게시하면 바로 워크플로우에서 사용할 수 있어요. 초안 저장은 나중에 마켓플레이스에서 게시할 수 있어요.
-                      </p>
+                      {detailPending ? (
+                        detailLoadingIdx !== null ? (
+                          <p className="text-[10px] text-amber-600 font-bold flex items-center gap-1">
+                            <Icon name="info" className="w-3 h-3" />
+                            상세(지침서·입출력)를 추출하는 중이에요. 완료된 뒤 저장하면 지침서가 함께 저장됩니다.
+                          </p>
+                        ) : (
+                          // detail이 실패해 staging이 영구 undefined인 경우 — "추출 중"으로 오인(무한 대기)
+                          // 하지 않도록 실패/재시도 안내로 분기한다(에러 상세는 extractError가 별도 노출).
+                          <p className="text-[10px] text-red-600 font-bold flex items-center gap-1">
+                            <Icon name="info" className="w-3 h-3" />
+                            상세 추출에 실패했어요. 위 카드를 다시 선택하거나 ‘재료 다시 선택’으로 재시도해 주세요.
+                          </p>
+                        )
+                      ) : (
+                        <p className="text-[10px] text-ink4 font-bold flex items-center gap-1">
+                          <Icon name="info" className="w-3 h-3" />
+                          검토 & 게시하면 바로 워크플로우에서 사용할 수 있어요. 초안 저장은 나중에 마켓플레이스에서 게시할 수 있어요.
+                        </p>
+                      )}
                     </div>
                   )}
                 </form>

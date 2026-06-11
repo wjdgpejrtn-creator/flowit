@@ -129,6 +129,7 @@ export interface SkillOption {
   skill_id: string;
   name: string;
   description?: string;
+  is_personal?: boolean; // 본인 소유 개인 스킬 — "⭐ 자주 사용" 배지 (REQ-013 개인화 추천)
 }
 
 export function SkillSelectionCard({
@@ -171,7 +172,14 @@ export function SkillSelectionCard({
                     <Icon name="sparkles" className="w-3.5 h-3.5 text-[var(--color-accent-coral)]" />
                   </span>
                   <span className="min-w-0 flex-1 break-keep">
-                    <span className="block text-[13.5px] font-bold text-[var(--color-ink)] leading-snug">{opt.name}</span>
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[13.5px] font-bold text-[var(--color-ink)] leading-snug">{opt.name}</span>
+                      {opt.is_personal && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-[var(--color-accent-coral)] bg-[var(--color-coral-light)] border border-[var(--color-hl2)] rounded-full px-1.5 py-0.5 leading-none whitespace-nowrap">
+                          ⭐ 자주 사용
+                        </span>
+                      )}
+                    </span>
                     {opt.description &&
                       opt.description
                         .split("\n")
