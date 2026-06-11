@@ -1295,10 +1295,14 @@ class LangGraphOrchestrator:
             except Exception as exc:
                 _logger.warning("COMPOSER.md 로드 실패 (건너뜀): %s", exc)
         # ADR-0026 §6.6: 결정적 스켈레톤 조립 — 구조는 코드가 결정, LLM은 파라미터만 채운다.
-        # refine(prior_workflow)·two-shot 스킬 바인딩 경로는 제외(기존 편집/바인딩 흐름 보존).
-        # assemble None(확신 없음/미지원 shape/잡담)이면 일반 LLM draft로 폴백(drafter가 처리).
+        # refine(prior_workflow)만 제외(편집은 prior 구조 보존). **스킬 선택 시에도 조립한다**
+        # (조장 2026-06-11): 스켈레톤이 확신 있으면(비-None) 온톨로지 구조가 스킬 COMPOSER.md의
+        # 구조 지침을 이긴다 — drafter가 scaffold 경로를 우선하므로(drafter_service.draft L264, skill
+        # 지침보다 앞) 스킬이 잘 짜인 온톨로지 워크플로우를 덮어쓰던 문제 해소. 스킬은 여전히 그 구조
+        # 안의 ai 노드에 _bind_skill_node로 skill_id가 바인딩된다(런타임 SKILL.md 주입은 보존). assemble
+        # None(확신 없음/미지원 shape/잡담)이면 스킬 지침 LLM draft로 폴백(drafter가 처리).
         skeleton_scaffold = None
-        if prior_workflow is None and not skill_selected:
+        if prior_workflow is None:
             # ADR-0026 §6.6 Phase 2: SOURCE/SINK 노드 선택을 다중신호 앙상블(lexical+semantic+
             # ontology[+LLM])로 의미화 — 렉시컬 손사전이 못 따라잡는 발화 어휘 변형("gmail에서…")에
             # 강건. resolve 실패/픽 없음이면 assemble이 lexical/grounding으로 폴백(비치명적).
