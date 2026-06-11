@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 from common_schemas.exceptions import NotFoundError, ValidationError
 
 from ...domain.entities.marketplace_company_skill import MarketplaceCompanySkill
+from ...domain.ports.skill_document_store import SkillDocumentStore
 from ...domain.ports.skill_repository import SkillRepository
 from ...domain.services.promotion_service import PromotionService
 from ...domain.value_objects.skill_scope import SkillScope
@@ -20,10 +21,15 @@ class PromoteToCompanyUseCase:
     - 원본 team의 메타는 승계하되 게시상태는 DRAFT로 재심사 리셋
     - promoted_from으로 신규 company가 원본을 역추적
     - 원본 team에 promoted_to_company_id 마킹 → search(include_promoted=False) 기본 제외
+
+    지침서(SKILL.md/COMPOSER.md)도 복제한다 — GCS 키가 skill_id에 결정적으로 묶여 있어
+    `skill_document_uri` 문자열만 승계하면 신규 skill_id 경로에 객체가 없어 지침서 조회가 404가
+    된다(PromoteToTeamUseCase와 동일). doc_store 미주입·원본 문서 없음 시 non-fatal 스킵.
     """
 
-    def __init__(self, repo: SkillRepository) -> None:
+    def __init__(self, repo: SkillRepository, doc_store: SkillDocumentStore | None = None) -> None:
         self._repo = repo
+        self._doc_store = doc_store
 
     async def execute(self, team_skill_id: UUID) -> UUID:
         """팀 스킬을 전사 범위로 승격하고 신규 company skill_id 반환."""
@@ -39,6 +45,8 @@ class PromoteToCompanyUseCase:
 
         now = datetime.now(UTC)
         new_skill_id = uuid4()
+        # 지침서 GCS 객체를 신규 skill_id로 복제 — skill_document_uri는 복사본 경로로 갱신.
+        document_uri = await self._copy_document(team.skill_id, new_skill_id, team.skill_document_uri)
         company_skill = MarketplaceCompanySkill(
             skill_id=new_skill_id,
             author_id=team.author_id,
@@ -46,7 +54,7 @@ class PromoteToCompanyUseCase:
             description=team.description,
             node_definition_id=team.node_definition_id,
             lifecycle_state=SkillState.DRAFT,        # 승격 = 재심사 리셋 (게시상태 비승계, 조장 리뷰 #98)
-            skill_document_uri=team.skill_document_uri,
+            skill_document_uri=document_uri,
             embedding=team.embedding,
             workflow_id=team.workflow_id,
             tags=list(team.tags),
@@ -62,3 +70,15 @@ class PromoteToCompanyUseCase:
             team.model_copy(update={"promoted_to_company_id": new_skill_id, "updated_at": now})
         )
         return new_skill_id
+
+    async def _copy_document(self, src_skill_id: UUID, dst_skill_id: UUID, fallback_uri: str | None) -> str | None:
+        """원본 skill_id의 지침서를 신규 skill_id로 GCS 복제하고 새 URI 반환.
+
+        doc_store 미주입·원본 문서 없음 시 fallback_uri 반환(non-fatal — 승격 자체는 막지 않는다).
+        """
+        if self._doc_store is None:
+            return fallback_uri
+        document = await self._doc_store.load(src_skill_id)
+        if document is None:
+            return fallback_uri
+        return await self._doc_store.save(dst_skill_id, document)
