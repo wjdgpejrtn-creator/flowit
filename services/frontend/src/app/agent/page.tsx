@@ -25,7 +25,7 @@ import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
 import { UserBubble, AiTurn, AgentWorkProcess, SkillSelectionCard } from '@/components/agent/ChatTurns';
 import WorkflowCanvasPanel, { type CanvasNodeChip } from '@/components/agent/WorkflowCanvasPanel';
-import { nextMonotonicStep, stepIndexFor, displayLabels } from '@/lib/agentSteps';
+import { nextMonotonicStep, displayPhases, phaseFor } from '@/lib/agentSteps';
 import { computeFilledParams } from '@/lib/filledParams';
 import { resolveNodeIcon } from '@/lib/nodeIcon';
 
@@ -491,6 +491,7 @@ function AgentPageContent() {
     currentStep, setCurrentStep,
     compositeFlow, setCompositeFlow,
     readyToExecute, setReadyToExecute,
+    verify, setVerify, resetVerify,
   } = useAgentStore();
 
   const userName = useAuthStore().userName || '사용자';
@@ -548,7 +549,7 @@ function AgentPageContent() {
       state.addSession({
         id: sid || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...msgs],
         readyToExecute: state.readyToExecute, rationaleText: state.rationaleText,
-        currentStep: state.currentStep, compositeFlow: state.compositeFlow,
+        currentStep: state.currentStep, compositeFlow: state.compositeFlow, verify: state.verify,
       });
     }
     state.clearMessages();
@@ -644,6 +645,22 @@ function AgentPageContent() {
       case 'rationale_delta':
         appendRationale(frame.delta as string);
         break;
+      // 검증 상세 보기 패널용 단계별 기록 캡처 — 완료 후 ConfirmCard "검증 상세 보기"에 접어둔다.
+      case 'intent_result':
+        setVerify({
+          intentType: frame.intent as string,
+          intentEntities: (frame.entities as Record<string, unknown>) ?? undefined,
+        });
+        break;
+      case 'qa_metric':
+        setVerify({ qaScore: frame.score as number, qaPassed: frame.pass_flag as boolean });
+        break;
+      case 'workflow_draft': {
+        const nodes = Array.isArray(frame.nodes) ? frame.nodes : [];
+        const conns = Array.isArray(frame.connections) ? frame.connections : [];
+        setVerify({ draftNodeCount: nodes.length, draftConnCount: conns.length });
+        break;
+      }
       case 'slot_fill_question':
         setSlotQuestion({
           fieldName: frame.field_name as string,
@@ -729,6 +746,7 @@ function AgentPageContent() {
     setCompositeFlow(false);  // 새 턴 — 복합 흐름 플래그 리셋 (라운드2 resume은 별도 경로라 미리셋)
     setSkillSelection(null);
     clearRationale();
+    resetVerify();  // 새 턴 — 검증 기록 초기화(다음 검증 상세 보기는 이번 턴 프레임으로 채움)
 
     try {
       await streamCreateSession(
@@ -806,8 +824,8 @@ function AgentPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const stepLabels = displayLabels(compositeFlow);
-  const stepIndex = stepIndexFor(currentStep, compositeFlow);
+  const stepPhases = displayPhases(compositeFlow);
+  const currentPhase = phaseFor(currentStep);
   // 컨펌 게이트 "실행 전 확인할 입력값" — AI가 자동으로 채운 노드 파라미터를 노드 안 들어가도
   // 보이게. loadedWorkflow(저장본)×editCatalog(input_schema)로 프론트 계산(백엔드 변경 0).
   const filledParams = computeFilledParams(loadedWorkflow, editCatalog);
@@ -832,7 +850,7 @@ function AgentPageContent() {
     s.addSession({
       id: s.sessionId || `local-${Date.now()}`, title, createdAt: Date.now(), messages: [...s.messages],
       readyToExecute: s.readyToExecute, rationaleText: s.rationaleText,
-      currentStep: s.currentStep, compositeFlow: s.compositeFlow,
+      currentStep: s.currentStep, compositeFlow: s.compositeFlow, verify: s.verify,
     });
   };
   // 이전 대화 클릭 → 현재 보존 후 그 세션을 active로 복원(워크플로우/ConfirmCard/판단근거 포함).
@@ -848,6 +866,7 @@ function AgentPageContent() {
     abortRef.current?.abort();
     clearMessages();
     clearRationale();
+    resetVerify();
     setSessionId('');
     setCurrentStep(null);
     setCompositeFlow(false);
@@ -1022,9 +1041,9 @@ function AgentPageContent() {
                       )}
                       {streaming && (
                         <AgentWorkProcess
-                          labels={stepLabels}
-                          currentIndex={stepIndex}
-                          rationale={rationaleText}
+                          phases={stepPhases}
+                          currentId={currentPhase}
+                          liveText={rationaleText}
                         />
                       )}
                       {slotQuestion && !streaming && (
@@ -1040,6 +1059,7 @@ function AgentPageContent() {
                             message={readyToExecute.message}
                             explanation={readyToExecute.explanation}
                             filledParams={filledParams}
+                            verify={verify}
                             onSave={handleSave}
                             onEdit={() => setMode('edit')}
                           />

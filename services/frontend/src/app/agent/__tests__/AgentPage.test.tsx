@@ -172,8 +172,8 @@ describe('AgentPage — handleSend SSE 연동', () => {
       expect(useAgentStore.getState().compositeFlow).toBe(true);
       expect(useAgentStore.getState().currentStep).toBe('security');
     });
-    // 선두 '스킬 생성'이 완료 단계로 채팅 인라인에 노출된다 (비복합이면 안 보임)
-    expect(screen.getByText('스킬 생성 완료')).toBeInTheDocument();
+    // 선두 '스킬 생성'이 완료 단계(타임라인)로 채팅 인라인에 노출된다 (비복합이면 안 보임)
+    expect(screen.getByText('스킬 생성')).toBeInTheDocument();
 
     await act(async () => resolveStream!());
   });
@@ -484,8 +484,8 @@ describe('AgentPage — 컨펌 게이트 저장 검증 피드백 위치 (#368)',
     await userEvent.click(screen.getByRole('button', { name: /저장하고 활성화/ }));
 
     const errorEl = await screen.findByText(/Slack 채널을 지정 부분 수정이 필요합니다/);
-    // 에러는 messages가 아닌 별도 상태 → ConfirmCard('최종 확인') '뒤'에 위치해야 함
-    const cardLabel = screen.getByText('최종 확인');
+    // 에러는 messages가 아닌 별도 상태 → ConfirmCard('완료' 캡션) '뒤'에 위치해야 함
+    const cardLabel = screen.getByText('완료');
     expect(
       cardLabel.compareDocumentPosition(errorEl) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

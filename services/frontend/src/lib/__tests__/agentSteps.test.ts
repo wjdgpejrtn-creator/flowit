@@ -2,6 +2,8 @@ import {
   nextMonotonicStep,
   stepIndexFor,
   displayLabels,
+  displayPhases,
+  phaseFor,
   toStep,
   STEP_ORDER,
   TOOL_TO_STEP,
@@ -164,5 +166,29 @@ describe('복구 silent 재시도 — 재방출 역행 차단 (c)', () => {
       expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]); // 단조 증가 — 깜빡임 없음
     }
     expect(step).toBe('drafter');
+  });
+});
+
+describe('검증 메시지 타임라인 — 7단계 → 4(복합 5) 표시 단계 매핑', () => {
+  it('displayPhases — 비복합은 4단계, 복합은 "스킬 생성" 선두 포함 5단계', () => {
+    expect(displayPhases(false).map((p) => p.id)).toEqual(['intent', 'select', 'build', 'qa']);
+    expect(displayPhases(false).map((p) => p.title)).toEqual([
+      '의도 분석', '노드 선출', '워크플로우 작성', '품질 평가',
+    ]);
+    expect(displayPhases(true).map((p) => p.id)).toEqual(['skill', 'intent', 'select', 'build', 'qa']);
+    // 각 단계는 진행 중 fallback 안내 문구(hint)를 갖는다
+    expect(displayPhases(false).every((p) => p.hint.length > 0)).toBe(true);
+  });
+
+  it('phaseFor — 내부 7단계가 표시 4단계로 묶인다', () => {
+    expect(phaseFor('security')).toBe('intent');
+    expect(phaseFor('intent')).toBe('intent');
+    expect(phaseFor('retriever')).toBe('select');
+    expect(phaseFor('drafter')).toBe('build');
+    expect(phaseFor('validator')).toBe('build');
+    expect(phaseFor('qa_eval')).toBe('qa');
+    expect(phaseFor('promote')).toBe('qa');
+    expect(phaseFor('skill')).toBe('skill');
+    expect(phaseFor(null)).toBeNull();
   });
 });
