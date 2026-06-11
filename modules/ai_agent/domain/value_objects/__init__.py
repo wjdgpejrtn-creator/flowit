@@ -1,3 +1,4 @@
+from .document_hit import DocumentChunkHit, DocumentHit
 from .ontology import OntologyNode, OntologySubgraph, PatternTemplate
 from .quality_threshold import QualityThreshold
 from .route_plan import RoutePlan, RouteTarget
@@ -11,4 +12,6 @@ __all__ = [
     "OntologyNode",
     "OntologySubgraph",
     "PatternTemplate",
+    "DocumentChunkHit",
+    "DocumentHit",
 ]
