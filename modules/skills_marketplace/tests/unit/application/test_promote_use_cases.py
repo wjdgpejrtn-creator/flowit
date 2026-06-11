@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from common_schemas import SkillDocument
 
 from skills_marketplace.application.use_cases import (
     PromoteToCompanyUseCase,
@@ -10,6 +11,33 @@ from skills_marketplace.application.use_cases import (
 )
 from skills_marketplace.domain.entities import MarketplacePersonalSkill
 from skills_marketplace.domain.value_objects import SkillScope, SkillState
+
+
+class _InMemoryDocStore:
+    """SkillDocumentStore ABC In-Memory 구현 (테스트 전용) — GCS 키처럼 skill_id로 색인."""
+
+    def __init__(self) -> None:
+        self.docs: dict = {}
+
+    async def save(self, skill_id, document) -> str:
+        self.docs[skill_id] = document
+        return f"gs://test-bucket/skills/{skill_id}/SKILL.md"
+
+    async def load(self, skill_id):
+        return self.docs.get(skill_id)
+
+    async def delete(self, skill_id) -> None:
+        self.docs.pop(skill_id, None)
+
+
+def _doc(skill_id) -> SkillDocument:
+    return SkillDocument(
+        skill_id=skill_id,
+        name="환불 자동화",
+        description="환불 요청 처리 스킬",
+        instructions="## 단계\n1. 요청 확인\n2. 승인",
+        composer_instructions="LLM 노드 + Email 노드 필수",
+    )
 
 
 class _InMemorySkillRepo:
@@ -156,3 +184,77 @@ async def test_search_delegates_to_repo():
     results = await SearchSkillsUseCase(repo).execute([0.1] * 768, SkillScope.PERSONAL, limit=5)
     assert len(results) == 1
     assert results[0].skill_id == pid
+
+
+@pytest.mark.asyncio
+async def test_promote_to_team_copies_document_to_new_skill_id():
+    """승격=복제 — 지침서(SKILL.md/COMPOSER.md)를 신규 skill_id로 GCS 복제하고 URI를 갱신한다.
+
+    GCS 키가 skill_id 결정적이라 문자열 URI만 승계하면 신규 skill_id 경로에 객체가 없어 404가 난다.
+    """
+    repo = _InMemorySkillRepo()
+    doc_store = _InMemoryDocStore()
+    pid, owner, team_id = uuid4(), uuid4(), uuid4()
+    await repo.save_personal(_personal(pid, owner))
+    await doc_store.save(pid, _doc(pid))  # 원본 personal 지침서
+
+    new_id = await PromoteToTeamUseCase(repo, doc_store=doc_store).execute(pid, team_id)
+
+    # 신규 skill_id 경로에 지침서가 복제돼 load 가능
+    copied = await doc_store.load(new_id)
+    assert copied is not None
+    assert copied.instructions == "## 단계\n1. 요청 확인\n2. 승인"
+    assert copied.composer_instructions == "LLM 노드 + Email 노드 필수"
+    # 복사본 메타의 URI는 신규 skill_id 경로를 가리킨다 (원본 URI 승계 아님)
+    team = await repo.get_team(new_id)
+    assert team.skill_document_uri == f"gs://test-bucket/skills/{new_id}/SKILL.md"
+
+
+@pytest.mark.asyncio
+async def test_promote_chain_personal_to_company_copies_document_each_hop():
+    repo = _InMemorySkillRepo()
+    doc_store = _InMemoryDocStore()
+    pid, owner, team_id = uuid4(), uuid4(), uuid4()
+    await repo.save_personal(_personal(pid, owner))
+    await doc_store.save(pid, _doc(pid))
+
+    team_id_new = await PromoteToTeamUseCase(repo, doc_store=doc_store).execute(pid, team_id)
+    company_id = await PromoteToCompanyUseCase(repo, doc_store=doc_store).execute(team_id_new)
+
+    # 매 홉마다 신규 skill_id 경로에 지침서 존재
+    assert await doc_store.load(team_id_new) is not None
+    company_doc = await doc_store.load(company_id)
+    assert company_doc is not None
+    assert company_doc.instructions == "## 단계\n1. 요청 확인\n2. 승인"
+    company = await repo.get_company(company_id)
+    assert company.skill_document_uri == f"gs://test-bucket/skills/{company_id}/SKILL.md"
+
+
+@pytest.mark.asyncio
+async def test_promote_without_doc_store_is_non_fatal():
+    """doc_store 미주입(하위호환) 시 fallback URI 승계 + 승격은 정상 진행."""
+    repo = _InMemorySkillRepo()
+    pid, owner, team_id = uuid4(), uuid4(), uuid4()
+    origin = _personal(pid, owner).model_copy(update={"skill_document_uri": "gs://b/skills/x/SKILL.md"})
+    await repo.save_personal(origin)
+
+    new_id = await PromoteToTeamUseCase(repo).execute(pid, team_id)  # doc_store=None
+
+    team = await repo.get_team(new_id)
+    assert team is not None
+    assert team.skill_document_uri == "gs://b/skills/x/SKILL.md"  # fallback 승계
+
+
+@pytest.mark.asyncio
+async def test_promote_with_no_source_document_keeps_fallback():
+    """doc_store는 있으나 원본 지침서가 없으면(수동 생성) fallback URI 유지(non-fatal)."""
+    repo = _InMemorySkillRepo()
+    doc_store = _InMemoryDocStore()  # 비어 있음
+    pid, owner, team_id = uuid4(), uuid4(), uuid4()
+    await repo.save_personal(_personal(pid, owner))  # skill_document_uri=None
+
+    new_id = await PromoteToTeamUseCase(repo, doc_store=doc_store).execute(pid, team_id)
+
+    team = await repo.get_team(new_id)
+    assert team.skill_document_uri is None
+    assert await doc_store.load(new_id) is None  # 복제할 원본이 없으니 새 경로도 비어 있음
