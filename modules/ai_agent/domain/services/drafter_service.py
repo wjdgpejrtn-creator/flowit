@@ -264,7 +264,8 @@ class DrafterService:
         if skeleton_scaffold is not None and prior_workflow is None:
             try:
                 return await self._fill_scaffold_params(
-                    skeleton_scaffold, candidates, spec, owner_user_id, retry_feedback
+                    skeleton_scaffold, candidates, spec, owner_user_id, retry_feedback,
+                    personal_patterns=personal_patterns,
                 )
             except Exception as exc:
                 # 구조는 결정적이지만 파라미터 채움이 실패하면 일반 LLM draft로 폴백(완전 산출 보장).
@@ -369,12 +370,18 @@ class DrafterService:
         spec: DraftSpec,
         owner_user_id: UUID,
         retry_feedback: str | None,
+        personal_patterns: list[str] | None = None,
     ) -> WorkflowSchema:
         """결정적 스켈레톤 골격에 LLM 파라미터만 채워 완성 (ADR-0026 §6.6.3 step5).
 
         구조(노드/엣지)는 ``build_workflow_with_refs``가 코드로 빌드 — LLM 출력은 parameters에만
         적용하고 구조는 절대 바꾸지 않는다(결정적 보장). 데이터흐름 ``${ref.field}`` 참조는 _build와
         동일하게 instance_id로 rewrite + 상류 output_schema로 grounding한다(ADR-0023 L1).
+
+        ``personal_patterns``(RAG로 회수한 사용자 과거 패턴)도 일반 draft 경로와 동일하게 주입한다.
+        스켈레톤이 구조를 결정해도 파라미터(예: spreadsheet_id)는 LLM이 채우므로, 사용자의 확립된
+        선호(예: 광고 시트 ID=flowit01)가 빈 파라미터 채움에 반영돼야 한다 — 이 경로가 patterns를
+        누락하면 fresh non-skill 요청(scheduled_pipeline 등)에서 개인화가 조용히 사라진다(데모 회귀).
         """
         node_id_by_type = {c.node_type: c.node_id for c in candidates}
         cfg_by_type = {c.node_type: c for c in candidates}
@@ -404,6 +411,7 @@ class DrafterService:
         )
         prompt = (
             _PARAM_FILL_SYSTEM_PROMPT
+            + self._personal_patterns_block((personal_patterns or [])[:_MAX_PATTERNS])
             + self._retry_feedback_block(retry_feedback)
             + f"\nUser request: {spec_json}"
             + f"\nNodes (structure fixed): {json.dumps(node_specs, ensure_ascii=False)}"

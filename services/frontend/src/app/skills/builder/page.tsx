@@ -288,6 +288,8 @@ export default function SkillBuilderPage() {
   // staging(추출 노드 스펙)을 함께 보내 publish 시 NodeDefinition I/O를 채운다(#290).
   const handleCreate = async (publish: boolean) => {
     if (!name.trim() || !description.trim()) return;
+    // 방어선 — 버튼 disabled를 우회한 제출(엔터 등)도 미완 detail 상태면 차단(빈 지침서 방지).
+    if (selectedDraftIdx !== null && selectedStaging === undefined) return;
     setLoading(true);
     setError(null);
     try {
@@ -328,7 +330,12 @@ export default function SkillBuilderPage() {
 
   const industryTemplates = templates.filter((t) => t.kind === 'industry');
   const functionalTemplates = templates.filter((t) => t.kind === 'functional');
-  const submitDisabled = loading || !name.trim() || !description.trim();
+  // 추출 초안(카드)을 선택했으나 상세(instructions/staging)가 아직 도착하지 않은 상태 —
+  // detail 로딩 중이거나 실패한 경우다. 이때 생성을 막지 않으면 instructions=undefined +
+  // node_spec_staging=undefined로 저장돼 지침서 없이 placeholder I/O 스킬이 만들어진다(빈 지침서 버그).
+  // detail이 빈 스키마({})로 정상 도착한 경우는 staging이 정의(truthy)되므로 차단하지 않는다.
+  const detailPending = selectedDraftIdx !== null && selectedStaging === undefined;
+  const submitDisabled = loading || !name.trim() || !description.trim() || detailPending;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -800,10 +807,26 @@ export default function SkillBuilderPage() {
                           취소
                         </button>
                       </div>
-                      <p className="text-[10px] text-ink4 font-bold flex items-center gap-1">
-                        <Icon name="info" className="w-3 h-3" />
-                        검토 & 게시하면 바로 워크플로우에서 사용할 수 있어요. 초안 저장은 나중에 마켓플레이스에서 게시할 수 있어요.
-                      </p>
+                      {detailPending ? (
+                        detailLoadingIdx !== null ? (
+                          <p className="text-[10px] text-amber-600 font-bold flex items-center gap-1">
+                            <Icon name="info" className="w-3 h-3" />
+                            상세(지침서·입출력)를 추출하는 중이에요. 완료된 뒤 저장하면 지침서가 함께 저장됩니다.
+                          </p>
+                        ) : (
+                          // detail이 실패해 staging이 영구 undefined인 경우 — "추출 중"으로 오인(무한 대기)
+                          // 하지 않도록 실패/재시도 안내로 분기한다(에러 상세는 extractError가 별도 노출).
+                          <p className="text-[10px] text-red-600 font-bold flex items-center gap-1">
+                            <Icon name="info" className="w-3 h-3" />
+                            상세 추출에 실패했어요. 위 카드를 다시 선택하거나 ‘재료 다시 선택’으로 재시도해 주세요.
+                          </p>
+                        )
+                      ) : (
+                        <p className="text-[10px] text-ink4 font-bold flex items-center gap-1">
+                          <Icon name="info" className="w-3 h-3" />
+                          검토 & 게시하면 바로 워크플로우에서 사용할 수 있어요. 초안 저장은 나중에 마켓플레이스에서 게시할 수 있어요.
+                        </p>
+                      )}
                     </div>
                   )}
                 </form>

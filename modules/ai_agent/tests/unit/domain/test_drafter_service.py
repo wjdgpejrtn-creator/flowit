@@ -794,6 +794,28 @@ class TestScaffoldParamFill:
         assert llm.generate_structured.call_args.args[1] is _ParamFillResponse
 
     @pytest.mark.asyncio
+    async def test_personal_patterns_injected_into_scaffold_prompt(self):
+        # 회귀(데모): scaffold(param-fill) 경로도 일반 draft와 동일하게 personal_patterns를
+        # 주입해야 한다. 누락 시 "매주…요일"처럼 스켈레톤에 걸리는 발화에서 개인화(빈 파라미터
+        # 채움)가 조용히 사라진다 — flowit01 미적용 버그.
+        scaffold, candidates = self._scaffold_and_candidates(
+            "매주 월요일 9시에 광고 시트를 읽어서 요약하고 슬랙으로 보내줘"
+        )
+        first_ref = scaffold.nodes[0].ref
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured = AsyncMock(
+            return_value=_ParamFillResponse(nodes=[_NodeParamFill(ref=first_ref, parameters={})])
+        )
+        await DrafterService(llm).draft(
+            _spec(), candidates, uuid4(), skeleton_scaffold=scaffold,
+            personal_patterns=["[광고 시트 ID] spreadsheet_id는 항상 flowit01"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert llm.generate_structured.call_args.args[1] is _ParamFillResponse  # scaffold 경로 확인
+        assert "USER PATTERNS" in prompt
+        assert "flowit01" in prompt
+
+    @pytest.mark.asyncio
     async def test_llm_cannot_alter_structure(self):
         # LLM이 엉뚱한 ref/노드를 반환해도 구조는 불변(코드가 만든 인스턴스에만 적용).
         scaffold, candidates = self._scaffold_and_candidates("웹훅 들어오면 분석해서 이메일로")

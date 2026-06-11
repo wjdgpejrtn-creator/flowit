@@ -28,6 +28,7 @@ class _Repo:
         call = dict(
             scope=scope,
             limit=limit,
+            include_promoted=include_promoted,
             lifecycle_state=lifecycle_state,
             owner_user_id=owner_user_id,
             max_distance=max_distance,
@@ -86,6 +87,11 @@ async def test_execute_accessible_searches_personal_owned_and_company():
     # 관련성 컷이 두 스코프 모두에 전달
     assert scopes[SkillScope.PERSONAL]["max_distance"] == 0.3
     assert scopes[SkillScope.COMPANY]["max_distance"] == 0.3
+    # owner 본인 personal 검색은 승격(=복제)한 자기 스킬도 포함해야 한다 — promote 후에도
+    # compose 후보로 계속 노출(team scope 미검색이라 기본 제외 시 영구 비가시).
+    assert scopes[SkillScope.PERSONAL]["include_promoted"] is True
+    # company는 승격 원본 중복 노출 방지 위해 기본 제외 유지
+    assert scopes[SkillScope.COMPANY]["include_promoted"] is False
 
 
 @pytest.mark.asyncio

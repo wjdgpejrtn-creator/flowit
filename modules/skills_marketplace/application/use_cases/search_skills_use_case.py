@@ -74,6 +74,11 @@ class SearchSkillsUseCase:
             query_embedding,
             SkillScope.PERSONAL,
             limit,
+            # include_promoted=True: owner 본인의 개인 스킬은 상위 scope(team/company)로 승격(=복제)했어도
+            # Composer 후보에 계속 노출한다. team scope는 Composer까지 식별자가 전달되지 않아 검색되지
+            # 않으므로(아래 docstring), 기본 제외(include_promoted=False)하면 승격한 본인 스킬이 compose에서
+            # 영구 비가시가 된다 — owner는 자기 원본을 항상 볼 수 있어야 하므로 promote 마킹을 무시한다.
+            include_promoted=True,
             lifecycle_state=lifecycle_state,
             owner_user_id=user_id,
             max_distance=max_distance,

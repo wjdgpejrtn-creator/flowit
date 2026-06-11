@@ -61,16 +61,24 @@ def get_list_review_queue_use_case(
 
 def get_promote_to_team_use_case(
     repo: SkillRepository = Depends(get_marketplace_skill_repository),
+    doc_store: SkillDocumentStore = Depends(get_skill_document_store),
 ) -> PromoteToTeamUseCase:
-    """personal → team 승격 (재심사 리셋: 새 team 스킬 DRAFT 생성). 박아름 use case 재사용."""
-    return PromoteToTeamUseCase(repo=repo)
+    """personal → team 승격 (재심사 리셋: 새 team 스킬 DRAFT 생성). 박아름 use case 재사용.
+
+    doc_store: 승격=복제 시 SKILL.md/COMPOSER.md를 신규 skill_id로 GCS 복사(지침서 유실 방지).
+    """
+    return PromoteToTeamUseCase(repo=repo, doc_store=doc_store)
 
 
 def get_promote_to_company_use_case(
     repo: SkillRepository = Depends(get_marketplace_skill_repository),
+    doc_store: SkillDocumentStore = Depends(get_skill_document_store),
 ) -> PromoteToCompanyUseCase:
-    """team → company 승격 (재심사 리셋: 새 company 스킬 DRAFT 생성). 박아름 use case 재사용."""
-    return PromoteToCompanyUseCase(repo=repo)
+    """team → company 승격 (재심사 리셋: 새 company 스킬 DRAFT 생성). 박아름 use case 재사용.
+
+    doc_store: 승격=복제 시 지침서(SKILL.md/COMPOSER.md)를 신규 skill_id로 GCS 복사(유실 방지).
+    """
+    return PromoteToCompanyUseCase(repo=repo, doc_store=doc_store)
 
 
 def get_approve_skill_use_case(
