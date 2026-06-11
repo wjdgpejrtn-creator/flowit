@@ -389,6 +389,69 @@ describe('AgentPage — handleSend SSE 연동', () => {
     expect(contents).toContain('슬랙 알림 워크플로우');
     expect(contents).toContain('url을 바꿔줘');
   });
+
+  it('컨펌 상태에서 refine 실패(ErrorFrame) 시 에러를 띄우고 카드(readyToExecute)는 사라진다', async () => {
+    // #369: 카드 떠 있는 상태에서 파라미터 수정(refine) 요청 → 검증/QA 소진 시 백엔드는
+    // ready_to_execute 대신 ErrorFrame(E_VALIDATION_EXHAUSTED)을 보낸다. 프론트는 에러 메시지를
+    // 띄우고, ready_to_execute가 다시 오지 않으므로 카드는 복귀하지 않아야 한다(정혜님 플래그 케이스).
+    mockStreamCreateSession
+      .mockImplementationOnce(async (_req: unknown, onFrame: (f: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'session', session_id: 'sid-1' });
+        onFrame({ frame_type: 'result', intent: 'propose', payload: { status: 'ready_to_execute', workflow_id: 'wf-1', message: '완성' } });
+      })
+      .mockImplementationOnce(async (_req: unknown, onFrame: (f: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'error', code: 'E_VALIDATION_EXHAUSTED', message: '워크플로우 검증 3회 실패 — 요청을 더 구체적으로 말씀해 주세요.' });
+      });
+
+    render(<AgentPage />);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
+    await userEvent.type(textarea, '슬랙 알림 워크플로우');
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
+    await waitFor(() => expect(useAgentStore.getState().readyToExecute).not.toBeNull());
+
+    // refine — 파라미터 수정 요청(같은 세션 이어감)
+    await userEvent.type(textarea, '슬랙 채널을 마케팅으로 바꿔줘');
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
+
+    // ErrorFrame → 에러 메시지 표시
+    await waitFor(() => {
+      expect(screen.getByText(/오류가 발생했습니다: 워크플로우 검증 3회 실패/)).toBeInTheDocument();
+    });
+    // 검증 실패라 ready_to_execute가 다시 오지 않음 → 카드는 복귀하지 않는다
+    expect(useAgentStore.getState().readyToExecute).toBeNull();
+  });
+
+  it('컨펌 상태에서 refine 성공 시 ready_to_execute가 다시 와 카드가 재표시된다', async () => {
+    // #369: 카드 떠 있는 상태에서 파라미터 수정(refine) 요청 → 검증/QA 통과 시 백엔드는
+    // 처음 생성과 동일한 ready_to_execute를 다시 emit한다(#337). 프론트는 같은 result 핸들러로
+    // 카드를 갱신해 다시 띄워야 한다 — 따로 처리 없이 자동 재표시되는지 고정한다.
+    mockStreamCreateSession
+      .mockImplementationOnce(async (_req: unknown, onFrame: (f: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'session', session_id: 'sid-1' });
+        onFrame({ frame_type: 'result', intent: 'propose', payload: { status: 'ready_to_execute', workflow_id: 'wf-1', message: '완성' } });
+      })
+      .mockImplementationOnce(async (_req: unknown, onFrame: (f: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'result', intent: 'propose', payload: { status: 'ready_to_execute', workflow_id: 'wf-2', message: '수정 완료' } });
+      });
+
+    render(<AgentPage />);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
+    await userEvent.type(textarea, '슬랙 알림 워크플로우');
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
+    await waitFor(() => expect(useAgentStore.getState().readyToExecute?.workflowId).toBe('wf-1'));
+
+    // refine — 파라미터 수정 요청(같은 세션 이어감)
+    await userEvent.type(textarea, '슬랙 채널을 마케팅으로 바꿔줘');
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
+
+    // 수정 결과 ready_to_execute가 다시 와 카드가 새 워크플로우로 갱신·재표시된다
+    await waitFor(() => {
+      expect(useAgentStore.getState().readyToExecute).toEqual({
+        workflowId: 'wf-2',
+        message: '수정 완료',
+      });
+    });
+  });
 });
 
 describe('AgentPage — 컨펌 게이트 저장 검증 피드백 위치 (#368)', () => {

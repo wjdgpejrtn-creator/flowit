@@ -72,6 +72,28 @@ class TestQAEvaluatorService:
         assert result.pass_flag is True
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("sentinel", ["none", "None", "N/A", "없음", "해당 없음", "null", "-", "none."])
+    async def test_sentinel_missing_treated_as_empty_passes(self, sentinel):
+        """QA LLM이 '누락 없음'을 ['none']/['없음'] 등 센티넬로 반환해도 만점이면 통과해야 한다.
+
+        실제 staging 버그: score=10인데 missing=['none']로 pass_flag=False가 돼 완성 워크플로우가
+        동일 draft 무한 재시도→E_QA_EXHAUSTED('누락된 필수 노드/채널: none')로 헛돌았다.
+        """
+        svc = QAEvaluatorService(_mock_llm(10.0, missing=[sentinel]))
+        result = await svc.evaluate(_empty_workflow(), _spec())
+        assert result.pass_flag is True
+        assert "누락된 필수 노드" not in (result.feedback or "")
+
+    @pytest.mark.asyncio
+    async def test_sentinel_mixed_with_real_missing_keeps_real(self):
+        """센티넬과 진짜 누락이 섞이면 진짜 누락만 남겨 fail 유지."""
+        svc = QAEvaluatorService(_mock_llm(10.0, missing=["none", "Gmail 노드"]))
+        result = await svc.evaluate(_empty_workflow(), _spec())
+        assert result.pass_flag is False
+        assert "Gmail 노드" in result.feedback
+        assert "none" not in result.feedback
+
+    @pytest.mark.asyncio
     async def test_parse_error_raises(self):
         llm = AsyncMock(spec=LLMPort)
         llm.generate_structured = AsyncMock(side_effect=Exception("parse error"))

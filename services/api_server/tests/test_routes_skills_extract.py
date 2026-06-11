@@ -80,7 +80,13 @@ def _make_doc(*, user_id=_USER_ID, blocks=("blk",)):
     return doc
 
 
-def _make_app(*, client=..., doc=...) -> FastAPI:
+def _make_chunk(content: str):
+    chunk = MagicMock()
+    chunk.model_dump.return_value = {"chunk_index": 0, "block": {"content": content}}
+    return chunk
+
+
+def _make_app(*, client=..., doc=..., chunks=()) -> FastAPI:
     app = FastAPI()
     app.include_router(skills_router)
     app.dependency_overrides[get_permission_source] = _fake_permission
@@ -92,6 +98,8 @@ def _make_app(*, client=..., doc=...) -> FastAPI:
     doc_repo = MagicMock()
     resolved_doc = _make_doc() if doc is ... else doc
     doc_repo.get_by_id = AsyncMock(return_value=resolved_doc)
+    # 옵션 C — extract/detail이 문서 경로에서 청크를 로드해 payload에 싣는다(map-reduce/RAG).
+    doc_repo.get_chunks = AsyncMock(return_value=list(chunks))
     app.dependency_overrides[get_document_repository] = lambda: doc_repo
     return app
 
@@ -154,6 +162,26 @@ def test_extract_streams_unwrapped_frames():
     assert sent["payload"]["source_type"] == "sop"
     assert sent["payload"]["step"] == "metadata"
     assert "document" in sent["payload"]
+
+
+def test_extract_includes_chunks_in_proxy_payload():
+    # 옵션 C: 문서 경로에서 document_chunks를 로드해 payload.chunks로 실어 보낸다(8192 초과 회귀 차단).
+    fake = _FakeSkillsBuilderClient([])
+    res = _post(_make_app(client=fake, chunks=[_make_chunk("Slack 알림 절차"), _make_chunk("에스컬레이션")]))
+    assert res.status_code == 200
+    sent = fake.captured["json"]
+    assert len(sent["payload"]["chunks"]) == 2
+    assert sent["payload"]["chunks"][0]["block"]["content"] == "Slack 알림 절차"
+
+
+def test_extract_template_path_sends_empty_chunks():
+    # 합성 템플릿(ecommerce seed)은 청크가 없으므로 빈 리스트 — use case가 전체 문서 폴백.
+    fake = _FakeSkillsBuilderClient([f"data: {json.dumps({'frames': []})}"])
+    app = _make_app(client=fake)
+    with TestClient(app) as tc:
+        res = tc.post("/api/v1/skills/extract", json={"template_code": "ecommerce"})
+    assert res.status_code == 200
+    assert fake.captured["json"]["payload"]["chunks"] == []
 
 
 # ── GET /templates + default(template_code) 추출 경로 ─────────────────────────

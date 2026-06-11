@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,6 +11,12 @@ from pydantic import BaseModel
 
 from ..ports.llm_port import LLMPort
 from ..value_objects.skeleton import AssembledDraft
+
+# 데이터흐름 ref 재작성/grounding 헬퍼는 dataflow_grounding가 SSOT — refine 편집 경로
+# (WorkflowEditService)도 동일 로직을 재사용하므로 공유 모듈로 분리(중복 정의 금지).
+from .dataflow_grounding import ground_ref_fields as _ground_ref_fields
+from .dataflow_grounding import outputs_of as _outputs_of
+from .dataflow_grounding import rewrite_refs as _rewrite_refs
 from .skeleton_assembler import build_workflow_with_refs
 
 _logger = logging.getLogger(__name__)
@@ -26,73 +31,6 @@ _MAX_MOTIFS = 3        # 모티프 패턴 최대 수
 # 무지하게 앞 N개만 자르면 풀>N일 때 보장 노드가 1순위로 드롭돼 바인딩이 조용히 실패한다.
 # node_registry_adapter._STRUCTURAL_CATEGORIES({trigger,condition}) + ai를 미러 (도메인 정책).
 _PRIORITY_CATEGORIES = frozenset({"ai", "trigger", "condition"})
-
-# 데이터 흐름 참조 ${<token>.<field>} — LLM은 token으로 node_type(fresh)/ref(edit)를 쓰고,
-# 빌드 시 instance_id로 재작성한다(token엔 점 없음 → 첫 '.'로 분리, ADR-0023 L1).
-_REF_TOKEN_RE = re.compile(r"\$\{([^.}]+)\.([^}]+)\}")
-
-
-def _rewrite_refs(value: Any, id_by_token: dict[str, UUID]) -> Any:
-    """파라미터 값 내 ``${<token>.<field>}``의 token을 instance_id로 치환.
-
-    token이 맵에 없으면(존재하지 않는 노드 참조) 원본을 보존한다 — 실행 시점
-    ReferenceResolver가 미해결로 graceful degrade한다.
-    """
-    if isinstance(value, str):
-        def _sub(m: re.Match[str]) -> str:
-            token, field = m.group(1), m.group(2)
-            inst = id_by_token.get(token)
-            return f"${{{inst}.{field}}}" if inst is not None else m.group(0)
-        return _REF_TOKEN_RE.sub(_sub, value)
-    if isinstance(value, list):
-        return [_rewrite_refs(v, id_by_token) for v in value]
-    if isinstance(value, dict):
-        return {k: _rewrite_refs(v, id_by_token) for k, v in value.items()}
-    return value
-
-
-def _ground_ref_fields(value: Any, outputs_by_instance: dict[UUID, list[str]]) -> Any:
-    """``${<instance_id>.<field>}`` 참조의 ``<field>``를 상류 노드의 실제 출력 필드에 grounding.
-
-    `_rewrite_refs` 이후(토큰이 이미 instance_id로 치환된 상태) 호출한다. LLM이 존재하지 않는
-    출력 필드를 환각하는 것(예: 출력이 ``[scheduled_at, ...]``인데 ``.values`` 참조)을 방어:
-
-    - 참조 노드의 출력 필드 집합에 ``<field>``가 있으면 그대로 둔다.
-    - 없고 그 노드의 출력이 **정확히 1개**면 그 단일 필드로 보정한다(거의 확실히 의도한 필드).
-    - 없고 출력이 0개 또는 2개 이상이면(어느 필드인지 결정 불가) 원본을 보존하고 경고만 남긴다
-      — 런타임 ReferenceResolver가 미해결로 graceful degrade한다. 잘못된 **소스 노드 선택**은
-      의미 판단이라 결정론적으로 고칠 수 없으므로 로그로만 노출한다.
-    - 토큰이 instance_id가 아니거나(미해결 토큰) 맵에 없는 노드면 손대지 않는다.
-    """
-    if isinstance(value, str):
-        def _sub(m: re.Match[str]) -> str:
-            token, field = m.group(1), m.group(2)
-            try:
-                inst = UUID(token)
-            except ValueError:
-                return m.group(0)
-            outs = outputs_by_instance.get(inst)
-            if outs is None or field in outs:
-                return m.group(0)
-            if len(outs) == 1:
-                _logger.warning("ref 필드 보정: %s.%s → %s.%s", token, field, token, outs[0])
-                return f"${{{token}.{outs[0]}}}"
-            _logger.warning(
-                "ref 필드 미존재(보정 불가, graceful degrade): %s.%s (outputs=%s)", token, field, outs
-            )
-            return m.group(0)
-        return _REF_TOKEN_RE.sub(_sub, value)
-    if isinstance(value, list):
-        return [_ground_ref_fields(v, outputs_by_instance) for v in value]
-    if isinstance(value, dict):
-        return {k: _ground_ref_fields(v, outputs_by_instance) for k, v in value.items()}
-    return value
-
-
-def _outputs_of(nc: NodeConfig) -> list[str]:
-    """NodeConfig의 출력 필드명 목록 (output_schema.properties 키)."""
-    return list((nc.output_schema or {}).get("properties", {}).keys())
-
 
 def _slim_schema(schema: dict | None) -> dict:
     """input_schema에서 description/title 등 verbose 필드를 제거해 토큰 절감.
@@ -336,11 +274,20 @@ class DrafterService:
         # (리뷰 MED #1), 우선 카테고리는 전수 보존하고 나머지에서만 잘라 합을 캡 이하로 맞춘다.
         # 우선 노드만으로 캡을 넘으면 정확성(바인딩) 우선으로 전수 유지한다.
         if len(candidates) > _MAX_CANDIDATES:
-            priority = [c for c in candidates if getattr(c, "category", None) in _PRIORITY_CATEGORIES]
-            rest = [c for c in candidates if getattr(c, "category", None) not in _PRIORITY_CATEGORIES]
+            # **refine 편집 시 prior 워크플로우 노드는 캡에서 무조건 보존(#369)**. augment가 prior
+            # 노드를 풀 '끝'에 덧붙이는데, 비-우선 카테고리(integration/action 등)면 순서 무지 캡이
+            # 1순위로 떨궜다 → `_serialize_for_edit`이 그 노드를 candidates에서 못 찾아 편집 직렬화가
+            # 실패(E_REFINE_SERIALIZE)했다(google_sheets_read 등). prior 노드를 우선군에 포함시킨다.
+            prior_ids = {n.node_id for n in prior_workflow.nodes} if prior_workflow else frozenset()
+
+            def _is_priority(c: NodeConfig) -> bool:
+                return getattr(c, "category", None) in _PRIORITY_CATEGORIES or c.node_id in prior_ids
+
+            priority = [c for c in candidates if _is_priority(c)]
+            rest = [c for c in candidates if not _is_priority(c)]
             capped = priority + rest[: max(0, _MAX_CANDIDATES - len(priority))]
             _logger.warning(
-                "후보 %d건 → %d건 캡 적용 (prompt diet; 우선 카테고리 %d건 보존)",
+                "후보 %d건 → %d건 캡 적용 (prompt diet; 우선/prior %d건 보존)",
                 len(candidates),
                 len(capped),
                 len(priority),
@@ -371,26 +318,34 @@ class DrafterService:
         binding_block = self._skill_binding_block(skill_selected, skill_composer_instructions)
         retry_block = self._retry_feedback_block(retry_feedback)
         motif_block = self._motif_block(capped_motifs)
-        # refine 편집 경로 — 직렬화 성공 시 ref 기반 편집 응답으로(중복 node_type 안전).
-        # 직렬화 불가(후보에 없는 node_type)면 None → fresh draft로 폴백.
+        # refine 편집 경로 — ref 기반 편집 응답으로 "지시한 부분만" 고친다(중복 node_type 안전).
+        # **편집 잠금(조장 지시 2026-06-10)**: prior가 주어지면 절대 fresh draft로 재생성하지
+        # 않는다. 직렬화 불가(기존 노드가 후보에 없음)면 폴백 대신 **에러** — 사용자가 쌓은
+        # 워크플로우를 조용히 2노드로 갈아엎던 회귀(#369) 차단. 호출부가 prior 노드를
+        # candidates에 보강(`_augment_candidates_with_prior`)하므로 정상 경로에선 직렬화 성공.
         if prior_workflow is not None:
             current = self._serialize_for_edit(prior_workflow, candidates)
-            if current is not None:
-                edit_prompt = (
-                    _EDIT_SYSTEM_PROMPT
-                    + patterns_block
-                    + binding_block
-                    + motif_block
-                    + retry_block
-                    + f"\nDraftSpec: {spec_json}"
-                    + f"\nAvailable nodes: {catalog_json}"
-                    + f"\nCURRENT WORKFLOW: {json.dumps(current, ensure_ascii=False)}"
+            if current is None:
+                raise ExecutionError(
+                    "기존 워크플로우를 편집용으로 직렬화하지 못했습니다(노드 복원 실패) — "
+                    "새로 생성하지 않습니다.",
+                    code="E_REFINE_SERIALIZE",
                 )
-                try:
-                    edit_resp = await self._llm.generate_structured(edit_prompt, _EditResponse)
-                except Exception as e:
-                    raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
-                return self._build_from_edit(edit_resp, candidates, owner_user_id)
+            edit_prompt = (
+                _EDIT_SYSTEM_PROMPT
+                + patterns_block
+                + binding_block
+                + motif_block
+                + retry_block
+                + f"\nDraftSpec: {spec_json}"
+                + f"\nAvailable nodes: {catalog_json}"
+                + f"\nCURRENT WORKFLOW: {json.dumps(current, ensure_ascii=False)}"
+            )
+            try:
+                edit_resp = await self._llm.generate_structured(edit_prompt, _EditResponse)
+            except Exception as e:
+                raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE") from e
+            return self._build_from_edit(edit_resp, candidates, owner_user_id)
 
         prompt = (
             _SYSTEM_PROMPT
