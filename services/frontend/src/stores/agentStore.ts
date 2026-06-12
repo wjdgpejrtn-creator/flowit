@@ -43,6 +43,12 @@ interface AgentStoreState {
   mode: WorkspaceMode;
   setMode: (mode: WorkspaceMode) => void;
 
+  // 우측 캔버스에 띄울 산출물 종류. 'workflow'(기본)면 워크플로우 캔버스,
+  // 'skill'이면 스킬 상세 편집 캔버스(스킬빌더 통합, REQ-010). build_skill 의도로
+  // 스킬빌더가 호출되면 'skill'로 전환된다.
+  artifactKind: 'workflow' | 'skill';
+  setArtifactKind: (kind: 'workflow' | 'skill') => void;
+
   sessionId: string | null;
   sessions: AgentSession[];
   setSessionId: (id: string) => void;
@@ -88,6 +94,9 @@ export const useAgentStore = create<AgentStoreState>()(
     (set) => ({
   mode: 'wizard',
   setMode: (mode) => set({ mode }),
+
+  artifactKind: 'workflow',
+  setArtifactKind: (artifactKind) => set({ artifactKind }),
 
   sessionId: null,
   sessions: [],
