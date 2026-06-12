@@ -258,8 +258,13 @@ export interface ChatMessageFrame {
   content: string;
 }
 
+export interface SkillBuilderWizardFrame {
+  frame_type: "skill_builder_wizard";
+  source_document_id?: string | null;
+}
+
 export interface AgentProtocolResponse {
-  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | SkillSelectionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame>;
+  frames: Array<SessionFrame | AgentNodeFrame | RationaleDeltaFrame | SlotFillQuestionFrame | SkillSelectionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame | SkillBuilderWizardFrame>;
   state_delta: Record<string, unknown>;
   next_action: "continue" | "complete" | "error";
 }
@@ -556,4 +561,4 @@ export interface WorkflowExplanation {
   assumptions: Array<string>;
 }
 
-export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | SkillSelectionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame;
+export type AnySSEFrame = AgentNodeFrame | SessionFrame | RationaleDeltaFrame | SlotFillQuestionFrame | SkillSelectionFrame | DraftSpecDeltaFrame | ResultFrame | ErrorFrame | PipelineStatusFrame | IntentResultFrame | QAMetricFrame | WorkflowDraftFrame | ChatMessageFrame | SkillBuilderWizardFrame;

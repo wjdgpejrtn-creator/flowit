@@ -32,6 +32,7 @@ from common_schemas.transport import (
     PipelineStatusFrame,
     ResultFrame,
     SessionFrame,
+    SkillBuilderWizardFrame,
     SSEFrame,
 )
 
@@ -191,9 +192,13 @@ class LangGraphSupervisor:
                     break
                 # 재시도 홉은 transition(AgentNodeFrame/안내)을 다시 내지 않는다 (중복 방지).
                 is_retry = retry_count > 0
+                # SKILLS 홉: 뒤에 COMPOSER가 이어지면(복합 skill_then_compose) 서브에이전트 relay,
+                # 단독이면 프론트 위저드 트리거만(REQ-010). plan.remaining()은 현재 커서(SKILLS)부터.
+                skills_relay = RouteTarget.COMPOSER in plan.remaining()
                 outcome: dict[str, Any] = {}
                 async for frame in self._dispatch(
-                    target, state, intent, outcome, is_retry=is_retry, resume=resume
+                    target, state, intent, outcome, is_retry=is_retry, resume=resume,
+                    skills_relay=skills_relay,
                 ):
                     all_frames.append(frame)
                     yield frame
@@ -226,6 +231,10 @@ class LangGraphSupervisor:
                 # 에러는 이미 노출된 상태
                 if outcome.get("error_code") in _RELAY_FAIL_CODES:
                     break  # E_RELAY_LIMIT / content 후 E_RELAY — 즉시 포기
+                # SKILLS 자체 에러는 composer 보정 대상 아님 — 스킬 빌드 실패는 즉시 종료(REQ-010).
+                # 복합 skill_then_compose에서 skills가 실패하면 그 스킬로 compose해도 의미가 없다.
+                if target is RouteTarget.SKILLS:
+                    break
                 # 서브에이전트 자체 ErrorFrame → result_review → composer 보정 (1회)
                 if review_inserted:
                     break
@@ -263,6 +272,7 @@ class LangGraphSupervisor:
         outcome: dict[str, Any],
         is_retry: bool = False,
         resume: bool = False,
+        skills_relay: bool = True,
     ) -> AsyncGenerator[AnySSEFrame, None]:
         """한 홉의 target을 디스패치 — 산출 프레임을 모두 yield (호출부가 append+yield).
 
@@ -297,12 +307,25 @@ class LangGraphSupervisor:
         elif target is RouteTarget.SKILLS:
             if not is_retry:
                 yield AgentNodeFrame(agent_node_name="build_skill")
+            # 단일 build_skill(skills_relay=False, 후속 COMPOSER 없음)은 프론트 위저드를 띄우는
+            # 트리거만 발행하고 서브에이전트 relay를 생략한다 — 실제 빌드(추출·생성·게시)는 프론트
+            # REST(skillApi)가 자가구동한다(REQ-010 통합). outcome은 비워둬 성공으로 advance.
+            # 복합 skill_then_compose(skills_relay=True)는 기존 relay 유지 — COMPOSER가 산출된
+            # selected_skill_id를 state-mediated로 소비해야 하므로 서브에이전트가 실제로 빌드한다.
+            if not skills_relay:
                 if not resume:
-                    # transition을 relay 호출 전에 즉시 yield — 사용자 즉시 progress 인지
                     yield ChatMessageFrame(
                         role="assistant",
-                        content="스킬 빌드를 시작할게요. 잠시만 기다려 주세요.",
+                        content="스킬 빌더를 열었어요. 어떤 재료로 만들지 골라주세요.",
                     )
+                yield SkillBuilderWizardFrame()
+                return
+            if not is_retry and not resume:
+                # transition을 relay 호출 전에 즉시 yield — 사용자 즉시 progress 인지
+                yield ChatMessageFrame(
+                    role="assistant",
+                    content="스킬 빌드를 시작할게요. 잠시만 기다려 주세요.",
+                )
             async for frame in self._relay_monitored(state, self._skills, AgentMode.SKILL_BUILDER, outcome):
                 yield frame
 
