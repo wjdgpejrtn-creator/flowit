@@ -1,7 +1,7 @@
 import {
   nextMonotonicStep,
-  stepIndexFor,
-  displayLabels,
+  displayPhases,
+  phaseFor,
   toStep,
   STEP_ORDER,
   TOOL_TO_STEP,
@@ -98,25 +98,6 @@ describe('복합 skill_then_compose — 선두 스킬 단계 (a)', () => {
     expect(nextMonotonicStep('retriever', 'skills_builder.upsert.x')).toBe('retriever');
     expect(nextMonotonicStep('drafter', 'build_skill')).toBe('drafter');
   });
-
-  it('stepIndexFor — 복합이면 skill 선두 포함, 비복합이면 컴포저 7단계 기준', () => {
-    expect(stepIndexFor('skill', true)).toBe(1);
-    expect(stepIndexFor('security', true)).toBe(2);   // skill 다음
-    expect(stepIndexFor('security', false)).toBe(1);  // 비복합은 첫 단계
-    expect(stepIndexFor('promote', false)).toBe(7);
-    expect(stepIndexFor('promote', true)).toBe(8);
-    expect(stepIndexFor(null, true)).toBe(0);
-  });
-
-  it('displayLabels — 복합이면 "스킬 생성"이 선두에 1칸 추가', () => {
-    const base = displayLabels(false);
-    const composite = displayLabels(true);
-    expect(base[0]).toBe('보안 검토');
-    expect(base).toHaveLength(7);
-    expect(composite[0]).toBe('스킬 생성');
-    expect(composite[1]).toBe('보안 검토');
-    expect(composite).toHaveLength(8);
-  });
 });
 
 describe('two-shot 2차 resume — 침묵 복귀 단계 매핑 (b)', () => {
@@ -164,5 +145,29 @@ describe('복구 silent 재시도 — 재방출 역행 차단 (c)', () => {
       expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]); // 단조 증가 — 깜빡임 없음
     }
     expect(step).toBe('drafter');
+  });
+});
+
+describe('검증 메시지 타임라인 — 7단계 → 4(복합 5) 표시 단계 매핑', () => {
+  it('displayPhases — 비복합은 4단계, 복합은 "스킬 생성" 선두 포함 5단계', () => {
+    expect(displayPhases(false).map((p) => p.id)).toEqual(['intent', 'select', 'build', 'qa']);
+    expect(displayPhases(false).map((p) => p.title)).toEqual([
+      '의도 분석', '노드 선출', '워크플로우 작성', '품질 평가',
+    ]);
+    expect(displayPhases(true).map((p) => p.id)).toEqual(['skill', 'intent', 'select', 'build', 'qa']);
+    // 각 단계는 진행 중 fallback 안내 문구(hint)를 갖는다
+    expect(displayPhases(false).every((p) => p.hint.length > 0)).toBe(true);
+  });
+
+  it('phaseFor — 내부 7단계가 표시 4단계로 묶인다', () => {
+    expect(phaseFor('security')).toBe('intent');
+    expect(phaseFor('intent')).toBe('intent');
+    expect(phaseFor('retriever')).toBe('select');
+    expect(phaseFor('drafter')).toBe('build');
+    expect(phaseFor('validator')).toBe('build');
+    expect(phaseFor('qa_eval')).toBe('qa');
+    expect(phaseFor('promote')).toBe('qa');
+    expect(phaseFor('skill')).toBe('skill');
+    expect(phaseFor(null)).toBeNull();
   });
 });

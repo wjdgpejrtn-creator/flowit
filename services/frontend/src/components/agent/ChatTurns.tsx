@@ -14,6 +14,7 @@
 
 import type { ReactNode } from 'react';
 import Icon from '@/components/common/Icon';
+import type { DisplayPhase, VerifyPhase } from '@/lib/agentSteps';
 
 // ─── AI 마커 (28px 코랄 원 + sparkles) ───────────────────────────────────────
 // blank=true면 같은 화자의 연속 블록에서 자리만 비워 정렬을 유지한다.
@@ -66,56 +67,86 @@ export function AiTurn({
   );
 }
 
-// ─── 에이전트 작업과정 (채팅 인라인) — 완료 단계 dim 체크라인 + 진행 단계 스피너 ──
-// 디자인 3-2: 우측 패널 대신 대화 흐름에 인라인으로. 판단근거(rationale)도 그 아래 평문.
+// ─── 검증 노드 마커 (볼드 체크) ───────────────────────────────────────────────
+// 디자인 §2: 24px 원 + 중앙정렬. 완료=갈색 원+볼드 흰 체크, 진행=코랄 보더+스피너,
+// 대기=빈 원. 진행 타임라인과 "검증 상세 보기"(전부 done)에서 공유한다.
+
+export type NodeState = 'done' | 'live' | 'pending';
+
+export function VerifyNode({ state }: { state: NodeState }) {
+  return (
+    <span className={`vnode vnode--${state}`} aria-hidden>
+      {state === 'done' && (
+        <svg className="vbold-check" viewBox="0 0 24 24">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      )}
+      {state === 'live' && <span className="vspin" />}
+    </span>
+  );
+}
+
+// ─── 에이전트 작업과정 (채팅 인라인) — 진행 중 스트리밍 타임라인 ──────────────────
+// 디자인 §4: 분리선 레일 + 볼드 체크 노드. 완료 단계는 제목만, 진행 단계는 SSE
+// 판단근거 토큰이 흐르며 커서가 깜빡이고, 대기 단계는 dim + "대기 중".
 
 export function AgentWorkProcess({
-  labels,
-  currentIndex,
-  rationale,
+  phases,
+  currentId,
+  liveText,
 }: {
-  labels: string[];
-  /** stepIndexFor 결과(1-base). 0이면 아직 단계 미진입 → 일반 분석 중. */
-  currentIndex: number;
-  rationale?: string;
+  phases: DisplayPhase[];
+  /** 현재 진행 단계 id. null이면 아직 미진입 → 첫 단계를 진행 중으로 본다. */
+  currentId: VerifyPhase | null;
+  /** 진행 단계에 흐르는 SSE 판단근거 텍스트(없으면 단계별 기본 안내). */
+  liveText?: string;
 }) {
+  const found = currentId ? phases.findIndex((p) => p.id === currentId) : 0;
+  const curIdx = found < 0 ? 0 : found;
+  const live = (liveText ?? '').trim();
+
   return (
     <div className="flex gap-3">
       <AiMarker />
       <div className="flex-1 min-w-0 pt-0.5">
-        <div className="space-y-1.5 text-[12.5px] font-bold">
-          {labels.map((label, i) => {
-            const n = i + 1;
-            if (n < currentIndex) {
-              // 완료 단계 — 흐릿한 체크 줄
-              return (
-                <div key={i} className="flex items-center gap-2 text-[var(--color-ink3)]">
-                  <Icon name="check" className="w-3.5 h-3.5 text-[var(--color-accent)] flex-shrink-0" />
-                  <span>{label} 완료</span>
-                </div>
-              );
-            }
-            if (n === currentIndex) {
-              // 진행 중 단계 — 스피너 한 줄
-              return (
-                <div key={i} className="flex items-center gap-2 text-[var(--color-ink4)]">
-                  <span className="flowit-spinner" />
-                  <span>{label}…</span>
-                </div>
-              );
-            }
-            return null;
-          })}
-          {currentIndex === 0 && (
-            <div className="flex items-center gap-2 text-[var(--color-ink4)]">
-              <span className="flowit-spinner" />
-              <span>워크플로우를 분석 중…</span>
-            </div>
-          )}
+        {/* 상태 캡션 — 코랄 점 + 대문자 라벨 + 가로 구분선 */}
+        <div className="flex items-center gap-2 mb-3">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent-coral)] flex-shrink-0" />
+          <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-[var(--color-ink4)] whitespace-nowrap">
+            진행 중 · 스트리밍
+          </span>
+          <span className="h-px flex-1 bg-[var(--color-line-soft)]" />
         </div>
-        {rationale && (
-          <p className="mt-2 text-[13px] text-[var(--color-ink3)] leading-[1.7] break-keep">{rationale}</p>
-        )}
+        <p className="text-[14px] font-bold text-[var(--color-ink)] mb-3.5">워크플로우를 만들고 있어요</p>
+
+        <div className="vtl">
+          {phases.map((p, i) => {
+            const state: NodeState = i < curIdx ? 'done' : i === curIdx ? 'live' : 'pending';
+            return (
+              <div key={p.id} className="vrow">
+                <VerifyNode state={state} />
+                <div className="flex-1 min-w-0">
+                  <div
+                    className={[
+                      'text-[14px] font-bold whitespace-nowrap',
+                      state === 'pending' ? 'text-[var(--color-ink4)]' : 'text-[var(--color-ink)]',
+                    ].join(' ')}
+                  >
+                    {p.title}
+                  </div>
+                  {state === 'live' && (
+                    <p className="mt-1 text-[13px] text-[var(--color-ink3)] leading-[1.6] break-keep">
+                      <span className="vcursor">{live || p.hint}</span>
+                    </p>
+                  )}
+                  {state === 'pending' && (
+                    <p className="mt-1 text-[13px] text-[var(--color-ink4)]">대기 중</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
