@@ -78,6 +78,8 @@ class GoogleOAuthClient(OAuthClientPort):
             "email": userinfo.get("email", ""),
             "access_token": tokens["access_token"],
             "refresh_token": tokens.get("refresh_token", ""),
+            # #452 ② access token 만료시각 계산용(초). google은 통상 3599. 미수신 시 None.
+            "expires_in": tokens.get("expires_in"),
             "scopes": tokens.get("scope", "").split(),
         }
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from ...domain.entities.oauth_connection import OAuthConnection
@@ -47,13 +48,19 @@ class CompleteConnectionUseCase:
         scopes: list[str] = info.get("scopes", [])
         account_id = info.get("sub")  # google subject (slack=team_id 후속)
         display_name = info.get("email")  # google email (slack=workspace 후속)
+        # #452 ② expires_in(초) → 절대 만료시각. _resolve_oauth가 이 값으로 선제 refresh 판정.
+        # 미수신 시 None(레거시처럼 best-effort 갱신 대상).
+        expires_at = self._compute_expires_at(info.get("expires_in"))
 
         existing = await self._oauth_repo.get_active_for_user(user_id, service)
         if existing is not None:
             # ④ upsert — 기존 active 토큰 갱신 (active row 미증식)
             await self._credential_repo.update_data(existing.credential_id, enc_access)
             # refresh 부재 시 refresh_token_encrypted 제외 → 기존 refresh 유지(클로버 방어, 조장 LOW).
-            new_tokens: dict = {"access_token_encrypted": enc_access}
+            new_tokens: dict = {
+                "access_token_encrypted": enc_access,
+                "access_token_expires_at": expires_at,
+            }
             if enc_refresh is not None:
                 new_tokens["refresh_token_encrypted"] = enc_refresh
             await self._oauth_repo.update_tokens(existing.credential_id, new_tokens)
@@ -76,5 +83,12 @@ class CompleteConnectionUseCase:
                 "scopes": scopes,
                 "account_id": account_id,
                 "display_name": display_name,
+                "access_token_expires_at": expires_at,
             },
         )
+
+    @staticmethod
+    def _compute_expires_at(expires_in: int | None) -> datetime | None:
+        if expires_in is None:
+            return None
+        return datetime.now(UTC) + timedelta(seconds=int(expires_in))

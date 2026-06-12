@@ -31,6 +31,7 @@ class PgOAuthRepository(OAuthConnectionRepository):
             scopes=tokens.get("scopes", []),
             account_id=tokens.get("account_id"),
             display_name=tokens.get("display_name"),
+            access_token_expires_at=tokens.get("access_token_expires_at"),
             is_active=True,
             connected_at=datetime.now(timezone.utc),
         )
@@ -121,6 +122,8 @@ class PgOAuthRepository(OAuthConnectionRepository):
             values["access_token_encrypted"] = new_tokens["access_token_encrypted"]
         if "refresh_token_encrypted" in new_tokens:
             values["refresh_token_encrypted"] = new_tokens["refresh_token_encrypted"]
+        if "access_token_expires_at" in new_tokens:
+            values["access_token_expires_at"] = new_tokens["access_token_expires_at"]
         stmt = (
             update(OAuthConnectionModel)
             .where(OAuthConnectionModel.credential_id == credential_id)

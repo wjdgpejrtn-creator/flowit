@@ -40,7 +40,7 @@ from auth.application.use_cases import (
 | 클래스 | 주요 필드 | 설명 |
 |--------|----------|------|
 | `Session` | `session_id: UUID`, `user_id: UUID`, `session_hash: str`, `expires_at: datetime`, `is_revoked: bool`, `device_info: Optional[str]` | JWT 세션. `is_expired() → bool`, `revoke() → None` 메서드 제공 |
-| `OAuthConnection` | `oauth_id: UUID`, `user_id: UUID`, `service: Literal["google","slack"]`, `credential_id: UUID`, `access_token_encrypted: bytes`, `refresh_token_encrypted: Optional[bytes]`, `scopes: list[str]`, `is_active: bool` | 외부 서비스 OAuth 연결. `revoke() → None` 메서드 제공 |
+| `OAuthConnection` | `oauth_id: UUID`, `user_id: UUID`, `service: Literal["google","slack"]`, `credential_id: UUID`, `access_token_encrypted: bytes`, `refresh_token_encrypted: Optional[bytes]`, `scopes: list[str]`, `access_token_expires_at: Optional[UtcDatetime]`, `is_active: bool` | 외부 서비스 OAuth 연결. `revoke() → None` + `needs_token_refresh(now, skew_seconds=60) → bool`(#452 ② — 만료/임박/미상이면 True, refresh_token 없으면 False) 메서드 제공. `access_token_expires_at`는 연결/갱신 시 `now+expires_in`, NULL=만료 미상(레거시) |
 | `User` | `user_id: UUID`, `email: str`, `name: str`, `role: Literal["User","team_manager","company_manager","Admin"]`, `department_id: Optional[UUID]`, `is_active: bool`, `created_at/updated_at: UtcDatetime` | 사용자 식별 정보. PR #87(cef92fa) 신설, JIT auto-provisioning 시 `AuthenticateUseCase`가 INSERT |
 | `Credential` | `credential_id: UUID`, `user_id: UUID`, `name: str`, `credential_kind: Literal["api_key","oauth_token","password","certificate","custom"]`, `encrypted_data: bytes`, `metadata: dict`, `is_active: bool`, `created_at/updated_at: UtcDatetime` | 통합 credential 저장 엔티티 (DB: `credentials`, 002). `oauth_connections.credential_id` FK가 본 엔티티를 참조. PR #99 신설 |
 
@@ -55,7 +55,7 @@ from auth.application.use_cases import (
 | 서비스 | 메서드 | 설명 |
 |--------|--------|------|
 | `PermissionResolver` | `resolve(user_id: UUID, role: Literal["User","team_manager","company_manager","Admin"], department_id: UUID, session_id: UUID, current_workflow_id: Optional[UUID], current_skill_id: Optional[UUID]) → PermissionSource` | 6차원 권한 모델 기반 컨텍스트 생성 |
-| `CredentialInjectionService` | `async inject(credential_id: UUID, node_id: UUID) → PlaintextCredential` | 노드 실행 시 자격증명 복호화 (ADR-0018). `credentials` 테이블(SSOT) 조회 후 `credential_kind` 분기 — `oauth_token`은 `oauth_connections` enrich + service 검증, `api_key` 등은 `encrypted_data` 직접 복호화. `NodeDefinitionRepository.get_by_id(node_id)`로 `risk_level`/`required_connections`/`service_type` 검증 (H-4 합의). 생성자에 `CredentialRepository` 의존 |
+| `CredentialInjectionService` | `async inject(credential_id: UUID, node_id: UUID) → PlaintextCredential` | 노드 실행 시 자격증명 복호화 (ADR-0018). `credentials` 테이블(SSOT) 조회 후 `credential_kind` 분기 — `oauth_token`은 `oauth_connections` enrich + service 검증 + **만료 임박 시 access token refresh**(#452 ②), `api_key` 등은 `encrypted_data` 직접 복호화. `NodeDefinitionRepository.get_by_id(node_id)`로 `risk_level`/`required_connections`/`service_type` 검증 (H-4 합의). 생성자에 `CredentialRepository` + **`oauth_clients: dict[str, OAuthClientPort] \| None`**(service별 refresh client, service-agnostic — 현재 google만 배선. 미배선 service: 유효 토큰은 그대로, known-expired는 `AuthorizationError` E-CRED-002) 의존 |
 
 ### domain/ports (인터페이스 — 구현체는 `modules/storage`)
 
@@ -79,7 +79,7 @@ from auth.application.use_cases import (
 | | `async get_by_id(credential_id: UUID) → Optional[Credential]` | |
 | | `async update_data(credential_id: UUID, encrypted_data: bytes) → None` | |
 | `CipherPort` | `encrypt(plaintext: bytes) → bytes`, `decrypt(ciphertext: bytes) → bytes` | `auth/adapters/cipher/` (자체 구현) |
-| `OAuthClientPort` | `async exchange_code(code: str) → dict`, `async refresh_access_token(refresh_token: str) → dict`, `async get_user_info(access_token: str) → dict` | `auth/adapters/oauth/` (자체 구현) |
+| `OAuthClientPort` | `async exchange_code(code: str) → dict` (반환에 `expires_in` 포함, #452 ②), `async refresh_access_token(refresh_token: str) → dict` (반환 `access_token`/`expires_in`), `async get_user_info(access_token: str) → dict` | `auth/adapters/oauth/` (자체 구현) |
 
 ### application/use_cases
 

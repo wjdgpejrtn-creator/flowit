@@ -160,6 +160,15 @@ def _build_credential_service_factory():
     # 에 encryption-key 바인딩 필요(infra/terraform/.../staging/main.tf).
     cipher = AESGCMCipher()
 
+    # #452 ② OAuth access token refresh client (service-agnostic). GOOGLE_CLIENT_ID/SECRET가
+    # worker secret_env_vars에 바인딩됐을 때만 google client를 배선한다 — 미바인딩이면 빈 dict로
+    # degrade(만료 토큰은 기존처럼 401, deploy-safe). _build_skill_document_store 선례 미러.
+    oauth_clients: dict[str, Any] = {}
+    if os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET"):
+        from auth.adapters.oauth.google_oauth_client import GoogleOAuthClient
+
+        oauth_clients["google"] = GoogleOAuthClient()
+
     @asynccontextmanager
     async def factory() -> AsyncIterator[Any]:
         from auth.domain.services.credential_injection_service import (
@@ -201,7 +210,13 @@ def _build_credential_service_factory():
                     oauth_repo=PgOAuthRepository(session),
                     node_def_repo=PgNodeDefinitionRepository(session),
                     credential_repo=PgCredentialRepository(session),
+                    oauth_clients=oauth_clients,
                 )
+                # #452 ② inject()가 만료 토큰을 refresh하면 update_tokens 쓰기가 발생한다.
+                # 정상 종료 시 commit해 갱신 토큰을 영속화(다음 주입 재갱신 비용 절감 + expires_at
+                # backfill). 소비자(inject)가 예외를 던지면 yield에서 전파돼 이 commit은 건너뛰고
+                # AsyncSession.__aexit__이 rollback한다. read-only 경로는 쓰기 없어 no-op commit.
+                await session.commit()
         finally:
             await engine.dispose()
             await connector.close_async()
