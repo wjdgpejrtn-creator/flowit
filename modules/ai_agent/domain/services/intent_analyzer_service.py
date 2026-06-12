@@ -39,9 +39,9 @@ _REFINE_RE = re.compile(
     r"(수정|바꿔|변경|고쳐|다시\s*만들어|추가\s*(해줘?|해)|빼|제거|삭제|대신|아니라|말고)",
     re.IGNORECASE,
 )
-# "만들어"만 잡으면 "스킬 만들고 싶어"·"스킬 만들래" 같은 자연 발화를 놓친다(#496 e2e). 어간
-# "만들"로 넓히고 생성/제작 동의어 + 을/를/하나/좀/새 필러를 허용한다. 복합용 _SKILL_SIGNAL_RE와
-# 어간 기준을 맞춘다(둘이 어긋나면 단일은 못 잡고 복합만 잡히는 비일관 발생).
+# 정규식은 fallback 전용(주 분류는 Gemma). "만들어"만 잡으면 "스킬 만들고 싶어"·"스킬 만들래"를
+# 놓치니 어간 "만들"로 넓히고 생성/제작 동의어 + 을/를/하나/좀/새 필러를 허용한다. 복합용
+# _SKILL_SIGNAL_RE와 **동의어·필러까지 동일**하게 유지(어긋나면 단일↔복합 분류 비일관).
 _BUILD_SKILL_RE = re.compile(
     r"(스킬|skill)\s*(을|를|좀|하나|새|한\s*개)?\s*(만들|만든|빌드|build|등록|추가|생성|제작|디자인)",
     re.IGNORECASE,
@@ -56,7 +56,12 @@ _DRAFT_RE = re.compile(
 # 한 발화에 스킬 생성 + 그 스킬로 워크플로우 작성이 모두 담긴 경우 → skill_then_compose.
 # 보수적: 세 신호(스킬 빌드 / compose 대상 / 순차 연결어)가 모두 있어야 복합으로 본다.
 # 애매하면 단일 의도로 폴백 (오탐 시 사용자 흐름이 더 어색해지므로).
-_SKILL_SIGNAL_RE = re.compile(r"(스킬|skill)\s*(을|를)?\s*(만들|만든|빌드|build|등록|생성)", re.IGNORECASE)
+# 단일 _BUILD_SKILL_RE와 **동의어·필러까지 동일**하게 유지 — 어긋나면 "스킬 제작해서 워크플로우"가
+# 단일은 잡고 복합은 놓치는 비일관 발생(복합은 regex 전용이라 정렬이 특히 중요).
+_SKILL_SIGNAL_RE = re.compile(
+    r"(스킬|skill)\s*(을|를|좀|하나|새|한\s*개)?\s*(만들|만든|빌드|build|등록|추가|생성|제작|디자인)",
+    re.IGNORECASE,
+)
 _COMPOSE_SIGNAL_RE = re.compile(r"(워크플로우|workflow|자동화|automation|플로우)", re.IGNORECASE)
 _CHAIN_CONNECTIVE_RE = re.compile(
     r"(만들어서|만들고|만든\s*뒤|만든\s*다음|등록하고|등록해서|해서|그걸로|그\s*스킬로|이용해서?|사용해서?|로\s*만들|연결)",
