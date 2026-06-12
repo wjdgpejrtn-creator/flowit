@@ -96,7 +96,7 @@ export default function DocumentAnalysisSidebar({
       <Btn
         primary
         title="이 문서를 기반으로 새 스킬 만들기"
-        onClick={() => router.push(`/skills/builder?source_document_id=${documentId}`)}
+        onClick={() => router.push(`/documents?build=1&source_document_id=${documentId}`)}
         className="mt-2 w-full justify-center"
       >
         이 문서로 스킬 만들기 →
