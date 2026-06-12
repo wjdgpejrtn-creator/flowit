@@ -1,10 +1,10 @@
-"""IntentAnalyzerService.analyze — 편집 잠금(상태 인지 draft↔refine) (#369).
+"""IntentAnalyzerService.analyze — Gemma 4 1차 분류 + 편집 잠금(상태 의존) + 정규식 fallback.
 
-확인 대기 draft가 있는 세션은 **편집 모드**다(조장 지시 2026-06-10). draft/refine/미분류
-발화는 전부 기존 draft 수정(refine)으로 **결정적 확정** — 새 워크플로우 생성을 잠근다.
-정규식만 쓰던 구조가 수정 발화("...로 바꿔줘")를 새 생성으로 오분류해 4노드 워크플로우가
-2노드로 재생성되던 회귀를, 상태(`has_pending_draft`) 기반 결정적 잠금으로 해소한다.
-LLM 분류는 제거(작은 모델 오분류 차단 + 핫패스 지연 0).
+1차 의도 분류는 Gemma 4(LLM)가 한다 — 자연어는 규칙 몇 개로 못 가른다("스킬 만들고 싶어"
+같은 표현 변주). 정규식은 llm-base 다운 시 비상 fallback 전용.
+
+draft↔refine은 텍스트로 못 푸는 **세션 상태 의존** 축이라 Gemma가 아니라 편집 잠금
+(`has_pending_draft`)으로 결정적으로 푼다(#369 회귀 방지) — Gemma 분류의 보완재.
 """
 from __future__ import annotations
 
@@ -14,7 +14,10 @@ import pytest
 from common_schemas.enums import IntentType
 
 from ai_agent.domain.ports.llm_port import LLMPort
-from ai_agent.domain.services.intent_analyzer_service import IntentAnalyzerService
+from ai_agent.domain.services.intent_analyzer_service import (
+    IntentAnalyzerService,
+    _IntentClassification,
+)
 
 
 def _msgs(text: str) -> list[dict]:
@@ -26,76 +29,99 @@ def _service() -> tuple[IntentAnalyzerService, AsyncMock]:
     return IntentAnalyzerService(llm), llm
 
 
-# ── 무상태·명시적 의도: 정규식 확정, LLM 미호출 (draft 유무 무관) ────────────────
-@pytest.mark.parametrize(
-    "text,expected",
-    [
-        ("취소", IntentType.CONTROL),
-        ("실행해줘", IntentType.WORKFLOW_EXECUTE),
-        ("안녕", IntentType.CHITCHAT),
-        ("이대로 진행", IntentType.PROPOSE),
-        ("스킬 만들어줘", IntentType.BUILD_SKILL),
-    ],
-)
-@pytest.mark.asyncio
-async def test_stateless_intents_use_regex_without_llm(text, expected):
-    # 명시적 의도는 draft 대기 중이어도 편집 잠금 전에 단락된다(실행/취소/인사 등은 편집 아님).
-    svc, llm = _service()
-    result = await svc.analyze(_msgs(text), context={"has_pending_draft": True})
-    assert result is not None and result.intent == expected
-    llm.generate_structured.assert_not_awaited()
+def _llm_returns(llm: AsyncMock, intent: str) -> None:
+    llm.generate_structured.return_value = _IntentClassification(intent=intent)
 
 
-# ── 편집 잠금: draft 존재 시 모든 구성 발화 → REFINE (결정적, LLM 0) ──────────────
+# ── Gemma가 1차 분류기: 분류 결과를 그대로 사용 ────────────────────────────────
 @pytest.mark.parametrize(
-    "text",
-    [
-        "슬랙 채널을 #general로 해줘",          # 편집동사 없는 자연스러운 수정
-        "url을 naver.com으로 바꿔줘",             # 명시적 수정
-        "이거 slack 말고 gmail로 보내는 걸로 수정해줘",  # 실제 #369 발화
-        "매주 월요일 9시에 시트 읽어서 슬랙으로 보내줘",  # draft처럼 보여도 잠금 → refine
-        "A노드 url naver.com",                    # 정규식 미분류여도 draft 존재 시 refine
-    ],
+    "intent",
+    ["build_skill", "chitchat", "control", "workflow_execute", "info_question", "propose"],
 )
 @pytest.mark.asyncio
-async def test_pending_draft_locks_all_construction_to_refine(text):
+async def test_llm_classifies_base_intent(intent: str):
     svc, llm = _service()
-    result = await svc.analyze(_msgs(text), context={"has_pending_draft": True})
-    assert result is not None and result.intent == IntentType.REFINE
+    _llm_returns(llm, intent)
+    result = await svc.analyze(_msgs("아무 발화든"), context={})
+    assert result is not None and result.intent.value == intent
+    llm.generate_structured.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_build_skill_varied_phrasing_via_llm():
+    # 핵심 회귀(#496): "나 스킬 만들고 싶어"를 Gemma가 build_skill로 분류 → 위저드 발동.
+    # (정규식 단독 시절엔 '만들고'를 못 잡아 general_chat으로 샜다.)
+    svc, llm = _service()
+    _llm_returns(llm, "build_skill")
+    result = await svc.analyze(_msgs("나 스킬 만들고 싶어"), context={"has_pending_draft": False})
+    assert result.intent == IntentType.BUILD_SKILL
+
+
+# ── 편집 잠금: 확인 대기 draft 있으면 구성 발화 → REFINE (상태 기반, Gemma 무관) ──
+@pytest.mark.asyncio
+async def test_pending_draft_locks_construction_to_refine():
+    # Gemma가 draft로 분류해도, 확인 대기 draft가 있으면 편집 잠금 → REFINE.
+    svc, llm = _service()
+    _llm_returns(llm, "draft")
+    result = await svc.analyze(
+        _msgs("슬랙 채널을 #general로 해줘"), context={"has_pending_draft": True}
+    )
+    assert result.intent == IntentType.REFINE
     assert result.confidence == 1.0
-    llm.generate_structured.assert_not_awaited()  # 결정적 — 분류 LLM 호출 없음
 
 
-# ── draft 없음: refine 불가 → 새 생성(draft)으로 교정, LLM 미호출 ─────────────────
 @pytest.mark.asyncio
-async def test_same_utterance_without_pending_draft_classifies_draft_no_llm():
+async def test_stateless_intent_bypasses_edit_lock_even_with_pending_draft():
+    # 무상태 의도(취소/실행/스킬빌드 등)는 draft 대기 중이어도 잠금 단락 — 편집이 아니다.
     svc, llm = _service()
-    result = await svc.analyze(_msgs("슬랙 채널을 #general로 해줘"), context={"has_pending_draft": False})
+    _llm_returns(llm, "control")
+    result = await svc.analyze(_msgs("취소"), context={"has_pending_draft": True})
+    assert result.intent == IntentType.CONTROL
+
+
+# ── draft 없음: refine 불가 → 새 생성(draft)으로 교정 ──────────────────────────
+@pytest.mark.asyncio
+async def test_refine_without_pending_draft_corrected_to_draft():
+    svc, llm = _service()
+    _llm_returns(llm, "refine")
+    result = await svc.analyze(
+        _msgs("url을 naver.com으로 바꿔줘"), context={"has_pending_draft": False}
+    )
     assert result.intent == IntentType.DRAFT
-    llm.generate_structured.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_refine_verb_without_pending_draft_corrected_to_draft():
-    # 불변식: refine은 draft가 있어야 성립. draft 없는데 "바꿔줘"면 새 생성으로 교정.
+async def test_no_state_context_uses_llm_result():
+    # 무상태 호출부(supervisor): context에 키 없음 → Gemma 분류 그대로(draft/refine 동일 레시피).
     svc, llm = _service()
-    result = await svc.analyze(_msgs("url을 naver.com으로 바꿔줘"), context={"has_pending_draft": False})
+    _llm_returns(llm, "draft")
+    result = await svc.analyze(_msgs("슬랙 알림 자동화 만들어줘"), context={})
     assert result.intent == IntentType.DRAFT
-    llm.generate_structured.assert_not_awaited()
 
 
-# ── 무상태 호출부(supervisor): context에 키 없음 → 정규식, LLM 미호출 ──────────
+# ── llm-base 다운/타임아웃 → 정규식 fallback (회복력) ──────────────────────────
 @pytest.mark.asyncio
-async def test_no_state_context_falls_back_to_regex_no_llm():
+async def test_llm_failure_falls_back_to_regex():
     svc, llm = _service()
-    result = await svc.analyze(_msgs("슬랙 채널을 #general로 해줘"), context={})
-    assert result.intent == IntentType.DRAFT  # 정규식 '해줘' → draft (supervisor 라우팅엔 충분)
-    llm.generate_structured.assert_not_awaited()
+    llm.generate_structured.side_effect = RuntimeError("llm-base down")
+    result = await svc.analyze(_msgs("스킬 만들어줘"), context={})
+    assert result is not None and result.intent == IntentType.BUILD_SKILL  # 정규식 fallback이 잡음
 
 
 @pytest.mark.asyncio
-async def test_unclassified_without_context_returns_none():
+async def test_llm_failure_unclassifiable_returns_none():
     svc, llm = _service()
-    result = await svc.analyze(_msgs("A노드 url naver.com"), context={})  # 키워드 무매칭, 상태 무
+    llm.generate_structured.side_effect = RuntimeError("down")
+    result = await svc.analyze(_msgs("xkcd qwerty"), context={})
     assert result is None
-    llm.generate_structured.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_llm_failure_pending_draft_still_locks_to_refine():
+    # llm-base 다운이어도 편집 잠금은 상태 기반이라 그대로 동작(REFINE).
+    svc, llm = _service()
+    llm.generate_structured.side_effect = RuntimeError("down")
+    result = await svc.analyze(
+        _msgs("A노드 url naver.com"), context={"has_pending_draft": True}
+    )
+    assert result.intent == IntentType.REFINE

@@ -42,17 +42,6 @@ export const TOOL_TO_STEP: Record<string, AgentStep> = {
   save_memory:       'promote',
 };
 
-export const STEP_LABELS: Record<AgentStep, string> = {
-  skill:     '스킬 생성',
-  security:  '보안 검토',
-  intent:    '의도 분류',
-  retriever: '노드 검색',
-  drafter:   '초안 생성',
-  validator: '그래프 검증',
-  qa_eval:   '품질 평가',
-  promote:   '워크플로우 확정',
-};
-
 // agent_node 프레임 이름 → 표시 단계. 매핑 없으면 null(현재 단계 유지).
 // skills_builder.* 릴레이 프레임(동적 이름: skills_builder.upsert.X 등)은 모두 'skill' 단계.
 export function toStep(toolName: string): AgentStep | null {
@@ -80,15 +69,57 @@ export function nextMonotonicStep(prev: AgentStep | null, toolName: string): Age
   return mi >= pi ? mapped : prev;
 }
 
-// 표시용 1-base 인덱스. 복합 흐름이면 'skill' 선두 단계를 포함한 순서 기준.
-export function stepIndexFor(step: AgentStep | null, composite: boolean): number {
-  if (!step) return 0;
-  const order = composite ? GUARD_ORDER : STEP_ORDER;
-  return order.indexOf(step) + 1;
+// ─── 검증 메시지 타임라인 — 사용자 표시용 4단계 요약 ───────────────────────────
+// 디자인 SSOT: docs/검증메시지-구현가이드.md (claude.ai/design 핸드오프).
+// 내부 7단계(보안·의도·검색·초안·검증·품질·확정)를 디자인의 4단계로 묶어 보여준다.
+//   보안+의도 → 의도 분석 / 검색 → 노드 선출 / 초안+검증 → 워크플로우 작성 /
+//   품질+확정 → 품질 평가. 복합 흐름이면 '스킬 생성'을 선두에 둔다.
+
+export type VerifyPhase = 'skill' | 'intent' | 'select' | 'build' | 'qa';
+
+const STEP_TO_PHASE: Record<AgentStep, VerifyPhase> = {
+  skill: 'skill',
+  security: 'intent',
+  intent: 'intent',
+  retriever: 'select',
+  drafter: 'build',
+  validator: 'build',
+  qa_eval: 'qa',
+  promote: 'qa',
+};
+
+const PHASE_BASE_ORDER: VerifyPhase[] = ['intent', 'select', 'build', 'qa'];
+
+export const PHASE_TITLES: Record<VerifyPhase, string> = {
+  skill: '스킬 생성',
+  intent: '의도 분석',
+  select: '노드 선출',
+  build: '워크플로우 작성',
+  qa: '품질 평가',
+};
+
+// 진행 단계에서 흐를 기본 안내 문구(SSE 판단근거 토큰이 없을 때 fallback).
+const PHASE_HINTS: Record<VerifyPhase, string> = {
+  skill: '스킬을 준비하고 있어요',
+  intent: '요청을 분석하고 있어요',
+  select: '필요한 노드를 찾고 있어요',
+  build: '노드를 연결해 워크플로우를 만들고 있어요',
+  qa: '품질을 점검하고 있어요',
+};
+
+export interface DisplayPhase {
+  id: VerifyPhase;
+  title: string;
+  hint: string;
 }
 
-// 표시할 단계 라벨 목록. 복합 흐름이면 '스킬 생성' 선두 단계를 포함한다.
-export function displayLabels(composite: boolean): string[] {
-  const order = composite ? GUARD_ORDER : STEP_ORDER;
-  return order.map((s) => STEP_LABELS[s]);
+// 표시할 4(복합 시 5)단계 목록.
+export function displayPhases(composite: boolean): DisplayPhase[] {
+  const order = composite ? (['skill', ...PHASE_BASE_ORDER] as VerifyPhase[]) : [...PHASE_BASE_ORDER];
+  return order.map((id) => ({ id, title: PHASE_TITLES[id], hint: PHASE_HINTS[id] }));
+}
+
+// 현재 내부 단계 → 표시 단계. 없으면 null(아직 미진입).
+export function phaseFor(step: AgentStep | null): VerifyPhase | null {
+  return step ? STEP_TO_PHASE[step] : null;
 }

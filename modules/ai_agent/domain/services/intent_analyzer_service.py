@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import logging
 import re
-from typing import Any
+from typing import Any, Literal
 
 from common_schemas import IntentResult
 from common_schemas.enums import IntentType
+from pydantic import BaseModel
 
 from ..ports.llm_port import LLMPort
 from ..value_objects.route_plan import RECIPE_SKILL_THEN_COMPOSE
 
-# ── 키워드 기반 fast classifier ──────────────────────────────────────────────
-# 정규식 매칭 ~90% → LLM fallback ~10%
+_logger = logging.getLogger(__name__)
+
+# ── 키워드 기반 fallback classifier ──────────────────────────────────────────
+# 1차 분류는 Gemma 4(LLM)가 한다 — 자연어는 규칙 몇 개로 분류 불가(예: "만들어"는 잡고
+# "만들고 싶어"는 놓침). 아래 정규식은 **llm-base 다운/타임아웃 시 비상 fallback 전용**이다.
 
 _CONTROL_RE = re.compile(
     r"(취소|초기화|리셋|reset|중단|멈춰|stop|처음부터|다시\s*시작)", re.IGNORECASE
@@ -34,8 +39,11 @@ _REFINE_RE = re.compile(
     r"(수정|바꿔|변경|고쳐|다시\s*만들어|추가\s*(해줘?|해)|빼|제거|삭제|대신|아니라|말고)",
     re.IGNORECASE,
 )
+# 정규식은 fallback 전용(주 분류는 Gemma). "만들어"만 잡으면 "스킬 만들고 싶어"·"스킬 만들래"를
+# 놓치니 어간 "만들"로 넓히고 생성/제작 동의어 + 을/를/하나/좀/새 필러를 허용한다. 복합용
+# _SKILL_SIGNAL_RE와 **동의어·필러까지 동일**하게 유지(어긋나면 단일↔복합 분류 비일관).
 _BUILD_SKILL_RE = re.compile(
-    r"(스킬|skill)\s*(만들어|빌드|build|등록|추가)",
+    r"(스킬|skill)\s*(을|를|좀|하나|새|한\s*개)?\s*(만들|만든|빌드|build|등록|추가|생성|제작|디자인)",
     re.IGNORECASE,
 )
 _DRAFT_RE = re.compile(
@@ -48,7 +56,12 @@ _DRAFT_RE = re.compile(
 # 한 발화에 스킬 생성 + 그 스킬로 워크플로우 작성이 모두 담긴 경우 → skill_then_compose.
 # 보수적: 세 신호(스킬 빌드 / compose 대상 / 순차 연결어)가 모두 있어야 복합으로 본다.
 # 애매하면 단일 의도로 폴백 (오탐 시 사용자 흐름이 더 어색해지므로).
-_SKILL_SIGNAL_RE = re.compile(r"(스킬|skill)\s*(을|를)?\s*(만들|만든|빌드|build|등록|생성)", re.IGNORECASE)
+# 단일 _BUILD_SKILL_RE와 **동의어·필러까지 동일**하게 유지 — 어긋나면 "스킬 제작해서 워크플로우"가
+# 단일은 잡고 복합은 놓치는 비일관 발생(복합은 regex 전용이라 정렬이 특히 중요).
+_SKILL_SIGNAL_RE = re.compile(
+    r"(스킬|skill)\s*(을|를|좀|하나|새|한\s*개)?\s*(만들|만든|빌드|build|등록|추가|생성|제작|디자인)",
+    re.IGNORECASE,
+)
 _COMPOSE_SIGNAL_RE = re.compile(r"(워크플로우|workflow|자동화|automation|플로우)", re.IGNORECASE)
 _CHAIN_CONNECTIVE_RE = re.compile(
     r"(만들어서|만들고|만든\s*뒤|만든\s*다음|등록하고|등록해서|해서|그걸로|그\s*스킬로|이용해서?|사용해서?|로\s*만들|연결)",
@@ -112,13 +125,63 @@ def _fast_classify(message: str) -> IntentType | None:
 _STATEFUL_INTENTS = frozenset({IntentType.DRAFT, IntentType.REFINE})
 
 
+# ── Gemma 4 1차 의도 분류 ─────────────────────────────────────────────────────
+# clarify는 사용자 입력 의도가 아니라 에이전트 상태 의도라 분류 대상에서 제외(8종).
+
+
+class _IntentClassification(BaseModel):
+    """Gemma 1차 분류 결과 — generate_structured 스키마(JSON 제약 출력)."""
+
+    intent: Literal[
+        "build_skill",
+        "draft",
+        "refine",
+        "propose",
+        "chitchat",
+        "info_question",
+        "control",
+        "workflow_execute",
+    ]
+
+
+_CLASSIFY_PROMPT = """당신은 업무 자동화 어시스턴트의 의도 분류기입니다.
+사용자의 마지막 발화를 아래 의도 중 정확히 하나로 분류해 JSON으로 답하세요.
+
+- build_skill: 재사용 가능한 '스킬'을 만들거나 등록하고 싶다. 예: "스킬 만들고 싶어", "이 문서로 스킬 만들어줘"
+- draft: 새 워크플로우/자동화를 만들어 달라. 예: "매주 월요일 시트 읽어서 슬랙으로 보내줘", "슬랙 알림 자동화 만들어줘"
+- refine: 방금 만든 워크플로우를 수정/변경. 예: "채널을 #general로 바꿔줘", "그 노드 빼줘"
+- propose: 제안된 워크플로우를 이대로 승인/확정. 예: "이대로 진행해줘", "좋아 승인"
+- chitchat: 인사·잡담·감사. 예: "안녕", "고마워", "수고했어"
+- info_question: 기능·사용법 질문. 예: "이게 뭐야?", "어떻게 사용해?", "뭘 할 수 있어?"
+- control: 취소·초기화·중단. 예: "취소", "처음부터 다시", "리셋"
+- workflow_execute: 지금 바로 실행. 예: "실행해줘", "바로 실행"
+
+발화: "{message}"
+"""
+
+
 class IntentAnalyzerService:
     def __init__(self, llm: LLMPort) -> None:
-        # `analyze`는 정규식 + 편집 잠금만 쓰는 결정적 분류라 현재 LLM을 호출하지 않는다
-        # (draft↔refine Gemma 분류는 편집 잠금으로 폐지 — decisions.md "구현 결정 메모"). `llm`은
-        # 생성자 시그니처/composition root(agent-composer·orchestrator) 안정성 + 향후 LLM 분류
-        # 재도입 대비로 보존한다. 미사용이지만 의도된 보존(dead dependency 아님).
+        # 1차 의도 분류는 Gemma 4(`self._llm`)가 수행한다 — 이 에이전트들을 Gemma로 만든 이유가
+        # 자연어 이해다. 정규식은 llm-base 다운 시 비상 fallback 전용. draft↔refine은 텍스트로
+        # 못 푸는 **세션 상태 의존** 축이라 Gemma가 아니라 편집 잠금(has_pending_draft)으로 푼다.
         self._llm = llm
+
+    async def _classify_with_llm(self, message: str) -> IntentType | None:
+        """Gemma 4로 1차 의도 분류. 실패(llm-base 다운/타임아웃/파싱)면 None → 정규식 fallback."""
+        text = message.strip()
+        if not text:
+            return None
+        try:
+            out = await self._llm.generate_structured(
+                _CLASSIFY_PROMPT.format(message=text),
+                _IntentClassification,
+                max_tokens=24,
+            )
+            return IntentType(out.intent)
+        except Exception as exc:  # llm-base 다운/타임아웃/스키마 위반 — 정규식으로 폴백
+            _logger.warning("intent LLM 분류 실패 — 정규식 fallback: %s", exc)
+            return None
 
     async def analyze(self, messages: list[dict[str, Any]], context: dict[str, Any]) -> IntentResult | None:
         user_message = ""
@@ -127,32 +190,32 @@ class IntentAnalyzerService:
                 user_message = m.get("content", "")
                 break
 
-        # fast-path: 키워드 분류 (LLM 0 call)
-        fast_intent = _fast_classify(user_message)
+        # 1차 의도 분류 — Gemma 4가 자연어를 이해해 분류(주). llm-base 다운/타임아웃 시에만 정규식
+        # fallback. (정규식 단독은 "스킬 만들고 싶어" 같은 표현 변주를 못 잡아 위저드 미발동 회귀.)
+        base_intent = await self._classify_with_llm(user_message)
+        if base_intent is None:
+            base_intent = _fast_classify(user_message)
 
-        # 무상태·명시적 의도(제어/실행/인사/승인/안내/스킬빌드)는 정규식으로 확정한다 —
-        # 발화 표면만으로 정답이 정해지므로 LLM이 불필요하다.
-        if fast_intent is not None and fast_intent not in _STATEFUL_INTENTS:
-            return IntentResult(intent=fast_intent, confidence=0.95, analyzed_entities={})
+        # 무상태·명시적 의도(제어/실행/인사/승인/안내/스킬빌드)는 세션 상태와 무관 — 편집 잠금 단락.
+        if base_intent is not None and base_intent not in _STATEFUL_INTENTS:
+            return IntentResult(intent=base_intent, confidence=0.9, analyzed_entities={})
 
         # 여기 도달 = draft/refine/미분류 = '워크플로우 구성' 의도(상태 의존).
         has_draft = context.get("has_pending_draft")
         if has_draft is not None:
             # 핵심 불변식: refine은 확인 대기 draft가 있어야만 성립한다.
             if has_draft:
-                # **편집 잠금(조장 지시 2026-06-10)**: 확인 대기 draft가 있으면 이 세션은
-                # 편집 모드다. draft/refine/미분류 발화는 전부 기존 draft 수정(refine)으로
-                # **결정적 확정** — 새 워크플로우 생성을 잠근다(새로 만들려면 "새 대화"로 세션 초기화).
-                # Gemma 상태 분류 제거: 작은 모델 오분류로 편집이 새 생성으로 새던 회귀
-                # (#369 — 4노드가 2노드로 재생성)를 원천 차단 + 핫패스 LLM 지연 0.
+                # **편집 잠금(#369)**: 확인 대기 draft가 있으면 이 세션은 편집 모드다. draft/refine/
+                # 미분류 발화는 전부 기존 draft 수정(refine)으로 **결정적 확정** — 새 워크플로우
+                # 생성을 잠근다(새로 만들려면 "새 대화"로 세션 초기화). 세션 상태는 텍스트로 못 푸는
+                # 축이라 LLM이 아니라 상태로 푼다(Gemma 분류의 보완재 — 둘은 상호 배타가 아님).
                 return IntentResult(intent=IntentType.REFINE, confidence=1.0, analyzed_entities={})
             # draft 없음 → refine 불가능 → refine 오탐은 새 생성(draft)으로 교정한다.
-            # create 핫패스엔 Gemma 호출을 더하지 않는다(불필요한 지연 방지).
-            if fast_intent is IntentType.REFINE:
-                fast_intent = IntentType.DRAFT
+            if base_intent is IntentType.REFINE:
+                base_intent = IntentType.DRAFT
 
-        # 무상태 호출부(supervisor)이거나 draft 없는 경우 — 정규식 결과 그대로.
-        # supervisor는 draft/refine이 동일 레시피(→COMPOSER)라 정규식으로 충분하다.
-        if fast_intent is not None:
-            return IntentResult(intent=fast_intent, confidence=0.95, analyzed_entities={})
+        # 무상태 호출부(supervisor)이거나 draft 없는 경우 — 분류 결과 그대로.
+        # supervisor는 draft/refine이 동일 레시피(→COMPOSER)라 둘 중 무엇이어도 충분하다.
+        if base_intent is not None:
+            return IntentResult(intent=base_intent, confidence=0.9, analyzed_entities={})
         return None

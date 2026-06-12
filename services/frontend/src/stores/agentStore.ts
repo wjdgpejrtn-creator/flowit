@@ -26,6 +26,17 @@ export interface SlotFillQuestion {
   question: string;
 }
 
+// 검증 메시지 "검증 상세 보기" 패널용 — 스트리밍 중 SSE 프레임에서 캡처한 단계별 기록.
+// (intent_result / qa_metric / workflow_draft). 백엔드가 안 보내는 필드는 비워두고 graceful.
+export interface VerifyData {
+  intentType?: string;                     // intent_result.intent
+  intentEntities?: Record<string, unknown>; // intent_result.entities
+  qaScore?: number;                         // qa_metric.score
+  qaPassed?: boolean;                       // qa_metric.pass_flag
+  draftNodeCount?: number;                  // workflow_draft.nodes.length
+  draftConnCount?: number;                  // workflow_draft.connections.length
+}
+
 export interface AgentSession {
   id: string;
   title: string;
@@ -37,6 +48,7 @@ export interface AgentSession {
   rationaleText?: string;
   currentStep?: AgentStep | null;
   compositeFlow?: boolean;
+  verify?: VerifyData;
 }
 
 interface AgentStoreState {
@@ -74,6 +86,11 @@ interface AgentStoreState {
   rationaleText: string;
   appendRationale: (delta: string) => void;
   clearRationale: () => void;
+
+  // 검증 메시지 상세 기록 — 스트리밍 중 누적, 새 턴마다 reset.
+  verify: VerifyData;
+  setVerify: (patch: Partial<VerifyData>) => void;
+  resetVerify: () => void;
 
   slotQuestion: SlotFillQuestion | null;
   setSlotQuestion: (q: SlotFillQuestion | null) => void;
@@ -117,6 +134,7 @@ export const useAgentStore = create<AgentStoreState>()(
       rationaleText: session.rationaleText ?? '',
       currentStep: session.currentStep ?? null,
       compositeFlow: session.compositeFlow ?? false,
+      verify: session.verify ?? {},
       // 스킬 빌드는 REST 자가구동/일시적이라 세션 스냅샷에 담지 않는다 — 복원 시 워크플로우
       // 산출물로 되돌린다(#496 리뷰 LOW: artifactKind 미스냅샷 일관성 보강).
       artifactKind: 'workflow',
@@ -142,6 +160,10 @@ export const useAgentStore = create<AgentStoreState>()(
   appendRationale: (delta) =>
     set((s) => ({ rationaleText: s.rationaleText + delta })),
   clearRationale: () => set({ rationaleText: '' }),
+
+  verify: {},
+  setVerify: (patch) => set((s) => ({ verify: { ...s.verify, ...patch } })),
+  resetVerify: () => set({ verify: {} }),
 
   slotQuestion: null,
   setSlotQuestion: (q) => set({ slotQuestion: q }),
@@ -169,6 +191,7 @@ export const useAgentStore = create<AgentStoreState>()(
         rationaleText: s.rationaleText,
         currentStep: s.currentStep,
         compositeFlow: s.compositeFlow,
+        verify: s.verify,
       }),
     },
   ),

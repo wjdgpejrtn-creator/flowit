@@ -184,6 +184,70 @@ body {
   flex-shrink: 0;
 }
 
+/* ───────── 검증 메시지 타임라인 (진행 중 스트리밍 + 검증 상세 보기) ─────────
+   디자인 SSOT: docs/검증메시지-구현가이드.md — 분리선 행 · 볼드 체크 노드. */
+
+/* 세로 레일: 노드(24px) 중심 = 12px, 선두께 2px → left 11px */
+.vtl { position: relative; }
+.vtl::before {
+  content: ""; position: absolute;
+  left: 11px; top: 12px; bottom: 12px;
+  width: 2px; background: var(--color-hl2);
+}
+.vrow { display: flex; align-items: flex-start; gap: 14px; position: relative; }
+.vrow + .vrow { margin-top: 16px; }
+.vrow--detail + .vrow--detail { margin-top: 22px; }
+
+/* 노드 마커 — 원(24px) 안에 마커 flex 중앙 정렬 */
+.vnode {
+  width: 24px; height: 24px; border-radius: 9999px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; position: relative; z-index: 1; line-height: 0;
+}
+.vnode--done    { background: var(--color-accent); }
+.vnode--live    { background: var(--color-coral-light); border: 2px solid var(--color-accent-coral);
+                  animation: vnode-pulse 1.4s ease-out infinite; }
+.vnode--pending { background: #fff; border: 2px solid var(--color-hl2); }
+@keyframes vnode-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 148, 92, .45); }
+  50%      { box-shadow: 0 0 0 5px rgba(232, 148, 92, 0); }
+}
+
+/* 볼드 체크 — display:block으로 baseline 오프셋 제거, stroke 3.25로 굵게 */
+.vbold-check {
+  width: 15px; height: 15px; display: block;
+  fill: none; stroke: #fff; stroke-width: 3.25;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+/* 진행 노드 내부 스피너(12px) */
+.vspin {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--color-hl2);
+  border-top-color: var(--color-accent-coral);
+  animation: flowit-spin .7s linear infinite;
+}
+/* 진행 중 텍스트 끝 깜빡이는 커서 */
+.vcursor::after {
+  content: "▍"; color: var(--color-accent-coral);
+  margin-left: 1px; animation: vcursor-blink .9s step-start infinite;
+}
+@keyframes vcursor-blink { 50% { opacity: 0; } }
+
+/* 검증 상세 보기 — 단계별 분리선 행(라벨 좌 / 값 우) */
+.vkv__row {
+  display: flex; gap: 12px; padding: 8px 0;
+  border-top: 1px solid rgba(236, 227, 214, .7);
+}
+.vkv__row:first-child { border-top: 0; }
+.vkv__k {
+  width: 84px; flex-shrink: 0; font-size: 12px; font-weight: 700;
+  color: var(--color-ink3); white-space: nowrap;
+}
+.vkv__v {
+  flex: 1; font-size: 13px; font-weight: 500; color: var(--color-ink);
+  line-height: 1.55; word-break: keep-all;
+}
+
 /* 선택지 카드 옵션 — 스킬 선택 / 최종 결과 선택 두 순간에만 */
 .choice-opt { transition: all .15s ease; }
 .choice-opt:hover { border-color: var(--color-accent-coral); background: var(--color-hl); }
