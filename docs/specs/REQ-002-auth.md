@@ -59,12 +59,16 @@ from common_schemas.exceptions import ValidationError, AuthorizationError, NotFo
 | `access_token_encrypted` | `bytes` | 암호화된 액세스 토큰 |
 | `refresh_token_encrypted` | `Optional[bytes]` | 암호화된 리프레시 토큰 |
 | `scopes` | `list[str]` | 부여된 OAuth 스코프 |
+| `account_id` | `Optional[str]` | 서비스측 안정 식별자 (google=sub / slack=team_id). ADR-0027 |
+| `display_name` | `Optional[str]` | settings 표시명 (google=email / slack=workspace). ADR-0027 |
+| `access_token_expires_at` | `Optional[datetime]` | access token 절대 만료시각 (연결/갱신 시 `now+expires_in`). NULL=만료 미상(레거시) → best-effort 갱신 대상. #452 ② |
 | `is_active` | `bool` | 활성 여부 |
 | `connected_at` | `datetime` | 연결 시점 |
 | `last_refreshed_at` | `Optional[datetime]` | 마지막 토큰 갱신 시점 |
 
 메서드:
 - `revoke() -> None` — `is_active = False`
+- `needs_token_refresh(now, skew_seconds=60) -> bool` — access token이 만료/임박/미상이라 refresh가 필요한지. `refresh_token_encrypted` 없으면 False(갱신 수단 없음), `access_token_expires_at` NULL이면 True(레거시 best-effort), `now+skew` 이내면 True. #452 ②
 
 ---
 
@@ -168,7 +172,7 @@ class OAuthConnectionRepository(ABC):
     
     @abstractmethod
     async def update_tokens(self, credential_id: UUID, new_tokens: dict) -> None:
-        """암호화된 토큰 갱신. new_tokens = {access_token_encrypted, refresh_token_encrypted?}"""
+        """암호화된 토큰 갱신. new_tokens = {access_token_encrypted, refresh_token_encrypted?, access_token_expires_at?}. #452 ② refresh 시 만료시각 동시 갱신."""
         ...
     
     @abstractmethod
@@ -217,6 +221,7 @@ class CredentialInjectionService:
         oauth_repo: OAuthConnectionRepository,
         node_def_repo: NodeDefinitionRepository,  # REQ-003에서 정의한 ABC
         credential_repo: CredentialRepository,
+        oauth_clients: dict[str, OAuthClientPort] | None = None,  # #452 ② service별 refresh client (service-agnostic, 현재 google만)
     ):
         ...
     
@@ -228,7 +233,12 @@ class CredentialInjectionService:
            (없거나 is_active=False이면 NotFoundError)
         4. credential.credential_kind 분기:
            - oauth_token: oauth_repo.get_by_credential_id로 enrich →
-             required_connections ↔ conn.service 검증 → decrypt(access_token_encrypted)
+             required_connections ↔ conn.service 검증 →
+             conn.needs_token_refresh(now)이면 oauth_clients[service]로 refresh →
+             재암호화 → update_tokens(영속화) → 새 토큰 반환 (#452 ②.
+             client 미배선·refresh 실패 시: known-expired면 AuthorizationError(E-CRED-002),
+             레거시 NULL이면 현재 토큰으로 best-effort fallback) →
+             decrypt(access_token_encrypted)
            - api_key 등: decrypt(credential.encrypted_data) 직접 (service-match 비적용 —
              credentials에 service 컬럼 없음, 검증은 OAuth 스코핑 전용)
         5. PlaintextCredential 생성 후 반환
@@ -361,11 +371,11 @@ class GoogleOAuthClient:
     """Google OAuth 2.0 코드 교환 + 토큰 갱신 어댑터."""
     
     async def exchange_code(self, code: str, redirect_uri: str) -> dict:
-        """Authorization code → access_token, refresh_token, id_token"""
+        """Authorization code → access_token, refresh_token, expires_in, id_token (#452 ② expires_in 추가)"""
         ...
     
     async def refresh_access_token(self, refresh_token: str) -> dict:
-        """Refresh token → new access_token"""
+        """Refresh token → new access_token, expires_in"""
         ...
     
     async def get_user_info(self, access_token: str) -> dict:
