@@ -233,6 +233,7 @@ class DrafterService:
         dropped_node_types: list[str] | None = None,
         pattern_templates: list[Any] | None = None,
         skeleton_scaffold: AssembledDraft | None = None,
+        required_node_types: list[str] | None = None,
     ) -> WorkflowSchema:
         """워크플로우 초안 생성. ``prior_workflow``가 주어지면(대화형 refine) 처음부터
         재생성하지 않고 그 워크플로우를 편집 컨텍스트로 주어 지시한 부분만 수정한다.
@@ -348,12 +349,14 @@ class DrafterService:
                 raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE") from e
             return self._build_from_edit(edit_resp, candidates, owner_user_id)
 
+        required_block = self._required_nodes_block(required_node_types, candidates)
         prompt = (
             _SYSTEM_PROMPT
             + patterns_block
             + binding_block
             + motif_block
             + retry_block
+            + required_block
             + f"\nDraftSpec: {spec_json}"
             + f"\nAvailable nodes: {catalog_json}"
         )
@@ -472,6 +475,31 @@ class DrafterService:
             "\nRETRY FEEDBACK (the previous draft failed validation/QA — fix these issues in "
             "this attempt; this is internal guidance, do NOT echo it into the workflow name or "
             f"description):\n{retry_feedback}\n"
+        )
+
+    @staticmethod
+    def _required_nodes_block(
+        required_node_types: list[str] | None, candidates: list[NodeConfig]
+    ) -> str:
+        """발화에 **명시된** 출력/입력 노드를 "반드시 포함" 하드 지시 블록으로.
+
+        스켈레톤 bail(자유 draft) 경로에서 LLM이 후보에 멀쩡히 있는 명시 노드를 드롭하던
+        회귀 차단(#502 측정: "PDF로"의 pdf_generate가 BGE-M3 #2 후보였는데도 Gemma가 미선택
+        → schedule_trigger→text_template→email_send로 토막). 후보 풀에 실제 존재하는 node_type
+        만 지시한다 — 후보에 없는 것을 강제하면 지시/후보 desync로 환각·미준수(스킬 바인딩
+        동일 안전 규칙, #376). 빈 입력이거나 교집합 0이면 빈 문자열(무영향)."""
+        if not required_node_types:
+            return ""
+        present = {c.node_type for c in candidates}
+        required = [nt for nt in dict.fromkeys(required_node_types) if nt in present]
+        if not required:
+            return ""
+        listed = "\n".join(f"  - {nt}" for nt in required)
+        return (
+            "\nUSER EXPLICITLY REQUESTED these nodes (they appear by name in the request, e.g. "
+            "an output format or delivery channel). You MUST include each of them in the nodes "
+            "list, wired into the workflow — do NOT omit or substitute them:\n"
+            f"{listed}\n"
         )
 
     @staticmethod

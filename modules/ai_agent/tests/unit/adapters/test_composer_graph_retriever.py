@@ -551,8 +551,6 @@ class TestDrafterSkillComposerInstructions:
         )
 
     def _make_skill_state(self, skill_id=None):
-        from common_schemas import SkillDocument
-
         sid = skill_id or uuid4()
         state = _make_state("스킬 기반 워크플로우")
         state["selected_skill_id"] = sid

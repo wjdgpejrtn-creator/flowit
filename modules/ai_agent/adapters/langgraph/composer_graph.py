@@ -1330,6 +1330,17 @@ class LangGraphOrchestrator:
                 skeleton_scaffold = None
             if skeleton_scaffold is not None:
                 candidates = await self._ensure_scaffold_candidates(candidates, skeleton_scaffold)
+        # LLM 자유 draft가 **발화에 명시된** 노드를 후보에 멀쩡히 두고도 드롭하던 회귀(#502 측정:
+        # "PDF로"의 pdf_generate가 BGE-M3 #2 후보였는데 Gemma 미선택)를 막기 위해, 명시 I/O 노드
+        # (트리거/소스/sink)를 drafter에 "반드시 포함"으로 넘긴다. drafter가 후보에 실재하는 것만
+        # 지시에 반영(desync 차단). refine은 prior 보존이라 제외. scaffold 성공 시 drafter가
+        # 프롬프트 전에 return해 무영향이고, scaffold param-fill 실패→일반 draft 폴백 시엔 directive가
+        # 살아 명시 노드를 지킨다(이중 방어). 빈 추출이면 None(무영향).
+        required_node_types: list[str] | None = None
+        if prior_workflow is None:
+            ent = self._skeleton_assembler.extractor.extract(spec.natural_language_intent)
+            explicit_io = [nt for nt in (ent.trigger, *ent.sources, *ent.sinks) if nt]
+            required_node_types = explicit_io or None
         # degrade로 버린 node_type을 수집할 요청-로컬 sink(동시 요청 안전). 재시도 retriever가
         # 이 ground-truth로 재검색하도록 state에 실어 보낸다(리뷰 #2 — QA-LLM 재인지 의존 제거).
         dropped: list[str] = []
@@ -1343,6 +1354,7 @@ class LangGraphOrchestrator:
                 dropped_node_types=dropped,
                 pattern_templates=state.get("pattern_templates"),
                 skeleton_scaffold=skeleton_scaffold,
+                required_node_types=required_node_types,
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:
