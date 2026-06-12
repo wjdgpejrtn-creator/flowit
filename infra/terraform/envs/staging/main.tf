@@ -508,6 +508,12 @@ module "execution_engine_worker" {
     LLM_BASE_URL       = { secret_id = "llm-base-url", version = "latest" }
     EMBEDDING_BASE_URL = { secret_id = "embedding-base-url", version = "latest" }
     ENCRYPTION_KEY     = { secret_id = "encryption-key", version = "latest" }
+    # #498 OAuth access token refresh — worker가 노드 실행 credential 주입 시
+    # CredentialInjectionService가 GoogleOAuthClient로 만료 임박 access token을
+    # refresh_token으로 선제 갱신한다(401 차단). api_server와 동일 secret 공유.
+    # 미바인딩 시 container가 빈 dict로 degrade(기존 401 동작 유지).
+    GOOGLE_CLIENT_ID     = { secret_id = "google-client-id", version = "latest" }
+    GOOGLE_CLIENT_SECRET = { secret_id = "google-client-secret", version = "latest" }
   }
 
   labels = merge(local.common_labels, { role = "execution-worker" })
