@@ -20,6 +20,7 @@ from common_schemas.transport import (
     ErrorFrame,
     ResultFrame,
     SessionFrame,
+    SkillBuilderWizardFrame,
     WorkflowDraftFrame,
 )
 
@@ -166,7 +167,9 @@ class TestSupervisorLoop:
         assert "update_memory" in _actions(personalization)
 
     @pytest.mark.asyncio
-    async def test_build_skill_routes_to_skills(self):
+    async def test_build_skill_emits_wizard_trigger_no_relay(self):
+        # 단일 build_skill — supervisor는 프론트 위저드 트리거(SkillBuilderWizardFrame)만 발행하고
+        # skills 서브에이전트 relay는 생략한다(REQ-010, 프론트 REST 자가구동). 진행단계 표시는 유지(D3).
         skills = _FakeClient(frames=[ResultFrame(intent="build_skill", payload={})])
         composer = _FakeClient()
         sup = _build(_intent(IntentType.BUILD_SKILL), composer=composer, skills=skills)
@@ -174,7 +177,8 @@ class TestSupervisorLoop:
 
         node_frames = [f for f in frames if isinstance(f, AgentNodeFrame)]
         assert any(f.agent_node_name == "build_skill" for f in node_frames)
-        assert len(skills.calls) == 1
+        assert any(isinstance(f, SkillBuilderWizardFrame) for f in frames)  # 위저드 트리거 발행
+        assert skills.calls == []     # 서브에이전트 relay 생략 (프론트 위저드가 REST로 자가구동)
         assert composer.calls == []
 
     @pytest.mark.asyncio
@@ -255,22 +259,19 @@ class TestSupervisorRecovery:
         assert len(composer.calls) == 1
 
     @pytest.mark.asyncio
-    async def test_subagent_error_routes_to_composer_correction(self):
-        # skills가 자체 ErrorFrame 반환 → result_review → composer 보정 삽입
+    async def test_composite_skills_error_terminates_without_composer(self):
+        # 복합 skill_then_compose에서 skills가 자체 ErrorFrame → 즉시 종료(D2). 실패한 스킬로
+        # composer가 보정/compose하지 않는다(스킬 빌드 실패 시 그 스킬 기반 워크플로우는 무의미).
         skills = _ScriptedClient([ErrorFrame(code="E_SKILL", message="스킬 생성 실패")])
         composer = _FakeClient(frames=[_draft_frame(), ResultFrame(intent="propose", payload={})])
         sup = _build(_intent(IntentType.BUILD_SKILL), composer=composer, skills=skills)
-        frames = await _collect(sup, msg="스킬 만들어줘")
+        frames = await _collect(sup, msg="스킬 만들어서 워크플로우 만들어줘")
 
-        # 서브에이전트 자체 에러는 노출됨
+        # 서브에이전트 자체 에러는 노출되고, composer 보정은 일어나지 않는다(종료)
         errors = [f for f in frames if isinstance(f, ErrorFrame)]
         assert any(e.code == "E_SKILL" for e in errors)
-        # result_review → composer 보정 1회 실행
-        assert len(composer.calls) == 1
-        node_names = [f.agent_node_name for f in frames if isinstance(f, AgentNodeFrame)]
-        assert "build_skill" in node_names and "composer" in node_names
-        # 보정 후 정상 draft 프레임
-        assert [f for f in frames if isinstance(f, WorkflowDraftFrame)]
+        assert composer.calls == []
+        assert not [f for f in frames if isinstance(f, WorkflowDraftFrame)]
 
     @pytest.mark.asyncio
     async def test_skill_then_compose_routes_both_hops_state_mediated(self):
@@ -293,18 +294,16 @@ class TestSupervisorRecovery:
         assert [f for f in frames if isinstance(f, WorkflowDraftFrame)]
 
     @pytest.mark.asyncio
-    async def test_subagent_error_correction_runs_only_once(self):
-        # skills 에러 → composer 보정도 자체 에러 → review_inserted 가드로 무한루프 없음
-        skills = _ScriptedClient([ErrorFrame(code="E_SKILL", message="실패")])
-        composer = _ScriptedClient([ErrorFrame(code="E_COMPOSE", message="보정도 실패")])
-        sup = _build(_intent(IntentType.BUILD_SKILL), composer=composer, skills=skills)
-        frames = await _collect(sup, msg="스킬 만들어줘")
+    async def test_composer_error_correction_runs_only_once(self):
+        # composer가 자체 ErrorFrame → result_review 보정(composer 재시도)도 또 에러 →
+        # review_inserted 가드로 보정은 단 1회만(무한루프 없음). 원 호출 + 보정 1회 = 2회.
+        composer = _ScriptedClient([ErrorFrame(code="E_COMPOSE", message="실패")])  # 매 호출 에러
+        sup = _build(_intent(IntentType.DRAFT), composer=composer)
+        frames = await _collect(sup, msg="슬랙 알림 보내줘")
 
-        # 보정 composer는 단 1회 (review_inserted 가드)
-        assert len(composer.calls) == 1
-        # 두 에러 모두 노출, 이후 종료
+        assert len(composer.calls) == 2  # 원 1 + 보정 1 (review_inserted 가드로 종료)
         codes = {f.code for f in frames if isinstance(f, ErrorFrame)}
-        assert codes == {"E_SKILL", "E_COMPOSE"}
+        assert codes == {"E_COMPOSE"}
 
 
 class TestSupervisorTwoShotResume:

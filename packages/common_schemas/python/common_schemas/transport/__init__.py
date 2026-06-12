@@ -11,6 +11,7 @@ from .sse import (
     RationaleDeltaFrame,
     ResultFrame,
     SessionFrame,
+    SkillBuilderWizardFrame,
     SkillOption,
     SkillSelectionFrame,
     SlotFillQuestionFrame,
@@ -31,6 +32,7 @@ __all__ = [
     "SkillOption",
     "SkillSelectionFrame",
     "SlotFillQuestionFrame",
+    "SkillBuilderWizardFrame",
     # SSE monitoring frames (PR #74, 오른쪽 사이드바 + 캔버스 실시간)
     "ChatMessageFrame",
     "IntentResultFrame",

@@ -26,7 +26,6 @@ const DEFAULT_NAV: NavItem[] = [
   { label: 'AI 채팅', href: '/agent' },
   { label: '워크플로우', href: '/workflows' },
   { label: '문서', href: '/documents' },
-  { label: '스킬빌더', href: '/skills/builder' },
   { label: '마켓플레이스', href: '/marketplace' },
   { label: '설정', href: '/settings' },
 ];

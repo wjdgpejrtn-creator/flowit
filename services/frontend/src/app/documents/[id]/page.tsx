@@ -228,13 +228,13 @@ export default function DocumentDetailPage({ params }: { params: { id: string } 
         <Btn onClick={handleAnalyze} disabled={isRunning || !doc}>
           {isRunning ? '분석 중…' : isFailed ? '🔁 다시 분석' : '🔍 분석'}
         </Btn>
-        {/* 문서 → 스킬빌더 핸드오프 (REQ-010) — source_document_id 를 쿼리로 전달.
-            DB 연결(source_document_id 영속화)은 박아름 skills_marketplace 백엔드 wiring 후속. */}
+        {/* 문서 → 스킬빌더 핸드오프 (REQ-010) — 스킬빌더는 문서 탭 서브뷰로 통합됐다.
+            ?build=1 로 문서 탭의 '스킬 만들기' 뷰를 열고 이 문서를 재료로 추출을 시작한다. */}
         <Btn
           primary
           disabled={!doc}
           title="이 문서를 기반으로 새 스킬 만들기"
-          onClick={() => router.push(`/skills/builder?source_document_id=${id}`)}
+          onClick={() => router.push(`/documents?build=1&source_document_id=${id}`)}
         >
           🛠 이 문서로 스킬 만들기
         </Btn>

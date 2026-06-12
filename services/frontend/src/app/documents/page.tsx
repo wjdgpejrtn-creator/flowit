@@ -7,6 +7,8 @@ import Icon from '@/components/common/Icon';
 import { showToast } from '@/stores/toastStore';
 import { uploadDocument, listDocuments, type DocumentResponse } from '@/lib/api/documentApi';
 import { DOCS_STORAGE_KEY } from '@/lib/storage/keys';
+import SkillBuilderWizard from '@/components/skill/SkillBuilderWizard';
+import { useSkillBuilderStore } from '@/stores/skillBuilderStore';
 
 // #219: 서버(GET /api/v1/documents)가 SSOT. localStorage 는 optimistic 캐시로만 유지
 // (첫 페인트 즉시 표시 + 서버 조회 실패 시 폴백).
@@ -142,6 +144,31 @@ export default function DocumentsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hydratedRef = useRef(false);
 
+  // 스킬빌더 통합(REQ-010) — 독립 탭을 없애고 문서 탭의 서브뷰로 흡수. '스킬 만들기'로 전환하면
+  // 위저드(skillBuilderStore)가 본문에 인라인으로 뜬다. 문서→스킬 핸드오프(?build=1&
+  // source_document_id=)로 진입하면 해당 문서를 재료로 곧장 추출을 시작한다.
+  const [view, setView] = useState<'library' | 'build'>('library');
+  const buildInit = useRef(false);
+  useEffect(() => {
+    if (buildInit.current) return;
+    buildInit.current = true;
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get('build') !== '1') return;
+    setView('build');
+    const store = useSkillBuilderStore.getState();
+    store.reset();
+    const src = sp.get('source_document_id');
+    if (src) {
+      store.setBranch('document');
+      store.startBuild({ kind: 'document', id: src, label: src });
+    }
+  }, []);
+
+  const goBuild = () => {
+    useSkillBuilderStore.getState().reset();
+    setView('build');
+  };
+
   useEffect(() => {
     if (!hydratedRef.current) return;
     try {
@@ -214,25 +241,41 @@ export default function DocumentsPage() {
       <AppBar />
 
       <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 md:p-6 space-y-4">
-        {/* 헤더 */}
-        <div className="flex items-end justify-between border-b border-line-soft pb-3">
-          <div>
-            <h2 className="text-lg font-bold text-ink">문서 보관함</h2>
-            <p className="text-xs text-ink3 font-bold">카드를 클릭하여 상세 분석 결과를 확인하세요.</p>
+        {/* 서브탭 — 문서 보관함 / 스킬 만들기 (스킬빌더 통합, REQ-010) */}
+        <div className="flex items-center justify-between border-b border-line-soft pb-3">
+          <div className="flex items-center gap-1.5 text-sm font-bold">
+            {([['library', '문서 보관함'], ['build', '스킬 만들기']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => (key === 'build' ? goBuild() : setView('library'))}
+                className={[
+                  'px-3.5 py-1.5 rounded-xl transition-all',
+                  view === key ? 'text-white bg-accent shadow-sm' : 'text-ink3 hover:text-ink hover:bg-paper2/50',
+                ].join(' ')}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <div className="relative">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="문서 이름 검색..."
-              aria-label="문서 이름 검색"
-              className="w-48 pl-8 pr-3 py-1.5 text-xs rounded-lg border border-line-soft focus:outline-none focus:border-accent-coral bg-white text-ink font-bold"
-            />
-            <Icon name="search" className="w-3.5 h-3.5 text-ink3 absolute left-2.5 top-2" />
-          </div>
+          {view === 'library' && (
+            <div className="relative">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="문서 이름 검색..."
+                aria-label="문서 이름 검색"
+                className="w-48 pl-8 pr-3 py-1.5 text-xs rounded-lg border border-line-soft focus:outline-none focus:border-accent-coral bg-white text-ink font-bold"
+              />
+              <Icon name="search" className="w-3.5 h-3.5 text-ink3 absolute left-2.5 top-2" />
+            </div>
+          )}
         </div>
 
+        {view === 'build' ? (
+          <SkillBuilderWizard onCancel={() => setView('library')} />
+        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* 좌: 문서 목록 */}
           <div className="lg:col-span-8 space-y-3">
@@ -294,6 +337,7 @@ export default function DocumentsPage() {
             />
           </div>
         </div>
+        )}
       </main>
     </div>
   );

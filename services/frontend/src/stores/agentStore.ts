@@ -55,6 +55,12 @@ interface AgentStoreState {
   mode: WorkspaceMode;
   setMode: (mode: WorkspaceMode) => void;
 
+  // 우측 캔버스에 띄울 산출물 종류. 'workflow'(기본)면 워크플로우 캔버스,
+  // 'skill'이면 스킬 상세 편집 캔버스(스킬빌더 통합, REQ-010). build_skill 의도로
+  // 스킬빌더가 호출되면 'skill'로 전환된다.
+  artifactKind: 'workflow' | 'skill';
+  setArtifactKind: (kind: 'workflow' | 'skill') => void;
+
   sessionId: string | null;
   sessions: AgentSession[];
   setSessionId: (id: string) => void;
@@ -106,6 +112,9 @@ export const useAgentStore = create<AgentStoreState>()(
   mode: 'wizard',
   setMode: (mode) => set({ mode }),
 
+  artifactKind: 'workflow',
+  setArtifactKind: (artifactKind) => set({ artifactKind }),
+
   sessionId: null,
   sessions: [],
   setSessionId: (id) => set({ sessionId: id }),
@@ -126,6 +135,9 @@ export const useAgentStore = create<AgentStoreState>()(
       currentStep: session.currentStep ?? null,
       compositeFlow: session.compositeFlow ?? false,
       verify: session.verify ?? {},
+      // 스킬 빌드는 REST 자가구동/일시적이라 세션 스냅샷에 담지 않는다 — 복원 시 워크플로우
+      // 산출물로 되돌린다(#496 리뷰 LOW: artifactKind 미스냅샷 일관성 보강).
+      artifactKind: 'workflow',
       slotQuestion: null,
       viewingSession: null,
       sessions: s.sessions.filter((x) => x.id !== session.id),  // active로 승격 → 목록에서 제거
