@@ -362,6 +362,12 @@ module "api_server" {
     GOOGLE_CLIENT_ID     = { secret_id = "google-client-id", version = "latest" }
     GOOGLE_CLIENT_SECRET = { secret_id = "google-client-secret", version = "latest" }
     GOOGLE_REDIRECT_URI  = { secret_id = "google-redirect-uri", version = "latest" }
+    # Slack OAuth 연결 (#504) — CompleteConnection/StartConnectionAuthorize가 service별 라우팅.
+    # redirect_uri는 라우터가 FRONTEND_URL 기준 동적 구성하므로 secret 불요.
+    # ⚠️ 이 바인딩은 secret 값(버전) 존재해야 apply 성공 — 신규 환경은 variables.tf 컨테이너
+    #    생성 + 값 add 후 이 블록 apply (순서 상세는 variables.tf slack 주석 참조).
+    SLACK_CLIENT_ID      = { secret_id = "slack-client-id", version = "latest" }
+    SLACK_CLIENT_SECRET  = { secret_id = "slack-client-secret", version = "latest" }
     ORCHESTRATOR_URL     = { secret_id = "orchestrator-url", version = "latest" }
     # 문서→스킬 추출(extract) 직결 — POST /api/v1/skills/extract가 orchestrator 의도분류를
     # 우회해 skills-builder `/v1/agent/route`(source_type=sop, step=extract)를 직접 호출(REQ-010/013).
