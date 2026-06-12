@@ -222,7 +222,7 @@ REST 라우트(skills.py): `/extract` `/extract/detail` `/personal`(생성) `/pe
 - 워크플로우 조립을 위해, **해당 스킬을 워크플로우로 만들 때 선택돼야 하는 노드 구조·BINDS 후보**를 **composer가 사용하는 동일 온톨로지(Neo4j) 조회 경로**(`OntologyRetrieverPort.expand_candidates` 등)로 선택한다 → 산출물 = **COMPOSER.md**.
 - → **SKILL.md** = 도메인 지식/제약/필수요소(①) 중심 / **COMPOSER.md** = 워크플로우 조립용 노드 구조·BINDS·스켈레톤 탐색 결과 중심. 둘은 **같은 온톨로지의 다른 측면**을 본다.
 
-> 📌 **인프라 1개 vs 2개 — 확인 중(2026-06-11)**: 코드/terraform상 **현재는** composer(`Neo4jOntologyAdapter`)와 skill publish(`Neo4jSkillProjector`)가 **같은 Neo4j 인스턴스 1개**(`neo4j-uri`/`username`/`password` secret 1세트, `NEO4J_DATABASE` 분리 없음)를 공유하고 `skeleton_library.SKELETONS`가 양쪽 SSOT다. **단 조장이 "처음 그래프DB를 composer/skill-builder 2개 별도 파이프라인으로 구성"했다고 언급** — 실제 인프라가 1개인지 2개(인스턴스/`database` 분리)인지 **조장 확인 대기**. 2개 분리가 맞으면 본 절을 "skill 전용 별도 DB"로 정정한다. 어느 쪽이든 node_type 어휘 SSOT(`SKELETONS`) 공유는 필요(COMPOSER.md ↔ composer 정합).
+> 📌 **인프라 = Neo4j 1개 인스턴스·1개 database (확인 완료 2026-06-11)**: 코드/terraform 직접 확인 — composer(`Neo4jOntologyAdapter`)·skill publish(`Neo4jSkillProjector`)가 **같은 Neo4j 1개**(`neo4j-uri`/`username`/`password` secret 1세트, 두 adapter 모두 `driver.session()`에 `database` 파라미터 없음=default db)를 공유하고 `skeleton_library.SKELETONS`가 양쪽 SSOT다. 조장이 언급한 "처음 2개 별도 파이프라인"은 **DB 2개가 아니라 투영 경로 2개**(정적 카탈로그 배치 ETL `scripts/build_ontology.py` + 게시 시 실시간 훅 `Neo4jSkillProjector`)를 뜻한 것으로 확인됨 — **DB는 1개**. → "같은 Neo4j 1개 공유"는 코드상 정확. node_type 어휘 SSOT(`SKELETONS`) 공유 필요(COMPOSER.md ↔ composer 정합).
 
 ### 도식
 
