@@ -254,8 +254,6 @@ class LangGraphOrchestrator:
         # ADR-0026 §6.6 결정적 스켈레톤 — 순수(무의존)라 미주입 시 기본 생성. assemble None이면
         # 일반 LLM draft로 폴백하므로 항상 안전(소비처 _drafter_node).
         self._skeleton_assembler = skeleton_assembler or SkeletonAssembler()
-        # 명시 노드 후보 보강(#PDF 드롭)에 쓸 추출기 — assembler와 동일 인스턴스 공유(드리프트 방지).
-        self._entity_extractor = self._skeleton_assembler._extractor
         # ADR-0026 §6.6 Phase 2 앙상블 슬롯 채움 — 미주입 시 싼 voter 3종(lexical+semantic+ontology)
         # 으로 기본 생성. LLM voter(SlotMapperPort)는 composition root에서 주입(미주입=graceful
         # degrade). resolve 실패/픽 없음이면 assemble이 lexical/grounding으로 폴백하므로 항상 안전.
@@ -856,31 +854,6 @@ class LangGraphOrchestrator:
             _logger.warning("범용 LLM 노드 후보 합산 실패 (non-fatal): %s", exc)
             return []
 
-    async def _fetch_explicit_candidates(self, text: str) -> list[NodeConfig]:
-        """발화에 명시된 node_type(렉시컬 추출)을 관련도 무관 항상-포함 회수.
-
-        추출 결과는 scaffold 경로(`_ensure_scaffold_candidates`)에서만 후보로 들어가,
-        스켈레톤 bail 시 명시 노드("PDF로"→pdf_generate)가 후보 누락→drafter 드롭됐다.
-        스켈레톤 적용 여부와 무관하게 후보에 보장한다. `list_by_node_types`(EXECUTABLE 가드) 재사용.
-        """
-        grounder = getattr(self._node_registry, "list_by_node_types", None)
-        if grounder is None:
-            return []
-        entities = self._entity_extractor.extract(text)
-        explicit = [
-            nt
-            for nt in (entities.trigger, *entities.sources, *entities.transforms, *entities.sinks)
-            if nt
-        ]
-        if not explicit:
-            return []
-        try:
-            result = await grounder(explicit)
-            return list(result) if result else []
-        except Exception as exc:
-            _logger.warning("명시 노드 후보 보강 실패 (non-fatal): %s", exc)
-            return []
-
     @staticmethod
     def _dedup_union(base: list[NodeConfig], extra: list[NodeConfig]) -> list[NodeConfig]:
         """node_id 기준 dedup 합집합 — base를 우선 보존하고 새 항목만 뒤에 덧붙인다."""
@@ -968,12 +941,6 @@ class LangGraphOrchestrator:
         # 의미검색이 generic LLM 노드를 도메인 쿼리 top-k 밖으로 밀어내 drafter가 드롭→끊긴
         # 워크플로우를 만드는 문제(평가 진단 ②) 대응. 이미 있으면 dedup으로 무시된다.
         candidates = self._dedup_union(candidates, await self._fetch_core_llm_candidates())
-
-        # 발화에 명시된 노드(렉시컬 추출)도 always-include — 스켈레톤 bail 시 명시 노드("PDF로"→
-        # pdf_generate)가 scaffold 후보 보강(_ensure_scaffold_candidates)을 못 타 누락→drafter 드롭되던
-        # 문제 대응. 스켈레톤 적용 여부와 무관하게 후보에 보장. 이미 있으면 dedup으로 무시된다.
-        user_text = state["messages"][-1].get("content", "") if state["messages"] else query
-        candidates = self._dedup_union(candidates, await self._fetch_explicit_candidates(user_text))
 
         # GraphRAG CAN_FOLLOW 확장 (ADR-0026 §4.2a) — 검색 상위 hit의 후행 가능 노드를 온톨로지에서
         # 회수해 **ADD 보강**한다. 의미검색이 놓치는 글루/transform/control 노드(예: csv_parse 뒤
@@ -1363,6 +1330,17 @@ class LangGraphOrchestrator:
                 skeleton_scaffold = None
             if skeleton_scaffold is not None:
                 candidates = await self._ensure_scaffold_candidates(candidates, skeleton_scaffold)
+        # LLM 자유 draft가 **발화에 명시된** 노드를 후보에 멀쩡히 두고도 드롭하던 회귀(#502 측정:
+        # "PDF로"의 pdf_generate가 BGE-M3 #2 후보였는데 Gemma 미선택)를 막기 위해, 명시 I/O 노드
+        # (트리거/소스/sink)를 drafter에 "반드시 포함"으로 넘긴다. drafter가 후보에 실재하는 것만
+        # 지시에 반영(desync 차단). refine은 prior 보존이라 제외. scaffold 성공 시 drafter가
+        # 프롬프트 전에 return해 무영향이고, scaffold param-fill 실패→일반 draft 폴백 시엔 directive가
+        # 살아 명시 노드를 지킨다(이중 방어). 빈 추출이면 None(무영향).
+        required_node_types: list[str] | None = None
+        if prior_workflow is None:
+            ent = self._skeleton_assembler.extractor.extract(spec.natural_language_intent)
+            explicit_io = [nt for nt in (ent.trigger, *ent.sources, *ent.sinks) if nt]
+            required_node_types = explicit_io or None
         # degrade로 버린 node_type을 수집할 요청-로컬 sink(동시 요청 안전). 재시도 retriever가
         # 이 ground-truth로 재검색하도록 state에 실어 보낸다(리뷰 #2 — QA-LLM 재인지 의존 제거).
         dropped: list[str] = []
@@ -1376,6 +1354,7 @@ class LangGraphOrchestrator:
                 dropped_node_types=dropped,
                 pattern_templates=state.get("pattern_templates"),
                 skeleton_scaffold=skeleton_scaffold,
+                required_node_types=required_node_types,
             )
             workflow = self._layout.apply_layout(workflow)
         except Exception as exc:

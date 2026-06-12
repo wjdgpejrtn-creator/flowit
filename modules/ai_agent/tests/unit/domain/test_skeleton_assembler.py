@@ -58,6 +58,26 @@ def test_scheduled_pipeline_e2e_bug_golden() -> None:
     assert all(e.from_handle == "output" for e in d.edges)
 
 
+def test_content_delivery_sink_anchored() -> None:
+    # #502 근본: 출력 채널만 ≥2개 명시(트리거/소스/가공 신호 없음)인 발화는 _select가 RC1으로
+    # bail → LLM 자유 draft가 pdf_generate(BGE-M3 #2 후보)를 드롭하던 회귀. 생산자(ai)→sink 팬을
+    # 결정적으로 조립해 명시 sink를 보장한다.
+    d = _A.assemble("이번 주 업무보고서 PDF로 만들어서 메일로 보내줘")
+    assert d is not None
+    assert d.skeleton_name == "content_delivery"
+    assert _node_types(d) == ["anthropic_chat", "pdf_generate", "email_send"]
+    assert d.warnings == ()
+    # 생산자에서 각 sink로 병렬 분기(직렬 sink→sink 아님).
+    assert len(d.edges) == 2
+    assert {e.to_ref for e in d.edges} == {"sink_0", "sink_1"}
+    assert all(e.from_ref == "transform_0" for e in d.edges)
+
+
+def test_single_sink_still_bails_to_llm() -> None:
+    # RC1 보존: 단일 출력 채널·trivial은 채널 모호/과조립 위험이라 content_delivery 미진입 → LLM 폴백.
+    assert _A.assemble("슬랙에 알림 보내줘") is None
+
+
 def test_event_response_skeleton() -> None:
     d = _A.assemble("웹훅 들어오면 내용 분석해서 이메일로 보내줘")
     assert d is not None
@@ -455,6 +475,7 @@ _PARITY_UTTERANCES = [
     "외부 api 호출해서 실패하면 재시도하고 결과를 슬랙으로",            # 재시도(백오프 루프)
     "보고서 초안 작성하고 검토 후 승인되면 이메일로 발송",              # 승인 게이트(HITL)
     "온도 값이 임계치를 넘으면 경보 메일을 보내줘",                    # 단일 가드(conditional_action)
+    "이번 주 업무보고서 PDF로 만들어서 메일로 보내줘",                  # 콘텐츠 전달(sink-anchored, #502)
 ]
 
 

@@ -384,6 +384,47 @@ class TestDrafterPersonalization:
         assert "3줄 요약" in prompt
 
 
+class TestDrafterRequiredNodes:
+    """#502 근본 — 발화 명시 노드를 "반드시 포함" 하드 지시로 주입하는지(스켈레톤 bail 경로)."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    @pytest.mark.asyncio
+    async def test_required_nodes_present_injected_as_directive(self):
+        # 후보에 실재하는 명시 노드(pdf_generate)는 "MUST include"로 지시된다.
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="pdf_generate")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("pdf_generate"), _node_config("email_send")], self.owner_id,
+            required_node_types=["pdf_generate", "email_send"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "EXPLICITLY REQUESTED" in prompt
+        assert "pdf_generate" in prompt
+        assert "email_send" in prompt
+
+    @pytest.mark.asyncio
+    async def test_required_node_absent_from_candidates_not_instructed(self):
+        # 후보에 없는 node_type은 지시하지 않는다(지시/후보 desync→환각 차단, 스킬바인딩 동일 규칙).
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("slack")], self.owner_id,
+            required_node_types=["pdf_generate"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "EXPLICITLY REQUESTED" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_no_required_leaves_prompt_unchanged(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "EXPLICITLY REQUESTED" not in prompt
+
+
 class TestDrafterSkillBinding:
     """#372 결함 A — skill_selected 시 LLM 노드 포함을 drafter 프롬프트에 지시하는지."""
 

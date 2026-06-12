@@ -629,36 +629,3 @@ class TestDrafterSkillComposerInstructions:
 
         call_kwargs = oc._drafter.draft.call_args.kwargs
         assert call_kwargs.get("skill_composer_instructions") is None
-
-
-class TestRetrieverExplicitNodes:
-    """발화 명시 노드 always-include — 스켈레톤 bail 시 명시 노드 누락 방지(#PDF 드롭)."""
-
-    @pytest.mark.asyncio
-    async def test_explicit_node_always_in_candidates(self):
-        """"PDF로 …메일로" — 스켈레톤 적용 여부 무관하게 pdf_generate/email_send를 후보에 보장."""
-        pdf = _node_config(name="pdf_generate").model_copy(update={"node_type": "pdf_generate"})
-        email = _node_config(name="email_send").model_copy(update={"node_type": "email_send"})
-        mapping = {"pdf_generate": pdf, "email_send": email}
-
-        async def _list_by_types(types):
-            return [mapping[t] for t in types if t in mapping]
-
-        oc = _build_orchestrator()
-        oc._node_registry.list_by_node_types = AsyncMock(side_effect=_list_by_types)
-
-        result = await oc._retriever_node(_make_state("이번 주 업무보고서 PDF로 만들어서 메일로 보내줘"))
-
-        types = {c.node_type for c in result["node_candidates"]}
-        assert "pdf_generate" in types
-        assert "email_send" in types
-
-    @pytest.mark.asyncio
-    async def test_no_explicit_nodes_skips_grounder(self):
-        """명시 노드 없는 발화 — 추출 빈 → 후보 보강 없음(spurious 노드 미추가)."""
-        oc = _build_orchestrator()
-        oc._node_registry.list_by_node_types = AsyncMock(side_effect=AssertionError("호출되면 안 됨"))
-
-        result = await oc._fetch_explicit_candidates("안녕하세요 반갑습니다")
-
-        assert result == []
