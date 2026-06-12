@@ -74,6 +74,9 @@ variable "agent_secret_names" {
     # Slack OAuth 연결 (#504) — api_server CompleteConnection/StartConnectionAuthorize가 소비.
     # 값(Client ID/Secret)은 Slack 앱(api.slack.com) 발급 후 수동 add(v1). redirect_uri는
     # 라우터가 FRONTEND_URL 기준 동적 구성하므로 secret 불요. 미바인딩 시 slack 연결만 inert.
+    # ⚠️ 신규 환경 재현 apply 순서(필수): ① 이 리스트 apply로 빈 컨테이너 생성 → ② 값 add
+    #    (gcloud secrets versions add) → ③ main.tf api_server secret_env_vars 바인딩 apply.
+    #    값(버전) 없는 secret을 version="latest"로 mount하면 Cloud Run revision 기동 실패.
     "slack-client-id",      # Slack App Client ID
     "slack-client-secret",  # Slack App Client Secret
     # agent-skills-builder 전용 (REQ-013/REQ-004, PR #171 doc_store wiring 활성화)
