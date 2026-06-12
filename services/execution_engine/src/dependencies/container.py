@@ -168,6 +168,12 @@ def _build_credential_service_factory():
         from auth.adapters.oauth.google_oauth_client import GoogleOAuthClient
 
         oauth_clients["google"] = GoogleOAuthClient()
+    # slack도 동일 패턴 — token rotation 활성 봇토큰의 실행시점 refresh 지원(미회전 봇토큰은
+    # refresh_token=None이라 needs_token_refresh=False로 애초에 refresh 미발생). 미바인딩이면 미배선.
+    if os.getenv("SLACK_CLIENT_ID") and os.getenv("SLACK_CLIENT_SECRET"):
+        from auth.adapters.oauth.slack_oauth_client import SlackOAuthClient
+
+        oauth_clients["slack"] = SlackOAuthClient()
 
     @asynccontextmanager
     async def factory() -> AsyncIterator[Any]:

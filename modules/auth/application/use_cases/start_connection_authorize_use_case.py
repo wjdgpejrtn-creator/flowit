@@ -21,22 +21,33 @@ CONNECTION_SCOPES: dict[str, list[str]] = {
         "https://www.googleapis.com/auth/gmail.send",
         "https://www.googleapis.com/auth/gmail.readonly",
     ],
-    # slack은 후속 PR(②: google-only 우선) — SlackOAuthClient 등록 시 추가.
-    # slack_read(conversations.history)/slack_post_message는 SlackOAuthClient 배선 시
-    # channels:history·groups:history + chat:write scope와 함께 추가 (#438 D 잔여).
+    # slack bot scope (#438 D): chat:write=slack_post_message,
+    # channels:history·groups:history=slack_read(conversations.history) public/private 채널.
+    "slack": [
+        "chat:write",
+        "channels:history",
+        "groups:history",
+    ],
 }
 
 
 class StartConnectionAuthorizeUseCase:
-    """connection authorize URL 생성 (ADR-0027). state(CSRF)는 라우터가 Redis에 저장한다."""
+    """connection authorize URL 생성 (ADR-0027). state(CSRF)는 라우터가 Redis에 저장한다.
 
-    def __init__(self, oauth_client: OAuthClientPort) -> None:
-        self._oauth_client = oauth_client
+    service별 OAuthClientPort를 `oauth_clients` dict로 받아 라우팅한다(google/slack).
+    scope는 service 무관 CONNECTION_SCOPES가 SSOT, client는 provider별 authorize 흐름만 담당.
+    """
+
+    def __init__(self, oauth_clients: dict[str, OAuthClientPort]) -> None:
+        self._oauth_clients = oauth_clients
 
     def build_authorization_url(self, service: str, state: str, redirect_uri: str | None = None) -> str:
         scopes = CONNECTION_SCOPES.get(service)
         if scopes is None:
             raise ValueError(f"Unsupported connection service: {service}")
+        client = self._oauth_clients.get(service)
+        if client is None:
+            raise ValueError(f"No OAuth client wired for service: {service}")
         # redirect_uri = connection callback 경로(라우터가 전달) — 로그인 callback과 분리해야
-        # google이 connection callback으로 돌려보낸다(ADR-0027 셀프리뷰 HIGH 수정).
-        return self._oauth_client.authorization_url(state, scopes, redirect_uri)
+        # provider가 connection callback으로 돌려보낸다(ADR-0027 셀프리뷰 HIGH 수정).
+        return client.authorization_url(state, scopes, redirect_uri)

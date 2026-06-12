@@ -20,6 +20,8 @@ class FakeOAuth:
         return {
             "sub": self._sub,
             "email": self._email,
+            "account_id": self._sub,       # 정규화 계약 (google=sub)
+            "display_name": self._email,   # 정규화 계약 (google=email)
             "access_token": self._access,
             "refresh_token": "refresh",
             "expires_in": 3600,
@@ -27,11 +29,28 @@ class FakeOAuth:
         }
 
 
+class FakeSlackOAuth:
+    """slack client — 정규화 계약(account_id=team_id, display_name=workspace)."""
+
+    def authorization_url(self, state: str, scopes: list[str] | None = None, redirect_uri: str | None = None) -> str:
+        return f"https://slack.com/oauth/v2/authorize?state={state}&scope={','.join(scopes or [])}"
+
+    async def exchange_code(self, code: str, redirect_uri: str | None = None) -> dict:
+        return {
+            "access_token": "xoxb-demo",
+            "refresh_token": "",
+            "expires_in": None,
+            "scopes": ["chat:write"],
+            "account_id": "T0ABC",
+            "display_name": "FlowIt Workspace",
+        }
+
+
 # ── Start ──────────────────────────────────────────────────────────────────
 
 
 def test_start_authorize_builds_url_with_service_scopes():
-    url = StartConnectionAuthorizeUseCase(FakeOAuth()).build_authorization_url("google", "state1")
+    url = StartConnectionAuthorizeUseCase({"google": FakeOAuth()}).build_authorization_url("google", "state1")
     assert "state=state1" in url
     assert "spreadsheets" in url  # connection scope 포함 (로그인 신원 scope와 분리)
 
@@ -52,13 +71,13 @@ def test_google_connection_scopes_cover_read_and_write():
 
 def test_start_authorize_rejects_unsupported_service():
     with pytest.raises(ValueError):
-        StartConnectionAuthorizeUseCase(FakeOAuth()).build_authorization_url("notion", "s")
+        StartConnectionAuthorizeUseCase({"google": FakeOAuth()}).build_authorization_url("notion", "s")
 
 
 def test_start_authorize_uses_connection_redirect_uri():
     """connection callback redirect_uri가 authorize URL에 반영 — 로그인 callback과 분리 (셀프리뷰 HIGH)."""
     redirect = "https://api.example/api/v1/connections/google/callback"
-    url = StartConnectionAuthorizeUseCase(FakeOAuth()).build_authorization_url("google", "s", redirect)
+    url = StartConnectionAuthorizeUseCase({"google": FakeOAuth()}).build_authorization_url("google", "s", redirect)
     assert f"redirect_uri={redirect}" in url
 
 
@@ -67,7 +86,8 @@ def test_start_authorize_uses_connection_redirect_uri():
 
 @pytest.mark.asyncio
 async def test_complete_connection_creates_with_account(oauth_repo, credential_repo, cipher):
-    uc = CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, FakeOAuth(sub="sub1", email="a@b.com"))
+    clients = {"google": FakeOAuth(sub="sub1", email="a@b.com")}
+    uc = CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, clients)
     user_id = uuid.uuid4()
 
     conn = await uc.execute(user_id, "google", "code")
@@ -84,7 +104,7 @@ async def test_complete_connection_persists_token_expiry(oauth_repo, credential_
     """expires_in → access_token_expires_at(now+expires_in) 영속화 (#452 ②)."""
     from datetime import UTC, datetime
 
-    uc = CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, FakeOAuth())
+    uc = CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, {"google": FakeOAuth()})
     user_id = uuid.uuid4()
 
     conn = await uc.execute(user_id, "google", "code")
@@ -94,12 +114,51 @@ async def test_complete_connection_persists_token_expiry(oauth_repo, credential_
 
 
 @pytest.mark.asyncio
+async def test_complete_connection_routes_to_slack(oauth_repo, credential_repo, cipher):
+    """service='slack' → slack client 라우팅 + team_id/workspace를 account/display로 저장."""
+    uc = CompleteConnectionUseCase(
+        oauth_repo, credential_repo, cipher,
+        {"google": FakeOAuth(), "slack": FakeSlackOAuth()},
+    )
+    conn = await uc.execute(uuid.uuid4(), "slack", "code")
+
+    assert conn.service == "slack"
+    assert conn.account_id == "T0ABC"
+    assert conn.display_name == "FlowIt Workspace"
+    assert cipher.decrypt(conn.access_token_encrypted) == b"xoxb-demo"
+
+
+@pytest.mark.asyncio
+async def test_complete_connection_unwired_service_raises(oauth_repo, credential_repo, cipher):
+    """배선 안 된 service → ValueError (google만 있는데 slack 요청)."""
+    uc = CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, {"google": FakeOAuth()})
+    with pytest.raises(ValueError):
+        await uc.execute(uuid.uuid4(), "slack", "code")
+
+
+def test_start_authorize_routes_slack_with_scopes():
+    """slack authorize → CONNECTION_SCOPES['slack'](chat:write 등) 포함."""
+    url = StartConnectionAuthorizeUseCase(
+        {"google": FakeOAuth(), "slack": FakeSlackOAuth()}
+    ).build_authorization_url("slack", "s1")
+    assert "slack.com/oauth/v2/authorize" in url
+    assert "chat:write" in url
+
+
+def test_start_authorize_supported_scope_but_unwired_client_raises():
+    """scope는 있는데 client 미배선 → ValueError(No OAuth client wired)."""
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        StartConnectionAuthorizeUseCase({"google": FakeOAuth()}).build_authorization_url("slack", "s1")
+
+
+@pytest.mark.asyncio
 async def test_complete_connection_upsert_no_duplicate(oauth_repo, credential_repo, cipher):
     user_id = uuid.uuid4()
-    await CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, FakeOAuth(access="tok1")).execute(
+    await CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, {"google": FakeOAuth(access="tok1")}).execute(
         user_id, "google", "c1"
     )
-    await CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, FakeOAuth(access="tok2")).execute(
+    await CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, {"google": FakeOAuth(access="tok2")}).execute(
         user_id, "google", "c2"
     )
 

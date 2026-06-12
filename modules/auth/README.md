@@ -79,7 +79,7 @@ from auth.application.use_cases import (
 | | `async get_by_id(credential_id: UUID) → Optional[Credential]` | |
 | | `async update_data(credential_id: UUID, encrypted_data: bytes) → None` | |
 | `CipherPort` | `encrypt(plaintext: bytes) → bytes`, `decrypt(ciphertext: bytes) → bytes` | `auth/adapters/cipher/` (자체 구현) |
-| `OAuthClientPort` | `async exchange_code(code: str) → dict` (반환에 `expires_in` 포함, #452 ②), `async refresh_access_token(refresh_token: str) → dict` (반환 `access_token`/`expires_in`), `async get_user_info(access_token: str) → dict` | `auth/adapters/oauth/` (자체 구현) |
+| `OAuthClientPort` | `authorization_url(state, scopes, redirect_uri) → str`, `async exchange_code(code, redirect_uri) → dict` (**정규화 계약**: `access_token`/`refresh_token`/`expires_in`/`scopes`/`account_id`/`display_name` — service 무관. google=sub/email, slack=team_id/workspace를 각 어댑터가 매핑), `async refresh_access_token(refresh_token) → dict`, `async get_user_info(access_token) → dict` | `auth/adapters/oauth/` (google/slack 자체 구현) |
 
 ### application/use_cases
 
@@ -103,6 +103,7 @@ from auth.application.use_cases import (
 | 어댑터 | 설명 |
 |--------|------|
 | `GoogleOAuthClient` | Google OAuth 2.0 클라이언트 (`OAuthClientPort` 구현). 코드 교환, 토큰 갱신, 사용자 정보 조회 |
+| `SlackOAuthClient` | Slack OAuth v2 클라이언트 (`OAuthClientPort` 구현). bot 토큰(xoxb-) 설치 흐름 — `oauth.v2.access`(실패도 HTTP 200 + `ok:false` → 명시 체크), `account_id=team_id`/`display_name=workspace`, scope 콤마 구분. `transport` 주입 seam(테스트). env: `SLACK_CLIENT_ID/SECRET/REDIRECT_URI` |
 
 ## 의존 관계
 
@@ -130,6 +131,9 @@ Downstream (이 모듈에 의존):
 | `ENCRYPTION_KEY` | Y | AES-256-GCM 마스터 키 (32바이트, base64) |
 | `GOOGLE_CLIENT_ID` | Y | Google OAuth 클라이언트 ID |
 | `GOOGLE_CLIENT_SECRET` | Y | Google OAuth 클라이언트 시크릿 |
+| `SLACK_CLIENT_ID` | N | Slack OAuth 클라이언트 ID (slack connection 사용 시) |
+| `SLACK_CLIENT_SECRET` | N | Slack OAuth 클라이언트 시크릿 |
+| `SLACK_REDIRECT_URI` | N | Slack connection callback redirect URI |
 
 ## 6차원 권한 모델
 
