@@ -105,7 +105,8 @@ def test_list_connections_requires_auth(app):
 
 def test_authorize_connection_returns_url(app):
     app.dependency_overrides[get_current_user] = _fake_user
-    app.dependency_overrides[get_start_connection_use_case] = lambda: StartConnectionAuthorizeUseCase(_FakeOAuth())
+    _start = lambda: StartConnectionAuthorizeUseCase({"google": _FakeOAuth()})  # noqa: E731
+    app.dependency_overrides[get_start_connection_use_case] = _start
 
     client = TestClient(app)
     resp = client.get("/api/v1/connections/google/authorize", headers={"Authorization": f"Bearer {_bearer()}"})
@@ -118,7 +119,8 @@ def test_authorize_connection_returns_url(app):
 
 def test_authorize_connection_unsupported_service(app):
     app.dependency_overrides[get_current_user] = _fake_user
-    app.dependency_overrides[get_start_connection_use_case] = lambda: StartConnectionAuthorizeUseCase(_FakeOAuth())
+    _start = lambda: StartConnectionAuthorizeUseCase({"google": _FakeOAuth()})  # noqa: E731
+    app.dependency_overrides[get_start_connection_use_case] = _start
 
     client = TestClient(app)
     resp = client.get("/api/v1/connections/notion/authorize", headers={"Authorization": f"Bearer {_bearer()}"})
@@ -155,9 +157,9 @@ def test_available_connections_derived_from_catalog(app):
     # 카탈로그 required_connections에 실재하는 provider만 노출(가짜 erp 같은 항목 없음).
     assert {"google", "slack", "linear", "anthropic", "postgresql", "mysql"} <= set(by)
     assert "erp" not in by
-    # google: oauth + 배선됨(available) / slack: oauth지만 SlackOAuthClient 미배선(unavailable).
+    # google·slack 둘 다 oauth + 배선됨(SlackOAuthClient 등록 + CONNECTION_SCOPES[slack]) → available.
     assert by["google"]["auth_type"] == "oauth" and by["google"]["available"] is True
-    assert by["slack"]["auth_type"] == "oauth" and by["slack"]["available"] is False
+    assert by["slack"]["auth_type"] == "oauth" and by["slack"]["available"] is True
     # api_key / connection_string provider는 키 입력이라 상시 available.
     assert by["linear"]["auth_type"] == "api_key" and by["linear"]["available"] is True
     assert by["anthropic"]["auth_type"] == "api_key"

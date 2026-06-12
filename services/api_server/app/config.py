@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
     google_redirect_uri: str = Field(default="", alias="GOOGLE_REDIRECT_URI")
 
+    slack_client_id: str = Field(default="", alias="SLACK_CLIENT_ID")
+    slack_client_secret: str = Field(default="", alias="SLACK_CLIENT_SECRET")
+    slack_redirect_uri: str = Field(default="", alias="SLACK_REDIRECT_URI")
+
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 

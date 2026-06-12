@@ -22,7 +22,8 @@ class CompleteConnectionUseCase:
     - ③ **단일 트랜잭션** — credentials + oauth_connection 2 write는 `get_db` request-단위 트랜잭션
       (repo는 flush only, 정상 종료 commit / 예외 rollback, `dependencies/database.py:99-101`).
       중간 실패 시 rollback으로 고아 credential 방지(셀프리뷰 ③).
-    - account_id/display_name(#422) — google=sub/email (slack=team_id/workspace는 후속).
+    - account_id/display_name — exchange_code 정규화 계약(google=sub/email, slack=team_id/workspace).
+    - service별 client 라우팅 — `oauth_clients[service]`(google/slack). 미배선 service는 ValueError.
     """
 
     def __init__(
@@ -30,24 +31,30 @@ class CompleteConnectionUseCase:
         oauth_repo: OAuthConnectionRepository,
         credential_repo: CredentialRepository,
         cipher: CipherPort,
-        oauth_client: OAuthClientPort,
+        oauth_clients: dict[str, OAuthClientPort],
     ) -> None:
         self._oauth_repo = oauth_repo
         self._credential_repo = credential_repo
         self._cipher = cipher
-        self._oauth_client = oauth_client
+        # service별 OAuthClientPort 라우팅(google/slack). 미지원 service는 execute에서 ValueError.
+        self._oauth_clients = oauth_clients
 
     async def execute(
         self, user_id: UUID, service: str, code: str, redirect_uri: str | None = None
     ) -> OAuthConnection:
-        # redirect_uri는 authorize 때와 동일해야 google 토큰 교환이 통과한다(셀프리뷰 HIGH 수정).
-        info = await self._oauth_client.exchange_code(code, redirect_uri)
+        client = self._oauth_clients.get(service)
+        if client is None:
+            raise ValueError(f"No OAuth client wired for service: {service}")
+        # redirect_uri는 authorize 때와 동일해야 provider 토큰 교환이 통과한다(셀프리뷰 HIGH 수정).
+        info = await client.exchange_code(code, redirect_uri)
         enc_access = self._cipher.encrypt(info["access_token"].encode())
         refresh = info.get("refresh_token")
         enc_refresh = self._cipher.encrypt(refresh.encode()) if refresh else None  # 부재 시 None(클로버 방어, 조장 LOW)
         scopes: list[str] = info.get("scopes", [])
-        account_id = info.get("sub")  # google subject (slack=team_id 후속)
-        display_name = info.get("email")  # google email (slack=workspace 후속)
+        # account_id/display_name = OAuthClientPort.exchange_code 정규화 계약(서비스 무관).
+        # google=sub/email, slack=team_id/workspace를 각 어댑터가 이 키로 매핑해 반환한다.
+        account_id = info.get("account_id")
+        display_name = info.get("display_name")
         # #452 ② expires_in(초) → 절대 만료시각. _resolve_oauth가 이 값으로 선제 refresh 판정.
         # 미수신 시 None(레거시처럼 best-effort 갱신 대상).
         expires_at = self._compute_expires_at(info.get("expires_in"))
