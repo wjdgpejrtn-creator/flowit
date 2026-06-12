@@ -1,7 +1,5 @@
 import {
   nextMonotonicStep,
-  stepIndexFor,
-  displayLabels,
   displayPhases,
   phaseFor,
   toStep,
@@ -99,25 +97,6 @@ describe('복합 skill_then_compose — 선두 스킬 단계 (a)', () => {
     // relay 순서 뒤섞임: 이미 retriever인데 skills_builder.* 가 늦게 도착
     expect(nextMonotonicStep('retriever', 'skills_builder.upsert.x')).toBe('retriever');
     expect(nextMonotonicStep('drafter', 'build_skill')).toBe('drafter');
-  });
-
-  it('stepIndexFor — 복합이면 skill 선두 포함, 비복합이면 컴포저 7단계 기준', () => {
-    expect(stepIndexFor('skill', true)).toBe(1);
-    expect(stepIndexFor('security', true)).toBe(2);   // skill 다음
-    expect(stepIndexFor('security', false)).toBe(1);  // 비복합은 첫 단계
-    expect(stepIndexFor('promote', false)).toBe(7);
-    expect(stepIndexFor('promote', true)).toBe(8);
-    expect(stepIndexFor(null, true)).toBe(0);
-  });
-
-  it('displayLabels — 복합이면 "스킬 생성"이 선두에 1칸 추가', () => {
-    const base = displayLabels(false);
-    const composite = displayLabels(true);
-    expect(base[0]).toBe('보안 검토');
-    expect(base).toHaveLength(7);
-    expect(composite[0]).toBe('스킬 생성');
-    expect(composite[1]).toBe('보안 검토');
-    expect(composite).toHaveLength(8);
   });
 });
 

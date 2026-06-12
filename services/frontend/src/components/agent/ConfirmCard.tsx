@@ -124,6 +124,7 @@ export default function ConfirmCard({ message, explanation, filledParams, verify
 
           {reviewFields.length > 0 && (
             <p className="text-[var(--color-ink2)] text-[13px]">
+              <span className="text-[10px] font-bold text-[var(--color-danger)] mr-1">확인 필요 {reviewN}</span>
               실행 전에{' '}
               {reviewFields.map((f, i) => (
                 <span key={`${f.node}:${f.name}`}>
@@ -148,9 +149,6 @@ export default function ConfirmCard({ message, explanation, filledParams, verify
             >
               <Icon name="list-checks" className="w-3.5 h-3.5 text-[var(--color-accent)]" />
               <span className="flex-1">검증 상세 보기</span>
-              {reviewN > 0 && !showDetail && (
-                <span className="text-[10px] font-bold text-[var(--color-danger)]">확인 필요 {reviewN}</span>
-              )}
               <Icon name={showDetail ? 'chevron-up' : 'chevron-down'} className="w-3.5 h-3.5" />
             </button>
             {showDetail && <VerifyTimeline phases={detailPhases} />}

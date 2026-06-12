@@ -42,17 +42,6 @@ export const TOOL_TO_STEP: Record<string, AgentStep> = {
   save_memory:       'promote',
 };
 
-export const STEP_LABELS: Record<AgentStep, string> = {
-  skill:     '스킬 생성',
-  security:  '보안 검토',
-  intent:    '의도 분류',
-  retriever: '노드 검색',
-  drafter:   '초안 생성',
-  validator: '그래프 검증',
-  qa_eval:   '품질 평가',
-  promote:   '워크플로우 확정',
-};
-
 // agent_node 프레임 이름 → 표시 단계. 매핑 없으면 null(현재 단계 유지).
 // skills_builder.* 릴레이 프레임(동적 이름: skills_builder.upsert.X 등)은 모두 'skill' 단계.
 export function toStep(toolName: string): AgentStep | null {
@@ -78,19 +67,6 @@ export function nextMonotonicStep(prev: AgentStep | null, toolName: string): Age
   const mi = GUARD_ORDER.indexOf(mapped);
   const pi = GUARD_ORDER.indexOf(prev);
   return mi >= pi ? mapped : prev;
-}
-
-// 표시용 1-base 인덱스. 복합 흐름이면 'skill' 선두 단계를 포함한 순서 기준.
-export function stepIndexFor(step: AgentStep | null, composite: boolean): number {
-  if (!step) return 0;
-  const order = composite ? GUARD_ORDER : STEP_ORDER;
-  return order.indexOf(step) + 1;
-}
-
-// 표시할 단계 라벨 목록. 복합 흐름이면 '스킬 생성' 선두 단계를 포함한다.
-export function displayLabels(composite: boolean): string[] {
-  const order = composite ? GUARD_ORDER : STEP_ORDER;
-  return order.map((s) => STEP_LABELS[s]);
 }
 
 // ─── 검증 메시지 타임라인 — 사용자 표시용 4단계 요약 ───────────────────────────
