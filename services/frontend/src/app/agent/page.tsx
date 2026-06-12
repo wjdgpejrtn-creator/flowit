@@ -25,6 +25,9 @@ import CustomNode from '@/components/workflow/CustomNode';
 import ConfirmCard from '@/components/agent/ConfirmCard';
 import { UserBubble, AiTurn, AgentWorkProcess, SkillSelectionCard } from '@/components/agent/ChatTurns';
 import WorkflowCanvasPanel, { type CanvasNodeChip } from '@/components/agent/WorkflowCanvasPanel';
+import SkillDetailCanvas from '@/components/skill/SkillDetailCanvas';
+import SkillBuilderChooseCards from '@/components/skill/SkillBuilderChooseCards';
+import { useSkillBuilderStore } from '@/stores/skillBuilderStore';
 import { nextMonotonicStep, stepIndexFor, displayLabels } from '@/lib/agentSteps';
 import { computeFilledParams } from '@/lib/filledParams';
 import { resolveNodeIcon } from '@/lib/nodeIcon';
@@ -491,7 +494,12 @@ function AgentPageContent() {
     currentStep, setCurrentStep,
     compositeFlow, setCompositeFlow,
     readyToExecute, setReadyToExecute,
+    artifactKind, setArtifactKind,
   } = useAgentStore();
+
+  // 스킬빌더 통합(REQ-010) — artifactKind==='skill'이면 우측 캔버스가 스킬 상세 편집이 되고
+  // 좌측 대화엔 위저드 '재료 선택' 카드가 인라인으로 뜬다. 위저드 진행상태는 skillBuilderStore.
+  const skillPhase = useSkillBuilderStore((s) => s.phase);
 
   const userName = useAuthStore().userName || '사용자';
   const [input, setInput] = useState('');
@@ -661,6 +669,22 @@ function AgentPageContent() {
         });
         break;
       }
+      case 'skill_builder_wizard': {
+        // build_skill 의도 → supervisor가 위저드를 띄우라는 트리거(REQ-010 2차). 우측 캔버스를
+        // 스킬 상세 편집으로 전환하고 좌측엔 재료 선택 카드를 띄운다. 문서 컨텍스트가 있으면
+        // 그 문서를 재료로 곧장 추출을 시작한다. 실제 빌드는 프론트 REST(skillApi)가 자가구동.
+        setArtifactKind('skill');
+        setMode('wizard');
+        setCanvasOpen(true);
+        const sb = useSkillBuilderStore.getState();
+        sb.reset();
+        const srcDoc = frame.source_document_id as string | undefined;
+        if (srcDoc) {
+          sb.setBranch('document');
+          sb.startBuild({ kind: 'document', id: srcDoc, label: srcDoc });
+        }
+        break;
+      }
       case 'result': {
         const payload = frame.payload as Record<string, unknown> | undefined;
         if (payload?.status === 'ready_to_execute') {
@@ -727,6 +751,9 @@ function AgentPageContent() {
     setStreaming(true);
     setCurrentStep(null);
     setCompositeFlow(false);  // 새 턴 — 복합 흐름 플래그 리셋 (라운드2 resume은 별도 경로라 미리셋)
+    // 새 턴은 워크플로우 산출물로 리셋 — build_skill이면 skill_builder_wizard 프레임이 다시 'skill'로
+    // 세팅한다. 이게 없으면 스킬 빌드 후 워크플로우 요청 시 우측 캔버스가 스킬 편집에 고착(#496 리뷰).
+    setArtifactKind('workflow');
     setSkillSelection(null);
     clearRationale();
 
@@ -851,6 +878,7 @@ function AgentPageContent() {
     setSessionId('');
     setCurrentStep(null);
     setCompositeFlow(false);
+    setArtifactKind('workflow');  // 새 채팅 — 산출물 종류도 워크플로우로 리셋(#496 리뷰)
     setSlotQuestion(null);
     setReadyToExecute(null);
     setSkillSelection(null);
@@ -952,7 +980,8 @@ function AgentPageContent() {
             </div>
             <div className="flex-1" />
             <div className="flex items-center gap-1.5">
-              {(['wizard', 'edit', 'run'] as WorkspaceMode[]).map((m) => {
+              {/* 스킬 산출물은 실행 개념이 없으므로 '실행' 모드를 숨긴다(대화/편집만). */}
+              {((artifactKind === 'skill' ? ['wizard', 'edit'] : ['wizard', 'edit', 'run']) as WorkspaceMode[]).map((m) => {
                 const META: Record<WorkspaceMode, { icon: string; label: string }> = {
                   wizard: { icon: 'message-circle', label: '대화' },
                   edit:   { icon: 'edit-3', label: '편집' },
@@ -1061,6 +1090,11 @@ function AgentPageContent() {
                           disabled={streaming}
                         />
                       )}
+                      {/* 스킬빌더 통합(REQ-010) — 위저드 '재료 선택'은 대화 흐름 안 인라인 카드로.
+                          재료를 고르면 build 단계로 넘어가고 편집은 우측 캔버스에서 진행된다. */}
+                      {artifactKind === 'skill' && skillPhase === 'choose' && !streaming && (
+                        <SkillBuilderChooseCards />
+                      )}
                       <div ref={bottomRef} />
                     </div>
                   )}
@@ -1105,16 +1139,22 @@ function AgentPageContent() {
                 </div>
               </div>
 
-              {/* 우측 접힘 캔버스 — 워크플로우 결과물(디자인 §4). 작업과정·판단근거는
-                  채팅 인라인(AgentWorkProcess)으로 이동, 우측은 결과물 캔버스 전용. */}
-              <WorkflowCanvasPanel
-                open={canvasOpen}
-                onToggle={() => setCanvasOpen((v) => !v)}
-                onEdit={() => setMode('edit')}
-                onRun={() => setMode('run')}
-                chips={canvasChips}
-                hasWork={!!loadedWorkflow || !!readyToExecute}
-              />
+              {/* 우측 캔버스 — 산출물 작업면. 워크플로우(기본) | 스킬 상세 편집(스킬빌더 통합).
+                  스킬일 땐 우측이 스킬 상세 편집 캔버스가 되어 사용자가 바로 검토·편집·게시한다. */}
+              {artifactKind === 'skill' ? (
+                <div className="w-[460px] flex-shrink-0 border-l border-[var(--color-line-soft)] bg-[var(--color-paper)] overflow-y-auto p-4">
+                  <SkillDetailCanvas onCancel={() => setArtifactKind('workflow')} />
+                </div>
+              ) : (
+                <WorkflowCanvasPanel
+                  open={canvasOpen}
+                  onToggle={() => setCanvasOpen((v) => !v)}
+                  onEdit={() => setMode('edit')}
+                  onRun={() => setMode('run')}
+                  chips={canvasChips}
+                  hasWork={!!loadedWorkflow || !!readyToExecute}
+                />
+              )}
             </div>
           )}
 
@@ -1124,7 +1164,17 @@ function AgentPageContent() {
               "확인 필요 입력값"을 여기서 바로 고치고 저장·실행. 아니면 빈 빌더(FlowEditor). */}
           {mode === 'edit' && (
             <div className="flex-1 min-h-0 flex">
-              {loadedWorkflow ? <WorkflowEditPane onExecuted={() => setMode('run')} /> : <FlowEditor />}
+              {artifactKind === 'skill' ? (
+                <div className="flex-1 overflow-y-auto p-4">
+                  <div className="max-w-[760px] mx-auto">
+                    <SkillDetailCanvas onCancel={() => setArtifactKind('workflow')} />
+                  </div>
+                </div>
+              ) : loadedWorkflow ? (
+                <WorkflowEditPane onExecuted={() => setMode('run')} />
+              ) : (
+                <FlowEditor />
+              )}
             </div>
           )}
 

@@ -18,7 +18,7 @@ describe('DocumentAnalysisSidebar — 스킬빌더 핸드오프 (REQ-010)', () =
     render(<DocumentAnalysisSidebar analyzed documentId="doc-42" />);
 
     await user.click(screen.getByRole('button', { name: /이 문서로 스킬 만들기/ }));
-    expect(mockPush).toHaveBeenCalledWith('/skills/builder?source_document_id=doc-42');
+    expect(mockPush).toHaveBeenCalledWith('/documents?build=1&source_document_id=doc-42');
   });
 
   it('분석 전에도 핸드오프 버튼은 활성화돼 있다 (분석 여부와 무관)', () => {

@@ -48,6 +48,7 @@ from .transport import (
     RationaleDeltaFrame,
     ResultFrame,
     SessionFrame,
+    SkillBuilderWizardFrame,
     SkillOption,
     SkillSelectionFrame,
     SlotFillQuestionFrame,
@@ -130,6 +131,7 @@ __all__ = [
     "SkillOption",
     "SkillSelectionFrame",
     "SlotFillQuestionFrame",
+    "SkillBuilderWizardFrame",
     # transport — SSE monitoring frames (PR #74, 사이드바 + 캔버스 실시간)
     "ChatMessageFrame",
     "IntentResultFrame",

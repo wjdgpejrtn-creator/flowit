@@ -78,6 +78,7 @@ beforeEach(() => {
     slotQuestion: null,
     readyToExecute: null,
     sseFrames: [],
+    artifactKind: 'workflow',
   });
 });
 
@@ -176,6 +177,46 @@ describe('AgentPage — handleSend SSE 연동', () => {
     expect(screen.getByText('스킬 생성 완료')).toBeInTheDocument();
 
     await act(async () => resolveStream!());
+  });
+
+  it('skill_builder_wizard frame 수신 시 스킬 캔버스로 전환 + 좌측 재료 선택 카드 노출 + 실행 모드 숨김 (REQ-010)', async () => {
+    mockStreamCreateSession.mockImplementation(
+      async (_req: unknown, onFrame: (frame: Record<string, unknown>) => void) => {
+        onFrame({ frame_type: 'session', session_id: 'sid-1' });
+        onFrame({ frame_type: 'skill_builder_wizard' });
+      },
+    );
+
+    render(<AgentPage />);
+
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
+    await userEvent.type(textarea, '스킬 만들어줘');
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
+
+    // 산출물이 스킬로 전환된다(우측 캔버스 = 스킬 상세 편집).
+    await waitFor(() => {
+      expect(useAgentStore.getState().artifactKind).toBe('skill');
+    });
+    // 좌측 대화에 위저드 '재료 선택' 카드가 인라인으로 뜬다.
+    expect(await screen.findByText('업무 관련 문서가 있으신가요?')).toBeInTheDocument();
+    // 스킬은 실행 개념이 없으므로 모드 토글에서 '실행'은 숨겨진다(정확 매칭 — '실행 지침 도움말' 제외).
+    expect(screen.queryByRole('button', { name: '실행' })).not.toBeInTheDocument();
+  });
+
+  it('스킬 모드에서 새 발화 시 artifactKind가 workflow로 리셋된다 (#496 리뷰 MEDIUM — 캔버스 고착 방지)', async () => {
+    // 스킬 빌드 상태(artifactKind='skill')에서 cancel 없이 새 워크플로우 요청 → 우측 캔버스가
+    // 스킬 편집에 고착되면 안 된다. 새 턴에서 'workflow'로 리셋(build_skill이면 프레임이 재설정).
+    useAgentStore.setState({ artifactKind: 'skill' });
+    mockStreamCreateSession.mockResolvedValue(undefined);
+
+    render(<AgentPage />);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
+    await userEvent.type(textarea, '슬랙 알림 워크플로우 만들어줘');
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().artifactKind).toBe('workflow');
+    });
   });
 
   it('result frame의 ready_to_execute 시 실행 버튼이 표시된다', async () => {

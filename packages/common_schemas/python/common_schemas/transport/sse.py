@@ -121,6 +121,19 @@ class ChatMessageFrame(SSEFrame):
     content: str
 
 
+class SkillBuilderWizardFrame(SSEFrame):
+    """스킬 빌드 위저드 트리거 — ``build_skill`` 의도 분류 시 supervisor가 발행한다(REQ-010).
+
+    프론트는 이 프레임을 받으면 AI 채팅의 우측 캔버스를 '스킬 상세 편집'으로 전환하고
+    좌측 대화에 위저드 '재료 선택' 카드를 인라인으로 띄운다. 위저드의 실제 빌드(추출·
+    생성·게시)는 프론트 REST(skillApi)가 자가구동하므로, 이 프레임은 '위저드를 띄워라'는
+    신호 + (있으면) 문서 컨텍스트만 싣는다. 단일 build_skill에서만 발행되고, 복합
+    ``skill_then_compose``는 기존 서브에이전트 relay를 유지한다(composer가 selected_skill_id 소비).
+    """
+    frame_type: Literal["skill_builder_wizard"] = "skill_builder_wizard"
+    source_document_id: Optional[UUID] = None
+
+
 def _get_frame_discriminator(v: Any) -> str:
     if isinstance(v, dict):
         return v.get("frame_type", "")
@@ -142,6 +155,7 @@ AnySSEFrame = Annotated[
         Annotated[QAMetricFrame, Tag("qa_metric")],
         Annotated[WorkflowDraftFrame, Tag("workflow_draft")],
         Annotated[ChatMessageFrame, Tag("chat_message")],
+        Annotated[SkillBuilderWizardFrame, Tag("skill_builder_wizard")],
     ],
     Discriminator(_get_frame_discriminator),
 ]
