@@ -71,6 +71,11 @@ variable "agent_secret_names" {
     "google-client-id",     # Google OAuth Client ID
     "google-client-secret", # Google OAuth Client Secret
     "google-redirect-uri",  # OAuth callback URL (staging Cloud Run public hostname)
+    # Slack OAuth 연결 (#504) — api_server CompleteConnection/StartConnectionAuthorize가 소비.
+    # 값(Client ID/Secret)은 Slack 앱(api.slack.com) 발급 후 수동 add(v1). redirect_uri는
+    # 라우터가 FRONTEND_URL 기준 동적 구성하므로 secret 불요. 미바인딩 시 slack 연결만 inert.
+    "slack-client-id",      # Slack App Client ID
+    "slack-client-secret",  # Slack App Client Secret
     # agent-skills-builder 전용 (REQ-013/REQ-004, PR #171 doc_store wiring 활성화)
     # 값은 skills_marketplace_bucket name(`<project>-skills-marketplace-staging`).
     # agent-skills-builder/main.py:219가 load_secrets_to_env로 읽고, 미등록 시 doc_store=None
