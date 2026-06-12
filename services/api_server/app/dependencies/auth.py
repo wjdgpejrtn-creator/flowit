@@ -5,6 +5,7 @@ from functools import lru_cache
 from auth.adapters.cipher.aes_gcm import AESGCMCipher
 from auth.adapters.jwt_adapter import JWTAdapter
 from auth.adapters.oauth.google_oauth_client import GoogleOAuthClient
+from auth.adapters.oauth.slack_oauth_client import SlackOAuthClient
 from auth.application.use_cases.authenticate_use_case import AuthenticateUseCase
 from auth.application.use_cases.grant_user_role_use_case import GrantUserRoleUseCase
 from auth.application.use_cases.list_connection_audit_use_case import ListConnectionAuditUseCase
@@ -43,6 +44,14 @@ def get_google_oauth(settings: Settings = Depends(get_settings)) -> OAuthClientP
         client_id=settings.google_client_id,
         client_secret=settings.google_client_secret,
         redirect_uri=settings.google_redirect_uri,
+    )
+
+
+def get_slack_oauth(settings: Settings = Depends(get_settings)) -> OAuthClientPort:
+    return SlackOAuthClient(
+        client_id=settings.slack_client_id,
+        client_secret=settings.slack_client_secret,
+        redirect_uri=settings.slack_redirect_uri,
     )
 
 

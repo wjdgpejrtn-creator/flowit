@@ -307,10 +307,12 @@ JIT auto-provisioning 동작:
 - `execute(user_id) -> list[ConnectionStatus]` — `OAuthConnectionRepository.list_for_user` 기반 settings 연결 목록 (service/connected/status/display)
 
 #### use_cases/start_connection_authorize_use_case.py — `StartConnectionAuthorizeUseCase` (ADR-0027)
-- `build_authorization_url(service, state, redirect_uri) -> str` — `CONNECTION_SCOPES`(google: sheets/drive/docs/calendar/gmail), 로그인 신원 scope와 분리(②). redirect_uri = connection callback 경로(로그인 callback과 분리)
+- `__init__(oauth_clients: dict[str, OAuthClientPort])` — **service별 client 라우팅**(google/slack). 생성자가 단일 client가 아닌 dict.
+- `build_authorization_url(service, state, redirect_uri) -> str` — `CONNECTION_SCOPES`(google: sheets/drive/docs/calendar/gmail / **slack: chat:write·channels:history·groups:history**), 로그인 신원 scope와 분리(②). scope 없으면 `ValueError`(미지원), client 미배선이면 `ValueError`. redirect_uri = connection callback 경로
 
 #### use_cases/complete_connection_use_case.py — `CompleteConnectionUseCase` (ADR-0027)
-- `execute(user_id, service, code, redirect_uri) -> OAuthConnection` — code 교환 → AESGCMCipher 암호화 → credentials + oauth_connection 저장. ④ upsert(active partial index 미증식) + account_id/display_name(#422). 단일 트랜잭션 = `get_db` request 단위(repo flush only)
+- `__init__(oauth_repo, credential_repo, cipher, oauth_clients: dict[str, OAuthClientPort])` — service별 client 라우팅.
+- `execute(user_id, service, code, redirect_uri) -> OAuthConnection` — `oauth_clients[service]`로 code 교환 → AESGCMCipher 암호화 → credentials + oauth_connection 저장. ④ upsert + account_id/display_name(정규화 계약: google=sub/email, slack=team_id/workspace) + access_token_expires_at(#452 ②). 미배선 service=`ValueError`. 단일 트랜잭션 = `get_db` request 단위
 
 #### use_cases/revoke_connection_use_case.py — `RevokeConnectionUseCase` (ADR-0027)
 - `execute(user_id, service) -> bool` — get_active → revoke(is_active=FALSE), 멱등
@@ -371,7 +373,8 @@ class GoogleOAuthClient:
     """Google OAuth 2.0 코드 교환 + 토큰 갱신 어댑터."""
     
     async def exchange_code(self, code: str, redirect_uri: str) -> dict:
-        """Authorization code → access_token, refresh_token, expires_in, id_token (#452 ② expires_in 추가)"""
+        """code → 정규화 계약: access_token, refresh_token, expires_in, scopes,
+        account_id(=google sub), display_name(=email). + sub/email(로그인 신원용 유지)."""
         ...
     
     async def refresh_access_token(self, refresh_token: str) -> dict:
@@ -382,6 +385,14 @@ class GoogleOAuthClient:
         """UserInfo endpoint에서 사용자 정보 조회"""
         ...
 ```
+
+#### oauth/slack_oauth_client.py — `SlackOAuthClient` (REQ-002, slack connection)
+
+`OAuthClientPort` 구현 — Slack OAuth v2 bot 토큰(xoxb-) 설치 흐름. google과 차이:
+- `oauth.v2.access`는 **실패도 HTTP 200 + `{"ok": false, "error": ...}`** → `ok` 명시 체크(아니면 `SlackOAuthError`).
+- 정규화 계약 매핑: `access_token`=xoxb 봇토큰, `account_id`=`team.id`, `display_name`=`team.name`, `scopes`=콤마 분리.
+- `transport` 주입 seam(httpx.MockTransport, 테스트). env: `SLACK_CLIENT_ID`/`SLACK_CLIENT_SECRET`/`SLACK_REDIRECT_URI`.
+- DI: api_server `get_oauth_clients`가 `{"google": GoogleOAuthClient, "slack": SlackOAuthClient}`를 조립해 connection 유스케이스에 주입. 라우터(`/{service}/authorize`·`/callback`)는 이미 service-generic.
 
 ---
 

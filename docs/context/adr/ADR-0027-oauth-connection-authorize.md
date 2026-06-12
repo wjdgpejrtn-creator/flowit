@@ -159,7 +159,7 @@ settings 통합 탭의 "연결 가능 목록"을 프론트 하드코딩(`[slack,
 
 - **provider 집합 SSOT = `nodes_graph` 카탈로그의 distinct `required_connections`** (코드 기반 — DB 시드와 무관하므로 노드 추가 시 목록 자동 반영). `EXECUTABLE_NODE_TYPES`처럼 "코드가 진실"인 경로.
 - **provider별 연결 메타(표시명 + `auth_type`)는 auth 소유** — `auth/application/connection_providers.py`의 `CONNECTION_PROVIDERS` 레지스트리. "이 provider를 어떻게 연결하는가"는 auth 책임이라는 ②(scope 분리)와 동일한 소유권 원칙.
-- **`auth_type` 3종** — `oauth`(동의화면 연결 버튼), `api_key`(키 입력·자격증명 페이지), `connection_string`(DB 접속정보). oauth의 실제 가능 여부(`available`)는 `CONNECTION_SCOPES` 배선에서 단일 도출 → slack은 `SlackOAuthClient` 미배선이라 "준비 중", 배선 시 코드 변경 없이 자동 활성.
+- **`auth_type` 3종** — `oauth`(동의화면 연결 버튼), `api_key`(키 입력·자격증명 페이지), `connection_string`(DB 접속정보). oauth의 실제 가능 여부(`available`)는 `CONNECTION_SCOPES` 배선에서 단일 도출 → **slack `SlackOAuthClient` 배선 완료(REQ-002 후속)로 `CONNECTION_SCOPES["slack"]` 추가 → 코드 변경 없이 자동 활성**(설계 약속 이행).
 - **조인은 Composition Root(api_server)** — `GET /api/v1/connections/available`이 카탈로그(provider 집합) × auth(메타)를 합친다. 두 module이 서로의 application을 직접 알 필요 없음(단방향 유지).
 - **드리프트 가드** — 카탈로그 `required_connections`의 모든 provider가 `CONNECTION_PROVIDERS`에 있어야 한다(엔드포인트가 메타 없는 provider를 silent skip하므로 누락을 CI에서 강제 검출).
 

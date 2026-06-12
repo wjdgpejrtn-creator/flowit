@@ -74,8 +74,13 @@ class GoogleOAuthClient(OAuthClientPort):
 
         userinfo = await self.get_user_info(tokens["access_token"])
         return {
+            # sub/email은 로그인(AuthenticateUseCase) 신원 확인용 — 유지.
             "sub": userinfo["sub"],
             "email": userinfo.get("email", ""),
+            # account_id/display_name = 서비스 무관 정규화 계약(CompleteConnectionUseCase 소비).
+            # google은 sub=안정 식별자, email=표시명.
+            "account_id": userinfo["sub"],
+            "display_name": userinfo.get("email", ""),
             "access_token": tokens["access_token"],
             "refresh_token": tokens.get("refresh_token", ""),
             # #452 ② access token 만료시각 계산용(초). google은 통상 3599. 미수신 시 None.
