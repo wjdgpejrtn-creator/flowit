@@ -41,10 +41,11 @@ class _NodeDef:
 class FakeOAuthClient:
     """refresh_access_token만 사용 — 호출 기록 + 응답/예외 주입."""
 
-    def __init__(self, new_access="new_token", expires_in=3600, raises=False):
+    def __init__(self, new_access="new_token", expires_in=3600, raises=False, bad_response=False):
         self._new_access = new_access
         self._expires_in = expires_in
         self._raises = raises
+        self._bad_response = bad_response
         self.refresh_calls: list[str] = []
 
     def authorization_url(self, state, scopes=None, redirect_uri=None) -> str:
@@ -57,6 +58,8 @@ class FakeOAuthClient:
         self.refresh_calls.append(refresh_token)
         if self._raises:
             raise RuntimeError("google token endpoint 500")
+        if self._bad_response:
+            return {"expires_in": self._expires_in}  # 비정상 200 — access_token 부재
         return {"access_token": self._new_access, "expires_in": self._expires_in}
 
     async def get_user_info(self, access_token) -> dict:
@@ -218,6 +221,41 @@ async def test_expired_refresh_failure_raises(oauth_repo, cipher, credential_rep
 
     with pytest.raises(AuthorizationError):
         await service.inject(cred.credential_id, node_def.node_id)
+
+
+@pytest.mark.asyncio
+async def test_expired_bad_response_no_access_token_raises(oauth_repo, cipher, credential_repo):
+    """200인데 access_token 부재(비정상) + known-expired → refresh 실패와 동일 취급(E-CRED-002)."""
+    node_def = _NodeDef()
+    client = FakeOAuthClient(bad_response=True)
+    service = CredentialInjectionService(
+        cipher, oauth_repo, _NodeRepo(node_def), credential_repo,
+        oauth_clients={"google": client},
+    )
+    cred = await _make_oauth_credential(
+        oauth_repo, cipher, credential_repo,
+        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+
+    with pytest.raises(AuthorizationError):
+        await service.inject(cred.credential_id, node_def.node_id)
+
+
+@pytest.mark.asyncio
+async def test_legacy_bad_response_falls_back_to_current(oauth_repo, cipher, credential_repo):
+    """200인데 access_token 부재 + 레거시 NULL → 현재 토큰 best-effort fallback."""
+    node_def = _NodeDef()
+    client = FakeOAuthClient(bad_response=True)
+    service = CredentialInjectionService(
+        cipher, oauth_repo, _NodeRepo(node_def), credential_repo,
+        oauth_clients={"google": client},
+    )
+    cred = await _make_oauth_credential(
+        oauth_repo, cipher, credential_repo, expires_at=None, access=b"old_token",
+    )
+
+    result = await service.inject(cred.credential_id, node_def.node_id)
+    assert result.value == "old_token"
 
 
 @pytest.mark.asyncio

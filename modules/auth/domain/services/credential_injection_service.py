@@ -114,7 +114,11 @@ class CredentialInjectionService:
             self._raise_if_definitely_expired(conn, now, cause=exc)
             return None
 
-        new_access: str = resp["access_token"]
+        new_access = resp.get("access_token")
+        if not new_access:
+            # 200인데 access_token 부재(비정상) — refresh 실패와 동일 취급(정책 일관).
+            self._raise_if_definitely_expired(conn, now)
+            return None
         new_tokens: dict = {"access_token_encrypted": self._cipher.encrypt(new_access.encode())}
         expires_in = resp.get("expires_in")
         if expires_in is not None:
