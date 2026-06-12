@@ -2,7 +2,7 @@ import common_schemas
 
 
 def test_all_exports():
-    assert len(common_schemas.__all__) == 78
+    assert len(common_schemas.__all__) == 79
 
 
 def test_key_symbols_importable():
@@ -29,6 +29,7 @@ def test_key_symbols_importable():
         PermissionSource,
         PipelineStatusFrame,
         QAMetricFrame,
+        SkillBuilderWizardFrame,
         SkillDocument,
         ToolCall,
         ValidationErrorResponse,
@@ -58,6 +59,7 @@ def test_key_symbols_importable():
     assert PermissionSource is not None
     assert PipelineStatusFrame is not None
     assert QAMetricFrame is not None
+    assert SkillBuilderWizardFrame is not None
     assert SkillDocument is not None
     assert ToolCall is not None
     assert ValidationErrorResponse is not None
