@@ -9,10 +9,43 @@ import pytest
 from common_schemas.enums import IntentType
 
 from ai_agent.domain.services.intent_analyzer_service import (
+    _fast_classify,
     _is_skill_then_compose,
     classify_recipe,
 )
 from ai_agent.domain.value_objects.route_plan import RECIPE_SKILL_THEN_COMPOSE
+
+
+class TestFastClassifyBuildSkill:
+    """단일 build_skill 정규식 — 자연 발화 회귀(#496 e2e: '스킬 만들고 싶어' 미분류로 위저드 미발동)."""
+
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "나 스킬 만들고 싶어",     # 회귀 핵심 — '만들고'(어간 '만들')
+            "스킬 만들어줘",
+            "스킬 만들래",
+            "스킬을 만들고 싶어",
+            "스킬 하나 만들어줘",
+            "스킬 좀 만들어볼래",
+            "스킬 생성해줘",
+            "스킬 제작하고 싶어",
+            "skill 만들고 싶어",
+        ],
+    )
+    def test_build_skill_natural_phrasings(self, msg: str) -> None:
+        assert _fast_classify(msg) is IntentType.BUILD_SKILL
+
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "슬랙 알림 워크플로우 만들어줘",  # 스킬 신호 없음 → draft
+            "이게 뭐야?",                     # 질문
+            "안녕",                           # chitchat
+        ],
+    )
+    def test_non_build_skill_not_misclassified(self, msg: str) -> None:
+        assert _fast_classify(msg) is not IntentType.BUILD_SKILL
 
 
 class TestIsSkillThenCompose:

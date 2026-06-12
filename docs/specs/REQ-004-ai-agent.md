@@ -213,7 +213,7 @@ LangGraph StateGraph 제거. `_run()` inline async generator로 직접 라우팅
 사용자 메시지 ─► load_memory (HTTP → agent-personalization)
                   │
                   ▼
-               analyze_intent (IntentAnalyzerService fast regex)
+               analyze_intent (IntentAnalyzerService — Gemma 4 분류 + 정규식 fallback)
                   │
                   ▼ intent 결정론적 분기
           ┌───────┴────────────────────────────────────┐
