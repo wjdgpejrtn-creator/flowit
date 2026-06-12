@@ -7,6 +7,12 @@ This project follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New models, new optional fields, new enum members
 - **PATCH**: Documentation, codegen improvements, internal refactoring
 
+## [0.24.0] - 2026-06-12
+
+### Added — SkillBuilderWizardFrame (REQ-010 스킬빌더 ↔ AI 채팅 통합)
+
+- `transport/sse.py` `SkillBuilderWizardFrame(frame_type="skill_builder_wizard", source_document_id: UUID | None)` 추가 — supervisor가 `build_skill` 의도를 분류하면 발행하는 위저드 트리거. 프론트가 AI 채팅 우측 캔버스를 '스킬 상세 편집'으로 전환하고 좌측에 '재료 선택' 위저드 카드를 띄운다. 위저드 빌드는 프론트 REST(skillApi) 자가구동. 단일 build_skill에서만 발행하고 복합 `skill_then_compose`는 기존 서브에이전트 relay 유지. `AnySSEFrame` union + top-level/transport export 반영. 신규 model → MINOR. TS `SkillBuilderWizardFrame` regenerate 반영.
+
 ## [0.23.0] - 2026-06-11
 
 ### Added — SkillOption.is_personal (REQ-013 개인화 스킬 추천)
