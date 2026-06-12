@@ -302,12 +302,19 @@ class SkeletonAssembler:
         )
 
     # ── 콘텐츠 전달 (sink-anchored, 생산자 자동) ───────────────────────────────
-    def _assemble_content_delivery(self, entities: ExtractedEntities) -> AssembledDraft:
-        """생산자(ai)→명시 sink 팬. 트리거/소스/가공 없이 출력 채널만 ≥2개 명시된 발화 전용.
+    # 산출물(파일) 생성형 sink — delivery sink가 **이 산출물을 전달**하므로 그 앞에 직렬로 둔다.
+    # ("PDF로 만들어서 메일로" = ai→pdf_generate→email_send: email이 원본 텍스트가 아니라 PDF를
+    # 첨부). 구조는 코드 고정(LLM 파라미터만)이라 fan으로 두면 첨부 흐름을 param-fill로 못 살린다.
+    _ARTIFACT_SINKS = frozenset({"pdf_generate", "file_write"})
 
-        "보고서를 PDF로 만들어서 메일로 보내줘" → anthropic_chat(콘텐츠 생성) → {pdf_generate,
-        email_send} 병렬 분기. 복수 sink는 기존 컨벤션(`fan_sinks`)대로 직렬이 아니라 마지막
-        생산 노드에서 병렬 분기한다. 구조는 결정적이고 LLM은 파라미터만 채운다(scaffold 경로).
+    def _assemble_content_delivery(self, entities: ExtractedEntities) -> AssembledDraft:
+        """생산자(ai)→[산출물 sink 직렬]→delivery sink 팬. 트리거/소스/가공 없이 출력 채널만
+        ≥2개 명시된 발화 전용(라이브러리 스켈레톤이 아니라 코드 직접 조립 — 동적 sink라 슬롯
+        모델에 안 맞아 의도적으로 `SKELETONS`에 미등재, skeleton_name만 합성).
+
+        "보고서를 PDF로 만들어서 메일로 보내줘" → anthropic_chat → pdf_generate → email_send.
+        산출물 생성형 sink(pdf_generate/file_write)는 delivery 앞 **직렬**(delivery가 산출물을
+        전달)이고, delivery 채널(메일/슬랙 등)은 마지막 산출물(없으면 생산자)에서 **병렬 분기**.
 
         sink는 발화에서 직접 명시된 출력 채널(lexical sink 추출)이라 의미 디스앰비규에이션이
         불필요 → 앙상블/그라운딩 미적용(어휘 변형으로 추출 실패 시 sink<2 → 이 경로 미진입,
@@ -316,14 +323,27 @@ class SkeletonAssembler:
         producer = DraftNode(
             ref="transform_0", node_type=_DEFAULT_CONTENT_PRODUCER, role=SlotRole.TRANSFORM
         )
-        sinks = [
-            DraftNode(ref=f"sink_{i}", node_type=nt, role=SlotRole.SINK)
-            for i, nt in enumerate(entities.sinks)
-        ]
-        edges = [DraftEdge(from_ref=producer.ref, to_ref=s.ref) for s in sinks]
+        artifacts = [nt for nt in entities.sinks if nt in self._ARTIFACT_SINKS]
+        deliveries = [nt for nt in entities.sinks if nt not in self._ARTIFACT_SINKS]
+
+        nodes: list[DraftNode] = [producer]
+        edges: list[DraftEdge] = []
+        # 생산자 → 산출물 생성 sink 직렬 체인(산출물이 delivery의 입력).
+        upstream = producer
+        for i, nt in enumerate(artifacts):
+            node = DraftNode(ref=f"artifact_{i}", node_type=nt, role=SlotRole.SINK)
+            nodes.append(node)
+            edges.append(DraftEdge(from_ref=upstream.ref, to_ref=node.ref))
+            upstream = node
+        # delivery 채널은 마지막 산출물(없으면 생산자)에서 병렬 분기.
+        for i, nt in enumerate(deliveries):
+            node = DraftNode(ref=f"sink_{i}", node_type=nt, role=SlotRole.SINK)
+            nodes.append(node)
+            edges.append(DraftEdge(from_ref=upstream.ref, to_ref=node.ref))
+
         return AssembledDraft(
             skeleton_name="content_delivery",
-            nodes=tuple([producer, *sinks]),
+            nodes=tuple(nodes),
             edges=tuple(edges),
             warnings=(),
         )
