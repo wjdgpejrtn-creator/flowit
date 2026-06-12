@@ -117,6 +117,9 @@ export const useAgentStore = create<AgentStoreState>()(
       rationaleText: session.rationaleText ?? '',
       currentStep: session.currentStep ?? null,
       compositeFlow: session.compositeFlow ?? false,
+      // 스킬 빌드는 REST 자가구동/일시적이라 세션 스냅샷에 담지 않는다 — 복원 시 워크플로우
+      // 산출물로 되돌린다(#496 리뷰 LOW: artifactKind 미스냅샷 일관성 보강).
+      artifactKind: 'workflow',
       slotQuestion: null,
       viewingSession: null,
       sessions: s.sessions.filter((x) => x.id !== session.id),  // active로 승격 → 목록에서 제거

@@ -751,6 +751,9 @@ function AgentPageContent() {
     setStreaming(true);
     setCurrentStep(null);
     setCompositeFlow(false);  // 새 턴 — 복합 흐름 플래그 리셋 (라운드2 resume은 별도 경로라 미리셋)
+    // 새 턴은 워크플로우 산출물로 리셋 — build_skill이면 skill_builder_wizard 프레임이 다시 'skill'로
+    // 세팅한다. 이게 없으면 스킬 빌드 후 워크플로우 요청 시 우측 캔버스가 스킬 편집에 고착(#496 리뷰).
+    setArtifactKind('workflow');
     setSkillSelection(null);
     clearRationale();
 
@@ -875,6 +878,7 @@ function AgentPageContent() {
     setSessionId('');
     setCurrentStep(null);
     setCompositeFlow(false);
+    setArtifactKind('workflow');  // 새 채팅 — 산출물 종류도 워크플로우로 리셋(#496 리뷰)
     setSlotQuestion(null);
     setReadyToExecute(null);
     setSkillSelection(null);

@@ -203,6 +203,22 @@ describe('AgentPage — handleSend SSE 연동', () => {
     expect(screen.queryByRole('button', { name: '실행' })).not.toBeInTheDocument();
   });
 
+  it('스킬 모드에서 새 발화 시 artifactKind가 workflow로 리셋된다 (#496 리뷰 MEDIUM — 캔버스 고착 방지)', async () => {
+    // 스킬 빌드 상태(artifactKind='skill')에서 cancel 없이 새 워크플로우 요청 → 우측 캔버스가
+    // 스킬 편집에 고착되면 안 된다. 새 턴에서 'workflow'로 리셋(build_skill이면 프레임이 재설정).
+    useAgentStore.setState({ artifactKind: 'skill' });
+    mockStreamCreateSession.mockResolvedValue(undefined);
+
+    render(<AgentPage />);
+    const textarea = screen.getByPlaceholderText(/이어서 말씀해/);
+    await userEvent.type(textarea, '슬랙 알림 워크플로우 만들어줘');
+    await userEvent.click(screen.getByRole('button', { name: '전송' }));
+
+    await waitFor(() => {
+      expect(useAgentStore.getState().artifactKind).toBe('workflow');
+    });
+  });
+
   it('result frame의 ready_to_execute 시 실행 버튼이 표시된다', async () => {
     mockStreamCreateSession.mockImplementation(
       async (_req: unknown, onFrame: (frame: Record<string, unknown>) => void) => {
