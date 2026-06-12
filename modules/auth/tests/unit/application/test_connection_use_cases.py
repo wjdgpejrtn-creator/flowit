@@ -22,6 +22,7 @@ class FakeOAuth:
             "email": self._email,
             "access_token": self._access,
             "refresh_token": "refresh",
+            "expires_in": 3600,
             "scopes": ["openid", "email", "https://www.googleapis.com/auth/spreadsheets"],
         }
 
@@ -76,6 +77,20 @@ async def test_complete_connection_creates_with_account(oauth_repo, credential_r
     assert conn.display_name == "a@b.com"
     assert conn.access_token_encrypted != b"tok"  # 암호화 저장
     assert await oauth_repo.get_active_for_user(user_id, "google") is not None
+
+
+@pytest.mark.asyncio
+async def test_complete_connection_persists_token_expiry(oauth_repo, credential_repo, cipher):
+    """expires_in → access_token_expires_at(now+expires_in) 영속화 (#452 ②)."""
+    from datetime import UTC, datetime
+
+    uc = CompleteConnectionUseCase(oauth_repo, credential_repo, cipher, FakeOAuth())
+    user_id = uuid.uuid4()
+
+    conn = await uc.execute(user_id, "google", "code")
+
+    assert conn.access_token_expires_at is not None
+    assert conn.access_token_expires_at > datetime.now(UTC)  # 미래 만료시각
 
 
 @pytest.mark.asyncio
