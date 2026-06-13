@@ -31,7 +31,7 @@ _DEFAULT_CONTENT_SINK = "google_docs_write"
 # 명시 출력 채널(sink)만 있고 입력/가공 신호가 없을 때(예 "보고서 PDF로 만들어서 메일로") 콘텐츠를
 # 생성할 기본 생산자. AI 노드가 발화 내용으로 산출물을 만들어 명시 sink들로 전달한다. _AI라 retriever
 # core-LLM 후보에 항상 존재(#418) → scaffold 후보 보강도 무비용.
-_DEFAULT_CONTENT_PRODUCER = "anthropic_chat"
+_DEFAULT_CONTENT_PRODUCER = "gemma_chat"
 
 
 class SkeletonAssembler:
@@ -312,7 +312,7 @@ class SkeletonAssembler:
         ≥2개 명시된 발화 전용(라이브러리 스켈레톤이 아니라 코드 직접 조립 — 동적 sink라 슬롯
         모델에 안 맞아 의도적으로 `SKELETONS`에 미등재, skeleton_name만 합성).
 
-        "보고서를 PDF로 만들어서 메일로 보내줘" → anthropic_chat → pdf_generate → email_send.
+        "보고서를 PDF로 만들어서 메일로 보내줘" → gemma_chat → pdf_generate → email_send.
         산출물 생성형 sink(pdf_generate/file_write)는 delivery 앞 **직렬**(delivery가 산출물을
         전달)이고, delivery 채널(메일/슬랙 등)은 마지막 산출물(없으면 생산자)에서 **병렬 분기**.
 
