@@ -785,6 +785,15 @@ def test_hallucinated_node_refs_empty_when_all_real_or_none():
     assert _hallucinated_node_refs("`gmail_send`만 쓴다") == []
 
 
+def test_hallucinated_node_refs_excludes_own_type_and_field_names():
+    # 라이브 측정 회귀: 스킬 자신 node_type(미등재)·출력 필드명은 노드가 아니므로 오탐 제외
+    ci = "1. `hr_onboarding_notice` 배치\n출력 `onboarding_notice_text` → `email_send` 연결\n`fake_node`는 환각"
+    known = frozenset({"hr_onboarding_notice", "onboarding_notice_text"})
+    assert _hallucinated_node_refs(ci, known) == ["fake_node"]
+    # 제외 안 하면 own/field까지 오탐(email_send는 실노드라 통과) — 정렬된 전체
+    assert _hallucinated_node_refs(ci) == ["fake_node", "hr_onboarding_notice", "onboarding_notice_text"]
+
+
 class _ABStructuredOkInstructionsFailLLM(LLMPort):
     """Call A(structured) 성공, Call B(instructions) 실패 — B 비치명성 검증용."""
 

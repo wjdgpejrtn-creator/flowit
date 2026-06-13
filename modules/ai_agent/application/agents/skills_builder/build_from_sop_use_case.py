@@ -206,19 +206,23 @@ def _select_blocks_for_meta(
     return [c.block for c in picked]
 
 
-def _hallucinated_node_refs(composer_instructions: str) -> list[str]:
+def _hallucinated_node_refs(
+    composer_instructions: str, known_non_node: frozenset[str] = frozenset()
+) -> list[str]:
     """composer_instructions의 백틱 토큰 중 node_type 형태(snake_case)지만 카탈로그에 없는 것.
 
     composer_instructions는 워크플로우 배선 지침이라 존재하지 않는 node_type을 참조하면 실행 불가능한
     워크플로우가 된다. 프롬프트가 백틱+실제 node_type 표기를 요구하므로 백틱 토큰을 카탈로그와 대조한다.
-    enum 값·일반 식별자(slack/google 등 단어)는 node_type 패턴이 아니거나 카탈로그에 없으면 후보로
-    잡힐 수 있어 **경고용**(비치명적)으로만 쓴다 — 결정적 보장은 스켈레톤 매핑 경로가 담당.
+    `known_non_node`(스킬 자신의 node_type + 입출력 필드명)는 노드가 아니므로 제외한다 — 라이브 측정에서
+    스킬 자신 타입(아직 카탈로그 미등재)·출력 필드명(`onboarding_notice_text` 등)이 오탐으로 잡힘 확인.
+    enum 값·단어형 토큰(slack 등)도 snake_case 필터로 1차 제외. **경고용**(비치명적)이며 결정적 보장은
+    스켈레톤 매핑 경로가 담당한다.
     """
     if not composer_instructions:
         return []
     tokens = {m.group(1) for m in _NODE_TYPE_PATTERN.finditer(composer_instructions)}
     # snake_case(밑줄 포함) 토큰만 node_type 후보로 본다 — 단어형 토큰(slack 등) 오탐 축소.
-    candidates = {t for t in tokens if "_" in t}
+    candidates = {t for t in tokens if "_" in t and t not in known_non_node}
     return sorted(t for t in candidates if t not in EXECUTABLE_NODE_TYPES)
 
 
@@ -524,7 +528,13 @@ class BuildFromSOPUseCase:
 
         # composer_instructions(워크플로우 배선) 환각 node_type 참조 검증 — 비치명적 경고(스켈레톤
         # 매칭 시 어차피 결정적 배선이 대체. 폴백일 때만 LLM 산출이 쓰이며 그 경우 실행가능성 신호).
-        hallucinated = _hallucinated_node_refs(structured.composer_instructions)
+        # 스킬 자신의 node_type(아직 카탈로그 미등재)과 입출력 필드명은 노드가 아니므로 오탐 제외.
+        known_non_node = frozenset(
+            {meta_obj.node_type}
+            | set((structured.inputs.get("properties") or {}).keys())
+            | set((structured.outputs.get("properties") or {}).keys())
+        )
+        hallucinated = _hallucinated_node_refs(structured.composer_instructions, known_non_node)
         if hallucinated:
             _logger.warning(
                 "composer_instructions 환각 node_type 참조(%s): %s",
