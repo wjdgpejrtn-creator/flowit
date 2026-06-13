@@ -11,8 +11,10 @@ LLM 호출은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base
       → ResultFrame(payload.skill_metas) — 메타 5필드만(node_type/name/description/category/risk_level)
       → 사용자 카드 그리드 표시, 1건 선택
     [extract_detail] DocumentBlock + 선택된 meta dict
-      → JSON prompt 구성 (target_skill_meta 명시)
+      → JSON prompt 구성 (target_skill_meta 명시 + 9섹션 고품질 런북 요청)
       → LLM.generate_structured(prompt, _ExtractedSkillNodeDetail)  ← inputs/outputs/instructions(SKILL.md) "LLM 보강"
+      → SKILL.md 품질 자기개선: SkillInstructionRefiner가 draft→critique→refine로 instructions를
+        끌어올린다(Gemma 1샷 초안은 얕음 — 같은 모델에게 루브릭 자기채점·재작성. 실패 시 초안 폴백)
       → T4: SOP 텍스트를 SkeletonEntityExtractor "발화"로 결정적 스켈레톤 조립(ADR-0028 D2/D3)
       → T5: AssembledDraft → COMPOSER.md(결정적) + 정밀 BINDS(bound_node_types) 매핑(D4)
             (스켈레톤 미매칭 시 LLM composer_instructions 폴백)
@@ -84,6 +86,11 @@ from ....domain.entities.skill_node import SkillNode
 from ....domain.ports.llm_port import LLMPort
 from ....domain.services.skeleton_assembler import SkeletonAssembler
 from ....domain.services.skeleton_composer_mapper import SkeletonComposerMapper
+from .skill_instruction_refiner import (
+    SKILL_MD_QUALITY_RULES,
+    SKILL_MD_SECTIONS,
+    SkillInstructionRefiner,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -252,6 +259,7 @@ class BuildFromSOPUseCase:
         llm: LLMPort,
         assembler: SkeletonAssembler | None = None,
         composer_mapper: SkeletonComposerMapper | None = None,
+        instruction_refiner: SkillInstructionRefiner | None = None,
     ) -> None:
         self._create_draft_skill = create_draft_skill
         self._embedder = embedder
@@ -261,6 +269,9 @@ class BuildFromSOPUseCase:
         # 기본 생성(의존성 무, composition root 주입 불요 — 기존 3-인자 와이어링 호환).
         self._assembler = assembler or SkeletonAssembler()
         self._composer_mapper = composer_mapper or SkeletonComposerMapper()
+        # SKILL.md 품질 자기개선 루프(draft→critique→refine). 같은 LLM을 재사용하므로 기본 생성
+        # (기존 와이어링 호환). detail 추출 후 instructions를 끌어올린다 — 실패 시 초안 폴백(graceful).
+        self._instruction_refiner = instruction_refiner or SkillInstructionRefiner(llm)
 
     async def extract_metadata(
         self,
@@ -449,6 +460,14 @@ class BuildFromSOPUseCase:
             )
             return
 
+        # SKILL.md 품질 자기개선(draft→critique→refine) — Gemma 1샷 초안은 얕아서, 같은 모델에게
+        # 루브릭으로 자기 채점·재작성시켜 끌어올린다. 실패/형태불일치 시 초안 그대로(graceful).
+        # instructions(런타임 주입 지침서)만 대상 — composer_instructions는 스켈레톤이 결정한다.
+        yield AgentNodeFrame(
+            agent_node_name=f"skills_builder.sop.refine_instructions.{meta_obj.node_type}"
+        )
+        instructions = await self._instruction_refiner.refine(meta_obj.name, detail.instructions)
+
         try:
             staging = self._convert_detail_to_staging(meta_obj, detail)
         except (KeyError, ValueError) as e:
@@ -489,7 +508,7 @@ class BuildFromSOPUseCase:
                 "file_name": document.file_meta.file_name,
                 "skill_detail": {
                     "node_type": meta_obj.node_type,            # 식별용 echo
-                    "instructions": detail.instructions,
+                    "instructions": instructions,                # SKILL.md (refine 끌어올림 또는 초안 폴백)
                     "composer_instructions": composer_instructions,  # COMPOSER.md (결정적 또는 LLM 폴백)
                     "inputs": detail.inputs,
                     "outputs": detail.outputs,
@@ -635,7 +654,8 @@ class BuildFromSOPUseCase:
             "각 SkillNode 메타 필드:\n"
             "  - node_type: snake_case 식별자 (e.g. 'send_approval_email')\n"
             "  - name: 사람이 읽을 수 있는 한글 이름\n"
-            "  - description: 노드 동작 설명 (한 문장)\n"
+            "  - description: 이 스킬을 **언제 호출하는지**(트리거 상황) + 무엇을 하는지를 1~2문장으로. "
+            "모델이 이 한 줄로 스킬 선택을 판단하므로 트리거가 구체적이어야 한다 (예: '...할 때 사용')\n"
             f"  - category: 다음 중 하나 — {sorted(_ALLOWED_CATEGORIES)}\n"
             "  - risk_level: 'Low' / 'Medium' / 'High' / 'Restricted'\n\n"
             "사용자의 personal_memory와 작업 패턴을 참고해 도메인 맥락 반영. "
@@ -727,9 +747,11 @@ class BuildFromSOPUseCase:
             "  - outputs: JSON Schema. 각 property에 무엇이 나오는지 `description`을 넣는다\n"
             "  - required_connections: list[str] (e.g. ['slack', 'google'])\n"
             "  - service_type: str | null (e.g. 'slack', 'google_workspace')\n"
-            "  - instructions: 이 스킬의 SKILL.md 지침서 본문 (markdown 문자열). "
-            "사용자가 대화 중 읽고 선택할 수 있도록 '## When to use', '## Steps', '## Inputs/Outputs' 섹션을 "
-            "포함한 충분한 설명 (ADR-0017). 이 노드가 **실행될 때** LLM에 주입되는 도메인 지침이다\n"
+            "  - instructions: 이 스킬의 SKILL.md 지침서 본문 (markdown 문자열). 이 노드가 **실행될 때** "
+            "LLM에 주입돼 그대로 실행되는 런북이다(ADR-0017). 모델이 읽고 행동할 수 있도록 다음 9개 "
+            "섹션을 **모두** 포함하라:\n"
+            f"{SKILL_MD_SECTIONS}\n"
+            f"  {SKILL_MD_QUALITY_RULES}\n"
             "  - composer_instructions: 이 스킬의 COMPOSER.md 지침서 본문 (markdown 문자열, ADR-0024). "
             "워크플로우 **작성 에이전트(Composer)** 에 주입되어 '이 스킬을 쓰려면 어떤 노드를 어떻게 엮어야 "
             "하는가'를 지시한다. 예: 'LLM 노드 1개와 Email 발송 노드를 순서대로 배치하고, LLM 출력을 Email "
@@ -764,11 +786,19 @@ class BuildFromSOPUseCase:
                 "required_connections": ["slack"],
                 "service_type": "slack",
                 "instructions": (
-                    "## When to use\n환불 요청이 접수되어 담당 매니저에게 즉시 알려야 할 때.\n"
-                    "## Steps\n1. 환불 요청 정보(refund_id, amount) 확인\n"
-                    "2. 지정 Slack 채널에 알림 메시지 발송\n"
-                    "## Inputs/Outputs\n- 입력: refund_id, amount, channel\n"
-                    "- 출력: message_ts (메시지 타임스탬프)"
+                    "# 환불 요청 매니저 알림\n"
+                    "## 목적\n환불 요청 접수 시 담당 매니저가 즉시 인지·대응하도록 자동 통보한다.\n"
+                    "## 언제 사용하나\n환불 요청 폼이 접수됐을 때 사용한다. 단순 배송 문의는 대상이 아니다.\n"
+                    "## 사전 조건\n입력: 환불 ID·금액·채널 / 외부 연결: slack / 권한: 대상 채널 게시 권한\n"
+                    "## 처리 절차\n1. 요청 정보(refund_id, amount)를 확인한다.\n"
+                    "2. 금액과 사유를 한 줄로 요약한다.\n3. 지정 Slack 채널에 알림 메시지를 발송한다.\n"
+                    "## 판단 규칙\n환불 금액이 50000원을 초과하면 메시지에 '매니저 승인 필요'를 명시한다.\n"
+                    "## 입력/출력\n입력: refund_id(요청 ID), amount(금액, 원), channel(Slack 채널)\n"
+                    "출력: message_ts(발송 메시지 타임스탬프)\n"
+                    "## 예시\n정상: 35000원 요청 → 채널에 요약 통보.\n"
+                    "엣지: 120000원 요청 → 메시지에 '매니저 승인 필요' 표기 후 통보.\n"
+                    "## 제약·주의\n환불 사유에 개인정보가 있으면 원문 노출 금지 — 사유 분류만 표기한다. "
+                    "발송 실패 시 1회 재시도 후 인사팀 채널로 에스컬레이션한다."
                 ),
                 "composer_instructions": (
                     "## 필수 노드\n이 스킬을 워크플로우에 쓰려면 다음 노드를 배치한다:\n"

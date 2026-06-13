@@ -671,3 +671,74 @@ async def test_extract_detail_embedding_failure_with_only_nonrelevant_chunks_no_
 
     # 크래시 없이 detail 결과 산출(컨텍스트 블록이 비어도 LLM 호출은 진행).
     assert isinstance(frames[-1], ResultFrame)
+
+
+# ----------------------------------------------------------------------
+# SKILL.md 품질 자기개선 루프 (draft→critique→refine, instruction_refiner)
+# ----------------------------------------------------------------------
+
+
+class _FakeRefiner:
+    """SkillInstructionRefiner mock — refine 호출 기록 + 고정 반환/passthrough."""
+
+    def __init__(self, returns: str | None = None) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self._returns = returns
+
+    async def refine(self, skill_name: str, draft_instructions: str) -> str:
+        self.calls.append((skill_name, draft_instructions))
+        return self._returns if self._returns is not None else draft_instructions
+
+
+def _uc_with_refiner(llm: _FakeLLM, refiner: _FakeRefiner) -> BuildFromSOPUseCase:
+    return BuildFromSOPUseCase(
+        create_draft_skill=_FakeCreateDraftSkill(),
+        embedder=_FakeEmbedder(),
+        llm=llm,
+        instruction_refiner=refiner,
+    )
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_refines_instructions():
+    draft_md = "## When to use\n얕은 초안"
+    refined_md = "# 환불 알림\n## 목적\n...\n## 처리 절차\n1. 확인한다"
+    llm = _FakeLLM(structured_response=_make_detail(instructions=draft_md))
+    refiner = _FakeRefiner(returns=refined_md)
+
+    frames = [f async for f in _uc_with_refiner(llm, refiner).extract_detail(
+        uuid4(), _make_document(), _meta_dict()
+    )]
+
+    # 결과 instructions는 초안이 아니라 refine 산출
+    detail = frames[-1].payload["skill_detail"]
+    assert detail["instructions"] == refined_md
+    # refiner는 스킬명 + 초안을 받았다
+    assert refiner.calls == [("고객 문의 Slack 알림", draft_md)]
+    # 진행 프레임에 refine 표식
+    names = {f.agent_node_name for f in frames if isinstance(f, AgentNodeFrame)}
+    assert any(n.startswith("skills_builder.sop.refine_instructions") for n in names)
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_refiner_passthrough_keeps_draft():
+    # refiner가 초안을 그대로 반환(폴백 상황 모사)하면 결과도 초안 유지
+    draft_md = "## When to use\n초안 유지"
+    llm = _FakeLLM(structured_response=_make_detail(instructions=draft_md))
+    refiner = _FakeRefiner()  # passthrough
+
+    frames = [f async for f in _uc_with_refiner(llm, refiner).extract_detail(
+        uuid4(), _make_document(), _meta_dict()
+    )]
+
+    assert frames[-1].payload["skill_detail"]["instructions"] == draft_md
+
+
+def test_build_prompt_detail_requests_nine_section_runbook():
+    # 프롬프트가 9섹션 고품질 런북을 요청 — 얕은 3섹션 대체(품질 고도화)
+    prompt = BuildFromSOPUseCase._build_prompt_detail("sop.pdf", [], [], _make_meta())
+    assert "## 처리 절차" in prompt
+    assert "## 판단 규칙" in prompt
+    assert "## 제약·주의" in prompt
+    # 모호어 금지 같은 품질 규칙도 주입
+    assert "모호어" in prompt
