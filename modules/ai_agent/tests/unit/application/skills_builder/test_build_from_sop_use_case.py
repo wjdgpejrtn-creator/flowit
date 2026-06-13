@@ -766,6 +766,21 @@ def test_build_prompt_instructions_requests_nine_section_runbook():
     assert "모호어" in prompt
 
 
+def test_prompt_fewshot_switches_by_category():
+    # ai 카테고리(문서작성) 메타 → 문서 exemplar, action → 알림 exemplar (편향 완화)
+    ai_meta = _make_meta(node_type="weekly_report", name="주간 보고서", category="ai", risk_level="Low")
+    a_struct = BuildFromSOPUseCase._build_prompt_structured("sop.pdf", [], [], ai_meta)
+    a_instr = BuildFromSOPUseCase._build_prompt_instructions("sop.pdf", [], [], ai_meta)
+    # 문서 exemplar 신호(보고서 작성 노드 + 문서 산출 노드), 환불-Slack 예시는 없어야
+    assert "weekly_report_compose" in a_struct and "google_docs_write" in a_struct
+    assert "refund_request_slack_alert" not in a_struct
+    assert "주간 업무 보고서" in a_instr and "독자" in a_instr
+
+    # action 카테고리는 기존 알림 exemplar 유지
+    act_struct = BuildFromSOPUseCase._build_prompt_structured("sop.pdf", [], [], _make_meta())
+    assert "slack_post_message" in act_struct and "refund_request_slack_alert" in act_struct
+
+
 # ----------------------------------------------------------------------
 # 카탈로그 그라운딩 — composer_instructions 실행가능성 (환각 node_type 차단)
 # ----------------------------------------------------------------------

@@ -94,6 +94,7 @@ from ....domain.entities.skill_node import SkillNode
 from ....domain.ports.llm_port import LLMPort
 from ....domain.services.skeleton_assembler import SkeletonAssembler
 from ....domain.services.skeleton_composer_mapper import SkeletonComposerMapper
+from .skill_fewshots import instructions_fewshot, select_fewshot, structured_fewshot
 from .skill_instruction_refiner import (
     SKILL_MD_QUALITY_RULES,
     SKILL_MD_SECTIONS,
@@ -856,83 +857,9 @@ class BuildFromSOPUseCase:
             "출력 전체는 **반드시 JSON** 형식입니다 (XML 금지). composer_instructions 값은 markdown 문자열입니다."
         )
 
-        # 고품질 레퍼런스 few-shot — 모델이 모방하는 '천장'이므로 의도적으로 깊고 구체적으로 쓴다.
-        # inputs/outputs는 description+예시+enum/default까지, composer_instructions는 실제 node_type으로.
-        few_shot_example = {
-            "input_meta": {
-                "node_type": "refund_request_slack_alert",
-                "name": "환불 요청 매니저 알림",
-                "description": "환불·반품 요청이 접수됐을 때 사용. 요청 핵심을 정규화해 담당 매니저 채널에 통보한다",
-                "category": "action",
-                "risk_level": "Medium",
-            },
-            "expected_output": {
-                "inputs": {
-                    "type": "object",
-                    "properties": {
-                        "refund_id": {
-                            "type": "string",
-                            "description": "환불 요청 건의 고유 ID. 중복 발송 방지 멱등키로도 쓰인다. 예: 'RF-10293'",
-                        },
-                        "amount": {"type": "integer", "description": "환불 금액(KRW 정수). 예: 35000"},
-                        "reason": {
-                            "type": "string",
-                            "enum": ["defective", "wrong_item", "change_of_mind"],
-                            "description": "환불 사유 코드. defective=불량, wrong_item=오배송, change_of_mind=단순변심",
-                        },
-                        "customer_name": {
-                            "type": "string",
-                            "description": "고객 표시명. PII이므로 메시지에는 마스킹해 노출. 예: '김**'",
-                        },
-                        "channel": {
-                            "type": "string",
-                            "default": "#cs-refund",
-                            "description": "통보할 Slack 채널. 미지정 시 '#cs-refund'",
-                        },
-                        "requested_at": {
-                            "type": "string",
-                            "format": "date-time",
-                            "description": (
-                                "요청 시각(ISO 8601). 단순변심 7일 경과 판단에 사용. "
-                                "예: '2026-06-13T09:30:00+09:00'"
-                            ),
-                        },
-                    },
-                    "required": ["refund_id", "amount", "reason"],
-                },
-                "outputs": {
-                    "type": "object",
-                    "properties": {
-                        "message_ts": {
-                            "type": "string",
-                            "description": (
-                                "발송된 Slack 메시지 타임스탬프(후속 스레드 참조용). 예: '1718241000.123456'"
-                            ),
-                        },
-                        "require_approval": {
-                            "type": "boolean",
-                            "description": "금액 임계 초과 등으로 매니저 승인이 필요한 건인지",
-                        },
-                        "skipped": {
-                            "type": "boolean",
-                            "description": "동일 refund_id로 이미 통보돼 발송을 건너뛰었는지",
-                        },
-                    },
-                },
-                "required_connections": ["slack"],
-                "service_type": "slack",
-                "composer_instructions": (
-                    "## 필수 노드\n이 스킬을 워크플로우에 쓰려면 다음을 순서대로 배치한다:\n"
-                    "1. `webhook_trigger` (category=trigger) — "
-                    "환불 요청 폼/웹훅에서 refund_id·amount·reason을 수신한다.\n"
-                    "2. `if_condition` (category=condition) — amount > 50000 으로 승인 필요 여부를 가른다.\n"
-                    "3. `slack_post_message` (category=action, service=slack) — 매니저 채널에 통보한다.\n"
-                    "## 연결\n- `webhook_trigger`의 refund_id·amount·reason → `if_condition` 입력.\n"
-                    "- `if_condition`의 분기 결과 + 트리거 데이터 → `slack_post_message` 입력.\n"
-                    "- 고액(true) 경로의 메시지에는 승인 버튼을 포함하도록 구성한다."
-                ),
-            },
-        }
+        # 고품질 레퍼런스 few-shot — 모델이 모방하는 '천장'. meta.category로 도메인에 맞는 예시 선택
+        # (ai/output/transform→문서작성, 나머지→알림/연동). 단일 환불 예시로 모든 스킬이 수렴하던 편향 완화.
+        few_shot_example = structured_fewshot(select_fewshot(meta.category))
 
         output_schema = {
             "type": "object",
@@ -988,51 +915,9 @@ class BuildFromSOPUseCase:
             "출력은 **반드시 JSON** 객체 1개 — instructions 필드에 SKILL.md markdown 본문만 담으세요."
         )
 
-        few_shot_example = {
-            "input_meta": {
-                "node_type": "refund_request_slack_alert",
-                "name": "환불 요청 매니저 알림",
-                "description": "환불·반품 요청이 접수됐을 때 사용. 요청 핵심을 정규화해 담당 매니저 채널에 통보한다",
-                "category": "action",
-                "risk_level": "Medium",
-            },
-            "expected_output": {
-                "instructions": (
-                    "# 환불 요청 매니저 알림\n"
-                    "## 목적\n환불·반품 요청이 접수되는 즉시 담당 매니저가 SLA 안에 인지·판단하도록, 요청 핵심을 "
-                    "정규화해 지정 Slack 채널에 통보한다.\n"
-                    "## 언제 사용하나\n환불·반품 요청 폼 또는 이메일이 접수됐을 때 사용한다. 사용 금지: 단순 배송 조회·"
-                    "교환 문의(별도 흐름), 이미 통보된 동일 refund_id의 재요청.\n"
-                    "## 사전 조건\n- 입력: refund_id·amount·reason(필수), customer_name·channel·requested_at(선택)\n"
-                    "- 외부 연결: slack(chat:write 스코프)\n- 권한: 대상 채널에 봇이 초대돼 게시 가능해야 함\n"
-                    "## 처리 절차\n"
-                    "1. refund_id로 기존 통보 여부를 조회한다 — 이미 통보됐으면 skipped=true로 즉시 종료한다.\n"
-                    "2. amount를 KRW 정수로 정규화하고 reason을 사유 코드로 검증한다.\n"
-                    "3. 판단 규칙으로 require_approval을 산출한다.\n"
-                    "4. Slack Block Kit 메시지를 구성한다 — 헤더(요청ID·금액), 본문(사유·마스킹 고객명·요청시각), "
-                    "require_approval이면 '매니저 승인 필요' 배지와 [승인]/[반려] 버튼을 추가한다.\n"
-                    "5. channel(미지정 시 '#cs-refund')에 chat.postMessage로 발송하고 "
-                    "반환된 ts를 message_ts에 기록한다.\n"
-                    "## 판단 규칙\n"
-                    "- amount > 50000 → require_approval=true('매니저 승인 필요' 배지+버튼).\n"
-                    "- amount ≤ 50000 → require_approval=false('자동 처리 가능' 표기).\n"
-                    "- reason=change_of_mind 이고 requested_at이 구매 후 7일 초과 → "
-                    "본문에 '환불 정책 위반 가능' 경고를 덧붙인다.\n"
-                    "## 입력/출력\n입력: refund_id(멱등키), amount(원), reason(사유 코드), customer_name(마스킹), "
-                    "channel, requested_at / 출력: message_ts, require_approval, skipped\n"
-                    "## 예시\n"
-                    "- 정상: {refund_id:'RF-10293', amount:35000, reason:'defective'} → '자동 처리 가능' 메시지 발송, "
-                    "{message_ts:'1718241000.123456', require_approval:false, skipped:false}\n"
-                    "- 엣지(고액): amount=120000 → '매니저 승인 필요' 배지+버튼 포함 발송, require_approval=true\n"
-                    "- 엣지(중복): 동일 refund_id 재요청 → 발송 안 함, {skipped:true}\n"
-                    "## 제약·주의\n"
-                    "- 고객 이메일·전화·전체 실명은 PII — 메시지 본문 평문 노출 금지(이름은 마스킹, 연락처는 제외).\n"
-                    "- 금액은 KRW 정수, 시각은 ISO 8601로 표기한다.\n"
-                    "- refund_id를 멱등키로 사용해 중복 발송을 막는다.\n"
-                    "- 발송 실패 시 1회 재시도하고, 그래도 실패하면 '#cs-ops' 채널로 에스컬레이션한다."
-                ),
-            },
-        }
+        # 카테고리별 9섹션 레퍼런스(천장) — ai/output/transform은 문서작성(doc-coauthoring +
+        # brand-guidelines 원칙), 나머지는 알림/연동 예시. Call A와 동일 exemplar에서 instructions만.
+        few_shot_example = instructions_fewshot(select_fewshot(meta.category))
 
         output_schema = {
             "type": "object",
