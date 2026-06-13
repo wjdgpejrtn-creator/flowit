@@ -141,6 +141,6 @@ def test_end_to_end_assemble_then_map():
     assert mapping.skeleton_name == "scheduled_pipeline"
     # 발화의 도메인 노드가 정밀 BINDS에 결정적으로 포함
     assert "google_sheets_read" in mapping.bound_node_types
-    assert "anthropic_chat" in mapping.bound_node_types
+    assert "gemma_chat" in mapping.bound_node_types
     assert "slack_post_message" in mapping.bound_node_types
     assert "schedule_trigger" in mapping.bound_node_types

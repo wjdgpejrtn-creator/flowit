@@ -44,7 +44,7 @@ _SOURCES: tuple[str, ...] = (
     "graphql",
     "file_read",
 )
-_AI: tuple[str, ...] = ("anthropic_chat", "gemma_chat")
+_AI: tuple[str, ...] = ("gemma_chat", "anthropic_chat")
 # scorer = 생성물을 기준에 따라 채점하는 ai 노드. quality_loop에서 generator와 gate(if_condition)
 # 사이에 들어가 score(number)를 내고, gate가 그 점수를 gte 비교한다(#438 §6.6 — 점수 내는 노드 부재
 # 갭 해소). condition이 아니라 ai 노드이므로 _GATES와 분리.
@@ -135,7 +135,7 @@ SKELETONS: tuple[Skeleton, ...] = (
                      default_node_type="manual_trigger", candidates=_TRIGGERS),
             SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
             SlotSpec(SlotRole.TRANSFORM, required=True, cardinality="one",
-                     default_node_type="anthropic_chat", candidates=_AI),
+                     default_node_type="gemma_chat", candidates=_AI),
             SlotSpec(SlotRole.SCORER, required=True, cardinality="one",
                      default_node_type="llm_judge", candidates=_SCORERS),
             SlotSpec(SlotRole.GATE, required=True, cardinality="one",
@@ -156,7 +156,7 @@ SKELETONS: tuple[Skeleton, ...] = (
                      default_node_type="manual_trigger", candidates=_TRIGGERS),
             SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
             SlotSpec(SlotRole.TRANSFORM, required=True, cardinality="one",
-                     default_node_type="anthropic_chat", candidates=_AI),
+                     default_node_type="gemma_chat", candidates=_AI),
             SlotSpec(SlotRole.ROUTER, required=True, cardinality="one",
                      default_node_type="if_condition", candidates=_ROUTERS),
             SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
@@ -203,7 +203,7 @@ SKELETONS: tuple[Skeleton, ...] = (
             SlotSpec(SlotRole.SPLITTER, required=True, cardinality="one",
                      default_node_type="loop_list", candidates=_SPLITTERS),
             SlotSpec(SlotRole.TRANSFORM, required=True, cardinality="one",
-                     default_node_type="anthropic_chat", candidates=_AI),
+                     default_node_type="gemma_chat", candidates=_AI),
             SlotSpec(SlotRole.MERGER, required=True, cardinality="one",
                      default_node_type="merge_branch", candidates=_MERGERS),
             SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
@@ -241,7 +241,7 @@ SKELETONS: tuple[Skeleton, ...] = (
                      default_node_type="manual_trigger", candidates=_TRIGGERS),
             SlotSpec(SlotRole.SOURCE, required=False, cardinality="many", candidates=_SOURCES),
             SlotSpec(SlotRole.TRANSFORM, required=True, cardinality="one",
-                     default_node_type="anthropic_chat", candidates=_AI),
+                     default_node_type="gemma_chat", candidates=_AI),
             SlotSpec(SlotRole.ROUTER, required=True, cardinality="one",
                      default_node_type="if_condition", candidates=_ROUTERS),
             SlotSpec(SlotRole.TERMINAL, required=True, cardinality="one",
