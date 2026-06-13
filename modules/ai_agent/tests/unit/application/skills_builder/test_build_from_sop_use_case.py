@@ -14,6 +14,7 @@ import pytest
 from common_schemas import Chunk, ContentBlock, DocumentBlock, FileMeta, ParserMeta
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
+from pydantic import BaseModel, ConfigDict, Field
 
 from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
     _DETAIL_INPUT_TOKEN_BUDGET,
@@ -21,7 +22,6 @@ from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
     BuildFromSOPUseCase,
     _batch_blocks_by_budget,
     _ExtractedInstructions,
-    _ExtractedSkillNodeDetail,
     _ExtractedSkillNodeMeta,
     _ExtractedSkillNodeMetaList,
     _ExtractedSkillStructured,
@@ -33,6 +33,24 @@ from ai_agent.domain.ports.llm_port import LLMPort
 # ----------------------------------------------------------------------
 # Fakes (inline 헬퍼 — conftest 미사용 정책)
 # ----------------------------------------------------------------------
+
+
+class _ExtractedSkillNodeDetail(BaseModel):
+    """테스트 전용 combined 모델 — A/B 분리 전 단일 detail 응답 형태.
+
+    프로덕션은 `_ExtractedSkillStructured`(Call A) + `_ExtractedInstructions`(Call B)로 분리됐다.
+    이 모델은 `_FakeLLM`이 요청 스키마에 맞춰 A/B 서브응답으로 적응 변환하는 호환 shim 용도로만
+    남긴다(기존 `_make_detail` 테스트 무회귀). 프로덕션 코드에는 두지 않는다(PR #509 리뷰 LOW #1).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    outputs: dict[str, Any] = Field(default_factory=dict)
+    required_connections: list[str] = Field(default_factory=list)
+    service_type: str | None = None
+    instructions: str = Field(min_length=1)
+    composer_instructions: str = ""
 
 
 class _FakeCreateDraftSkill:

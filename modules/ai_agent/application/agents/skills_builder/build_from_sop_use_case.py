@@ -253,28 +253,6 @@ class _ExtractedSkillNodeMetaList(BaseModel):
     skill_node_metas: list[_ExtractedSkillNodeMeta]
 
 
-class _ExtractedSkillNodeDetail(BaseModel):
-    """2차 LLM 추출 — 선택된 메타에 대한 detail 필드. 폼 prefill용.
-
-    옵션 1의 2차 응답 스키마. inputs/outputs JSON Schema + instructions/composer_instructions markdown 등
-    토큰 무거운 필드.
-    1차에서 받은 메타와 frontend가 합쳐서 사용자 폼에 prefill한다.
-
-    `instructions`는 ADR-0017 이중 저장 중 SkillDocument(SKILL.md) 지침서 본문 —
-    confirm 단계에서 GCS 저장된다(use case 경유).
-    `composer_instructions`는 ADR-0024 2-md 중 COMPOSER.md 본문 — 워크플로우 생성 시 drafter가
-    노드 구성에 주입하는 "이 스킬을 쓰려면 어떤 노드를 엮어야 하는가" 지침(#372 결함 A 해소). optional.
-    """
-    model_config = ConfigDict(frozen=True)
-
-    inputs: dict[str, Any] = Field(default_factory=dict)
-    outputs: dict[str, Any] = Field(default_factory=dict)
-    required_connections: list[str] = Field(default_factory=list)
-    service_type: str | None = None
-    instructions: str = Field(min_length=1)  # SkillDocument(SKILL.md) markdown body — ADR-0017
-    composer_instructions: str = ""          # SkillDocument(COMPOSER.md) body — ADR-0024 (optional)
-
-
 class _ExtractedSkillStructured(BaseModel):
     """Call A 응답 — 구조 필드(instructions 제외). 단일 detail 호출이 few-shot+출력으로 8192 ctx를
     초과하던 문제 해소를 위해 A(구조)/B(지침서)로 분리(ADR-0028 후속).
