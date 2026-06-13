@@ -22,8 +22,16 @@ def test_document_categories_select_document_exemplar():
         assert ex.input_meta["node_type"] == "weekly_report_compose", cat
 
 
+def test_condition_selects_branch_exemplar():
+    assert select_fewshot("condition").input_meta["node_type"] == "pto_request_gate"
+
+
+def test_trigger_selects_trigger_exemplar():
+    assert select_fewshot("trigger").input_meta["node_type"] == "inventory_low_stock_trigger"
+
+
 def test_action_and_others_select_action_exemplar():
-    for cat in ("action", "integration", "condition", "trigger", "utility"):
+    for cat in ("action", "integration", "utility"):
         ex = select_fewshot(cat)
         assert ex.input_meta["node_type"] == "refund_request_slack_alert", cat
 
@@ -43,14 +51,12 @@ def _node_refs(ex) -> set[str]:
     return {r for r in refs if "_" in r and r not in non_node}
 
 
-def test_document_exemplar_composer_refs_are_real_catalog_nodes():
-    # 문서 exemplar의 composer_instructions가 실제 카탈로그 node_type만 참조(환각 차단)
-    unknown = _node_refs(select_fewshot("ai")) - set(EXECUTABLE_NODE_TYPES)
-    assert unknown == set(), f"환각 node_type: {unknown}"
-
-
-def test_action_exemplar_composer_refs_are_real_catalog_nodes():
-    assert _node_refs(select_fewshot("action")) - set(EXECUTABLE_NODE_TYPES) == set()
+def test_all_exemplars_composer_refs_are_real_catalog_nodes():
+    # 모든 exemplar의 composer_instructions가 실제 카탈로그 node_type만 참조(환각 차단)
+    for cat in ("ai", "condition", "trigger", "action"):
+        ex = select_fewshot(cat)
+        unknown = _node_refs(ex) - set(EXECUTABLE_NODE_TYPES)
+        assert unknown == set(), f"{cat}({ex.input_meta['node_type']}) 환각 node_type: {unknown}"
 
 
 def test_structured_fewshot_shape():

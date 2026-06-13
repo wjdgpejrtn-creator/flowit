@@ -1,11 +1,13 @@
 """카테고리별 고품질 few-shot 레퍼런스 — 모델이 모방하는 '천장'.
 
 단일 환불-Slack 예시만 있으면 모든 스킬이 알림/action 형태로 수렴한다. `meta.category`로 도메인에
-맞는 예시를 골라 넣어 편향을 줄인다(토큰 비용은 예시 1개로 동일). 두 종류:
+맞는 예시를 골라 넣어 편향을 줄인다(토큰 비용은 예시 1개로 동일). 네 종류:
   - 문서 작성(document): ai/output/transform — 가장 흔한 use case. Anthropic 공개 스킬
     `doc-coauthoring`(독자·목적·템플릿 우선 → 섹션별 구성 → 독자 검증)과 `brand-guidelines`(타이포·
     서식 위계)의 전문가 원칙을 9섹션 런북으로 녹였다.
-  - 알림/연동(action): action/integration/condition/trigger/utility — 환불→Slack 알림(외부 호출·분기).
+  - 분기(condition): 휴가 신청 승인 분기 — 정책 기준 자동/수동 승인·반려(임계·잔여 비교).
+  - 트리거(trigger): 재고 부족 임계 감지 — 정기 점검으로 후속 워크플로우 시작(빈 실행 방지).
+  - 알림/연동(action): action/integration/utility(기본) — 환불→Slack 알림(외부 호출).
 
 composer_instructions의 node_type은 전부 실제 카탈로그(EXECUTABLE_NODE_TYPES)에 존재해야 한다
 (환각 차단) — 두 예시 모두 실노드만 참조한다.
@@ -146,9 +148,9 @@ _DOCUMENT = Exemplar(
     ),
 )
 
-# ── 알림/연동(action) — 외부 호출·분기. 기본값(document 외 전 카테고리) ───────────────
+# ── 알림/연동(action) — 외부 호출. 기본값(다른 family 미매칭 카테고리 전부) ────────────
 _ACTION = Exemplar(
-    families=frozenset({"action", "integration", "condition", "trigger", "utility"}),
+    families=frozenset({"action", "integration", "utility"}),
     input_meta={
         "node_type": "refund_request_slack_alert",
         "name": "환불 요청 매니저 알림",
@@ -253,7 +255,208 @@ _ACTION = Exemplar(
     ),
 )
 
-_EXEMPLARS = (_DOCUMENT, _ACTION)
+# ── 분기(condition) — 정책 기준 자동/수동 승인·반려 분기 ──────────────────────────
+_CONDITION = Exemplar(
+    families=frozenset({"condition"}),
+    input_meta={
+        "node_type": "pto_request_gate",
+        "name": "휴가 신청 승인 분기",
+        "description": (
+            "휴가 신청이 접수됐을 때 사용. 휴가 종류·잔여 연차·신청 일수로 자동승인/매니저승인/"
+            "반려를 일관되게 분기한다"
+        ),
+        "category": "condition",
+        "risk_level": "Medium",
+    },
+    inputs={
+        "type": "object",
+        "properties": {
+            "leave_type": {
+                "type": "string",
+                "enum": ["연차", "반차", "병가"],
+                "description": "휴가 종류. 분기 규칙의 1차 기준",
+            },
+            "days_requested": {
+                "type": "number",
+                "description": "신청 일수. 반차는 0.5로 센다. 예: 3",
+            },
+            "remaining_days": {
+                "type": "number",
+                "description": "신청자의 잔여 연차(일). 자동 반려 판단에 사용. 예: 10",
+            },
+            "requester": {"type": "string", "description": "신청자 표시명. 예: '김**'"},
+            "start_date": {
+                "type": "string",
+                "format": "date",
+                "description": "휴가 시작일(YYYY-MM-DD)",
+            },
+        },
+        "required": ["leave_type", "days_requested", "remaining_days"],
+    },
+    outputs={
+        "type": "object",
+        "properties": {
+            "decision": {
+                "type": "string",
+                "enum": ["auto_approve", "manager_approval", "reject"],
+                "description": "분기 결과",
+            },
+            "reason": {"type": "string", "description": "분기 근거 한 줄(감사 추적용)"},
+            "notify_targets": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "통보 대상. 예: ['매니저', '인사팀']",
+            },
+        },
+    },
+    required_connections=[],
+    service_type=None,
+    composer_instructions=(
+        "## 필수 노드\n이 스킬을 워크플로우에 쓰려면 다음을 배치한다:\n"
+        "1. `manual_trigger` 또는 `webhook_trigger` (category=trigger) — 휴가 신청 폼 데이터를 수신한다.\n"
+        "2. `pto_request_gate` (category=condition) — 종류·잔여·일수로 승인 여부를 분기한다.\n"
+        "3. `slack_post_message` (category=action) — manager_approval 경로에서 매니저에게 승인 요청.\n"
+        "4. `gmail_send` (category=action) — auto_approve/reject 결과를 신청자에게 통지.\n"
+        "## 연결\n- 트리거의 leave_type·days_requested·remaining_days → `pto_request_gate` 입력.\n"
+        "- `pto_request_gate`의 decision 분기 → manager_approval은 `slack_post_message`, "
+        "auto_approve/reject는 `gmail_send`로 라우팅한다."
+    ),
+    instructions=(
+        "# 휴가 신청 승인 분기\n"
+        "## 목적\n휴가 신청을 회사 정책 기준으로 일관되게 자동승인·매니저승인·반려로 분기해 "
+        "처리 속도와 형평성을 확보한다.\n"
+        "## 언제 사용하나\n휴가 신청 폼이 접수됐을 때 사용한다. 사용 금지: 신청 정보가 확정되지 않은 시점, "
+        "급여·인사평가 관련 분기.\n"
+        "## 사전 조건\n- 입력: leave_type·days_requested·remaining_days(필수), requester·start_date(선택)\n"
+        "- 외부 연결: 없음\n- 권한: 없음(순수 판단 노드)\n"
+        "## 처리 절차\n"
+        "1. leave_type을 연차/반차/병가 중 하나로 검증한다(아니면 보류 신호).\n"
+        "2. remaining_days와 days_requested를 비교한다(반차는 0.5일로 계산).\n"
+        "3. 판단 규칙으로 decision을 산출한다.\n"
+        "4. decision에 따라 notify_targets(통보 대상)를 정한다.\n"
+        "5. reason에 분기 근거를 한 줄로 남긴다(감사 추적).\n"
+        "## 판단 규칙\n"
+        "- leave_type == '병가' → decision=auto_approve(사전 승인 불요), notify_targets=['매니저', '인사팀'].\n"
+        "- (연차/반차) remaining_days < days_requested → decision=reject, reason='잔여 연차 부족'.\n"
+        "- (연차/반차) 잔여가 충분 → decision=manager_approval, notify_targets=['매니저'].\n"
+        "## 입력/출력\n입력: leave_type, days_requested, remaining_days, requester, start_date / "
+        "출력: decision, reason, notify_targets\n"
+        "## 예시\n"
+        "- 정상(연차): {leave_type:'연차', days_requested:3, remaining_days:10} → "
+        "manager_approval, 매니저 통보.\n"
+        "- 엣지(잔여 부족): {leave_type:'연차', days_requested:5, remaining_days:2} → "
+        "reject, reason='잔여 연차 부족'.\n"
+        "- 엣지(병가): {leave_type:'병가', days_requested:2, remaining_days:0} → "
+        "auto_approve, 매니저·인사팀 통보.\n"
+        "## 제약·주의\n"
+        "- 반차는 days_requested를 0.5로 계산한다.\n"
+        "- 잔여 연차(remaining_days)를 입력 없이 추정하지 않는다 — 없으면 반려 대신 보류로 처리한다.\n"
+        "- 분기 사유(reason)를 반드시 남겨 감사 가능하게 한다.\n"
+        "- 병가 사유 등 의료 정보는 PII — decision/통보 본문에 사유 원문을 노출하지 않는다."
+    ),
+)
+
+# ── 트리거(trigger) — 정기 점검·임계 감지로 후속 워크플로우 시작 ─────────────────────
+_TRIGGER = Exemplar(
+    families=frozenset({"trigger"}),
+    input_meta={
+        "node_type": "inventory_low_stock_trigger",
+        "name": "재고 부족 임계 감지 트리거",
+        "description": (
+            "정기적으로 재고를 점검해 임계 미만 품목이 생겼을 때 후속 보충 워크플로우를 자동 시작할 때 사용"
+        ),
+        "category": "trigger",
+        "risk_level": "Low",
+    },
+    inputs={
+        "type": "object",
+        "properties": {
+            "source": {
+                "type": "string",
+                "description": "재고 데이터 소스(구글 시트 URL 또는 재고 API 엔드포인트). 예: 시트 'inventory'",
+            },
+            "threshold": {
+                "type": "integer",
+                "default": 10,
+                "description": "부족으로 판단할 임계 수량. 미만이면 부족 품목. 예: 10",
+            },
+            "poll_schedule": {
+                "type": "string",
+                "default": "daily 09:00",
+                "description": "점검 주기(cron 또는 'daily HH:MM'). 소스 갱신 주기보다 촘촘하지 않게",
+            },
+            "sku_filter": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "(선택) 점검 대상 SKU 목록. 비우면 전체 점검. 예: ['SKU-A','SKU-B']",
+            },
+        },
+        "required": ["source", "threshold"],
+    },
+    outputs={
+        "type": "object",
+        "properties": {
+            "triggered": {
+                "type": "boolean",
+                "description": "임계 미만 품목이 하나라도 있는지(true일 때만 후속 발화)",
+            },
+            "low_items": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "임계 미만 품목 목록. 예: [{'sku':'SKU-A','qty':4}]",
+            },
+            "checked_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "점검 시각(ISO 8601)",
+            },
+        },
+    },
+    required_connections=[],
+    service_type=None,
+    composer_instructions=(
+        "## 필수 노드\n이 스킬은 워크플로우의 **시작점(트리거)** 으로 배치한다:\n"
+        "1. `inventory_low_stock_trigger` (category=trigger) — 이 스킬. poll_schedule 주기로 재고를 "
+        "점검하며 내부적으로 `schedule_trigger`/`api_poll_trigger`로 발화하고 "
+        "`google_sheets_read`/`http_request`로 재고를 조회한다.\n"
+        "2. `if_condition` (category=condition) — triggered=true일 때만 후속을 진행한다.\n"
+        "3. `slack_post_message` (category=action) — 발주 담당 채널에 부족 품목을 알린다.\n"
+        "## 연결\n- 트리거의 low_items → `if_condition`을 거쳐 `slack_post_message` 본문으로 매핑한다.\n"
+        "- triggered=false면 후속 노드를 실행하지 않는다(빈 실행 방지)."
+    ),
+    instructions=(
+        "# 재고 부족 임계 감지 트리거\n"
+        "## 목적\n재고를 정기 점검해 임계 미만 품목이 생기면 후속 보충(발주·알림) 워크플로우를 "
+        "자동으로 시작한다.\n"
+        "## 언제 사용하나\n정기 재고 모니터링이 필요할 때 사용한다. 사용 금지: 1회성 수동 조회(트리거 불필요), "
+        "실시간 POS 연동(별도 흐름).\n"
+        "## 사전 조건\n- 입력: source·threshold(필수), poll_schedule·sku_filter(선택)\n"
+        "- 외부 연결: 재고 소스 접근(구글 시트 또는 재고 API)\n- 권한: 소스 읽기 권한\n"
+        "## 처리 절차\n"
+        "1. poll_schedule 주기에 따라 발화한다(기본 매일 09:00).\n"
+        "2. source에서 현재 재고를 조회한다(sku_filter가 있으면 해당 품목만).\n"
+        "3. 각 품목 수량을 threshold와 비교한다.\n"
+        "4. 임계 미만 품목을 low_items에 모은다.\n"
+        "5. low_items가 비어있지 않으면 triggered=true로 후속을 발화한다(비어있으면 발화하지 않음).\n"
+        "## 판단 규칙\n"
+        "- 현재 수량 < threshold → 부족 품목으로 분류한다.\n"
+        "- low_items가 비어있음 → triggered=false, 후속 워크플로우를 발화하지 않는다(빈 실행 방지).\n"
+        "- sku_filter가 비어있음 → 전체 SKU를 점검한다.\n"
+        "## 입력/출력\n입력: source, threshold, poll_schedule, sku_filter / "
+        "출력: triggered, low_items, checked_at\n"
+        "## 예시\n"
+        "- 정상: threshold=10, 'SKU-A' 현재 4개 → low_items=[{sku:'SKU-A', qty:4}], triggered=true.\n"
+        "- 엣지(전부 충분): 모든 품목 수량 ≥ threshold → triggered=false, 후속 미발화.\n"
+        "- 엣지(필터): sku_filter=['SKU-A'] → SKU-A만 점검한다.\n"
+        "## 제약·주의\n"
+        "- 재고 수치는 소스 값을 그대로 사용한다(추정·창작 금지).\n"
+        "- 임계 미만 품목이 없으면 후속을 발화하지 않아 빈 실행을 막는다(비용·멱등).\n"
+        "- poll_schedule은 소스 갱신 주기보다 촘촘하지 않게 설정한다(중복 알림 방지).\n"
+        "- checked_at(점검 시각)을 남겨 추적 가능하게 한다."
+    ),
+)
+
+_EXEMPLARS = (_DOCUMENT, _CONDITION, _TRIGGER, _ACTION)
 
 
 def select_fewshot(category: str) -> Exemplar:
