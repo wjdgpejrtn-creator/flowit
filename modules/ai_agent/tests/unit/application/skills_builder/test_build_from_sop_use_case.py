@@ -363,7 +363,7 @@ async def test_extract_detail_skeleton_match_overrides_composer_instructions():
     # 정밀 BINDS — 발화 도메인 노드가 결정적으로 포함
     assert "google_sheets_read" in detail["bound_node_types"]
     assert "slack_post_message" in detail["bound_node_types"]
-    assert "anthropic_chat" in detail["bound_node_types"]
+    assert "gemma_chat" in detail["bound_node_types"]
 
 
 @pytest.mark.asyncio

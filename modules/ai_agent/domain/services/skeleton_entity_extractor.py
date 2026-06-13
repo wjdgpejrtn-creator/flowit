@@ -84,7 +84,7 @@ _SOURCE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 # category=transform) 의도와 겹치는 광의어는 AI 노드 오삽입을 부르므로 제외 — 해당 디스앰비규에이션은
 # Phase 2 의미매칭 몫(#435 리뷰 LOW 대응). 슬롯 미충전 시 조립기가 처리(transform 대개 optional).
 _TRANSFORM_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("anthropic_chat", (
+    ("gemma_chat", (
         "요약", "요약본", "생성", "작성", "초안", "분석", "분류", "번역", "정리", "답변 작성",
         "추출해", "응답 생성", "내용 생성", "텍스트 생성", "보고서 작성", "재작성", "다듬", "교정", "평가해",
         # 계산/집계 의도 — 결정적 글루노드(number_calc)는 스켈레톤 슬롯 후보가 아니므로(_AI만),

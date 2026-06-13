@@ -36,7 +36,7 @@ def test_multiple_sources_ordered_by_appearance() -> None:
 
 def test_transform_dedup_to_single_ai() -> None:
     # 여러 변환 키워드("요약"+"분석")여도 동일 node_type은 1개로.
-    assert _X.extract("요약하고 분석해서").transforms == ("anthropic_chat",)
+    assert _X.extract("요약하고 분석해서").transforms == ("gemma_chat",)
 
 
 def test_ambiguous_transform_words_not_mapped_to_ai() -> None:
@@ -73,7 +73,7 @@ def test_full_e2e_bug_utterance() -> None:
     e = _X.extract("매주 월요일에 광고 시트 읽어서 요약해서 슬랙으로 보내줘")
     assert e.trigger == "schedule_trigger"
     assert e.sources == ("google_sheets_read",)
-    assert e.transforms == ("anthropic_chat",)
+    assert e.transforms == ("gemma_chat",)
     assert e.sinks == ("slack_post_message",)
     assert e.needs_gate is False
     assert e.has_branch is False
