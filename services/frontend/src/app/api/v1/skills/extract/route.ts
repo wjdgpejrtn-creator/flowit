@@ -31,6 +31,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       },
       body: await req.text(),
       cache: 'no-store',
+      // client abort를 upstream까지 전파 — 취소 후 SSE 추출이 서버 측 고아로 도는 것 차단.
+      signal: req.signal,
     });
   } catch (err) {
     // upstream(api) 다운/네트워크 오류 — 핸들러 throw 시 Next 500(HTML)이 내려가므로,
