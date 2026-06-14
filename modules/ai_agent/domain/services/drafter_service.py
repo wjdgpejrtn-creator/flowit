@@ -72,6 +72,9 @@ Fill in `parameters` for each node using:
    for which fields to fill. Fill every field listed in `required`; when the user did not specify
    a value, use the field's `default` if present.
 3. Use an empty string "" only for optional fields the user did not specify that have no default.
+4. VALUE HYGIENE: for fields that hold a structured value (email/recipient, URL, phone, ID), extract
+   ONLY the clean valid value — strip surrounding names, honorifics (e.g. Korean "님"), titles, or
+   labels. e.g. "...ㅇㅇ님 a@b.com에게 보내줘" → recipient = "a@b.com" (NOT "ㅇㅇ님a@b.com").
 
 Each candidate also carries `required_connections` — the external services it needs at runtime
 (e.g. ["google"], ["slack"], ["anthropic"], or [] for none). When multiple candidates satisfy the
@@ -132,6 +135,10 @@ never borrow a field that belongs to a different node. Choose a source node whos
 semantically the data the input needs; if none fits, leave "". Use a literal only for values the
 user gave inline.
 
+VALUE HYGIENE: for fields holding a structured value (email/recipient, URL, phone, ID), extract ONLY
+the clean valid value — strip names, honorifics (e.g. Korean "님"), titles, labels.
+e.g. "...ㅇㅇ님 a@b.com으로 바꿔줘" → "a@b.com" (NOT "ㅇㅇ님a@b.com").
+
 LOOPS (quality-gate / retry patterns): when adding or editing a loop cycle, use ref-based edges:
 - Forward: {"from_ref": "<generator_ref>", "to_ref": "<evaluator_ref>", "from_handle": "output", "to_handle": "input"}
 - BACK-EDGE (fail/retry): {"from_ref": "<evaluator_ref>", "to_ref": "<generator_ref>", "from_handle": "false", "to_handle": "input"}
@@ -181,6 +188,10 @@ _PARAM_FILL_SYSTEM_PROMPT = """You fill PARAMETERS for a workflow whose STRUCTUR
 Do NOT invent, add, remove, or reorder nodes/edges — structure is decided by code.
 For each node (identified by its stable "ref"), produce a `parameters` object whose keys match
 that node's input_schema, derived from the user's request.
+
+VALUE HYGIENE: for fields holding a structured value (email/recipient, URL, phone, ID), extract ONLY
+the clean valid value — strip names, honorifics (e.g. Korean "님"), titles, labels.
+e.g. "...ㅇㅇ님 a@b.com에게 보내줘" → recipient = "a@b.com" (NOT "ㅇㅇ님a@b.com").
 
 DATA FLOW — to use an upstream node's output, write "${<ref>.<field>}" where:
 - <ref> is an EARLIER node in the list (nodes are given in execution order), and

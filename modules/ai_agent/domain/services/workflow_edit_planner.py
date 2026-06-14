@@ -36,6 +36,9 @@ HARD RULES:
 5. target_ref/after_ref/before_ref MUST be refs that exist in CURRENT WORKFLOW.
 6. To feed a value from an upstream node's output, use "${<ref>.<output_field>}" where <output_field> is
    copied verbatim from that node's `outputs`. Otherwise use literal values.
+7. VALUE HYGIENE: when a parameter holds a structured value (email/recipient, URL, phone, ID), extract
+   ONLY the clean valid value — strip names, honorifics (e.g. Korean "님"), titles, labels.
+   "수신자를 ㅇㅇ님 a@b.com으로 바꿔줘" → set_param recipient = "a@b.com" (NOT "ㅇㅇ님a@b.com").
 """
 
 
