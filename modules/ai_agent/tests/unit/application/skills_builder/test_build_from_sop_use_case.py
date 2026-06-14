@@ -14,15 +14,18 @@ import pytest
 from common_schemas import Chunk, ContentBlock, DocumentBlock, FileMeta, ParserMeta
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
+from pydantic import BaseModel, ConfigDict, Field
 
 from ai_agent.application.agents.skills_builder.build_from_sop_use_case import (
     _DETAIL_INPUT_TOKEN_BUDGET,
     _METADATA_INPUT_TOKEN_BUDGET,
     BuildFromSOPUseCase,
     _batch_blocks_by_budget,
-    _ExtractedSkillNodeDetail,
+    _ExtractedInstructions,
     _ExtractedSkillNodeMeta,
     _ExtractedSkillNodeMetaList,
+    _ExtractedSkillStructured,
+    _hallucinated_node_refs,
     _select_blocks_for_meta,
 )
 from ai_agent.domain.ports.llm_port import LLMPort
@@ -30,6 +33,24 @@ from ai_agent.domain.ports.llm_port import LLMPort
 # ----------------------------------------------------------------------
 # Fakes (inline 헬퍼 — conftest 미사용 정책)
 # ----------------------------------------------------------------------
+
+
+class _ExtractedSkillNodeDetail(BaseModel):
+    """테스트 전용 combined 모델 — A/B 분리 전 단일 detail 응답 형태.
+
+    프로덕션은 `_ExtractedSkillStructured`(Call A) + `_ExtractedInstructions`(Call B)로 분리됐다.
+    이 모델은 `_FakeLLM`이 요청 스키마에 맞춰 A/B 서브응답으로 적응 변환하는 호환 shim 용도로만
+    남긴다(기존 `_make_detail` 테스트 무회귀). 프로덕션 코드에는 두지 않는다(PR #509 리뷰 LOW #1).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    outputs: dict[str, Any] = Field(default_factory=dict)
+    required_connections: list[str] = Field(default_factory=list)
+    service_type: str | None = None
+    instructions: str = Field(min_length=1)
+    composer_instructions: str = ""
 
 
 class _FakeCreateDraftSkill:
@@ -80,7 +101,20 @@ class _FakeLLM(LLMPort):
         self.received_max_tokens.append(max_tokens)
         if self._raise_on_call:
             raise self._raise_on_call
-        return self._structured_response
+        resp = self._structured_response
+        # A/B 분리 호환: 테스트가 combined _ExtractedSkillNodeDetail을 주면 요청 스키마에 맞춰
+        # 구조(Call A)/지침서(Call B) 서브응답으로 적응 변환한다(기존 _make_detail 테스트 무회귀).
+        if isinstance(resp, _ExtractedSkillNodeDetail):
+            if schema is _ExtractedSkillStructured:
+                return _ExtractedSkillStructured(
+                    inputs=resp.inputs, outputs=resp.outputs,
+                    required_connections=resp.required_connections,
+                    service_type=resp.service_type,
+                    composer_instructions=resp.composer_instructions,
+                )
+            if schema is _ExtractedInstructions:
+                return _ExtractedInstructions(instructions=resp.instructions)
+        return resp
 
 
 # ----------------------------------------------------------------------
@@ -284,11 +318,16 @@ async def test_extract_detail_returns_composer_instructions():
     assert detail["composer_instructions"].startswith("## 필수 노드")
 
 
-def test_build_prompt_detail_requests_composer_instructions():
-    # 프롬프트가 COMPOSER.md(composer_instructions) 합성을 요청 — 2-md 추출 계약(ADR-0024 D3)
-    prompt = BuildFromSOPUseCase._build_prompt_detail("sop.pdf", [], [], _make_meta())
+def test_build_prompt_structured_requests_composer_instructions_grounded():
+    # Call A 프롬프트가 COMPOSER.md(composer_instructions) 합성 요청 + 실제 카탈로그 그라운딩
+    prompt = BuildFromSOPUseCase._build_prompt_structured("sop.pdf", [], [], _make_meta())
     assert "composer_instructions" in prompt
     assert "COMPOSER.md" in prompt
+    # 카탈로그 그라운딩 — 실제 node_type 목록 + 환각 금지 지시
+    assert "available_node_types" in prompt
+    assert "slack_post_message" in prompt  # 실제 카탈로그 node_type
+    # instructions(9섹션)는 Call B로 분리 — A 프롬프트엔 없다
+    assert "## 처리 절차" not in prompt
 
 
 # ----------------------------------------------------------------------
@@ -324,7 +363,7 @@ async def test_extract_detail_skeleton_match_overrides_composer_instructions():
     # 정밀 BINDS — 발화 도메인 노드가 결정적으로 포함
     assert "google_sheets_read" in detail["bound_node_types"]
     assert "slack_post_message" in detail["bound_node_types"]
-    assert "anthropic_chat" in detail["bound_node_types"]
+    assert "gemma_chat" in detail["bound_node_types"]
 
 
 @pytest.mark.asyncio
@@ -367,8 +406,9 @@ async def test_extract_detail_progress_frames():
     frames = [f async for f in _make_uc(llm=llm).extract_detail(uuid4(), _make_document(), _meta_dict())]
     names = {f.agent_node_name for f in frames if isinstance(f, AgentNodeFrame)}
     assert "skills_builder.sop.parse_document" in names
-    # detail 노드명에 node_type 포함 (관측성)
-    assert any(n.startswith("skills_builder.sop.llm_extract_detail.") for n in names)
+    # A/B 분리: 구조 추출 + 지침서 추출 노드명에 node_type 포함 (관측성)
+    assert any(n.startswith("skills_builder.sop.llm_extract_structured.") for n in names)
+    assert any(n.startswith("skills_builder.sop.llm_extract_instructions.") for n in names)
 
 
 @pytest.mark.asyncio
@@ -671,3 +711,158 @@ async def test_extract_detail_embedding_failure_with_only_nonrelevant_chunks_no_
 
     # 크래시 없이 detail 결과 산출(컨텍스트 블록이 비어도 LLM 호출은 진행).
     assert isinstance(frames[-1], ResultFrame)
+
+
+# ----------------------------------------------------------------------
+# SKILL.md 품질 자기개선 루프 (draft→critique→refine, instruction_refiner)
+# ----------------------------------------------------------------------
+
+
+class _FakeRefiner:
+    """SkillInstructionRefiner mock — refine 호출 기록 + 고정 반환/passthrough."""
+
+    def __init__(self, returns: str | None = None) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self._returns = returns
+
+    async def refine(self, skill_name: str, draft_instructions: str) -> str:
+        self.calls.append((skill_name, draft_instructions))
+        return self._returns if self._returns is not None else draft_instructions
+
+
+def _uc_with_refiner(llm: _FakeLLM, refiner: _FakeRefiner) -> BuildFromSOPUseCase:
+    return BuildFromSOPUseCase(
+        create_draft_skill=_FakeCreateDraftSkill(),
+        embedder=_FakeEmbedder(),
+        llm=llm,
+        instruction_refiner=refiner,
+    )
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_refines_instructions():
+    draft_md = "## When to use\n얕은 초안"
+    refined_md = "# 환불 알림\n## 목적\n...\n## 처리 절차\n1. 확인한다"
+    llm = _FakeLLM(structured_response=_make_detail(instructions=draft_md))
+    refiner = _FakeRefiner(returns=refined_md)
+
+    frames = [f async for f in _uc_with_refiner(llm, refiner).extract_detail(
+        uuid4(), _make_document(), _meta_dict()
+    )]
+
+    # 결과 instructions는 초안이 아니라 refine 산출
+    detail = frames[-1].payload["skill_detail"]
+    assert detail["instructions"] == refined_md
+    # refiner는 스킬명 + 초안을 받았다
+    assert refiner.calls == [("고객 문의 Slack 알림", draft_md)]
+    # 진행 프레임에 refine 표식
+    names = {f.agent_node_name for f in frames if isinstance(f, AgentNodeFrame)}
+    assert any(n.startswith("skills_builder.sop.refine_instructions") for n in names)
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_refiner_passthrough_keeps_draft():
+    # refiner가 초안을 그대로 반환(폴백 상황 모사)하면 결과도 초안 유지
+    draft_md = "## When to use\n초안 유지"
+    llm = _FakeLLM(structured_response=_make_detail(instructions=draft_md))
+    refiner = _FakeRefiner()  # passthrough
+
+    frames = [f async for f in _uc_with_refiner(llm, refiner).extract_detail(
+        uuid4(), _make_document(), _meta_dict()
+    )]
+
+    assert frames[-1].payload["skill_detail"]["instructions"] == draft_md
+
+
+def test_build_prompt_instructions_requests_nine_section_runbook():
+    # Call B 프롬프트가 9섹션 고품질 런북을 요청 — 얕은 3섹션 대체(품질 고도화)
+    prompt = BuildFromSOPUseCase._build_prompt_instructions("sop.pdf", [], [], _make_meta())
+    assert "## 처리 절차" in prompt
+    assert "## 판단 규칙" in prompt
+    assert "## 제약·주의" in prompt
+    # 모호어 금지 같은 품질 규칙도 주입
+    assert "모호어" in prompt
+
+
+def test_prompt_fewshot_switches_by_category():
+    # ai 카테고리(문서작성) 메타 → 문서 exemplar, action → 알림 exemplar (편향 완화)
+    ai_meta = _make_meta(node_type="weekly_report", name="주간 보고서", category="ai", risk_level="Low")
+    a_struct = BuildFromSOPUseCase._build_prompt_structured("sop.pdf", [], [], ai_meta)
+    a_instr = BuildFromSOPUseCase._build_prompt_instructions("sop.pdf", [], [], ai_meta)
+    # 문서 exemplar 신호(보고서 작성 노드 + 문서 산출 노드), 환불-Slack 예시는 없어야
+    assert "weekly_report_compose" in a_struct and "google_docs_write" in a_struct
+    assert "refund_request_slack_alert" not in a_struct
+    assert "주간 업무 보고서" in a_instr and "독자" in a_instr
+
+    # action 카테고리는 기존 알림 exemplar 유지
+    act_struct = BuildFromSOPUseCase._build_prompt_structured("sop.pdf", [], [], _make_meta())
+    assert "slack_post_message" in act_struct and "refund_request_slack_alert" in act_struct
+
+
+# ----------------------------------------------------------------------
+# 카탈로그 그라운딩 — composer_instructions 실행가능성 (환각 node_type 차단)
+# ----------------------------------------------------------------------
+
+
+def test_hallucinated_node_refs_flags_only_unknown_snake_case():
+    # 실제 카탈로그 node_type은 통과, 존재하지 않는 snake_case 참조만 환각으로 잡는다
+    ci = (
+        "## 필수 노드\n1. `webhook_trigger`\n2. `if_condition`\n3. `slack_post_message`\n"
+        "4. `magic_unicorn_node` — 존재하지 않음\n## 연결\n`slack`으로 보낸다(단어형은 무시)"
+    )
+    assert _hallucinated_node_refs(ci) == ["magic_unicorn_node"]
+
+
+def test_hallucinated_node_refs_empty_when_all_real_or_none():
+    assert _hallucinated_node_refs("") == []
+    assert _hallucinated_node_refs("`gmail_send`만 쓴다") == []
+
+
+def test_hallucinated_node_refs_excludes_own_type_and_field_names():
+    # 라이브 측정 회귀: 스킬 자신 node_type(미등재)·출력 필드명은 노드가 아니므로 오탐 제외
+    ci = "1. `hr_onboarding_notice` 배치\n출력 `onboarding_notice_text` → `email_send` 연결\n`fake_node`는 환각"
+    known = frozenset({"hr_onboarding_notice", "onboarding_notice_text"})
+    assert _hallucinated_node_refs(ci, known) == ["fake_node"]
+    # 제외 안 하면 own/field까지 오탐(email_send는 실노드라 통과) — 정렬된 전체
+    assert _hallucinated_node_refs(ci) == ["fake_node", "hr_onboarding_notice", "onboarding_notice_text"]
+
+
+class _ABStructuredOkInstructionsFailLLM(LLMPort):
+    """Call A(structured) 성공, Call B(instructions) 실패 — B 비치명성 검증용."""
+
+    def __init__(self, structured: _ExtractedSkillStructured) -> None:
+        self._structured = structured
+
+    async def generate(self, prompt: str, **kwargs: Any) -> str:
+        return "stub"
+
+    async def generate_structured(self, prompt: str, schema: type, max_tokens: int | None = None) -> Any:
+        if schema is _ExtractedInstructions:
+            raise RuntimeError("instructions LLM down")
+        return self._structured
+
+
+@pytest.mark.asyncio
+async def test_extract_detail_instructions_failure_is_non_fatal():
+    # Call B(지침서) 실패는 비치명적 — 구조 필드는 살리고 instructions만 빈 값으로 진행(graceful)
+    structured = _ExtractedSkillStructured(
+        inputs={"type": "object", "properties": {"x": {"type": "string"}}},
+        outputs={"type": "object"},
+        required_connections=["slack"],
+        service_type="slack",
+        composer_instructions="## 필수 노드\n1. `slack_post_message`",
+    )
+    uc = BuildFromSOPUseCase(
+        create_draft_skill=_FakeCreateDraftSkill(),
+        embedder=_FakeEmbedder(),
+        llm=_ABStructuredOkInstructionsFailLLM(structured),
+    )
+
+    frames = [f async for f in uc.extract_detail(uuid4(), _make_document(), _meta_dict())]
+
+    result = frames[-1]
+    assert isinstance(result, ResultFrame)
+    detail = result.payload["skill_detail"]
+    assert detail["instructions"] == ""           # B 실패 → 빈 지침서(사용자가 편집)
+    assert detail["required_connections"] == ["slack"]  # 구조 필드는 보존
+    assert detail["composer_instructions"].startswith("## 필수 노드")

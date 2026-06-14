@@ -28,11 +28,21 @@ _GATE_DEFAULT = "if_condition"
 # 발화에서 안 준 경우 산출물을 문서로 떨군다(2026-06-09 측정: sink 없는 transform-종단을 qa가
 # 불완전으로 저평가). 문서가 보고서/생성물의 자연스러운 기본 산출처(google_docs_write).
 _DEFAULT_CONTENT_SINK = "google_docs_write"
+# 명시 출력 채널(sink)만 있고 입력/가공 신호가 없을 때(예 "보고서 PDF로 만들어서 메일로") 콘텐츠를
+# 생성할 기본 생산자. AI 노드가 발화 내용으로 산출물을 만들어 명시 sink들로 전달한다. _AI라 retriever
+# core-LLM 후보에 항상 존재(#418) → scaffold 후보 보강도 무비용.
+_DEFAULT_CONTENT_PRODUCER = "gemma_chat"
 
 
 class SkeletonAssembler:
     def __init__(self, extractor: SkeletonEntityExtractor | None = None) -> None:
         self._extractor = extractor or SkeletonEntityExtractor()
+
+    @property
+    def extractor(self) -> SkeletonEntityExtractor:
+        """공유 엔티티 추출기(읽기 전용). 소비처(composer)가 명시 I/O 노드 보장 등에 재사용 —
+        별도 인스턴스 생성으로 인한 룰 드리프트 방지."""
+        return self._extractor
 
     # ── 선택 ────────────────────────────────────────────────────────────────
     def _select(self, entities: ExtractedEntities, text: str) -> Skeleton | None:
@@ -211,6 +221,20 @@ class SkeletonAssembler:
         if "guard" in shapes:
             return self._assemble_conditional(entities, grounding, resolved)
 
+        # 콘텐츠 전달(sink-anchored): 출력 채널(sink)을 **둘 이상** 명시했는데 트리거/소스/가공
+        # 신호가 전혀 없는 발화("보고서 PDF로 만들어서 메일로 보내줘"). _select는 이를 RC1
+        # (catch-all 금지) 규칙으로 bail → LLM 자유 draft가 명시 sink(pdf_generate)를 드롭하던
+        # 회귀(#502 측정: pdf_generate는 BGE-M3 #2 후보였는데 Gemma가 미선택). 생성형 콘텐츠를
+        # 복수 채널로 전달하는 구조는 결정적이므로(생산자→sink 팬) 코드가 직접 조립한다.
+        # RC1과 구분: 단일 sink/trivial은 채널 모호·과조립 위험이라 여전히 LLM 폴백(여기 미해당).
+        if (
+            not entities.trigger
+            and not entities.sources
+            and not entities.transforms
+            and len(entities.sinks) >= 2
+        ):
+            return self._assemble_content_delivery(entities)
+
         skeleton = self._select(entities, text)
         if skeleton is None:
             return None  # 확신 가는 선형 매칭 없음 — LLM 폴백(catch-all 강제 금지, RC1)
@@ -275,6 +299,53 @@ class SkeletonAssembler:
         return AssembledDraft(
             skeleton_name=skeleton.name, nodes=tuple(all_nodes),
             edges=tuple(edges), warnings=tuple(warnings),
+        )
+
+    # ── 콘텐츠 전달 (sink-anchored, 생산자 자동) ───────────────────────────────
+    # 산출물(파일) 생성형 sink — delivery sink가 **이 산출물을 전달**하므로 그 앞에 직렬로 둔다.
+    # ("PDF로 만들어서 메일로" = ai→pdf_generate→email_send: email이 원본 텍스트가 아니라 PDF를
+    # 첨부). 구조는 코드 고정(LLM 파라미터만)이라 fan으로 두면 첨부 흐름을 param-fill로 못 살린다.
+    _ARTIFACT_SINKS = frozenset({"pdf_generate", "file_write"})
+
+    def _assemble_content_delivery(self, entities: ExtractedEntities) -> AssembledDraft:
+        """생산자(ai)→[산출물 sink 직렬]→delivery sink 팬. 트리거/소스/가공 없이 출력 채널만
+        ≥2개 명시된 발화 전용(라이브러리 스켈레톤이 아니라 코드 직접 조립 — 동적 sink라 슬롯
+        모델에 안 맞아 의도적으로 `SKELETONS`에 미등재, skeleton_name만 합성).
+
+        "보고서를 PDF로 만들어서 메일로 보내줘" → gemma_chat → pdf_generate → email_send.
+        산출물 생성형 sink(pdf_generate/file_write)는 delivery 앞 **직렬**(delivery가 산출물을
+        전달)이고, delivery 채널(메일/슬랙 등)은 마지막 산출물(없으면 생산자)에서 **병렬 분기**.
+
+        sink는 발화에서 직접 명시된 출력 채널(lexical sink 추출)이라 의미 디스앰비규에이션이
+        불필요 → 앙상블/그라운딩 미적용(어휘 변형으로 추출 실패 시 sink<2 → 이 경로 미진입,
+        LLM 폴백). 생산자는 _AI 기본 노드라 retriever core-LLM 후보에 항상 존재.
+        """
+        producer = DraftNode(
+            ref="transform_0", node_type=_DEFAULT_CONTENT_PRODUCER, role=SlotRole.TRANSFORM
+        )
+        artifacts = [nt for nt in entities.sinks if nt in self._ARTIFACT_SINKS]
+        deliveries = [nt for nt in entities.sinks if nt not in self._ARTIFACT_SINKS]
+
+        nodes: list[DraftNode] = [producer]
+        edges: list[DraftEdge] = []
+        # 생산자 → 산출물 생성 sink 직렬 체인(산출물이 delivery의 입력).
+        upstream = producer
+        for i, nt in enumerate(artifacts):
+            node = DraftNode(ref=f"artifact_{i}", node_type=nt, role=SlotRole.SINK)
+            nodes.append(node)
+            edges.append(DraftEdge(from_ref=upstream.ref, to_ref=node.ref))
+            upstream = node
+        # delivery 채널은 마지막 산출물(없으면 생산자)에서 병렬 분기.
+        for i, nt in enumerate(deliveries):
+            node = DraftNode(ref=f"sink_{i}", node_type=nt, role=SlotRole.SINK)
+            nodes.append(node)
+            edges.append(DraftEdge(from_ref=upstream.ref, to_ref=node.ref))
+
+        return AssembledDraft(
+            skeleton_name="content_delivery",
+            nodes=tuple(nodes),
+            edges=tuple(edges),
+            warnings=(),
         )
 
     # ── 분기 (XOR) ────────────────────────────────────────────────────────────

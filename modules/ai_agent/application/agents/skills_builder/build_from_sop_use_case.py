@@ -10,9 +10,14 @@ LLM 호출은 LLMPort stub으로 단위 테스트 가능, 실 endpoint(`llm-base
       → LLM.generate_structured(prompt, _ExtractedSkillNodeMetaList)
       → ResultFrame(payload.skill_metas) — 메타 5필드만(node_type/name/description/category/risk_level)
       → 사용자 카드 그리드 표시, 1건 선택
-    [extract_detail] DocumentBlock + 선택된 meta dict
-      → JSON prompt 구성 (target_skill_meta 명시)
-      → LLM.generate_structured(prompt, _ExtractedSkillNodeDetail)  ← inputs/outputs/instructions(SKILL.md) "LLM 보강"
+    [extract_detail] DocumentBlock + 선택된 meta dict — A/B 두 호출로 분리(단일 호출이 풍부한
+      few-shot + 출력으로 8192 ctx 초과하던 문제 해소):
+      → Call A: _build_prompt_structured → _ExtractedSkillStructured (inputs/outputs/connections/
+        service_type/composer_instructions). composer_instructions는 실제 카탈로그 node_type
+        (EXECUTABLE_NODE_TYPES)에 그라운딩 + 환각 참조 검증(실행 불가능 워크플로우 방지)
+      → Call B: _build_prompt_instructions → _ExtractedInstructions (9섹션 SKILL.md 단독)
+      → SKILL.md 품질 자기개선: SkillInstructionRefiner가 draft→critique→refine로 instructions를
+        끌어올린다(Gemma 1샷 초안은 얕음 — 같은 모델에게 루브릭 자기채점·재작성. 실패 시 초안 폴백)
       → T4: SOP 텍스트를 SkeletonEntityExtractor "발화"로 결정적 스켈레톤 조립(ADR-0028 D2/D3)
       → T5: AssembledDraft → COMPOSER.md(결정적) + 정밀 BINDS(bound_node_types) 매핑(D4)
             (스켈레톤 미매칭 시 LLM composer_instructions 폴백)
@@ -68,6 +73,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import UUID
@@ -75,6 +81,10 @@ from uuid import UUID
 from common_schemas import Chunk, ContentBlock, DocumentBlock, MemoryEntry
 from common_schemas.enums import RiskLevel
 from common_schemas.transport import AgentNodeFrame, ErrorFrame, ResultFrame, SSEFrame
+
+# 실행 가능 node_type 카탈로그(import-safe 상수 미러, PR #387) — composer_instructions를 실제 노드에
+# 그라운딩해 "실행 불가능한 워크플로우" 생성을 막는다(ADR-0028, 환각 node_type 차단).
+from nodes_graph.application.executable_node_types import EXECUTABLE_NODE_TYPES
 from nodes_graph.domain.ports.embedder_port import EmbedderPort
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from skills_marketplace.application.use_cases import CreateDraftSkillUseCase
@@ -84,6 +94,12 @@ from ....domain.entities.skill_node import SkillNode
 from ....domain.ports.llm_port import LLMPort
 from ....domain.services.skeleton_assembler import SkeletonAssembler
 from ....domain.services.skeleton_composer_mapper import SkeletonComposerMapper
+from .skill_fewshots import instructions_fewshot, select_fewshot, structured_fewshot
+from .skill_instruction_refiner import (
+    SKILL_MD_QUALITY_RULES,
+    SKILL_MD_SECTIONS,
+    SkillInstructionRefiner,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -100,10 +116,19 @@ _ALLOWED_CATEGORIES = {"trigger", "action", "condition", "transform", "ai", "int
 _CTX_SIZE = 8192
 # 한 LLM 호출에 넣을 문서 블록의 입력 토큰 예산(배치 경계). instruction/few-shot/output 여유 확보.
 _METADATA_INPUT_TOKEN_BUDGET = 2500
-_DETAIL_INPUT_TOKEN_BUDGET = 1800
-# 출력 예산 — 메타 5필드×N은 작고, detail은 instructions/composer_instructions markdown이라 크다.
+# detail은 고품질 few-shot(모델이 모방하는 천장)을 키우는 대신 문서 청크 입력을 줄여 ctx를 확보한다 —
+# detail은 단일 노드라 RAG가 고른 관련 청크 1~2개면 충분(품질>문서 폭). A/B 두 호출이 공유.
+_DETAIL_INPUT_TOKEN_BUDGET = 1500
+# 출력 예산 — 메타 5필드×N은 작다. detail은 A/B 분리(ADR-0028 후속): A(구조 필드)와 B(9섹션 SKILL.md)를
+# 별 호출로 나눠 각 출력을 8192 ctx 안에 넣는다(단일 호출이 few-shot+출력으로 ctx 초과하던 문제 해소).
 _METADATA_OUTPUT_MAX_TOKENS = 1800
-_DETAIL_OUTPUT_MAX_TOKENS = 3500
+_STRUCTURED_OUTPUT_MAX_TOKENS = 2000   # Call A — inputs/outputs/connections/service_type/composer_instructions
+_INSTRUCTIONS_OUTPUT_MAX_TOKENS = 3000  # Call B — instructions(SKILL.md) markdown 단독
+
+# composer_instructions 그라운딩용 — 실제 카탈로그 node_type을 프롬프트에 인라인(정렬, 결정적).
+_EXECUTABLE_NODE_TYPES_SORTED: tuple[str, ...] = tuple(sorted(EXECUTABLE_NODE_TYPES))
+# 백틱 토큰 중 node_type 형태(snake_case)지만 카탈로그에 없는 환각 참조 탐지용.
+_NODE_TYPE_PATTERN = re.compile(r"`([a-z][a-z0-9_]+)`")
 # 폭주(거대 문서) 방지 — 초과 배치는 절단하고 log로 노출한다(무음 캡 금지).
 _MAX_EXTRACT_BATCHES = 24
 _REL_BLOCK_TYPES = {"text", "heading", "table"}
@@ -182,6 +207,26 @@ def _select_blocks_for_meta(
     return [c.block for c in picked]
 
 
+def _hallucinated_node_refs(
+    composer_instructions: str, known_non_node: frozenset[str] = frozenset()
+) -> list[str]:
+    """composer_instructions의 백틱 토큰 중 node_type 형태(snake_case)지만 카탈로그에 없는 것.
+
+    composer_instructions는 워크플로우 배선 지침이라 존재하지 않는 node_type을 참조하면 실행 불가능한
+    워크플로우가 된다. 프롬프트가 백틱+실제 node_type 표기를 요구하므로 백틱 토큰을 카탈로그와 대조한다.
+    `known_non_node`(스킬 자신의 node_type + 입출력 필드명)는 노드가 아니므로 제외한다 — 라이브 측정에서
+    스킬 자신 타입(아직 카탈로그 미등재)·출력 필드명(`onboarding_notice_text` 등)이 오탐으로 잡힘 확인.
+    enum 값·단어형 토큰(slack 등)도 snake_case 필터로 1차 제외. **경고용**(비치명적)이며 결정적 보장은
+    스켈레톤 매핑 경로가 담당한다.
+    """
+    if not composer_instructions:
+        return []
+    tokens = {m.group(1) for m in _NODE_TYPE_PATTERN.finditer(composer_instructions)}
+    # snake_case(밑줄 포함) 토큰만 node_type 후보로 본다 — 단어형 토큰(slack 등) 오탐 축소.
+    candidates = {t for t in tokens if "_" in t and t not in known_non_node}
+    return sorted(t for t in candidates if t not in EXECUTABLE_NODE_TYPES)
+
+
 # ----------------------------------------------------------------------
 # LLM structured response 래퍼
 # ----------------------------------------------------------------------
@@ -208,17 +253,12 @@ class _ExtractedSkillNodeMetaList(BaseModel):
     skill_node_metas: list[_ExtractedSkillNodeMeta]
 
 
-class _ExtractedSkillNodeDetail(BaseModel):
-    """2차 LLM 추출 — 선택된 메타에 대한 detail 필드. 폼 prefill용.
+class _ExtractedSkillStructured(BaseModel):
+    """Call A 응답 — 구조 필드(instructions 제외). 단일 detail 호출이 few-shot+출력으로 8192 ctx를
+    초과하던 문제 해소를 위해 A(구조)/B(지침서)로 분리(ADR-0028 후속).
 
-    옵션 1의 2차 응답 스키마. inputs/outputs JSON Schema + instructions/composer_instructions markdown 등
-    토큰 무거운 필드.
-    1차에서 받은 메타와 frontend가 합쳐서 사용자 폼에 prefill한다.
-
-    `instructions`는 ADR-0017 이중 저장 중 SkillDocument(SKILL.md) 지침서 본문 —
-    confirm 단계에서 GCS 저장된다(use case 경유).
-    `composer_instructions`는 ADR-0024 2-md 중 COMPOSER.md 본문 — 워크플로우 생성 시 drafter가
-    노드 구성에 주입하는 "이 스킬을 쓰려면 어떤 노드를 엮어야 하는가" 지침(#372 결함 A 해소). optional.
+    `composer_instructions`(COMPOSER.md, 워크플로우 배선 지침)는 실제 카탈로그 node_type에
+    그라운딩한다 — 스켈레톤 미매칭 폴백에서도 실행 불가능한 노드를 지어내지 않게(환각 차단).
     """
     model_config = ConfigDict(frozen=True)
 
@@ -226,8 +266,18 @@ class _ExtractedSkillNodeDetail(BaseModel):
     outputs: dict[str, Any] = Field(default_factory=dict)
     required_connections: list[str] = Field(default_factory=list)
     service_type: str | None = None
-    instructions: str = Field(min_length=1)  # SkillDocument(SKILL.md) markdown body — ADR-0017
     composer_instructions: str = ""          # SkillDocument(COMPOSER.md) body — ADR-0024 (optional)
+
+
+class _ExtractedInstructions(BaseModel):
+    """Call B 응답 — instructions(SKILL.md) markdown 단독. 9섹션 고품질 런북.
+
+    이 노드가 **실행될 때** LLM에 주입되는 자기 동작 지침(ADR-0017)이라 다른 노드를 참조하지 않는다
+    → 카탈로그 그라운딩 불필요. 추출 후 SkillInstructionRefiner(draft→critique→refine)로 끌어올린다.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    instructions: str = Field(min_length=1)
 
 
 # ----------------------------------------------------------------------
@@ -252,6 +302,7 @@ class BuildFromSOPUseCase:
         llm: LLMPort,
         assembler: SkeletonAssembler | None = None,
         composer_mapper: SkeletonComposerMapper | None = None,
+        instruction_refiner: SkillInstructionRefiner | None = None,
     ) -> None:
         self._create_draft_skill = create_draft_skill
         self._embedder = embedder
@@ -261,6 +312,9 @@ class BuildFromSOPUseCase:
         # 기본 생성(의존성 무, composition root 주입 불요 — 기존 3-인자 와이어링 호환).
         self._assembler = assembler or SkeletonAssembler()
         self._composer_mapper = composer_mapper or SkeletonComposerMapper()
+        # SKILL.md 품질 자기개선 루프(draft→critique→refine). 같은 LLM을 재사용하므로 기본 생성
+        # (기존 와이어링 호환). detail 추출 후 instructions를 끌어올린다 — 실패 시 초안 폴백(graceful).
+        self._instruction_refiner = instruction_refiner or SkillInstructionRefiner(llm)
 
     async def extract_metadata(
         self,
@@ -429,28 +483,72 @@ class BuildFromSOPUseCase:
             relevant = [b for b in document.blocks if b.block_type in _REL_BLOCK_TYPES]
             detail_blocks = _first_batch_or_empty(relevant, _DETAIL_INPUT_TOKEN_BUDGET)
 
-        prompt = self._build_prompt_detail(
+        # ── Call A — 구조 필드(inputs/outputs/connections/service_type/composer_instructions) ──
+        # 고품질 instructions few-shot을 B로 분리해 ctx를 확보. A는 카탈로그 그라운딩된 배선 지침 생성.
+        prompt_a = self._build_prompt_structured(
             document.file_meta.file_name, detail_blocks, personal_memory, meta_obj
         )
-        yield AgentNodeFrame(agent_node_name=f"skills_builder.sop.llm_extract_detail.{meta_obj.node_type}")
-
+        yield AgentNodeFrame(
+            agent_node_name=f"skills_builder.sop.llm_extract_structured.{meta_obj.node_type}"
+        )
         try:
-            detail = await self._llm.generate_structured(
-                prompt, _ExtractedSkillNodeDetail, max_tokens=_DETAIL_OUTPUT_MAX_TOKENS
+            structured = await self._llm.generate_structured(
+                prompt_a, _ExtractedSkillStructured, max_tokens=_STRUCTURED_OUTPUT_MAX_TOKENS
             )
         except Exception as e:
             yield ErrorFrame(code="E_LLM_GENERATION_FAILED", message=f"LLM 호출 실패: {e}")
             return
-
-        if not isinstance(detail, _ExtractedSkillNodeDetail):
+        if not isinstance(structured, _ExtractedSkillStructured):
             yield ErrorFrame(
                 code="E_LLM_RESPONSE_INVALID",
-                message=f"LLM 응답이 _ExtractedSkillNodeDetail 형태 아님: {type(detail).__name__}",
+                message=f"LLM 응답이 _ExtractedSkillStructured 형태 아님: {type(structured).__name__}",
             )
             return
 
+        # composer_instructions(워크플로우 배선) 환각 node_type 참조 검증 — 비치명적 경고(스켈레톤
+        # 매칭 시 어차피 결정적 배선이 대체. 폴백일 때만 LLM 산출이 쓰이며 그 경우 실행가능성 신호).
+        # 스킬 자신의 node_type(아직 카탈로그 미등재)과 입출력 필드명은 노드가 아니므로 오탐 제외.
+        known_non_node = frozenset(
+            {meta_obj.node_type}
+            | set((structured.inputs.get("properties") or {}).keys())
+            | set((structured.outputs.get("properties") or {}).keys())
+        )
+        hallucinated = _hallucinated_node_refs(structured.composer_instructions, known_non_node)
+        if hallucinated:
+            _logger.warning(
+                "composer_instructions 환각 node_type 참조(%s): %s",
+                meta_obj.node_type, hallucinated,
+            )
+
+        # ── Call B — instructions(9섹션 SKILL.md) 단독. 실패/형태불일치/빈응답은 비치명적(빈 초안). ──
+        prompt_b = self._build_prompt_instructions(
+            document.file_meta.file_name, detail_blocks, personal_memory, meta_obj
+        )
+        yield AgentNodeFrame(
+            agent_node_name=f"skills_builder.sop.llm_extract_instructions.{meta_obj.node_type}"
+        )
         try:
-            staging = self._convert_detail_to_staging(meta_obj, detail)
+            instr_resp = await self._llm.generate_structured(
+                prompt_b, _ExtractedInstructions, max_tokens=_INSTRUCTIONS_OUTPUT_MAX_TOKENS
+            )
+            draft_instructions = (
+                instr_resp.instructions
+                if isinstance(instr_resp, _ExtractedInstructions) and instr_resp.instructions.strip()
+                else ""
+            )
+        except Exception as e:
+            _logger.warning("SKILL.md 추출 실패(빈 초안으로 진행) %s: %s", meta_obj.node_type, e)
+            draft_instructions = ""
+
+        # SKILL.md 품질 자기개선(draft→critique→refine) — Gemma 1샷 초안은 얕아서, 같은 모델에게
+        # 루브릭으로 자기 채점·재작성시켜 끌어올린다. 실패/빈 초안 시 그대로(graceful).
+        yield AgentNodeFrame(
+            agent_node_name=f"skills_builder.sop.refine_instructions.{meta_obj.node_type}"
+        )
+        instructions = await self._instruction_refiner.refine(meta_obj.name, draft_instructions)
+
+        try:
+            staging = self._convert_detail_to_staging(meta_obj, structured)
         except (KeyError, ValueError) as e:
             yield ErrorFrame(
                 code="E_LLM_RESPONSE_INVALID",
@@ -477,7 +575,8 @@ class BuildFromSOPUseCase:
         else:
             # 확신 가는 스켈레톤 매칭 없음(중첩 합성·불완전 커버리지 등) → 구조 결정 불가 →
             # LLM 자유추출 composer_instructions로 폴백(정밀 BINDS 없음, coarse BINDS 유지).
-            composer_instructions = detail.composer_instructions
+            # 이 폴백은 카탈로그 그라운딩 프롬프트로 생성됐고 위에서 환각 참조를 검증·경고했다.
+            composer_instructions = structured.composer_instructions
             bound_node_types = []
             skeleton_name = None
 
@@ -489,12 +588,12 @@ class BuildFromSOPUseCase:
                 "file_name": document.file_meta.file_name,
                 "skill_detail": {
                     "node_type": meta_obj.node_type,            # 식별용 echo
-                    "instructions": detail.instructions,
+                    "instructions": instructions,                # SKILL.md (refine 끌어올림 또는 초안 폴백)
                     "composer_instructions": composer_instructions,  # COMPOSER.md (결정적 또는 LLM 폴백)
-                    "inputs": detail.inputs,
-                    "outputs": detail.outputs,
-                    "required_connections": detail.required_connections,
-                    "service_type": detail.service_type,
+                    "inputs": structured.inputs,
+                    "outputs": structured.outputs,
+                    "required_connections": structured.required_connections,
+                    "service_type": structured.service_type,
                     "staging": staging.model_dump(mode="json"),
                     # ADR-0028 D4 — 스켈레톤 유래 정밀 BINDS 원천(스캐폴드 실노드). 영속화/projector
                     # 정밀화는 O3(조장 합의) 후속 — 현재는 산출물 노출만(콜러블 use case 우선).
@@ -621,7 +720,7 @@ class BuildFromSOPUseCase:
         """1차 LLM 프롬프트 — 메타 5필드만 추출(카드 그리드용). **JSON 형식 강제**.
 
         토큰을 가볍게 유지하기 위해 inputs/outputs JSON Schema + instructions markdown은
-        2차(`_build_prompt_detail`)로 분리. 메타만으로도 사용자가 어느 노드를 선택할지 결정 가능.
+        2차(`_build_prompt_structured`/`_build_prompt_instructions`)로 분리. 메타만으로 어느 노드를 선택할지 결정 가능.
         `blocks`는 호출자가 이미 관련 타입 필터 + 토큰 예산 배치를 적용한 부분집합이다(map-reduce).
         """
         relevant_blocks = [b.model_dump(mode="json") for b in blocks]
@@ -635,7 +734,8 @@ class BuildFromSOPUseCase:
             "각 SkillNode 메타 필드:\n"
             "  - node_type: snake_case 식별자 (e.g. 'send_approval_email')\n"
             "  - name: 사람이 읽을 수 있는 한글 이름\n"
-            "  - description: 노드 동작 설명 (한 문장)\n"
+            "  - description: 이 스킬을 **언제 호출하는지**(트리거 상황) + 무엇을 하는지를 1~2문장으로. "
+            "모델이 이 한 줄로 스킬 선택을 판단하므로 트리거가 구체적이어야 한다 (예: '...할 때 사용')\n"
             f"  - category: 다음 중 하나 — {sorted(_ALLOWED_CATEGORIES)}\n"
             "  - risk_level: 'Low' / 'Medium' / 'High' / 'Restricted'\n\n"
             "사용자의 personal_memory와 작업 패턴을 참고해 도메인 맥락 반영. "
@@ -702,24 +802,24 @@ class BuildFromSOPUseCase:
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     @staticmethod
-    def _build_prompt_detail(
+    def _build_prompt_structured(
         file_name: str,
         blocks: list[ContentBlock],
         personal_memory: list[MemoryEntry],
         meta: _ExtractedSkillNodeMeta,
     ) -> str:
-        """2차 LLM 프롬프트 — 선택된 메타에 대한 detail 5필드 추출(폼 prefill용).
+        """Call A 프롬프트 — 구조 필드(inputs/outputs/connections/service_type/composer_instructions).
 
-        SOP context를 함께 전달해 instructions(Steps 등)가 SOP 흐름 기반으로 생성되도록 한다.
-        `blocks`는 호출자가 선택 메타와 관련도 높은 청크로 RAG 선별 + 토큰 예산 적용한 부분집합이다.
-        메타는 LLM에 echo하지 않음 — frontend가 1차 메타와 합쳐 사용.
+        instructions(9섹션 SKILL.md)는 출력에서 빠져 Call B로 분리된다 — few-shot+출력이 8192 ctx를
+        초과하던 문제 해소. composer_instructions는 실제 카탈로그 node_type(`available_node_types`)에
+        그라운딩해 실행 불가능한 워크플로우 배선을 막는다.
         """
         relevant_blocks = [b.model_dump(mode="json") for b in blocks]
         memory_json = [m.model_dump(mode="json") for m in personal_memory[:_MAX_MEMORY_ENTRIES]]
 
         instruction = (
-            "당신은 사내 업무 자동화 SOP 문서에서 추출된 SkillNode의 **상세 스펙(detail)을 채우는** 어시스턴트입니다. "
-            "아래 `target_skill_meta`에 명시된 노드에 대해서만, SOP 문서를 근거로 다음 5필드를 생성하세요:\n\n"
+            "당신은 사내 업무 자동화 SOP 문서에서 추출된 SkillNode의 **구조 스펙을 채우는** 어시스턴트입니다. "
+            "아래 `target_skill_meta`에 명시된 노드에 대해서만, SOP 문서를 근거로 다음 필드를 생성하세요:\n\n"
             "  - inputs: JSON Schema (type=object + properties). **각 property는 반드시 `description`을 포함** — "
             "비전문가도 무슨 값을 넣어야 할지 알 수 있도록 한 줄 설명 + 구체적인 예시(예: ...)를 넣는다. "
             "특히 외부에서 발급되는 ID·토큰처럼 값을 추정하기 어려운 필드는 '어디서 얻는지'까지 적는다. "
@@ -727,56 +827,17 @@ class BuildFromSOPUseCase:
             "  - outputs: JSON Schema. 각 property에 무엇이 나오는지 `description`을 넣는다\n"
             "  - required_connections: list[str] (e.g. ['slack', 'google'])\n"
             "  - service_type: str | null (e.g. 'slack', 'google_workspace')\n"
-            "  - instructions: 이 스킬의 SKILL.md 지침서 본문 (markdown 문자열). "
-            "사용자가 대화 중 읽고 선택할 수 있도록 '## When to use', '## Steps', '## Inputs/Outputs' 섹션을 "
-            "포함한 충분한 설명 (ADR-0017). 이 노드가 **실행될 때** LLM에 주입되는 도메인 지침이다\n"
             "  - composer_instructions: 이 스킬의 COMPOSER.md 지침서 본문 (markdown 문자열, ADR-0024). "
             "워크플로우 **작성 에이전트(Composer)** 에 주입되어 '이 스킬을 쓰려면 어떤 노드를 어떻게 엮어야 "
-            "하는가'를 지시한다. 예: 'LLM 노드 1개와 Email 발송 노드를 순서대로 배치하고, LLM 출력을 Email "
-            "본문에 연결하라'. **필수 노드 종류와 연결 방식을 명시**해 Composer가 실행 가능한 워크플로우를 "
-            "구성하도록 한다 (instructions와 소비처가 다름 — 실행 시 vs 생성 시)\n\n"
-            "출력 전체는 **반드시 JSON** 형식입니다 (XML 금지). "
-            "단 instructions / composer_instructions 필드의 *값*은 사람이 읽는 markdown 문자열입니다."
+            "하는가'를 지시한다. **노드를 지칭할 때는 반드시 아래 `available_node_types`에 있는 실제 "
+            "node_type을 백틱으로 표기**한다(예: `slack_post_message`). 목록에 **없는 노드를 지어내지 "
+            "말 것** — 실행 불가능한 워크플로우가 된다. 필수 노드와 연결(어느 출력을 어느 입력에) 방식을 명시한다\n\n"
+            "출력 전체는 **반드시 JSON** 형식입니다 (XML 금지). composer_instructions 값은 markdown 문자열입니다."
         )
 
-        few_shot_example = {
-            "input_meta": {
-                "node_type": "refund_request_slack_alert",
-                "name": "환불 요청 매니저 알림",
-                "description": "환불 요청 접수 시 매니저 슬랙 채널에 알림",
-                "category": "action",
-                "risk_level": "Medium",
-            },
-            "expected_output": {
-                "inputs": {
-                    "type": "object",
-                    "properties": {
-                        "refund_id": {"type": "string", "description": "환불 요청 건의 ID. 예: RF-10293"},
-                        "amount": {"type": "number", "description": "환불 금액(원). 예: 35000"},
-                        "channel": {"type": "string", "description": "Slack 채널. 예: '#cs-refund'"},
-                    },
-                    "required": ["refund_id", "amount"],
-                },
-                "outputs": {
-                    "type": "object",
-                    "properties": {"message_ts": {"type": "string", "description": "메시지 타임스탬프"}},
-                },
-                "required_connections": ["slack"],
-                "service_type": "slack",
-                "instructions": (
-                    "## When to use\n환불 요청이 접수되어 담당 매니저에게 즉시 알려야 할 때.\n"
-                    "## Steps\n1. 환불 요청 정보(refund_id, amount) 확인\n"
-                    "2. 지정 Slack 채널에 알림 메시지 발송\n"
-                    "## Inputs/Outputs\n- 입력: refund_id, amount, channel\n"
-                    "- 출력: message_ts (메시지 타임스탬프)"
-                ),
-                "composer_instructions": (
-                    "## 필수 노드\n이 스킬을 워크플로우에 쓰려면 다음 노드를 배치한다:\n"
-                    "1. **Slack 메시지 발송 노드**(category=action, service=slack) — 매니저 채널 알림\n"
-                    "## 연결\n환불 트리거의 refund_id·amount를 Slack 노드 입력으로 연결한다."
-                ),
-            },
-        }
+        # 고품질 레퍼런스 few-shot — 모델이 모방하는 '천장'. meta.category로 도메인에 맞는 예시 선택
+        # (ai/output/transform→문서작성, 나머지→알림/연동). 단일 환불 예시로 모든 스킬이 수렴하던 편향 완화.
+        few_shot_example = structured_fewshot(select_fewshot(meta.category))
 
         output_schema = {
             "type": "object",
@@ -785,10 +846,61 @@ class BuildFromSOPUseCase:
                 "outputs": {"type": "object"},
                 "required_connections": {"type": "array", "items": {"type": "string"}},
                 "service_type": {"type": ["string", "null"]},
-                "instructions": {"type": "string"},
                 "composer_instructions": {"type": "string"},
             },
-            "required": ["inputs", "outputs", "required_connections", "instructions", "composer_instructions"],
+            "required": ["inputs", "outputs", "required_connections", "composer_instructions"],
+        }
+
+        payload = {
+            "instruction": instruction,
+            "personal_memory": memory_json,
+            "document": {
+                "file_name": file_name,
+                "blocks": relevant_blocks,
+            },
+            "target_skill_meta": meta.model_dump(mode="json"),
+            # composer_instructions 그라운딩용 실제 카탈로그 — 환각 node_type 차단(실행가능성 보장).
+            "available_node_types": list(_EXECUTABLE_NODE_TYPES_SORTED),
+            "few_shot_example": few_shot_example,
+            "output_schema": output_schema,
+        }
+
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _build_prompt_instructions(
+        file_name: str,
+        blocks: list[ContentBlock],
+        personal_memory: list[MemoryEntry],
+        meta: _ExtractedSkillNodeMeta,
+    ) -> str:
+        """Call B 프롬프트 — instructions(9섹션 SKILL.md) 단독.
+
+        이 노드가 실행될 때 LLM에 주입되는 자기 동작 런북(ADR-0017). 다른 노드를 참조하지 않으므로
+        카탈로그 그라운딩 불필요. 풍부한 9섹션 few-shot이 천장이라 의도적으로 깊게 쓴다(이후 refiner가
+        critique→refine로 더 끌어올린다).
+        """
+        relevant_blocks = [b.model_dump(mode="json") for b in blocks]
+        memory_json = [m.model_dump(mode="json") for m in personal_memory[:_MAX_MEMORY_ENTRIES]]
+
+        instruction = (
+            "당신은 사내 업무 자동화 SOP 문서에서 추출된 SkillNode의 **실행 지침서(SKILL.md)를 작성하는** "
+            "어시스턴트입니다. 아래 `target_skill_meta` 노드에 대해서만, SOP 문서를 근거로 이 노드가 "
+            "**실행될 때 LLM에 주입돼 그대로 실행되는 런북**(ADR-0017)을 작성하세요. 모델이 읽고 행동할 수 "
+            "있도록 다음 9개 섹션을 **모두** 포함합니다:\n"
+            f"{SKILL_MD_SECTIONS}\n"
+            f"  {SKILL_MD_QUALITY_RULES}\n\n"
+            "출력은 **반드시 JSON** 객체 1개 — instructions 필드에 SKILL.md markdown 본문만 담으세요."
+        )
+
+        # 카테고리별 9섹션 레퍼런스(천장) — ai/output/transform은 문서작성(doc-coauthoring +
+        # brand-guidelines 원칙), 나머지는 알림/연동 예시. Call A와 동일 exemplar에서 instructions만.
+        few_shot_example = instructions_fewshot(select_fewshot(meta.category))
+
+        output_schema = {
+            "type": "object",
+            "properties": {"instructions": {"type": "string"}},
+            "required": ["instructions"],
         }
 
         payload = {
@@ -817,11 +929,11 @@ class BuildFromSOPUseCase:
     @staticmethod
     def _convert_detail_to_staging(
         meta: _ExtractedSkillNodeMeta,
-        detail: _ExtractedSkillNodeDetail,
+        structured: _ExtractedSkillStructured,
     ) -> NodeSpecStaging:
-        """메타 + detail → NodeSpecStaging (NodeDefinition은 publish 시 생성, Option B).
+        """메타 + 구조 필드 → NodeSpecStaging (NodeDefinition은 publish 시 생성, Option B).
 
-        category/risk_level은 메타에서, input/output/connections/service_type은 detail에서 가져온다.
+        category/risk_level은 메타에서, input/output/connections/service_type은 Call A 구조 응답에서.
         SkillNode Pydantic 검증으로 source 일관성도 확인.
         """
         SkillNode(
@@ -829,16 +941,16 @@ class BuildFromSOPUseCase:
             source_id="",
             name=meta.name,
             description=meta.description,
-            inputs=detail.inputs,
-            outputs=detail.outputs,
+            inputs=structured.inputs,
+            outputs=structured.outputs,
             risk_level=RiskLevel(meta.risk_level),
         )
 
         return NodeSpecStaging(
             category=meta.category,
-            input_schema=detail.inputs,
-            output_schema=detail.outputs,
+            input_schema=structured.inputs,
+            output_schema=structured.outputs,
             risk_level=RiskLevel(meta.risk_level),
-            required_connections=detail.required_connections,
-            service_type=detail.service_type,
+            required_connections=structured.required_connections,
+            service_type=structured.service_type,
         )

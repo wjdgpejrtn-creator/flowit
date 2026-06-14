@@ -50,7 +50,7 @@ def test_scheduled_pipeline_e2e_bug_golden() -> None:
     assert d is not None
     assert d.skeleton_name == "scheduled_pipeline"
     assert _node_types(d) == [
-        "schedule_trigger", "google_sheets_read", "anthropic_chat", "slack_post_message",
+        "schedule_trigger", "google_sheets_read", "gemma_chat", "slack_post_message",
     ]
     assert d.warnings == ()
     # 선형 배선 — 연속 3엣지, back-edge 없음.
@@ -58,11 +58,43 @@ def test_scheduled_pipeline_e2e_bug_golden() -> None:
     assert all(e.from_handle == "output" for e in d.edges)
 
 
+def test_content_delivery_artifact_serial_chain() -> None:
+    # #502 근본: 출력 채널만 ≥2개 명시(트리거/소스/가공 신호 없음)인 발화는 _select가 RC1으로
+    # bail → LLM 자유 draft가 pdf_generate(BGE-M3 #2 후보)를 드롭하던 회귀. 생산자(ai)→sink를
+    # 결정적 조립해 명시 sink를 보장한다. 산출물 생성형 sink(pdf_generate)는 delivery 앞 **직렬**
+    # — "PDF로 만들어서 메일로"=ai→pdf_generate→email_send(email이 원본텍스트 아닌 PDF 전달).
+    d = _A.assemble("이번 주 업무보고서 PDF로 만들어서 메일로 보내줘")
+    assert d is not None
+    assert d.skeleton_name == "content_delivery"
+    assert _node_types(d) == ["gemma_chat", "pdf_generate", "email_send"]
+    assert d.warnings == ()
+    # 직렬: ai→pdf_generate(산출물)→email_send(전달). 병렬 fan 아님.
+    assert {(e.from_ref, e.to_ref) for e in d.edges} == {
+        ("transform_0", "artifact_0"), ("artifact_0", "sink_0"),
+    }
+
+
+def test_content_delivery_fans_when_no_artifact_sink() -> None:
+    # 산출물 생성형 sink 없이 delivery 채널만 둘 → 생산자에서 병렬 분기(직렬 아님).
+    d = _A.assemble("이 내용 이메일로도 보내고 슬랙으로도 알려줘")
+    assert d is not None
+    assert d.skeleton_name == "content_delivery"
+    assert _node_types(d) == ["gemma_chat", "email_send", "slack_post_message"]
+    assert {(e.from_ref, e.to_ref) for e in d.edges} == {
+        ("transform_0", "sink_0"), ("transform_0", "sink_1"),
+    }
+
+
+def test_single_sink_still_bails_to_llm() -> None:
+    # RC1 보존: 단일 출력 채널·trivial은 채널 모호/과조립 위험이라 content_delivery 미진입 → LLM 폴백.
+    assert _A.assemble("슬랙에 알림 보내줘") is None
+
+
 def test_event_response_skeleton() -> None:
     d = _A.assemble("웹훅 들어오면 내용 분석해서 이메일로 보내줘")
     assert d is not None
     assert d.skeleton_name == "event_response"
-    assert _node_types(d) == ["webhook_trigger", "anthropic_chat", "email_send"]
+    assert _node_types(d) == ["webhook_trigger", "gemma_chat", "email_send"]
 
 
 def test_quality_loop_has_back_edge_and_exit() -> None:
@@ -121,7 +153,7 @@ def test_content_without_sink_gets_default_doc_output() -> None:
     assert d is not None
     assert d.skeleton_name == "scheduled_pipeline"
     assert _node_types(d) == [
-        "schedule_trigger", "google_sheets_read", "anthropic_chat", "google_docs_write",
+        "schedule_trigger", "google_sheets_read", "gemma_chat", "google_docs_write",
     ]
 
 
@@ -331,7 +363,7 @@ def test_assemble_uses_resolved_slots_over_lexical_source() -> None:
     types = _node_types(d)
     assert "gmail_read" in types and "google_sheets_read" not in types
     assert types[0] == "schedule_trigger"
-    assert "anthropic_chat" in types and "gmail_send" in types and "pdf_generate" in types
+    assert "gemma_chat" in types and "gmail_send" in types and "pdf_generate" in types
 
 
 def test_resolved_slots_none_preserves_lexical_behavior() -> None:
@@ -353,7 +385,7 @@ def test_resolved_only_overrides_its_roles_not_transform() -> None:
     d = _A.assemble("매주 시트 읽어서 요약해서 슬랙으로 보내줘", resolved_slots=resolved)
     types = _node_types(d)
     assert "gmail_read" in types and "google_sheets_read" not in types
-    assert "anthropic_chat" in types and "slack_post_message" in types
+    assert "gemma_chat" in types and "slack_post_message" in types
 
 
 def test_multiple_sinks_fan_out_in_parallel() -> None:
@@ -382,7 +414,7 @@ def test_saream2_full_chain_with_calc_keyword() -> None:
     assert d is not None
     assert d.skeleton_name == "scheduled_pipeline"
     assert _node_types(d) == [
-        "schedule_trigger", "google_sheets_read", "anthropic_chat", "google_docs_write",
+        "schedule_trigger", "google_sheets_read", "gemma_chat", "google_docs_write",
     ]
 
 
@@ -406,7 +438,7 @@ def test_grounding_does_not_override_lexical_sink() -> None:
         candidate_node_types=["google_sheets_read", "google_docs_write", "email_send", "anthropic_chat"],
     )
     assert _node_types(d) == [
-        "schedule_trigger", "google_sheets_read", "anthropic_chat", "slack_post_message",
+        "schedule_trigger", "google_sheets_read", "gemma_chat", "slack_post_message",
     ]
 
 
@@ -455,6 +487,7 @@ _PARITY_UTTERANCES = [
     "외부 api 호출해서 실패하면 재시도하고 결과를 슬랙으로",            # 재시도(백오프 루프)
     "보고서 초안 작성하고 검토 후 승인되면 이메일로 발송",              # 승인 게이트(HITL)
     "온도 값이 임계치를 넘으면 경보 메일을 보내줘",                    # 단일 가드(conditional_action)
+    "이번 주 업무보고서 PDF로 만들어서 메일로 보내줘",                  # 콘텐츠 전달(sink-anchored, #502)
 ]
 
 
