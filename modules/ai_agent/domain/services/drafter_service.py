@@ -135,6 +135,10 @@ never borrow a field that belongs to a different node. Choose a source node whos
 semantically the data the input needs; if none fits, leave "". Use a literal only for values the
 user gave inline.
 
+VALUE HYGIENE: for fields holding a structured value (email/recipient, URL, phone, ID), extract ONLY
+the clean valid value — strip names, honorifics (e.g. Korean "님"), titles, labels.
+e.g. "...ㅇㅇ님 a@b.com으로 바꿔줘" → "a@b.com" (NOT "ㅇㅇ님a@b.com").
+
 LOOPS (quality-gate / retry patterns): when adding or editing a loop cycle, use ref-based edges:
 - Forward: {"from_ref": "<generator_ref>", "to_ref": "<evaluator_ref>", "from_handle": "output", "to_handle": "input"}
 - BACK-EDGE (fail/retry): {"from_ref": "<evaluator_ref>", "to_ref": "<generator_ref>", "from_handle": "false", "to_handle": "input"}
