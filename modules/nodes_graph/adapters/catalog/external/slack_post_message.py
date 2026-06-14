@@ -7,7 +7,7 @@ from uuid import uuid5
 import httpx
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
-from common_schemas.exceptions import ValidationError
+from common_schemas.exceptions import ExecutionError, ValidationError
 
 from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
@@ -71,7 +71,12 @@ class SlackPostMessageNode(BaseNode[SlackPostMessageInput, SlackPostMessageOutpu
             response = await client.post(_SLACK_POST_MESSAGE_URL, json=payload, headers=headers)
 
         # chat.postMessage는 논리 오류도 HTTP 200 + {"ok": false, "error": ...}로 반환한다.
+        # 이를 ok=False로 조용히 통과시키면 not_in_channel(봇 미초대) 같은 미전송이 "성공"처럼
+        # 보여 디버깅을 가린다 — Google 노드(HTTP 4xx raise)와 동일하게 실패를 노드 실패로
+        # 노출한다. (HIGH risk 부수효과 노드라 미전송은 조용한 no-op이 아니라 실패여야 한다.)
         raw: dict[str, Any] = response.json()
+        if not raw.get("ok", False):
+            raise ExecutionError(f"Slack chat.postMessage 오류: {raw.get('error', 'unknown')}")
         return SlackPostMessageOutput(
             ok=bool(raw.get("ok", False)),
             ts=raw.get("ts", ""),
