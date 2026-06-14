@@ -32,10 +32,14 @@ export async function POST(req: NextRequest): Promise<Response> {
       },
       body: await req.text(),
       cache: 'no-store',
+      // client abort(extractSkillDetail의 signal)를 upstream까지 전파 — 취소 후 30~60s
+      // Gemma 호출이 서버 측 고아로 끝까지 도는 것 차단.
+      signal: req.signal,
     });
   } catch (err) {
     // upstream(api) 다운/소켓 끊김 — 핸들러 throw 시 Next 500(HTML)이 내려가므로,
-    // 프론트 client(apiJson)가 읽을 수 있는 JSON 502로 정돈한다(!res.ok→detail 텍스트 throw).
+    // 프론트 client(apiJson)가 읽을 수 있는 JSON 502로 정돈한다(apiJson은 !res.ok면
+    // `${status} ${statusText}: ${body}`로 throw).
     const message = err instanceof Error ? err.message : 'upstream fetch failed';
     return new Response(
       JSON.stringify({ detail: `Skills extract detail upstream 연결 실패: ${message}` }),
