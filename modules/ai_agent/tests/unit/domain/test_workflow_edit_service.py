@@ -123,6 +123,58 @@ class TestReplaceNode:
         assert downstream.parameters["url"] == f"${{{n0.instance_id}.message_id}}"
 
 
+class TestPlannerRefRewrite:
+    """planner가 값 참조를 ${nX.field}(임시 ref)로 내므로 apply가 instance_id로 역번역해야 한다.
+    이 패스가 빠져 set_param/replace_node가 넣은 ${n2.content}가 그대로 누출되던 회귀 방지."""
+
+    def test_set_param_value_ref_rewritten_to_instance_id(self):
+        gemma = _cfg("gemma_chat", outputs=["content"])
+        gmail = _cfg("gmail_send")
+        n0, n1 = _node(gemma), _node(gmail, {"to": ["a@b.com"]})
+        prior = _wf([n0, n1], [_edge(n0, n1)])
+
+        out = WorkflowEditService().apply(
+            prior,
+            EditPlan(ops=[SetParamOp(op="set_param", target_ref="n1",
+                                     parameters={"body": "${n0.content}"})]),
+            [gemma, gmail],
+        )
+        edited = next(n for n in out.nodes if n.instance_id == n1.instance_id)
+        # ${n0.content} → ${<gemma instance_id>.content} (런타임 ReferenceResolver가 풀 수 있는 형식)
+        assert edited.parameters["body"] == f"${{{n0.instance_id}.content}}"
+
+    def test_replace_node_value_ref_rewritten(self):
+        gemma = _cfg("gemma_chat", outputs=["content"])
+        slack, gmail = _cfg("slack_post_message"), _cfg("gmail_send")
+        n0, n1 = _node(gemma), _node(slack, {"channel": "#g", "text": "${n0.content}"})
+        prior = _wf([n0, n1], [_edge(n0, n1)])
+
+        out = WorkflowEditService().apply(
+            prior,
+            EditPlan(ops=[ReplaceNodeOp(op="replace_node", target_ref="n1", new_node_type="gmail_send",
+                                        parameters={"to": ["a@b.com"], "body": "${n0.content}"})]),
+            [gemma, slack, gmail],
+        )
+        repl = next(n for n in out.nodes if n.instance_id == n1.instance_id)
+        assert repl.parameters["body"] == f"${{{n0.instance_id}.content}}"
+
+    def test_existing_instance_id_ref_preserved(self):
+        # 안 건드린 노드의 ${instance_id.field}는 n0..nX 키와 안 겹쳐 무손상(이중 변환 X)이어야 한다.
+        gemma = _cfg("gemma_chat", outputs=["content"])
+        gmail = _cfg("gmail_send")
+        n0 = _node(gemma)
+        n1 = _node(gmail, {"to": ["a@b.com"], "body": f"${{{n0.instance_id}.content}}"})
+        prior = _wf([n0, n1], [_edge(n0, n1)])
+
+        out = WorkflowEditService().apply(
+            prior,
+            EditPlan(ops=[SetParamOp(op="set_param", target_ref="n0", parameters={"prompt": "hi"})]),
+            [gemma, gmail],
+        )
+        downstream = next(n for n in out.nodes if n.instance_id == n1.instance_id)
+        assert downstream.parameters["body"] == f"${{{n0.instance_id}.content}}"
+
+
 class TestAddNode:
     def test_after_ref_on_sink_appends_single_edge(self):
         sheets, slack = _cfg("google_sheets_read"), _cfg("slack_post_message")

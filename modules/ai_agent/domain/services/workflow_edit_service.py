@@ -8,7 +8,7 @@ from common_schemas import Edge, NodeConfig, NodeInstance, Position, WorkflowSch
 from common_schemas.exceptions import ExecutionError
 from pydantic import BaseModel, Field
 
-from .dataflow_grounding import ground_ref_fields, outputs_of
+from .dataflow_grounding import ground_ref_fields, outputs_of, rewrite_refs
 
 _logger = logging.getLogger(__name__)
 
@@ -121,6 +121,14 @@ class WorkflowEditService:
                 nodes_by_iid.pop(iid, None)
 
         nodes = list(nodes_by_iid.values())
+        # planner는 값 참조를 ${nX.field}(임시 ref — _serialize_for_edit가 부여한 n0,n1,…)로 낸다.
+        # fresh draft 경로의 rewrite_refs와 동일하게 instance_id로 역번역해야 런타임 ReferenceResolver가
+        # 푼다 — 이 패스가 edit 경로에 빠져 set_param/replace_node가 넣은 ${n2.content}가 그대로 누출됐다.
+        # 안 건드린 노드 params는 이미 ${instance_id.field} 형식이라 n0..nX 키와 안 겹쳐 무손상.
+        nodes = [
+            n.model_copy(update={"parameters": rewrite_refs(n.parameters, ref_to_instance)})
+            for n in nodes
+        ]
         nodes = self._reground_dataflow(nodes, candidates)
         # workflow_id를 유지하므로 저장 시 repo가 같은 row를 UPDATE(merge)한다. version 컬럼은
         # NOT NULL(server_default는 INSERT에만 적용) → 편집본에 non-null version을 실어야 UPDATE가
