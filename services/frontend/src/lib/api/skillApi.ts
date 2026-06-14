@@ -344,7 +344,9 @@ export async function streamExtractSkill(
 
 // 위저드 1.5단계 — 1차에서 받은 메타 1건을 선택하면 detail(instructions/staging 등)을 채운다
 // (POST /api/v1/skills/extract/detail, JSON 단건). 백엔드가 source를 다시 받아 stateless로 추출한다.
-// SSE가 아니라 일반 rewrite 경유(JSON)라 extract처럼 전용 Route Handler가 필요 없다.
+// SSE는 아니지만 detail은 무거운 Gemma structured라 30~60s long POST다 — next.config rewrite로
+// 프록시하면 응답 전 소켓이 끊겨(socket hang up) Next 500이 난다(api는 200 완료). 그래서
+// app/api/v1/skills/extract/detail/route.ts 전용 Route Handler로 rewrite를 우회한다.
 export async function extractSkillDetail(
   material: ExtractMaterial,
   meta: SkillMeta,
