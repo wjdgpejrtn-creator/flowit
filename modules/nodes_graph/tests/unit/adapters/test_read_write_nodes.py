@@ -310,12 +310,11 @@ async def test_slack_read_returns_messages(fake_http):
 
 
 @pytest.mark.asyncio
-async def test_slack_read_ok_false_no_raise(fake_http):
-    # Slack 논리오류는 200+ok:false (slack_post_message 계약 동일) — 예외 없이 ok=False 반환.
+async def test_slack_read_ok_false_raises(fake_http):
+    # Slack 논리오류는 200+ok:false (slack_post_message 계약 동일) — Google 노드처럼 실패로 노출.
     fake_http.responses = [_FakeResponse(200, {"ok": False, "error": "channel_not_found"})]
-    out = await SlackReadNode().process(SlackReadInput(channel="bad"), _ctx("xoxb-t"))
-    assert out.ok is False and out.count == 0
-    assert out.raw_response["error"] == "channel_not_found"
+    with pytest.raises(ExecutionError, match="channel_not_found"):
+        await SlackReadNode().process(SlackReadInput(channel="bad"), _ctx("xoxb-t"))
 
 
 @pytest.mark.asyncio

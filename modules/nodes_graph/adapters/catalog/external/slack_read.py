@@ -7,7 +7,7 @@ from uuid import uuid5
 import httpx
 from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
-from common_schemas.exceptions import ValidationError
+from common_schemas.exceptions import ExecutionError, ValidationError
 
 from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
@@ -63,7 +63,10 @@ class SlackReadNode(BaseNode[SlackReadInput, SlackReadOutput]):
             response = await client.get(_SLACK_HISTORY_URL, params=params, headers=headers)
 
         # Slack은 논리 오류도 HTTP 200 + {"ok": false, "error": ...}로 반환(slack_post_message 동일 계약).
+        # ok=False 조용한 통과는 not_in_channel(봇 미초대) 등의 실패를 가리므로 노드 실패로 노출한다.
         raw: dict[str, Any] = response.json()
+        if not raw.get("ok", False):
+            raise ExecutionError(f"Slack conversations.history 오류: {raw.get('error', 'unknown')}")
         messages = [
             {
                 "ts": m.get("ts", ""),
