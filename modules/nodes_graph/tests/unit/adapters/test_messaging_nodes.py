@@ -17,7 +17,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from common_schemas import NodeContext
-from common_schemas.exceptions import ValidationError
+from common_schemas.exceptions import ExecutionError, ValidationError
 
 from nodes_graph.adapters.catalog.external.email_send import EmailSendInput, EmailSendNode
 from nodes_graph.adapters.catalog.external.http_request import HttpRequestInput, HttpRequestNode
@@ -221,15 +221,16 @@ async def test_slack_post_message_success(fake_http):
 
 
 @pytest.mark.asyncio
-async def test_slack_post_message_logical_error_passthrough(fake_http):
-    """Slack은 논리 오류도 HTTP 200 — ok=False + raw_response로 전달."""
-    fake_http.response = _FakeResponse(200, {"ok": False, "error": "channel_not_found"})
-    out = await SlackPostMessageNode().process(
-        SlackPostMessageInput(channel="#nope", text="안녕"), _ctx_with_token("xoxb-test")
-    )
-    assert out.ok is False
-    assert out.raw_response["error"] == "channel_not_found"
-    assert out.ts == ""
+async def test_slack_post_message_logical_error_raises(fake_http):
+    """Slack 논리 오류(HTTP 200 + ok:false)는 미전송 — Google 노드처럼 노드 실패로 노출한다.
+
+    not_in_channel(봇 미초대) 등이 조용히 ok=False로 통과하면 미전송이 '성공'처럼 보인다.
+    """
+    fake_http.response = _FakeResponse(200, {"ok": False, "error": "not_in_channel"})
+    with pytest.raises(ExecutionError, match="not_in_channel"):
+        await SlackPostMessageNode().process(
+            SlackPostMessageInput(channel="#nope", text="안녕"), _ctx_with_token("xoxb-test")
+        )
 
 
 @pytest.mark.asyncio
