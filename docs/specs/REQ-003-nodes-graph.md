@@ -161,6 +161,8 @@ class GraphValidator:
     2. 고립 노드 검출 (연결 없는 노드)
     3. 노드 타입 불일치 (표현식 경로 ${inst.field} 출력 shape ↔ 소비 파라미터 기대 shape;
        edge handle은 제어 분기 라벨이라 검증 대상 아님 — 전수조사 2026-06-15)
+       Phase 2b: nested 경로(field.sub / field.0.sub)를 output_schema properties·items로 walk —
+       head 미존재/scalar 초과접근은 경로 환각 거부, 내부 미정의(동적 노드)는 보수적 통과
     4. 중복 instance_id 검출
     5. 필수 연결 누락 (required_connections 확인)
     6. 비실재 노드 (node_id가 카탈로그에 없음 = 실행 불가, E_UNKNOWN_NODE_TYPE,
@@ -193,8 +195,10 @@ class GraphValidator:
     async def _check_type_compatibility(self, workflow: WorkflowSchema) -> list[ValidationErrorItem]:
         """parameters의 ${inst.field} 표현식 출력 shape ↔ 소비 파라미터 기대 shape 호환 검증.
 
-        1차 = shape 레벨(scalar/array/object), str 파라미터 + list 원소 표현식 모두.
-        ANY({})·nested path·문자열 보간·미해결 토큰은 보수적 통과(false positive 방지).
+        str 파라미터 + list 원소 표현식 모두 검증. Phase 2b: nested 경로(field.sub)를
+        output_schema properties·items로 walk — head 미존재/scalar 초과접근은 경로 환각 거부,
+        내부 미정의(동적 노드)·ANY·문자열 보간·미해결 토큰은 보수적 통과(false positive 방지).
+        grounding(#524, compose)과 역할 분담: validator는 compose+execute 공통 게이트.
         """
         ...
     

@@ -447,26 +447,110 @@ async def test_type_compat_list_element_scalar_to_scalar_passes():
     assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
 
 
-@pytest.mark.asyncio
-async def test_type_compat_list_element_nested_path_conservative_pass():
-    """to:["${x.items.email}"] 같은 nested path는 top-level properties에 없어 보수적 통과.
+# ── Phase 2b: nested 경로 존재성 + 깊은 경로 타입 검증 (#525 properties 보강 활용) ──
+# grounding(신정혜 #524)은 compose 시점에 head 절단/보정하나, validator는 compose+execute
+# 공통 게이트라 수동편집 워크플로우(grounding 미적용)의 nested 환각까지 막는다.
+# - head(첫 세그먼트) 미존재 = 경로 환각 → 거부 (to=None의 execute 게이트)
+# - 깊은 경로: array→items→properties / object→properties / 숫자 인덱스 세그먼트 skip
+# - items/object 내부 미정의(동적 노드) 또는 output_schema 미선언 → 보수적 통과
 
-    staging to=None의 실제 원인(nested 경로 환각)이지만, 이는 경로 존재성 문제라 1차
-    shape 검증 영역이 아님(후속 표현식 경로 검증 몫) — false positive를 내지 않아야 한다.
+
+@pytest.mark.asyncio
+async def test_nested_head_missing_rejected():
+    """표현식 head가 출력에 없으면 거부 — staging to=None 환각의 execute 게이트.
+
+    to:["${x.items.email}"]에서 items가 출력(messages)에 아예 없음. grounding이 compose에서
+    못 잡은 경우(수동편집 등)를 validator가 거부한다. (#523에서는 보수적 통과였으나 Phase 2b로 전환)
     """
     repo = _InMemoryRepo()
-    src_def = _typed_def(repo, outputs={"messages": {"type": "array"}})
-    gmail_def = _typed_def(
-        repo, inputs={"to": {"type": "array", "items": {"type": "string"}}}
-    )
+    src_def = _typed_def(repo, outputs={"messages": {"type": "array"}})  # 'items' 없음
+    gmail_def = _typed_def(repo, inputs={"to": {"type": "array", "items": {"type": "string"}}})
     src = _node(node_id=src_def.node_id)
-    gmail = _node(
-        node_id=gmail_def.node_id,
-        parameters={"to": [f"${{{src.instance_id}.items.email}}"]},
-    )
+    gmail = _node(node_id=gmail_def.node_id, parameters={"to": [f"${{{src.instance_id}.items.email}}"]})
     result = await GraphValidator(repo).validate(
         _wf([src, gmail], [_edge(src.instance_id, gmail.instance_id)])
     )
+    assert any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_nested_deep_path_type_ok():
+    """messages[].subject(string) → text(string): 깊은 경로 도달 + shape 일치 → 통과."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={
+        "messages": {"type": "array", "items": {
+            "type": "object", "properties": {"subject": {"type": "string"}}}},
+    })
+    dst_def = _typed_def(repo, inputs={"text": {"type": "string"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"text": f"${{{src.instance_id}.messages.0.subject}}"})
+    result = await GraphValidator(repo).validate(_wf([src, dst], [_edge(src.instance_id, dst.instance_id)]))
+    assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_nested_deep_path_type_mismatch():
+    """messages[].subject(string)를 array 기대 파라미터에 → 깊은 경로 shape 불일치 거부."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={
+        "messages": {"type": "array", "items": {
+            "type": "object", "properties": {"subject": {"type": "string"}}}},
+    })
+    dst_def = _typed_def(repo, inputs={"rows": {"type": "array"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"rows": f"${{{src.instance_id}.messages.0.subject}}"})
+    result = await GraphValidator(repo).validate(_wf([src, dst], [_edge(src.instance_id, dst.instance_id)]))
+    assert any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_nested_deep_field_missing_rejected():
+    """messages[].body 참조하나 items.properties엔 subject만 → nested field 미존재 거부."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={
+        "messages": {"type": "array", "items": {
+            "type": "object", "properties": {"subject": {"type": "string"}}}},
+    })
+    dst_def = _typed_def(repo, inputs={"text": {"type": "string"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"text": f"${{{src.instance_id}.messages.0.body}}"})
+    result = await GraphValidator(repo).validate(_wf([src, dst], [_edge(src.instance_id, dst.instance_id)]))
+    assert any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_nested_scalar_overaccess_rejected():
+    """scalar 필드에 .subfield 접근(count.foo) → 객체 아니라 키 접근 불가 → 거부."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={"count": {"type": "integer"}})
+    dst_def = _typed_def(repo, inputs={"text": {"type": "string"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"text": f"${{{src.instance_id}.count.foo}}"})
+    result = await GraphValidator(repo).validate(_wf([src, dst], [_edge(src.instance_id, dst.instance_id)]))
+    assert any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_nested_undefined_items_conservative_pass():
+    """items 내부 properties 미정의(동적 노드 rows) → 깊은 경로 검증 불가 → 보수적 통과."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={"rows": {"type": "array"}})  # items.properties 없음
+    dst_def = _typed_def(repo, inputs={"text": {"type": "string"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"text": f"${{{src.instance_id}.rows.0.col}}"})
+    result = await GraphValidator(repo).validate(_wf([src, dst], [_edge(src.instance_id, dst.instance_id)]))
+    assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_nested_empty_output_schema_conservative_pass():
+    """output_schema properties 미선언 노드 → 경로 검증 불가 → 보수적 통과(false positive 방지)."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={})  # properties 비어있음
+    dst_def = _typed_def(repo, inputs={"text": {"type": "string"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"text": f"${{{src.instance_id}.anything.deep}}"})
+    result = await GraphValidator(repo).validate(_wf([src, dst], [_edge(src.instance_id, dst.instance_id)]))
     assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
 
 
