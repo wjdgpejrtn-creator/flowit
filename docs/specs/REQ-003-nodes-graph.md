@@ -159,7 +159,8 @@ class GraphValidator:
     검증 항목:
     1. 사이클 감지 (Kahn's algorithm 기반 위상 정렬)
     2. 고립 노드 검출 (연결 없는 노드)
-    3. 노드 타입 불일치 (from_handle ↔ to_handle 타입 호환)
+    3. 노드 타입 불일치 (표현식 경로 ${inst.field} 출력 shape ↔ 소비 파라미터 기대 shape;
+       edge handle은 제어 분기 라벨이라 검증 대상 아님 — 전수조사 2026-06-15)
     4. 중복 instance_id 검출
     5. 필수 연결 누락 (required_connections 확인)
     6. 비실재 노드 (node_id가 카탈로그에 없음 = 실행 불가, E_UNKNOWN_NODE_TYPE,
@@ -189,8 +190,12 @@ class GraphValidator:
         """연결이 하나도 없는 노드 검출."""
         ...
     
-    def _check_type_compatibility(self, edges: list[Edge]) -> list[ValidationErrorItem]:
-        """from_handle 출력 타입과 to_handle 입력 타입 호환 검증."""
+    async def _check_type_compatibility(self, workflow: WorkflowSchema) -> list[ValidationErrorItem]:
+        """parameters의 ${inst.field} 표현식 출력 shape ↔ 소비 파라미터 기대 shape 호환 검증.
+
+        1차 = shape 레벨(scalar/array/object), str 파라미터 + list 원소 표현식 모두.
+        ANY({})·nested path·문자열 보간·미해결 토큰은 보수적 통과(false positive 방지).
+        """
         ...
     
     def _check_duplicate_ids(self, nodes: list[NodeInstance]) -> list[ValidationErrorItem]:

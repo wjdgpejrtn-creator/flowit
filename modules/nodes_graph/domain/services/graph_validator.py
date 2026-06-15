@@ -282,6 +282,10 @@ class GraphValidator:
           ANY로 떨어진다 — nested 경로의 출력 타입/존재성 검증은 후속(표현식 경로 검증) 스코프.
         - 토큰이 instance_id(UUID)가 아니면(rewrite 전 잔재) skip — 런타임 ReferenceResolver가
           미해결로 graceful degrade한다.
+
+        execution_engine ``CyclicScheduler``에는 대응 검증이 없다 — 본 타입검증은 ``validate``가
+        스케줄러보다 엄격한 **의도된 비대칭**이다(``required_connections``/parameter 검증과 동일
+        패턴). cycle parity(``test_validator_scheduler_parity``)는 타입 축과 무관하므로 유지된다.
         """
         errors: list[ValidationErrorItem] = []
         inst_map = {n.instance_id: n for n in workflow.nodes}

@@ -275,7 +275,7 @@ async def test_type_compatibility_returns_no_errors():
     _register(repo, n1, n2)
     edge = _edge(n1.instance_id, n2.instance_id)
     result = await GraphValidator(repo).validate(_wf([n1, n2], [edge]))
-    assert not any(e.code for e in result.errors if e.validator == "TypeCompatibility")
+    assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
     assert result.validation_status == "passed"
 
 
