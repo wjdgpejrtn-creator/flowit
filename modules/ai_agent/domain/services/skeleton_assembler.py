@@ -452,13 +452,16 @@ class SkeletonAssembler:
         sources = by_role.get(SlotRole.SOURCE, [])
         splitter = by_role[SlotRole.SPLITTER]
         worker = by_role[SlotRole.TRANSFORM]
-        merger = by_role[SlotRole.MERGER]
+        merger = by_role.get(SlotRole.MERGER, [])  # optional — 단일채널 per-item 루프엔 합류 불필요
         sinks = by_role[SlotRole.SINK]
 
         edges: list[DraftEdge] = []
         self._chain(edges, trigger + sources + splitter + worker + merger)
-        for s in sinks:  # merger → sink 병렬 분기
-            edges.append(DraftEdge(from_ref=merger[0].ref, to_ref=s.ref))
+        # merger 있으면 거기서, 없으면 worker에서 sink로 직접 팬아웃. merge_branch는 branches가
+        # required라 스캐폴드 미충전 시 검증 실패하므로 기본은 합류 없는 worker→sink(조장 e2e 발견).
+        tail = merger[0] if merger else worker[-1]
+        for s in sinks:
+            edges.append(DraftEdge(from_ref=tail.ref, to_ref=s.ref))
 
         return AssembledDraft(
             skeleton_name=skeleton.name,

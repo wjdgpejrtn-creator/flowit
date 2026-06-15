@@ -81,9 +81,14 @@ class QAEvaluatorService:
         if missing:
             gap = "누락된 필수 노드/채널: " + ", ".join(missing)
             feedback = f"{gap}\n{feedback}".strip() if feedback else gap
+        # 점수↔판정 정합: missing 게이트로 fail시키면서 만점 점수를 그대로 노출하면 "10/10
+        # (재시도 필요)" 모순 표시가 된다(조장 e2e 발견). 게이트 발동 시 점수를 임계 미만으로
+        # 낮춰 일치시킨다 — 누락 사유는 feedback이 보유(프롬프트도 "score below 8"을 지시하나
+        # LLM이 종종 불이행). missing 없으면 LLM 점수 그대로.
+        score = min(result.score, _THRESHOLD.MIN_SCORE - 1.0) if missing else result.score
         return EvaluationResult(
-            score=result.score,
-            pass_flag=_THRESHOLD.is_pass(result.score) and not missing,
+            score=score,
+            pass_flag=_THRESHOLD.is_pass(score) and not missing,
             reason=result.reason,
             feedback=feedback,
         )
