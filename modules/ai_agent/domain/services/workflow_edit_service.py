@@ -8,7 +8,7 @@ from common_schemas import Edge, NodeConfig, NodeInstance, Position, WorkflowSch
 from common_schemas.exceptions import ExecutionError
 from pydantic import BaseModel, Field
 
-from .dataflow_grounding import ground_ref_fields, outputs_of, rewrite_refs
+from .dataflow_grounding import ground_ref_fields, output_field_types, rewrite_refs
 
 _logger = logging.getLogger(__name__)
 
@@ -225,12 +225,12 @@ class WorkflowEditService:
         출력으로 보정/degrade한다(이미 instance_id 형태이므로 rewrite 불필요, grounding만).
         """
         cfg_by_id = {c.node_id: c for c in candidates}
-        outputs_by_instance = {
-            n.instance_id: outputs_of(cfg_by_id[n.node_id])
+        field_types_by_instance = {
+            n.instance_id: output_field_types(cfg_by_id[n.node_id])
             for n in nodes
             if n.node_id in cfg_by_id
         }
         return [
-            n.model_copy(update={"parameters": ground_ref_fields(n.parameters, outputs_by_instance)})
+            n.model_copy(update={"parameters": ground_ref_fields(n.parameters, field_types_by_instance)})
             for n in nodes
         ]

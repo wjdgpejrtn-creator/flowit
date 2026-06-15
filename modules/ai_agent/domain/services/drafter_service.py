@@ -15,6 +15,7 @@ from ..value_objects.skeleton import AssembledDraft
 # 데이터흐름 ref 재작성/grounding 헬퍼는 dataflow_grounding가 SSOT — refine 편집 경로
 # (WorkflowEditService)도 동일 로직을 재사용하므로 공유 모듈로 분리(중복 정의 금지).
 from .dataflow_grounding import ground_ref_fields as _ground_ref_fields
+from .dataflow_grounding import output_field_types as _output_field_types
 from .dataflow_grounding import outputs_of as _outputs_of
 from .dataflow_grounding import rewrite_refs as _rewrite_refs
 from .skeleton_assembler import build_workflow_with_refs
@@ -433,8 +434,8 @@ class DrafterService:
         resp = await self._llm.generate_structured(prompt, _ParamFillResponse)
         params_by_ref = {item.ref: item.parameters for item in resp.nodes}
 
-        outputs_by_instance = {
-            ref_to_iid[ref]: _outputs_of(cfg_by_type[ref_node_types[ref]])
+        field_types_by_instance = {
+            ref_to_iid[ref]: _output_field_types(cfg_by_type[ref_node_types[ref]])
             for ref in ref_to_iid
             if ref_node_types[ref] in cfg_by_type
         }
@@ -444,7 +445,7 @@ class DrafterService:
                 update={
                     "parameters": _ground_ref_fields(
                         _rewrite_refs(params_by_ref.get(iid_to_ref[n.instance_id], {}), ref_to_iid),
-                        outputs_by_instance,
+                        field_types_by_instance,
                     )
                 }
             )
@@ -661,14 +662,15 @@ class DrafterService:
 
             # 데이터 흐름 참조 재작성 — LLM이 쓴 ref 토큰을 instance_id로 (ADR-0023 L1)
             # → grounding: 환각한 출력 필드를 상류 노드의 실제 output_schema에 맞춘다 (REQ-004 bug B)
-            outputs_by_instance = {
-                ref_to_instance[raw.ref]: _outputs_of(node_map[raw.node_type]) for raw in draft.nodes
+            field_types_by_instance = {
+                ref_to_instance[raw.ref]: _output_field_types(node_map[raw.node_type])
+                for raw in draft.nodes
             }
             nodes = [
                 n.model_copy(
                     update={
                         "parameters": _ground_ref_fields(
-                            _rewrite_refs(n.parameters, ref_to_instance), outputs_by_instance
+                            _rewrite_refs(n.parameters, ref_to_instance), field_types_by_instance
                         )
                     }
                 )
@@ -748,14 +750,14 @@ class DrafterService:
 
             # 데이터 흐름 참조 재작성 — LLM이 쓴 node_type 토큰을 instance_id로 (ADR-0023 L1)
             # → grounding: 환각한 출력 필드를 상류 노드의 실제 output_schema에 맞춘다 (REQ-004 bug B)
-            outputs_by_instance = {
-                instance_id_map[ntype]: _outputs_of(node_map[ntype]) for ntype in instance_id_map
+            field_types_by_instance = {
+                instance_id_map[ntype]: _output_field_types(node_map[ntype]) for ntype in instance_id_map
             }
             nodes = [
                 n.model_copy(
                     update={
                         "parameters": _ground_ref_fields(
-                            _rewrite_refs(n.parameters, instance_id_map), outputs_by_instance
+                            _rewrite_refs(n.parameters, instance_id_map), field_types_by_instance
                         )
                     }
                 )
