@@ -1,9 +1,9 @@
 # Modal deploy (sub-agents) — CD #2.
 #
 # release 브랜치 push 즉시 변경된 Modal sub-agent만 자동 재배포.
-# Modal workspace 단일(flowit)이라 staging/prod env 구분 없음 — sub-agent matrix만.
+# Modal workspace 단일(flowit02)이라 staging/prod env 구분 없음 — sub-agent matrix만.
 #
-# 5 agents (workspace=flowit, Q&A §4.2 실측 — 전부 이미 배포돼 있음 → 갈아끼우기):
+# 5 agents (workspace=flowit02, Q&A §4.2 실측 — 전부 이미 배포돼 있음 → 갈아끼우기):
 #   - agent-composer        (services/agents/agent-composer/main.py)
 #   - orchestrator          (services/agents/orchestrator/main.py)    ← app prefix 없음
 #   - agent-skills-builder  (services/agents/agent-skills-builder/main.py)
@@ -18,7 +18,7 @@
 # Modal token 의존:
 #   secrets.MODAL_TOKEN_ID
 #   secrets.MODAL_TOKEN_SECRET
-#   둘 다 flowit workspace 토큰이어야 sub-agent 간 RPC lookup 정상.
+#   둘 다 flowit02 workspace 토큰이어야 sub-agent 간 RPC lookup 정상.
 
 name: Modal deploy (sub-agents)
 
@@ -46,7 +46,9 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   # PR #232 황대원 LOW #3 — workspace 이름 8곳 하드코딩 → env 단일 정의로 drift 방지.
   # 변경 시 본 라인 1곳만 수정.
-  EXPECTED_MODAL_WORKSPACE: flowit
+  # 2026-06-15: flowit($30 크레딧 소진) → flowit02 워크스페이스 이전. GitHub secret
+  # MODAL_TOKEN_ID/SECRET도 flowit02 토큰으로 동시 교체됨.
+  EXPECTED_MODAL_WORKSPACE: flowit02
 
 jobs:
   # 변경 경로 보고 어떤 sub-agent deploy 돌릴지 분기.
