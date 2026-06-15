@@ -218,18 +218,21 @@ def test_branch_with_three_sinks_bails_to_llm() -> None:
 
 
 # ── 팬아웃 (병렬 map) ───────────────────────────────────────────────────────
-def test_fanout_assembles_split_worker_merge() -> None:
+def test_fanout_assembles_split_worker_to_sink_without_merge() -> None:
+    # 단일채널 per-item 루프 — splitter→worker→sink 직결. merge_branch는 기본 미삽입(branches가
+    # required라 스캐폴드 미충전 시 매번 검증 실패하던 회귀, 조장 e2e 발견).
     d = _A.assemble("목록의 각 항목마다 요약해서 슬랙으로 보내줘")
     assert d is not None
     assert d.skeleton_name == "fan_out_map"
     types = [n.node_type for n in d.nodes]
-    assert "loop_list" in types and "merge_branch" in types
+    assert "loop_list" in types
+    assert "merge_branch" not in types  # 불필요한 합류 노드 미삽입
     splitter = next(n for n in d.nodes if n.role == SlotRole.SPLITTER)
     worker = next(n for n in d.nodes if n.role == SlotRole.TRANSFORM)
-    merger = next(n for n in d.nodes if n.role == SlotRole.MERGER)
-    # splitter→worker→merger 연쇄.
+    sink = next(n for n in d.nodes if n.role == SlotRole.SINK)
+    # splitter→worker→sink 연쇄(merger 없음).
     assert any(e.from_ref == splitter.ref and e.to_ref == worker.ref for e in d.edges)
-    assert any(e.from_ref == worker.ref and e.to_ref == merger.ref for e in d.edges)
+    assert any(e.from_ref == worker.ref and e.to_ref == sink.ref for e in d.edges)
 
 
 def test_fanout_without_sink_bails_to_llm() -> None:
