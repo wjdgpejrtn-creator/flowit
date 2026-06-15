@@ -100,10 +100,19 @@ def test_quarter_word_does_not_trigger_branch() -> None:
 
 
 def test_genuine_branch_verb_still_detected() -> None:
-    # 분기 **동작**을 명확히 가리키는 동사형은 여전히 branch로 잡혀야 한다(진짜 제어흐름 보존).
-    e = _X.extract("값에 따라 분기하여 처리해줘")
-    assert e.has_branch is True
-    assert "branch" in e.shape_signals()
+    # 분기 **동작**(동사 분기하다/분기시키다 + "분기 처리")은 활용형 전반에서 branch로 잡혀야 한다
+    # (진짜 제어흐름 보존). 어간 매칭이라 여/서/ㄴ다/했다/줘/시켜 등 활용형을 두루 커버.
+    for utterance in (
+        "값에 따라 분기하여 처리해줘",
+        "조건마다 분기해서 보내",
+        "유형 보고 분기한다",
+        "상태로 분기해줘",
+        "등급으로 분기시켜",
+        "값 보고 분기 처리해",
+    ):
+        e = _X.extract(utterance)
+        assert e.has_branch is True, utterance
+        assert "branch" in e.shape_signals(), utterance
 
 
 def test_fanout_signal_detected() -> None:
