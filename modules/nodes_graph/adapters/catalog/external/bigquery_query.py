@@ -134,7 +134,16 @@ def get_node_definition() -> NodeDefinition:
                 "rows": {"type": "array", "items": {"type": "object"}},
                 "total_rows": {"type": "integer"},
                 "total_bytes_processed": {"type": "integer"},
-                "schema": {"type": "array", "items": {"type": "object"}},
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "type": {"type": "string"},
+                        },
+                    },
+                },
             },
         },
         parameter_schema={},

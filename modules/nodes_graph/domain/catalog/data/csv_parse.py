@@ -74,7 +74,7 @@ def get_node_definition() -> NodeDefinition:
         output_schema={
             "type": "object",
             "properties": {
-                "rows": {"type": "array"},
+                "rows": {"type": "array", "items": {"type": "object"}},
                 "headers": {"type": "array", "items": {"type": "string"}},
                 "row_count": {"type": "integer"},
             },
