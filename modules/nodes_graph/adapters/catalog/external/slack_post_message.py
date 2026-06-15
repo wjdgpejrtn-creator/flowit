@@ -22,18 +22,18 @@ _TIMEOUT_SECONDS = 30
 
 @dataclass
 class SlackPostMessageInput:
-    channel: str                                    # 채널 ID 또는 채널명 (e.g. "C0123ABC", "#general")
-    text: str                                       # 메시지 본문
-    thread_ts: str | None = None                    # 스레드 답글일 경우 부모 메시지 ts
-    mrkdwn: bool = True                             # Slack mrkdwn 포맷 활성화
+    channel: str  # 채널 ID 또는 채널명 (e.g. "C0123ABC", "#general")
+    text: str  # 메시지 본문
+    thread_ts: str | None = None  # 스레드 답글일 경우 부모 메시지 ts
+    mrkdwn: bool = True  # Slack mrkdwn 포맷 활성화
     blocks: list[dict[str, Any]] = field(default_factory=list)  # Block Kit (선택)
 
 
 @dataclass
 class SlackPostMessageOutput:
     ok: bool
-    ts: str                                         # 게시된 메시지 timestamp (ID 역할)
-    channel: str                                    # 해석된 채널 ID
+    ts: str  # 게시된 메시지 timestamp (ID 역할)
+    channel: str  # 해석된 채널 ID
     raw_response: dict[str, Any]
 
 
@@ -98,7 +98,11 @@ def get_node_definition() -> NodeDefinition:
                 "channel": {"type": "string", "description": "채널 ID 또는 채널명"},
                 "text": {"type": "string", "description": "메시지 본문"},
                 "thread_ts": {"type": ["string", "null"], "description": "스레드 부모 메시지 ts"},
-                "mrkdwn": {"type": "boolean", "default": True},
+                "mrkdwn": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Slack 마크다운(*굵게*, _기울임_ 등) 해석 여부. 기본값 true",
+                },
                 "blocks": {"type": "array", "items": {"type": "object"}, "description": "Slack Block Kit"},
             },
             "required": ["channel", "text"],

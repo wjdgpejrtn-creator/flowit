@@ -43,9 +43,7 @@ class TextTemplateNode(BaseNode[TextTemplateInput, TextTemplateOutput]):
     async def process(self, input: TextTemplateInput, context: NodeContext) -> TextTemplateOutput:
         variables = input.variables or {}
         required_keys = {
-            field_name
-            for _, field_name, _, _ in Formatter().parse(input.template)
-            if field_name is not None
+            field_name for _, field_name, _, _ in Formatter().parse(input.template) if field_name is not None
         }
         missing = required_keys - variables.keys()
         if missing:
@@ -67,8 +65,11 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "template": {"type": "string"},
-                "variables": {"type": "object"},
+                "template": {
+                    "type": "string",
+                    "description": '{변수} 자리를 치환할 템플릿 문자열. 예: "안녕하세요 {name}님"',
+                },
+                "variables": {"type": "object", "description": '{변수}에 채워 넣을 값 객체. 예: {"name": "홍길동"}'},
             },
             "required": ["template", "variables"],
         },

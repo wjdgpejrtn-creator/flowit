@@ -17,9 +17,9 @@ _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
 
 @dataclass
 class ScheduleTriggerInput:
-    cron: str               # "0 9 * * 1-5" (평일 오전 9시)
+    cron: str  # "0 9 * * 1-5" (평일 오전 9시)
     timezone: str = "UTC"
-    triggered_at: str = "" # 실행 엔진이 주입하는 실제 트리거 시각 (ISO 형식)
+    triggered_at: str = ""  # 실행 엔진이 주입하는 실제 트리거 시각 (ISO 형식)
 
 
 @dataclass
@@ -59,8 +59,15 @@ def get_node_definition() -> NodeDefinition:
             "type": "object",
             "properties": {
                 "cron": {"type": "string", "description": "Cron 표현식 (예: '0 9 * * 1-5')"},
-                "timezone": {"type": "string", "default": "UTC"},
-                "triggered_at": {"type": "string"},
+                "timezone": {
+                    "type": "string",
+                    "default": "UTC",
+                    "description": 'Cron 시각을 해석할 시간대. 예: "Asia/Seoul". 기본값 UTC',
+                },
+                "triggered_at": {
+                    "type": "string",
+                    "description": "실제 트리거 시각(실행 엔진이 자동 주입, 직접 입력 불필요)",
+                },
             },
             "required": ["cron"],
         },

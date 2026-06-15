@@ -21,13 +21,13 @@ class RetryInput:
     max_attempts: int = 3
     delay_seconds: float = 1.0
     backoff_multiplier: float = 2.0
-    value: Any = None   # 하위 노드로 전달할 pass-through 값
+    value: Any = None  # 하위 노드로 전달할 pass-through 값
 
 
 @dataclass
 class RetryOutput:
     value: Any
-    config: dict[str, Any]   # 실행 엔진이 읽는 재시도 설정
+    config: dict[str, Any]  # 실행 엔진이 읽는 재시도 설정
 
 
 class RetryNode(BaseNode[RetryInput, RetryOutput]):
@@ -62,10 +62,22 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "max_attempts": {"type": "integer", "default": 3},
-                "delay_seconds": {"type": "number", "default": 1.0},
-                "backoff_multiplier": {"type": "number", "default": 2.0},
-                "value": {},
+                "max_attempts": {
+                    "type": "integer",
+                    "default": 3,
+                    "description": "최대 시도 횟수(최초 실행 포함). 기본값 3",
+                },
+                "delay_seconds": {
+                    "type": "number",
+                    "default": 1.0,
+                    "description": "첫 재시도 전 대기 시간(초). 기본값 1.0",
+                },
+                "backoff_multiplier": {
+                    "type": "number",
+                    "default": 2.0,
+                    "description": "재시도마다 대기 시간에 곱할 배수(지수 백오프). 기본값 2.0",
+                },
+                "value": {"description": "재시도 대상 하위 노드로 전달할 입력값"},
             },
         },
         output_schema={

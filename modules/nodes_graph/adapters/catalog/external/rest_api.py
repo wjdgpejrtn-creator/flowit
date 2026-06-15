@@ -24,7 +24,7 @@ _MAX_TIMEOUT_SECONDS = 300  # input_schema의 timeout_seconds maximum과 정합
 class RestApiInput:
     base_url: str
     path: str = ""
-    method: str = "GET"                                         # GET | POST | PUT | PATCH | DELETE
+    method: str = "GET"  # GET | POST | PUT | PATCH | DELETE
     query_params: dict[str, Any] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
     body: dict[str, Any] | None = None
@@ -98,17 +98,32 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "base_url": {"type": "string"},
-                "path": {"type": "string", "default": ""},
+                "base_url": {"type": "string", "description": 'API 기본 URL. 예: "https://api.example.com"'},
+                "path": {
+                    "type": "string",
+                    "default": "",
+                    "description": 'base_url에 이어붙일 경로. 예: "/v1/users". 기본값 빈 문자열',
+                },
                 "method": {
                     "type": "string",
                     "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
                     "default": "GET",
+                    "description": "HTTP 메서드(GET/POST/PUT/PATCH/DELETE). 기본값 GET",
                 },
-                "query_params": {"type": "object"},
-                "headers": {"type": "object", "additionalProperties": {"type": "string"}},
-                "body": {"type": "object"},
-                "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "default": 30},
+                "query_params": {"type": "object", "description": 'URL 쿼리 파라미터 객체. 예: {"page": 1}'},
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": "요청 HTTP 헤더 객체. 인증 토큰은 연결(credential)로 주입 권장",
+                },
+                "body": {"type": "object", "description": "POST/PUT/PATCH 요청 본문(JSON)"},
+                "timeout_seconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 300,
+                    "default": 30,
+                    "description": "응답 대기 제한 시간(초). 기본값 30",
+                },
             },
             "required": ["base_url"],
         },

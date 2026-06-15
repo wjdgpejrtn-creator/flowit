@@ -68,8 +68,16 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "branches": {"type": "array"},
-                "strategy": {"type": "string", "enum": ["list", "first", "last", "dict_merge"], "default": "list"},
+                "branches": {"type": "array", "description": "병합할 병렬 브랜치 결과 목록"},
+                "strategy": {
+                    "type": "string",
+                    "enum": ["list", "first", "last", "dict_merge"],
+                    "default": "list",
+                    "description": (
+                        "병합 방식. list=배열로 모음, first=첫 결과, last=마지막 결과, "
+                        "dict_merge=객체 병합. 기본값 list"
+                    ),
+                },
             },
             "required": ["branches"],
         },

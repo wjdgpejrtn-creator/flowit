@@ -18,7 +18,7 @@ _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
 
 @dataclass
 class StringTemplateInput:
-    template: str                  # "안녕하세요, ${name}님. 나이는 ${age}세입니다."
+    template: str  # "안녕하세요, ${name}님. 나이는 ${age}세입니다."
     variables: dict[str, str]
 
 
@@ -53,8 +53,15 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "template": {"type": "string", "description": "예: '안녕하세요, ${name}님' (string.Template $변수명 형식)"},
-                "variables": {"type": "object", "additionalProperties": {"type": "string"}},
+                "template": {
+                    "type": "string",
+                    "description": "예: '안녕하세요, ${name}님' (string.Template $변수명 형식)",
+                },
+                "variables": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": '템플릿의 $변수명에 채워 넣을 값 객체. 예: {"name": "홍길동"}',
+                },
             },
             "required": ["template", "variables"],
         },

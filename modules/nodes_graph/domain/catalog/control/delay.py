@@ -51,7 +51,9 @@ def get_node_definition() -> NodeDefinition:
         version="1.0.0",
         input_schema={
             "type": "object",
-            "properties": {"seconds": {"type": "number", "minimum": 0}},
+            "properties": {
+                "seconds": {"type": "number", "minimum": 0, "description": "실행을 지연시킬 시간(초). 예: 5"}
+            },
             "required": ["seconds"],
         },
         output_schema={

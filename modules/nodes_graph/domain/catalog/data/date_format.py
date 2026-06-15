@@ -66,12 +66,29 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "date_str": {"type": "string"},
-                "input_format": {"type": "string", "default": "%Y-%m-%d %H:%M:%S"},
-                "output_format": {"type": "string", "default": "%Y-%m-%d %H:%M:%S"},
-                "add_days": {"type": "integer", "default": 0},
-                "add_hours": {"type": "integer", "default": 0},
-                "add_minutes": {"type": "integer", "default": 0},
+                "date_str": {
+                    "type": "string",
+                    "description": (
+                        '변환할 날짜 문자열. input_format과 형식이 일치해야 합니다. 예: "2026-06-03 14:30:00"'
+                    ),
+                },
+                "input_format": {
+                    "type": "string",
+                    "default": "%Y-%m-%d %H:%M:%S",
+                    "description": '입력 날짜 문자열의 형식(strftime 코드). 기본값 "%Y-%m-%d %H:%M:%S"',
+                },
+                "output_format": {
+                    "type": "string",
+                    "default": "%Y-%m-%d %H:%M:%S",
+                    "description": '출력할 날짜 형식(strftime 코드). 예: "%Y년 %m월 %d일"',
+                },
+                "add_days": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "결과 날짜에 더할 일수(음수면 과거). 기본값 0",
+                },
+                "add_hours": {"type": "integer", "default": 0, "description": "더할 시간 수(음수 가능). 기본값 0"},
+                "add_minutes": {"type": "integer", "default": 0, "description": "더할 분 수(음수 가능). 기본값 0"},
             },
             "required": ["date_str"],
         },

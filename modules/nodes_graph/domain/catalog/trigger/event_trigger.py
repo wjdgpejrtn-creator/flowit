@@ -59,9 +59,9 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "event_type": {"type": "string"},
-                "payload": {"type": "object"},
-                "source": {"type": "string"},
+                "event_type": {"type": "string", "description": '구독할 내부 이벤트 종류. 예: "order.completed"'},
+                "payload": {"type": "object", "description": "이벤트 발행 시 전달되는 데이터(실행 엔진이 주입)"},
+                "source": {"type": "string", "description": "이벤트 발행 출처를 한정(선택). 비우면 모든 출처를 구독"},
             },
             "required": ["event_type"],
         },

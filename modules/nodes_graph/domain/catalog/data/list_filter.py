@@ -20,8 +20,8 @@ _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
 class ListFilterInput:
     items: list[Any]
     operation: str  # filter_none | sort | sort_desc | deduplicate | reverse | take | skip
-    n: int = 0          # take/skip 개수
-    key: str = ""       # dict 리스트 정렬 시 기준 필드명
+    n: int = 0  # take/skip 개수
+    key: str = ""  # dict 리스트 정렬 시 기준 필드명
 
 
 @dataclass
@@ -81,13 +81,21 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "items": {"type": "array"},
+                "items": {"type": "array", "description": "처리할 리스트"},
                 "operation": {
                     "type": "string",
                     "enum": ["filter_none", "sort", "sort_desc", "deduplicate", "reverse", "take", "skip"],
+                    "description": (
+                        "filter_none=빈 값 제거, sort=오름차순, sort_desc=내림차순, "
+                        "deduplicate=중복 제거, reverse=뒤집기, take=앞 n개, skip=앞 n개 건너뛰기"
+                    ),
                 },
-                "n": {"type": "integer", "default": 0},
-                "key": {"type": "string", "default": ""},
+                "n": {"type": "integer", "default": 0, "description": "take/skip 연산에서 사용할 개수. 기본값 0"},
+                "key": {
+                    "type": "string",
+                    "default": "",
+                    "description": "객체 리스트 정렬·필터 시 기준이 될 필드명. 비우면 값 자체 기준",
+                },
             },
             "required": ["items", "operation"],
         },

@@ -22,25 +22,25 @@ _TIMEOUT_SECONDS = 60
 
 @dataclass
 class GoogleCalendarCreateEventInput:
-    calendar_id: str                                            # "primary" 또는 캘린더 ID
-    summary: str                                                # 이벤트 제목
-    start: str                                                  # ISO 8601 (e.g. "2026-05-11T09:00:00+09:00")
-    end: str                                                    # ISO 8601
+    calendar_id: str  # "primary" 또는 캘린더 ID
+    summary: str  # 이벤트 제목
+    start: str  # ISO 8601 (e.g. "2026-05-11T09:00:00+09:00")
+    end: str  # ISO 8601
     description: str | None = None
     location: str | None = None
-    attendees: list[str] = field(default_factory=list)          # 이메일 목록
+    attendees: list[str] = field(default_factory=list)  # 이메일 목록
     timezone: str = "Asia/Seoul"
-    send_updates: str = "none"                                  # all | externalOnly | none
+    send_updates: str = "none"  # all | externalOnly | none
     reminders: list[dict[str, Any]] = field(default_factory=list)  # [{"method": "email"|"popup", "minutes": ...}]
 
 
 @dataclass
 class GoogleCalendarCreateEventOutput:
     event_id: str
-    html_link: str                                              # 캘린더 웹 링크
+    html_link: str  # 캘린더 웹 링크
     ical_uid: str
-    status: str                                                 # confirmed | tentative | cancelled
-    created: str                                                # ISO 8601
+    status: str  # confirmed | tentative | cancelled
+    created: str  # ISO 8601
 
 
 class GoogleCalendarCreateEventNode(BaseNode[GoogleCalendarCreateEventInput, GoogleCalendarCreateEventOutput]):
@@ -75,23 +75,16 @@ class GoogleCalendarCreateEventNode(BaseNode[GoogleCalendarCreateEventInput, Goo
         if input.reminders:
             body["reminders"] = {"useDefault": False, "overrides": input.reminders}
 
-        url = (
-            f"https://www.googleapis.com/calendar/v3/calendars/"
-            f"{quote(input.calendar_id, safe='')}/events"
-        )
+        url = f"https://www.googleapis.com/calendar/v3/calendars/{quote(input.calendar_id, safe='')}/events"
         headers = {
             "Authorization": f"Bearer {context.connection_token}",
             "Content-Type": "application/json",
         }
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                url, params={"sendUpdates": input.send_updates}, json=body, headers=headers
-            )
+            response = await client.post(url, params={"sendUpdates": input.send_updates}, json=body, headers=headers)
 
         if response.status_code >= 400:
-            raise ExecutionError(
-                f"Google Calendar API 오류 {response.status_code}: {response.text[:200]}"
-            )
+            raise ExecutionError(f"Google Calendar API 오류 {response.status_code}: {response.text[:200]}")
 
         data = response.json()
         return GoogleCalendarCreateEventOutput(
@@ -113,16 +106,41 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "calendar_id": {"type": "string", "default": "primary"},
-                "summary": {"type": "string"},
-                "start": {"type": "string", "format": "date-time"},
-                "end": {"type": "string", "format": "date-time"},
-                "description": {"type": ["string", "null"]},
-                "location": {"type": ["string", "null"]},
-                "attendees": {"type": "array", "items": {"type": "string", "format": "email"}},
-                "timezone": {"type": "string", "default": "Asia/Seoul"},
-                "send_updates": {"type": "string", "enum": ["all", "externalOnly", "none"], "default": "none"},
-                "reminders": {"type": "array", "items": {"type": "object"}},
+                "calendar_id": {
+                    "type": "string",
+                    "default": "primary",
+                    "description": '이벤트를 추가할 캘린더 ID. 본인 기본 캘린더는 "primary". 기본값 primary',
+                },
+                "summary": {"type": "string", "description": "이벤트 제목"},
+                "start": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": '시작 일시(ISO 8601). 예: "2026-06-03T14:00:00"',
+                },
+                "end": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": '종료 일시(ISO 8601). 예: "2026-06-03T15:00:00"',
+                },
+                "description": {"type": ["string", "null"], "description": "이벤트 상세 설명(선택)"},
+                "location": {"type": ["string", "null"], "description": "장소(선택)"},
+                "attendees": {
+                    "type": "array",
+                    "items": {"type": "string", "format": "email"},
+                    "description": "참석자 이메일 목록(선택)",
+                },
+                "timezone": {
+                    "type": "string",
+                    "default": "Asia/Seoul",
+                    "description": "시작·종료 시각의 시간대. 기본값 Asia/Seoul",
+                },
+                "send_updates": {
+                    "type": "string",
+                    "enum": ["all", "externalOnly", "none"],
+                    "default": "none",
+                    "description": "참석자 알림 발송 범위. all=전체, externalOnly=외부만, none=안함. 기본값 none",
+                },
+                "reminders": {"type": "array", "items": {"type": "object"}, "description": "알림 설정 목록(선택)"},
             },
             "required": ["calendar_id", "summary", "start", "end"],
         },

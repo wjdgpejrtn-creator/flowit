@@ -21,7 +21,7 @@ class RegexReplaceInput:
     text: str
     pattern: str
     replacement: str
-    max_count: int = 0   # 0 = 전체 교체
+    max_count: int = 0  # 0 = 전체 교체
     ignore_case: bool = False
 
 
@@ -60,11 +60,15 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "text": {"type": "string"},
-                "pattern": {"type": "string"},
-                "replacement": {"type": "string"},
-                "max_count": {"type": "integer", "default": 0},
-                "ignore_case": {"type": "boolean", "default": False},
+                "text": {"type": "string", "description": "치환 대상 텍스트"},
+                "pattern": {"type": "string", "description": "찾을 정규식 패턴"},
+                "replacement": {"type": "string", "description": "치환할 문자열. 캡처 그룹은 \\1, \\2로 참조"},
+                "max_count": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "최대 치환 횟수. 0이면 전체 치환. 기본값 0",
+                },
+                "ignore_case": {"type": "boolean", "default": False, "description": "대소문자 무시 여부. 기본값 false"},
             },
             "required": ["text", "pattern", "replacement"],
         },

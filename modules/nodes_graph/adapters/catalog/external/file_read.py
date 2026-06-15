@@ -27,7 +27,7 @@ class FileReadInput:
 
 @dataclass
 class FileReadOutput:
-    content: Any                                                # str(text) | str(hex when binary=True)
+    content: Any  # str(text) | str(hex when binary=True)
     size_bytes: int
     path: str
 
@@ -69,9 +69,13 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "path": {"type": "string"},
-                "encoding": {"type": "string", "default": "utf-8"},
-                "binary": {"type": "boolean", "default": False},
+                "path": {"type": "string", "description": '읽을 파일 경로. 예: "/data/report.txt"'},
+                "encoding": {"type": "string", "default": "utf-8", "description": "텍스트 디코딩 인코딩. 기본값 utf-8"},
+                "binary": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "true면 바이너리를 hex 문자열로 읽음. 기본값 false",
+                },
             },
             "required": ["path"],
         },

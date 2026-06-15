@@ -53,8 +53,8 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "count": {"type": "integer"},
-                "start": {"type": "integer", "default": 0},
+                "count": {"type": "integer", "description": "하위 노드를 반복 실행할 횟수"},
+                "start": {"type": "integer", "default": 0, "description": "반복 인덱스 시작값. 기본값 0"},
             },
             "required": ["count"],
         },

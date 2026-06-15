@@ -87,9 +87,14 @@ def test_branch_and_fanout_have_required_control_slots() -> None:
     assert branch.slot(SlotRole.ROUTER) is not None and branch.slot(SlotRole.ROUTER).required
     fanout = find_skeleton("fan_out_map")
     assert fanout is not None
-    for role in (SlotRole.SPLITTER, SlotRole.MERGER, SlotRole.TRANSFORM):
+    # splitter/worker는 fanout 구조의 필수. merger는 **optional** — 단일채널 per-item 루프엔
+    # 합류가 불필요하고, required로 강제하면 merge_branch(branches required)가 무조건 삽입돼
+    # 검증 실패하던 회귀 때문(조장 e2e). 합류는 발화/앙상블이 명시할 때만.
+    for role in (SlotRole.SPLITTER, SlotRole.TRANSFORM):
         slot = fanout.slot(role)
         assert slot is not None and slot.required
+    merger = fanout.slot(SlotRole.MERGER)
+    assert merger is not None and not merger.required and merger.default_node_type is None
 
 
 def test_library_covers_six_control_flow_primitives() -> None:

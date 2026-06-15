@@ -19,7 +19,7 @@ _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
 @dataclass
 class SwitchCaseInput:
     value: Any
-    cases: list[str]    # 정의된 케이스 목록
+    cases: list[str]  # 정의된 케이스 목록
     default_case: str = "default"
 
 
@@ -56,9 +56,17 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "value": {},
-                "cases": {"type": "array", "items": {"type": "string"}},
-                "default_case": {"type": "string", "default": "default"},
+                "value": {"description": "분기 기준이 되는 값"},
+                "cases": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "값과 매칭할 케이스 목록. 각 케이스는 비교값과 대상 브랜치를 지정",
+                },
+                "default_case": {
+                    "type": "string",
+                    "default": "default",
+                    "description": '어떤 케이스에도 매칭되지 않을 때 사용할 브랜치 이름. 기본값 "default"',
+                },
             },
             "required": ["value", "cases"],
         },

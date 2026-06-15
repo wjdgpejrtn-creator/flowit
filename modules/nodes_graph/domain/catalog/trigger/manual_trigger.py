@@ -59,9 +59,12 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "payload": {"type": "object"},
-                "triggered_by": {"type": "string"},
-                "triggered_at": {"type": "string"},
+                "payload": {"type": "object", "description": "수동 시작 시 전달할 초기 데이터(선택)"},
+                "triggered_by": {
+                    "type": "string",
+                    "description": "워크플로우를 시작한 사용자 식별자(실행 엔진이 주입)",
+                },
+                "triggered_at": {"type": "string", "description": "수동 시작 시각(실행 엔진이 주입)"},
             },
         },
         output_schema={

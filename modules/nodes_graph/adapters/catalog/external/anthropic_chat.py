@@ -24,9 +24,9 @@ _TIMEOUT_SECONDS = 120  # LLM 추론은 느림 — 넉넉히
 @dataclass
 class AnthropicChatInput:
     model: str  # 예: claude-opus-4-7 / claude-sonnet-4-6 / claude-haiku-4-5
-    messages: list[dict[str, Any]]                              # [{"role": "user", "content": "..."}, ...]
+    messages: list[dict[str, Any]]  # [{"role": "user", "content": "..."}, ...]
     max_tokens: int = 1024
-    system: str | None = None                                   # system prompt
+    system: str | None = None  # system prompt
     temperature: float = 1.0
     top_p: float = 1.0
     stop_sequences: list[str] = field(default_factory=list)
@@ -35,10 +35,10 @@ class AnthropicChatInput:
 
 @dataclass
 class AnthropicChatOutput:
-    content: str                                                # text content (멀티 블록은 결합)
-    stop_reason: str                                            # end_turn | max_tokens | stop_sequence | tool_use
+    content: str  # text content (멀티 블록은 결합)
+    stop_reason: str  # end_turn | max_tokens | stop_sequence | tool_use
     model: str
-    usage: dict[str, int]                                       # {"input_tokens": .., "output_tokens": ..}
+    usage: dict[str, int]  # {"input_tokens": .., "output_tokens": ..}
     tool_use: list[dict[str, Any]]
 
 
@@ -81,9 +81,7 @@ class AnthropicChatNode(BaseNode[AnthropicChatInput, AnthropicChatOutput]):
             response = await client.post(_ANTHROPIC_API_URL, json=body, headers=headers)
 
         if response.status_code >= 400:
-            raise ExecutionError(
-                f"Anthropic API 오류 {response.status_code}: {response.text[:200]}"
-            )
+            raise ExecutionError(f"Anthropic API 오류 {response.status_code}: {response.text[:200]}")
 
         data = response.json()
         blocks = data.get("content", [])
@@ -108,24 +106,39 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "model": {"type": "string"},
+                "model": {
+                    "type": "string",
+                    "description": '사용할 Claude 모델 ID. 예: "claude-opus-4-8", "claude-sonnet-4-6"',
+                },
                 "messages": {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "role": {"type": "string", "enum": ["user", "assistant"]},
-                            "content": {},
-                        },
+                        "properties": {"role": {"type": "string", "enum": ["user", "assistant"]}, "content": {}},
                         "required": ["role", "content"],
                     },
+                    "description": "대화 메시지 목록. 각 항목은 role(user/assistant)과 content",
                 },
-                "max_tokens": {"type": "integer", "default": 1024},
-                "system": {"type": ["string", "null"]},
-                "temperature": {"type": "number", "default": 1.0, "minimum": 0, "maximum": 1},
-                "top_p": {"type": "number", "default": 1.0},
-                "stop_sequences": {"type": "array", "items": {"type": "string"}},
-                "tools": {"type": "array", "items": {"type": "object"}},
+                "max_tokens": {"type": "integer", "default": 1024, "description": "생성할 최대 토큰 수. 기본값 1024"},
+                "system": {"type": ["string", "null"], "description": "모델 동작을 지시하는 시스템 프롬프트(선택)"},
+                "temperature": {
+                    "type": "number",
+                    "default": 1.0,
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "출력 무작위성(0=결정적, 1=다양). 기본값 1.0",
+                },
+                "top_p": {"type": "number", "default": 1.0, "description": "누적 확률 샘플링 기준(0~1). 기본값 1.0"},
+                "stop_sequences": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "생성을 중단할 문자열 목록(선택)",
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "모델이 호출할 수 있는 도구 정의 목록(선택)",
+                },
             },
             "required": ["model", "messages"],
         },

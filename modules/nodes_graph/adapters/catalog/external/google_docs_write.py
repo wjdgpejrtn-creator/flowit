@@ -22,9 +22,7 @@ _TIMEOUT_SECONDS = 60
 
 def _json_or_raise(response: httpx.Response, label: str) -> dict[str, Any]:
     if response.status_code >= 400:
-        raise ExecutionError(
-            f"Google Docs {label} 오류 {response.status_code}: {response.text[:200]}"
-        )
+        raise ExecutionError(f"Google Docs {label} 오류 {response.status_code}: {response.text[:200]}")
     return response.json()
 
 
@@ -40,9 +38,7 @@ def _build_requests(mode: str, content: str, doc: dict[str, Any]) -> list[dict[s
     if mode == "replace":
         requests: list[dict[str, Any]] = []
         if end - 1 > 1:  # 기존 본문이 있으면 [1, end-1] 삭제 (마지막 개행은 보존)
-            requests.append(
-                {"deleteContentRange": {"range": {"startIndex": 1, "endIndex": end - 1}}}
-            )
+            requests.append({"deleteContentRange": {"range": {"startIndex": 1, "endIndex": end - 1}}})
         requests.append({"insertText": {"location": {"index": 1}, "text": content}})
         return requests
     # append — 본문 끝(최종 개행 직전)에 삽입
@@ -56,18 +52,19 @@ class GoogleDocsWriteInput:
     - document_id가 None: 새 문서 생성 (title 필수)
     - document_id 지정: 기존 문서에 작업 (mode=append/replace)
     """
-    title: str | None = None                        # 새 문서 생성 시 필수
-    content: str = ""                               # 작성할 텍스트 (개행 보존)
-    document_id: str | None = None                  # 기존 문서 ID (수정 시)
-    mode: str = "append"                            # append | replace | create_only
-    folder_id: str | None = None                    # 생성 시 부모 폴더 (Drive)
+
+    title: str | None = None  # 새 문서 생성 시 필수
+    content: str = ""  # 작성할 텍스트 (개행 보존)
+    document_id: str | None = None  # 기존 문서 ID (수정 시)
+    mode: str = "append"  # append | replace | create_only
+    folder_id: str | None = None  # 생성 시 부모 폴더 (Drive)
 
 
 @dataclass
 class GoogleDocsWriteOutput:
     document_id: str
     revision_id: str
-    web_link: str                                   # https://docs.google.com/document/d/...
+    web_link: str  # https://docs.google.com/document/d/...
     title: str
 
 
@@ -152,14 +149,18 @@ def get_node_definition() -> NodeDefinition:
             "type": "object",
             "properties": {
                 "title": {"type": ["string", "null"], "description": "새 문서 생성 시 필수"},
-                "content": {"type": "string"},
+                "content": {"type": "string", "description": "문서에 쓸 내용"},
                 "document_id": {"type": ["string", "null"], "description": "기존 문서 수정 시 지정"},
                 "mode": {
                     "type": "string",
                     "enum": ["append", "replace", "create_only"],
                     "default": "append",
+                    "description": "append=기존 문서에 추가, replace=내용 교체, create_only=새로 생성. 기본값 append",
                 },
-                "folder_id": {"type": ["string", "null"]},
+                "folder_id": {
+                    "type": ["string", "null"],
+                    "description": "새 문서를 생성할 Drive 폴더 ID(선택). 폴더 URL의 마지막 문자열",
+                },
             },
             "required": ["content"],
         },

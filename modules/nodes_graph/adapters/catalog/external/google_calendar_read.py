@@ -112,7 +112,20 @@ def get_node_definition() -> NodeDefinition:
         output_schema={
             "type": "object",
             "properties": {
-                "events": {"type": "array", "items": {"type": "object"}},
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "summary": {"type": "string"},
+                            "start": {"type": "object"},
+                            "end": {"type": "object"},
+                            "status": {"type": "string"},
+                            "html_link": {"type": "string"},
+                        },
+                    },
+                },
                 "count": {"type": "integer"},
             },
         },

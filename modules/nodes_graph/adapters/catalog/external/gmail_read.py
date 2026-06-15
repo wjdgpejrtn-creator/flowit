@@ -116,7 +116,20 @@ def get_node_definition() -> NodeDefinition:
         output_schema={
             "type": "object",
             "properties": {
-                "messages": {"type": "array", "items": {"type": "object"}},
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "thread_id": {"type": "string"},
+                            "subject": {"type": "string"},
+                            "from": {"type": "string"},
+                            "date": {"type": "string"},
+                            "snippet": {"type": "string"},
+                        },
+                    },
+                },
                 "count": {"type": "integer"},
             },
         },

@@ -105,7 +105,18 @@ def get_node_definition() -> NodeDefinition:
             "type": "object",
             "properties": {
                 "ok": {"type": "boolean"},
-                "messages": {"type": "array", "items": {"type": "object"}},
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "ts": {"type": "string"},
+                            "user": {"type": "string"},
+                            "text": {"type": "string"},
+                            "type": {"type": "string"},
+                        },
+                    },
+                },
                 "count": {"type": "integer"},
                 "raw_response": {"type": "object"},
             },
