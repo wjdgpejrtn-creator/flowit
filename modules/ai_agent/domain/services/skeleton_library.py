@@ -190,9 +190,12 @@ SKELETONS: tuple[Skeleton, ...] = (
         ),
     ),
     # ── fan_out_map ─────────────────────────────────────────────────────────
-    # van der Aalst Parallel Split + Synchronization + agentic Orchestrator-Workers. "각 항목마다
-    # 처리" — splitter(loop_list)가 목록을 펼치고 worker(ai)가 항목별 처리, merger(merge_branch)가
-    # 합류 후 sink. loop_list/merge_branch 출력은 list/int라 selector 없음 → 엣지 전부 live(DAG).
+    # van der Aalst Parallel Split + agentic Orchestrator-Workers. "각 항목마다 처리" —
+    # splitter(loop_list)가 목록을 펼치고 worker(ai)가 항목별 처리 후 sink로 전달.
+    # **merger(merge_branch)는 optional**(default 없음): 단일채널 per-item 루프("각 항목 메일")는
+    # 합류가 불필요한데 required로 강제하면 merge_branch가 무조건 삽입되고, 그 노드는 branches가
+    # required라 스캐폴드가 못 채워 매번 검증 실패한다(조장 e2e 발견). 기본은 worker→sink 직결,
+    # 합류는 발화/앙상블이 명시할 때만(_assemble_fanout이 부재 시 worker에서 sink로 팬아웃).
     Skeleton(
         name="fan_out_map",
         intent_keywords=("각각", "각 항목", "항목마다", "항목별", "그룹별", "일괄", "전부", "하나하나"),
@@ -204,8 +207,8 @@ SKELETONS: tuple[Skeleton, ...] = (
                      default_node_type="loop_list", candidates=_SPLITTERS),
             SlotSpec(SlotRole.TRANSFORM, required=True, cardinality="one",
                      default_node_type="gemma_chat", candidates=_AI),
-            SlotSpec(SlotRole.MERGER, required=True, cardinality="one",
-                     default_node_type="merge_branch", candidates=_MERGERS),
+            SlotSpec(SlotRole.MERGER, required=False, cardinality="one",
+                     candidates=_MERGERS),
             SlotSpec(SlotRole.SINK, required=True, cardinality="many", candidates=_SINKS),
         ),
     ),

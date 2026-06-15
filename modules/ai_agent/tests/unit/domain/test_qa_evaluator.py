@@ -66,6 +66,23 @@ class TestQAEvaluatorService:
         assert "Gmail 노드" in result.feedback  # retry가 교정하도록 feedback에 노출
 
     @pytest.mark.asyncio
+    async def test_score_clamped_below_threshold_when_gated_by_missing(self):
+        """점수↔판정 정합 — missing 게이트로 fail시키면서 만점 점수를 노출하면 '10/10 (재시도 필요)'
+        모순 표시가 된다(조장 e2e 발견). 게이트 발동 시 점수를 임계(8) 미만으로 낮춰 일치시킨다."""
+        svc = QAEvaluatorService(_mock_llm(10.0, missing=["데이터소스 노드"]))
+        result = await svc.evaluate(_empty_workflow(), _spec())
+        assert result.pass_flag is False
+        assert result.score < 8.0  # 점수와 판정이 일치(모순 표시 차단)
+
+    @pytest.mark.asyncio
+    async def test_score_not_clamped_when_no_missing(self):
+        # missing 없으면 LLM 점수 그대로 노출(정상 통과는 점수 보존).
+        svc = QAEvaluatorService(_mock_llm(10.0, missing=[]))
+        result = await svc.evaluate(_empty_workflow(), _spec())
+        assert result.pass_flag is True
+        assert result.score == 10.0
+
+    @pytest.mark.asyncio
     async def test_pass_when_score_high_and_no_missing(self):
         svc = QAEvaluatorService(_mock_llm(9.0, missing=[]))
         result = await svc.evaluate(_empty_workflow(), _spec())
