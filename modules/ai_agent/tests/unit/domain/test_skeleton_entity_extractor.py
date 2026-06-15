@@ -86,6 +86,26 @@ def test_branch_signal_detected() -> None:
     assert e.shape_signals() == {"branch"}
 
 
+def test_quarter_word_does_not_trigger_branch() -> None:
+    # "분기(quarter, 시간단위)"는 "분기(branch)"와 동음이의 — 콘텐츠 발화를 branch 제어흐름으로
+    # 오인하면 스켈레톤이 bail해 LLM 폴백(내부 gemma 기본값 미적용)된다. quarter 표현은 branch 신호 X.
+    for utterance in (
+        "매분기 말에 '분기 성과' 시트 읽어서 요약 보고서 작성해서 메일로 보내줘",
+        "분기별 매출 요약해서 슬랙으로",
+        "분기말 실적 보고서 작성",
+    ):
+        e = _X.extract(utterance)
+        assert e.has_branch is False, utterance
+        assert "branch" not in e.shape_signals(), utterance
+
+
+def test_genuine_branch_verb_still_detected() -> None:
+    # 분기 **동작**을 명확히 가리키는 동사형은 여전히 branch로 잡혀야 한다(진짜 제어흐름 보존).
+    e = _X.extract("값에 따라 분기하여 처리해줘")
+    assert e.has_branch is True
+    assert "branch" in e.shape_signals()
+
+
 def test_fanout_signal_detected() -> None:
     e = _X.extract("각 항목마다 요약해서 저장")
     assert e.has_fanout is True
