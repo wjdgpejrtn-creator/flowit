@@ -20,11 +20,11 @@ class _InMemoryRepo:
     async def search_by_embedding(self, q, limit=10): return list(self._store.values())[:limit]
 
 
-def _make_node_def(required_connections=None, input_schema=None, category="x"):
+def _make_node_def(required_connections=None, input_schema=None, output_schema=None, category="x"):
     from uuid import uuid4
     return NodeDefinition(
         node_id=uuid4(), node_type="x", name="x", category=category, version="1.0.0",
-        input_schema=input_schema or {}, output_schema={}, parameter_schema={},
+        input_schema=input_schema or {}, output_schema=output_schema or {}, parameter_schema={},
         risk_level=RiskLevel.LOW, required_connections=required_connections or [],
         description="x", is_mvp=True,
     )
@@ -269,7 +269,7 @@ async def test_required_parameter_skipped_when_no_required_key():
 
 @pytest.mark.asyncio
 async def test_type_compatibility_returns_no_errors():
-    # _check_type_compatibility는 현재 stub — 항상 빈 리스트 반환
+    # 스키마 미선언(generic) 노드 + 표현식 없음 → 타입 검증 대상 없음 → 통과
     repo = _InMemoryRepo()
     n1, n2 = _node(), _node()
     _register(repo, n1, n2)
@@ -277,6 +277,197 @@ async def test_type_compatibility_returns_no_errors():
     result = await GraphValidator(repo).validate(_wf([n1, n2], [edge]))
     assert not any(e.code for e in result.errors if e.validator == "TypeCompatibility")
     assert result.validation_status == "passed"
+
+
+# ── 표현식경로 shape 타입 검증 (REQ-003, _check_type_compatibility 1차) ──────────
+# 신정혜 요청 + 조장 전수조사 결정: edge handle은 제어 분기 라벨이라 무의미하고, 실제 IO
+# 불일치는 parameters의 ${instance_id.field} 표현식 경로에서 발생한다. 1차 스코프 = shape
+# 레벨(scalar↔array↔object). nested items / ANY({}) 필드는 보수적 통과(false positive 방지).
+
+
+def _typed_def(repo, *, inputs=None, outputs=None):
+    """input/output schema의 properties 타입을 지정한 NodeDefinition을 repo에 등록."""
+    d = _make_node_def(
+        input_schema={"properties": inputs or {}},
+        output_schema={"properties": outputs or {}},
+    )
+    repo._store[str(d.node_id)] = d
+    return d
+
+
+@pytest.mark.asyncio
+async def test_type_mismatch_array_output_to_scalar_param_detected():
+    """upstream 출력이 array인데 소비 파라미터 기대가 string(scalar) → E_NODE_TYPE_MISMATCH."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={"values": {"type": "array"}})
+    dst_def = _typed_def(repo, inputs={"body": {"type": "string"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"body": f"${{{src.instance_id}.values}}"})
+    result = await GraphValidator(repo).validate(
+        _wf([src, dst], [_edge(src.instance_id, dst.instance_id)])
+    )
+    err = next(e for e in result.errors if e.code == ErrorCode.E_NODE_TYPE_MISMATCH)
+    assert err.validator == "SchemaValidation"
+    assert str(dst.instance_id) in err.node_ids
+
+
+@pytest.mark.asyncio
+async def test_type_mismatch_object_output_to_array_param_detected():
+    """object → array shape 불일치도 검출."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={"data": {"type": "object"}})
+    dst_def = _typed_def(repo, inputs={"items": {"type": "array"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"items": f"${{{src.instance_id}.data}}"})
+    result = await GraphValidator(repo).validate(
+        _wf([src, dst], [_edge(src.instance_id, dst.instance_id)])
+    )
+    assert any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_type_compat_scalar_to_scalar_passes():
+    """integer → string은 scalar끼리라 1차 shape 레벨에서 통과(캐스팅/보간 흔함)."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={"count": {"type": "integer"}})
+    dst_def = _typed_def(repo, inputs={"text": {"type": "string"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"text": f"${{{src.instance_id}.count}}"})
+    result = await GraphValidator(repo).validate(
+        _wf([src, dst], [_edge(src.instance_id, dst.instance_id)])
+    )
+    assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_type_compat_array_to_array_passes_first_pass():
+    """1차는 shape 레벨 — array→array는 통과(nested items 정밀 검증은 2차 스코프)."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={"values": {"type": "array"}})
+    dst_def = _typed_def(repo, inputs={"rows": {"type": "array"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"rows": f"${{{src.instance_id}.values}}"})
+    result = await GraphValidator(repo).validate(
+        _wf([src, dst], [_edge(src.instance_id, dst.instance_id)])
+    )
+    assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_type_compat_any_output_skipped():
+    """출력 필드 타입 미선언({} = ANY) → 보수적 통과(false positive 방지)."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={"result": {}})  # ANY
+    dst_def = _typed_def(repo, inputs={"text": {"type": "string"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(node_id=dst_def.node_id, parameters={"text": f"${{{src.instance_id}.result}}"})
+    result = await GraphValidator(repo).validate(
+        _wf([src, dst], [_edge(src.instance_id, dst.instance_id)])
+    )
+    assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_type_compat_string_interpolation_relaxed():
+    """값 전체가 아닌 문자열 보간 안의 참조는 str 컨텍스트 → 검증 완화(통과)."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={"values": {"type": "array"}})
+    dst_def = _typed_def(repo, inputs={"body": {"type": "string"}})
+    src = _node(node_id=src_def.node_id)
+    dst = _node(
+        node_id=dst_def.node_id,
+        parameters={"body": f"Total: ${{{src.instance_id}.values}} rows"},
+    )
+    result = await GraphValidator(repo).validate(
+        _wf([src, dst], [_edge(src.instance_id, dst.instance_id)])
+    )
+    assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_type_compat_unresolved_token_skipped():
+    """토큰이 instance_id(UUID)가 아니면(rewrite 전 잔재) 검증 skip."""
+    repo = _InMemoryRepo()
+    dst_def = _typed_def(repo, inputs={"text": {"type": "string"}})
+    dst = _node(node_id=dst_def.node_id, parameters={"text": "${some_node.values}"})
+    other = _node()
+    _register(repo, other)
+    result = await GraphValidator(repo).validate(
+        _wf([dst, other], [_edge(dst.instance_id, other.instance_id)])
+    )
+    assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+# ── list 원소 표현식 검증 (staging 실데이터 기반, 2026-06-15 덤프) ────────────────
+# 실제 데이터 흐름의 주류가 to:["${x.field}"] / operands:["${x.field}", ...] 처럼 list
+# 원소 표현식이라, 기대 shape는 properties[param].items.type 으로 본다. (이메일/id 등
+# 민감값은 익명 UUID로 마스킹 — 표현식 구조만 보존)
+
+
+@pytest.mark.asyncio
+async def test_type_mismatch_list_element_array_to_scalar_detected():
+    """number_calc operands(array[number])에 array 출력(values)이 원소로 유입 → 불일치 검출.
+
+    staging: number_calc operands: ["${<sheets>.values}", "전주 데이터"] 패턴.
+    """
+    repo = _InMemoryRepo()
+    sheets_def = _typed_def(repo, outputs={"values": {"type": "array"}})
+    calc_def = _typed_def(
+        repo, inputs={"operands": {"type": "array", "items": {"type": "number"}}}
+    )
+    sheets = _node(node_id=sheets_def.node_id)
+    calc = _node(
+        node_id=calc_def.node_id,
+        parameters={"operands": [f"${{{sheets.instance_id}.values}}", "전주 데이터"]},
+    )
+    result = await GraphValidator(repo).validate(
+        _wf([sheets, calc], [_edge(sheets.instance_id, calc.instance_id)])
+    )
+    err = next(e for e in result.errors if e.code == ErrorCode.E_NODE_TYPE_MISMATCH)
+    assert "operands" in err.message
+    assert str(calc.instance_id) in err.node_ids
+
+
+@pytest.mark.asyncio
+async def test_type_compat_list_element_scalar_to_scalar_passes():
+    """gmail_send to(array[string]) 원소가 scalar 출력 표현식 → 통과."""
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={"email": {"type": "string"}})
+    gmail_def = _typed_def(
+        repo, inputs={"to": {"type": "array", "items": {"type": "string"}}}
+    )
+    src = _node(node_id=src_def.node_id)
+    gmail = _node(
+        node_id=gmail_def.node_id,
+        parameters={"to": [f"${{{src.instance_id}.email}}"]},
+    )
+    result = await GraphValidator(repo).validate(
+        _wf([src, gmail], [_edge(src.instance_id, gmail.instance_id)])
+    )
+    assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_type_compat_list_element_nested_path_conservative_pass():
+    """to:["${x.items.email}"] 같은 nested path는 top-level properties에 없어 보수적 통과.
+
+    staging to=None의 실제 원인(nested 경로 환각)이지만, 이는 경로 존재성 문제라 1차
+    shape 검증 영역이 아님(후속 표현식 경로 검증 몫) — false positive를 내지 않아야 한다.
+    """
+    repo = _InMemoryRepo()
+    src_def = _typed_def(repo, outputs={"messages": {"type": "array"}})
+    gmail_def = _typed_def(
+        repo, inputs={"to": {"type": "array", "items": {"type": "string"}}}
+    )
+    src = _node(node_id=src_def.node_id)
+    gmail = _node(
+        node_id=gmail_def.node_id,
+        parameters={"to": [f"${{{src.instance_id}.items.email}}"]},
+    )
+    result = await GraphValidator(repo).validate(
+        _wf([src, gmail], [_edge(src.instance_id, gmail.instance_id)])
+    )
+    assert not any(e.code == ErrorCode.E_NODE_TYPE_MISMATCH for e in result.errors)
 
 
 @pytest.mark.asyncio
