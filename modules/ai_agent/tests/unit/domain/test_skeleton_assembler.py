@@ -58,6 +58,17 @@ def test_scheduled_pipeline_e2e_bug_golden() -> None:
     assert all(e.from_handle == "output" for e in d.edges)
 
 
+def test_quarter_pipeline_assembles_to_internal_llm_not_bail() -> None:
+    # "분기 성과"(quarter)의 "분기"가 branch로 오인돼 assemble이 bail→LLM 폴백되면, 내부 LLM
+    # (gemma) 기본값을 못 받고 AI 노드가 비결정적으로 선택됐다. quarter 발화는 선형으로 조립돼
+    # transform 슬롯이 내부 LLM 기본값(gemma_chat)으로 채워져야 한다(보안 정책 — 사내 LLM 우선).
+    d = _A.assemble("매분기 말에 '분기 성과' 시트 읽어서 요약 보고서 작성해서 메일로 보내줘")
+    assert d is not None, "quarter 발화가 branch 오인으로 bail되면 안 됨"
+    assert d.skeleton_name == "scheduled_pipeline"
+    assert "gemma_chat" in _node_types(d)
+    assert "anthropic_chat" not in _node_types(d)
+
+
 def test_content_delivery_artifact_serial_chain() -> None:
     # #502 근본: 출력 채널만 ≥2개 명시(트리거/소스/가공 신호 없음)인 발화는 _select가 RC1으로
     # bail → LLM 자유 draft가 pdf_generate(BGE-M3 #2 후보)를 드롭하던 회귀. 생산자(ai)→sink를
