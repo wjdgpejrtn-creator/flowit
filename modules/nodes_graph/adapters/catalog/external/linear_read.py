@@ -115,7 +115,22 @@ def get_node_definition() -> NodeDefinition:
         output_schema={
             "type": "object",
             "properties": {
-                "issues": {"type": "array", "items": {"type": "object"}},
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "identifier": {"type": "string"},
+                            "title": {"type": "string"},
+                            "url": {"type": "string"},
+                            "priority": {"type": "integer"},
+                            "state": {"type": "string"},
+                            "assignee": {"type": "string"},
+                            "created_at": {"type": "string"},
+                        },
+                    },
+                },
                 "count": {"type": "integer"},
             },
         },
