@@ -225,12 +225,12 @@ class WorkflowEditService:
         출력으로 보정/degrade한다(이미 instance_id 형태이므로 rewrite 불필요, grounding만).
         """
         cfg_by_id = {c.node_id: c for c in candidates}
-        outputs_by_instance = {
+        field_types_by_instance = {
             n.instance_id: output_field_types(cfg_by_id[n.node_id])
             for n in nodes
             if n.node_id in cfg_by_id
         }
         return [
-            n.model_copy(update={"parameters": ground_ref_fields(n.parameters, outputs_by_instance)})
+            n.model_copy(update={"parameters": ground_ref_fields(n.parameters, field_types_by_instance)})
             for n in nodes
         ]
