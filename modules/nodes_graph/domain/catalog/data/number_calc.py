@@ -86,12 +86,37 @@ def get_node_definition() -> NodeDefinition:
                 "operation": {
                     "type": "string",
                     "enum": [
-                        "add", "sub", "mul", "div", "mod", "pow",
-                        "abs", "round", "min", "max", "sum", "ceil", "floor", "sqrt",
+                        "add",
+                        "sub",
+                        "mul",
+                        "div",
+                        "mod",
+                        "pow",
+                        "abs",
+                        "round",
+                        "min",
+                        "max",
+                        "sum",
+                        "ceil",
+                        "floor",
+                        "sqrt",
                     ],
+                    "description": (
+                        "연산 종류. add=덧셈, sub=뺄셈, mul=곱셈, div=나눗셈, mod=나머지, "
+                        "pow=거듭제곱, abs=절댓값, round=반올림, min/max/sum=집계, "
+                        "ceil=올림, floor=내림, sqrt=제곱근"
+                    ),
                 },
-                "operands": {"type": "array", "items": {"type": "number"}},
-                "ndigits": {"type": "integer", "default": 0},
+                "operands": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "연산 대상 숫자 목록. 예: [10, 3]",
+                },
+                "ndigits": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "round 연산 시 반올림할 소수점 자리수. 기본값 0",
+                },
             },
             "required": ["operation", "operands"],
         },

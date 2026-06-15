@@ -66,9 +66,13 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "response": {"type": "object"},
-                "previous_response": {"type": "object"},
-                "changed": {"type": "boolean", "default": False},
+                "response": {"type": "object", "description": "폴링한 API의 현재 응답(실행 엔진이 주입)"},
+                "previous_response": {"type": "object", "description": "직전 폴링 응답(변경 비교용, 실행 엔진이 주입)"},
+                "changed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "응답 변경 여부(실행 엔진이 판정). 기본값 false",
+                },
             },
             "required": ["response"],
         },

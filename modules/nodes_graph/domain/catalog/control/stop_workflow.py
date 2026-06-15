@@ -54,7 +54,13 @@ def get_node_definition() -> NodeDefinition:
         version="1.0.0",
         input_schema={
             "type": "object",
-            "properties": {"reason": {"type": "string", "default": ""}},
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "default": "",
+                    "description": "워크플로우 종료 사유(로그·결과에 기록). 기본값 빈 문자열",
+                }
+            },
         },
         output_schema={
             "type": "object",

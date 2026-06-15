@@ -64,8 +64,15 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "text": {"type": "string"},
-                "operation": {"type": "string", "enum": ["upper", "lower", "strip", "title", "reverse"]},
+                "text": {"type": "string", "description": '변환할 원본 텍스트. 예: "Hello World"'},
+                "operation": {
+                    "type": "string",
+                    "enum": ["upper", "lower", "strip", "title", "reverse"],
+                    "description": (
+                        "수행할 변환. upper=대문자, lower=소문자, strip=양끝 공백 제거, "
+                        "title=단어 첫 글자 대문자, reverse=문자열 뒤집기"
+                    ),
+                },
             },
             "required": ["text", "operation"],
         },

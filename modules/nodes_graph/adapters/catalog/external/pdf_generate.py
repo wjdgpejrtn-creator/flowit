@@ -7,10 +7,10 @@ from common_schemas import NodeContext
 from common_schemas.enums import RiskLevel
 from fpdf import FPDF
 
+from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
-from ....domain.catalog._catalog_ns import _CATALOG_NS
 
 _NODE_TYPE = "pdf_generate"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -73,19 +73,17 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "title": {"type": "string"},
+                "title": {"type": "string", "description": "PDF 문서 제목"},
                 "sections": {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "heading": {"type": "string"},
-                            "body": {"type": "string"},
-                        },
+                        "properties": {"heading": {"type": "string"}, "body": {"type": "string"}},
                     },
+                    "description": "문서를 구성할 섹션 목록(각 섹션은 제목·본문 포함)",
                 },
-                "font_size": {"type": "integer", "default": 12},
-                "margin": {"type": "integer", "default": 10},
+                "font_size": {"type": "integer", "default": 12, "description": "본문 글자 크기(pt). 기본값 12"},
+                "margin": {"type": "integer", "default": 10, "description": "페이지 여백(mm). 기본값 10"},
             },
             "required": ["title", "sections"],
         },

@@ -30,7 +30,7 @@ class EmailSendInput:
     subject: str
     body: str
     smtp_port: int = 587
-    body_type: str = "plain"                                    # plain | html
+    body_type: str = "plain"  # plain | html
     use_tls: bool = True
 
 
@@ -96,14 +96,24 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "smtp_host": {"type": "string"},
-                "smtp_port": {"type": "integer", "default": 587},
-                "from_address": {"type": "string"},
-                "to_addresses": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-                "subject": {"type": "string"},
-                "body": {"type": "string"},
-                "body_type": {"type": "string", "enum": ["plain", "html"], "default": "plain"},
-                "use_tls": {"type": "boolean", "default": True},
+                "smtp_host": {"type": "string", "description": 'SMTP 서버 주소. 예: "smtp.gmail.com"'},
+                "smtp_port": {"type": "integer", "default": 587, "description": "SMTP 포트. 기본값 587(TLS)"},
+                "from_address": {"type": "string", "description": "보내는 사람 이메일 주소"},
+                "to_addresses": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": '받는 사람 이메일 주소 목록. 예: ["a@example.com"]',
+                },
+                "subject": {"type": "string", "description": "이메일 제목"},
+                "body": {"type": "string", "description": "이메일 본문"},
+                "body_type": {
+                    "type": "string",
+                    "enum": ["plain", "html"],
+                    "default": "plain",
+                    "description": "본문 형식. plain=일반텍스트, html=HTML. 기본값 plain",
+                },
+                "use_tls": {"type": "boolean", "default": True, "description": "TLS 암호화 사용 여부. 기본값 true"},
             },
             "required": ["smtp_host", "from_address", "to_addresses", "subject", "body"],
         },

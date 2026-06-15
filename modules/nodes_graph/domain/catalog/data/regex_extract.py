@@ -74,10 +74,17 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "text": {"type": "string"},
-                "pattern": {"type": "string"},
-                "ignore_case": {"type": "boolean", "default": False},
-                "multiline": {"type": "boolean", "default": False},
+                "text": {"type": "string", "description": "검색 대상 텍스트"},
+                "pattern": {
+                    "type": "string",
+                    "description": '추출할 정규식 패턴. 예: "\\d{3}-\\d{4}" (전화번호 뒷자리)',
+                },
+                "ignore_case": {"type": "boolean", "default": False, "description": "대소문자 무시 여부. 기본값 false"},
+                "multiline": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "여러 줄 모드(^,$가 각 줄에 매칭). 기본값 false",
+                },
             },
             "required": ["text", "pattern"],
         },

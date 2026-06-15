@@ -21,7 +21,7 @@ _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
 @dataclass
 class HttpRequestInput:
     url: str
-    method: str = "GET"                           # GET | POST | PUT | DELETE | PATCH
+    method: str = "GET"  # GET | POST | PUT | DELETE | PATCH
     headers: dict[str, str] = field(default_factory=dict)
     body: dict[str, Any] | None = None
     timeout: float = 30.0
@@ -79,11 +79,16 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "url": {"type": "string", "format": "uri"},
-                "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"], "default": "GET"},
-                "headers": {"type": "object"},
-                "body": {"type": "object"},
-                "timeout": {"type": "number", "default": 30.0},
+                "url": {"type": "string", "format": "uri", "description": "호출할 API의 전체 URL"},
+                "method": {
+                    "type": "string",
+                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                    "default": "GET",
+                    "description": "HTTP 메서드(GET/POST/PUT/DELETE/PATCH). 기본값 GET",
+                },
+                "headers": {"type": "object", "description": "요청 HTTP 헤더 객체"},
+                "body": {"type": "object", "description": "요청 본문(JSON)"},
+                "timeout": {"type": "number", "default": 30.0, "description": "응답 대기 제한 시간(초). 기본값 30"},
             },
             "required": ["url"],
         },

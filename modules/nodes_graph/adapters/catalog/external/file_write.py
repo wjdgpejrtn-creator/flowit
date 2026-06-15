@@ -22,7 +22,7 @@ class FileWriteInput:
     path: str
     content: str
     encoding: str = "utf-8"
-    mode: str = "w"                                             # w | a
+    mode: str = "w"  # w | a
     create_parents: bool = False
 
 
@@ -72,11 +72,20 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"},
-                "encoding": {"type": "string", "default": "utf-8"},
-                "mode": {"type": "string", "enum": ["w", "a"], "default": "w"},
-                "create_parents": {"type": "boolean", "default": False},
+                "path": {"type": "string", "description": "쓸 파일 경로"},
+                "content": {"type": "string", "description": "파일에 쓸 내용"},
+                "encoding": {"type": "string", "default": "utf-8", "description": "텍스트 인코딩. 기본값 utf-8"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["w", "a"],
+                    "default": "w",
+                    "description": "w=덮어쓰기, a=기존 파일에 추가. 기본값 w",
+                },
+                "create_parents": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "true면 상위 디렉터리를 자동 생성. 기본값 false",
+                },
             },
             "required": ["path", "content"],
         },

@@ -67,9 +67,13 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "base": {"type": "object"},
-                "overlay": {"type": "object"},
-                "deep": {"type": "boolean", "default": False},
+                "base": {"type": "object", "description": "기준이 되는 JSON 객체. overlay가 같은 키를 덮어씁니다"},
+                "overlay": {"type": "object", "description": "base 위에 덮어쓸 JSON 객체"},
+                "deep": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "true면 중첩 객체까지 재귀 병합, false면 최상위 키만 병합. 기본값 false",
+                },
             },
             "required": ["base", "overlay"],
         },

@@ -20,7 +20,7 @@ _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
 @dataclass
 class DataMappingInput:
     data: dict[str, Any]
-    mapping: dict[str, str]                                     # {old_field: new_field}
+    mapping: dict[str, str]  # {old_field: new_field}
     drop_unmapped: bool = False
 
 
@@ -65,9 +65,16 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "data": {"type": "object"},
-                "mapping": {"type": "object"},
-                "drop_unmapped": {"type": "boolean", "default": False},
+                "data": {"type": "object", "description": "필드명을 바꿀 원본 객체"},
+                "mapping": {
+                    "type": "object",
+                    "description": '변경 규칙 {기존필드명: 새필드명}. 예: {"user_name": "name"}',
+                },
+                "drop_unmapped": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "true면 mapping에 없는 필드를 제거. 기본값 false",
+                },
             },
             "required": ["data", "mapping"],
         },

@@ -53,8 +53,12 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "data": {"type": "string"},
-                "encoding": {"type": "string", "default": "utf-8"},
+                "data": {"type": "string", "description": "디코딩할 Base64 문자열"},
+                "encoding": {
+                    "type": "string",
+                    "default": "utf-8",
+                    "description": "복원할 문자열의 문자 인코딩. 기본값 utf-8",
+                },
             },
             "required": ["data"],
         },

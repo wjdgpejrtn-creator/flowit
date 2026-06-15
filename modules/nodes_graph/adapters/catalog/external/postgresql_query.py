@@ -28,17 +28,17 @@ def _jsonable(row: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class PostgresqlQueryInput:
-    query: str                                                  # SQL 문 (`$1, $2, ...` 파라미터 placeholder 지원)
+    query: str  # SQL 문 (`$1, $2, ...` 파라미터 placeholder 지원)
     parameters: list[Any] = field(default_factory=list)
-    fetch_mode: str = "all"                                     # all | one | none — 결과 fetch 모드
+    fetch_mode: str = "all"  # all | one | none — 결과 fetch 모드
     timeout_seconds: float = 30.0
 
 
 @dataclass
 class PostgresqlQueryOutput:
-    rows: list[dict[str, Any]]                                  # fetch_mode=all/one일 때
-    row_count: int                                              # 영향받은 행 수 (INSERT/UPDATE/DELETE)
-    fields: list[str]                                           # 컬럼명 목록
+    rows: list[dict[str, Any]]  # fetch_mode=all/one일 때
+    row_count: int  # 영향받은 행 수 (INSERT/UPDATE/DELETE)
+    fields: list[str]  # 컬럼명 목록
 
 
 class PostgresqlQueryNode(BaseNode[PostgresqlQueryInput, PostgresqlQueryOutput]):
@@ -63,23 +63,17 @@ class PostgresqlQueryNode(BaseNode[PostgresqlQueryInput, PostgresqlQueryOutput])
         conn = await asyncpg.connect(context.connection_token, timeout=input.timeout_seconds)
         try:
             if input.fetch_mode == "none":
-                status = await conn.execute(
-                    input.query, *input.parameters, timeout=input.timeout_seconds
-                )
+                status = await conn.execute(input.query, *input.parameters, timeout=input.timeout_seconds)
                 # asyncpg execute는 "INSERT 0 3" / "UPDATE 2" 형태 상태 문자열을 반환.
                 tail = status.split()
                 row_count = int(tail[-1]) if tail and tail[-1].isdigit() else 0
                 return PostgresqlQueryOutput(rows=[], row_count=row_count, fields=[])
 
             if input.fetch_mode == "one":
-                record = await conn.fetchrow(
-                    input.query, *input.parameters, timeout=input.timeout_seconds
-                )
+                record = await conn.fetchrow(input.query, *input.parameters, timeout=input.timeout_seconds)
                 rows = [_jsonable(record)] if record is not None else []
             else:
-                records = await conn.fetch(
-                    input.query, *input.parameters, timeout=input.timeout_seconds
-                )
+                records = await conn.fetch(input.query, *input.parameters, timeout=input.timeout_seconds)
                 rows = [_jsonable(r) for r in records]
             return PostgresqlQueryOutput(
                 rows=rows,
@@ -101,9 +95,17 @@ def get_node_definition() -> NodeDefinition:
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "SQL 문 ($1, $2 ... placeholder 사용)"},
-                "parameters": {"type": "array"},
-                "fetch_mode": {"type": "string", "enum": ["all", "one", "none"], "default": "all"},
-                "timeout_seconds": {"type": "number", "default": 30.0},
+                "parameters": {
+                    "type": "array",
+                    "description": "쿼리의 $1, $2 자리에 바인딩할 값 목록(SQL 인젝션 방지)",
+                },
+                "fetch_mode": {
+                    "type": "string",
+                    "enum": ["all", "one", "none"],
+                    "default": "all",
+                    "description": "결과 반환 방식. all=전체 행, one=첫 행, none=결과 없음(INSERT 등). 기본값 all",
+                },
+                "timeout_seconds": {"type": "number", "default": 30.0, "description": "쿼리 제한 시간(초). 기본값 30"},
             },
             "required": ["query"],
         },

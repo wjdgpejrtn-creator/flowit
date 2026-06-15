@@ -90,11 +90,20 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "endpoint": {"type": "string"},
-                "query": {"type": "string"},
-                "variables": {"type": "object"},
-                "headers": {"type": "object"},
-                "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "default": 30},
+                "endpoint": {
+                    "type": "string",
+                    "description": 'GraphQL 엔드포인트 URL. 예: "https://api.example.com/graphql"',
+                },
+                "query": {"type": "string", "description": "실행할 GraphQL 쿼리 또는 뮤테이션 문자열"},
+                "variables": {"type": "object", "description": "쿼리 변수 객체"},
+                "headers": {"type": "object", "description": "요청 HTTP 헤더 객체"},
+                "timeout_seconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 300,
+                    "default": 30,
+                    "description": "응답 대기 제한 시간(초). 기본값 30",
+                },
             },
             "required": ["endpoint", "query"],
         },

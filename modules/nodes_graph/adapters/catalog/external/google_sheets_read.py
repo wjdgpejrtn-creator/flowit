@@ -23,15 +23,15 @@ _TIMEOUT_SECONDS = 60
 @dataclass
 class GoogleSheetsReadInput:
     spreadsheet_id: str
-    range_a1: str                                                       # e.g. "Sheet1!A1:D100"
-    value_render_option: str = "FORMATTED_VALUE"                        # FORMATTED_VALUE | UNFORMATTED_VALUE | FORMULA
-    date_time_render_option: str = "FORMATTED_STRING"                   # FORMATTED_STRING | SERIAL_NUMBER
-    major_dimension: str = "ROWS"                                       # ROWS | COLUMNS
+    range_a1: str  # e.g. "Sheet1!A1:D100"
+    value_render_option: str = "FORMATTED_VALUE"  # FORMATTED_VALUE | UNFORMATTED_VALUE | FORMULA
+    date_time_render_option: str = "FORMATTED_STRING"  # FORMATTED_STRING | SERIAL_NUMBER
+    major_dimension: str = "ROWS"  # ROWS | COLUMNS
 
 
 @dataclass
 class GoogleSheetsReadOutput:
-    range_resolved: str                                                 # 실제 반환된 범위
+    range_resolved: str  # 실제 반환된 범위
     major_dimension: str
     values: list[list[Any]]
     row_count: int
@@ -67,9 +67,7 @@ class GoogleSheetsReadNode(BaseNode[GoogleSheetsReadInput, GoogleSheetsReadOutpu
             response = await client.get(url, params=params, headers=headers)
 
         if response.status_code >= 400:
-            raise ExecutionError(
-                f"Google Sheets API 오류 {response.status_code}: {response.text[:200]}"
-            )
+            raise ExecutionError(f"Google Sheets API 오류 {response.status_code}: {response.text[:200]}")
 
         data = response.json()
         values: list[list[Any]] = data.get("values", [])
@@ -91,22 +89,33 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "spreadsheet_id": {"type": "string"},
+                "spreadsheet_id": {
+                    "type": "string",
+                    "description": '스프레드시트 ID. 시트 URL의 /d/ 뒤 문자열. 예: "1AbC...xyz"',
+                },
                 "range_a1": {"type": "string", "description": "A1 표기법 (Sheet1!A1:D100)"},
                 "value_render_option": {
                     "type": "string",
                     "enum": ["FORMATTED_VALUE", "UNFORMATTED_VALUE", "FORMULA"],
                     "default": "FORMATTED_VALUE",
+                    "description": (
+                        "값 표시 방식. FORMATTED_VALUE=서식 적용, "
+                        "UNFORMATTED_VALUE=원본값, FORMULA=수식. 기본값 FORMATTED_VALUE"
+                    ),
                 },
                 "date_time_render_option": {
                     "type": "string",
                     "enum": ["FORMATTED_STRING", "SERIAL_NUMBER"],
                     "default": "FORMATTED_STRING",
+                    "description": (
+                        "날짜·시간 표시 방식. FORMATTED_STRING=문자열, SERIAL_NUMBER=일련번호. 기본값 FORMATTED_STRING"
+                    ),
                 },
                 "major_dimension": {
                     "type": "string",
                     "enum": ["ROWS", "COLUMNS"],
                     "default": "ROWS",
+                    "description": "데이터 방향. ROWS=행 기준, COLUMNS=열 기준. 기본값 ROWS",
                 },
             },
             "required": ["spreadsheet_id", "range_a1"],

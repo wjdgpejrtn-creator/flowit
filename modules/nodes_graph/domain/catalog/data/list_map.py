@@ -19,7 +19,7 @@ _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
 @dataclass
 class ListMapInput:
     items: list[Any]
-    operation: str   # extract_field | to_str | to_int | to_float | upper | lower | strip
+    operation: str  # extract_field | to_str | to_int | to_float | upper | lower | strip
     field: str = ""  # extract_field 시 추출할 키 이름
 
 
@@ -71,12 +71,16 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "items": {"type": "array"},
+                "items": {"type": "array", "description": "변환할 리스트"},
                 "operation": {
                     "type": "string",
                     "enum": ["extract_field", "to_str", "to_int", "to_float", "upper", "lower", "strip"],
+                    "description": (
+                        "각 요소에 적용할 변환. extract_field=필드 추출, "
+                        "to_str/to_int/to_float=타입 변환, upper/lower=대소문자, strip=공백 제거"
+                    ),
                 },
-                "field": {"type": "string", "default": ""},
+                "field": {"type": "string", "default": "", "description": "extract_field 연산 시 추출할 필드명"},
             },
             "required": ["items", "operation"],
         },

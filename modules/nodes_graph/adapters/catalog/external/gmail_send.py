@@ -27,18 +27,18 @@ _TIMEOUT_SECONDS = 60
 
 @dataclass
 class GmailSendInput:
-    to: list[str]                                   # 수신자 이메일 (1개 이상)
+    to: list[str]  # 수신자 이메일 (1개 이상)
     subject: str
-    body: str                                       # 메시지 본문 (text/html 둘 다 가능)
+    body: str  # 메시지 본문 (text/html 둘 다 가능)
     cc: list[str] = field(default_factory=list)
     bcc: list[str] = field(default_factory=list)
-    is_html: bool = False                           # True이면 body를 text/html로 전송
+    is_html: bool = False  # True이면 body를 text/html로 전송
     attachments: list[dict[str, Any]] = field(default_factory=list)  # [{"filename": ..., "content_base64": ...}]
 
 
 @dataclass
 class GmailSendOutput:
-    message_id: str                                 # Gmail API 반환 메시지 ID
+    message_id: str  # Gmail API 반환 메시지 ID
     thread_id: str
     label_ids: list[str]
 
@@ -103,21 +103,36 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "to": {"type": "array", "items": {"type": "string", "format": "email"}, "minItems": 1},
-                "subject": {"type": "string"},
-                "body": {"type": "string"},
-                "cc": {"type": "array", "items": {"type": "string", "format": "email"}},
-                "bcc": {"type": "array", "items": {"type": "string", "format": "email"}},
-                "is_html": {"type": "boolean", "default": False},
+                "to": {
+                    "type": "array",
+                    "items": {"type": "string", "format": "email"},
+                    "minItems": 1,
+                    "description": '받는 사람 이메일 주소 목록. 예: ["a@example.com"]',
+                },
+                "subject": {"type": "string", "description": "이메일 제목"},
+                "body": {"type": "string", "description": "이메일 본문"},
+                "cc": {
+                    "type": "array",
+                    "items": {"type": "string", "format": "email"},
+                    "description": "참조(CC) 주소 목록(선택)",
+                },
+                "bcc": {
+                    "type": "array",
+                    "items": {"type": "string", "format": "email"},
+                    "description": "숨은참조(BCC) 주소 목록(선택)",
+                },
+                "is_html": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "본문을 HTML로 해석할지 여부. 기본값 false",
+                },
                 "attachments": {
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "filename": {"type": "string"},
-                            "content_base64": {"type": "string"},
-                        },
+                        "properties": {"filename": {"type": "string"}, "content_base64": {"type": "string"}},
                     },
+                    "description": "첨부파일 목록(선택)",
                 },
             },
             "required": ["to", "subject", "body"],

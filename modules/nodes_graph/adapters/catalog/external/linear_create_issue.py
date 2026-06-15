@@ -30,21 +30,21 @@ mutation IssueCreate($input: IssueCreateInput!) {
 
 @dataclass
 class LinearCreateIssueInput:
-    team_id: str                                                # Linear 팀 ID
+    team_id: str  # Linear 팀 ID
     title: str
-    description: str = ""                                       # Markdown
-    priority: int = 0                                           # 0(없음) | 1(긴급) | 2(높음) | 3(중간) | 4(낮음)
+    description: str = ""  # Markdown
+    priority: int = 0  # 0(없음) | 1(긴급) | 2(높음) | 3(중간) | 4(낮음)
     assignee_id: str | None = None
     label_ids: list[str] = field(default_factory=list)
     project_id: str | None = None
-    state_id: str | None = None                                 # 워크플로우 state. 미지정 시 backlog
-    due_date: str | None = None                                 # ISO 8601 date
+    state_id: str | None = None  # 워크플로우 state. 미지정 시 backlog
+    due_date: str | None = None  # ISO 8601 date
 
 
 @dataclass
 class LinearCreateIssueOutput:
     issue_id: str
-    identifier: str                                             # e.g. "ENG-123"
+    identifier: str  # e.g. "ENG-123"
     url: str
     title: str
     state: str
@@ -121,15 +121,27 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "team_id": {"type": "string"},
-                "title": {"type": "string"},
-                "description": {"type": "string"},
-                "priority": {"type": "integer", "enum": [0, 1, 2, 3, 4], "default": 0},
-                "assignee_id": {"type": ["string", "null"]},
-                "label_ids": {"type": "array", "items": {"type": "string"}},
-                "project_id": {"type": ["string", "null"]},
-                "state_id": {"type": ["string", "null"]},
-                "due_date": {"type": ["string", "null"], "format": "date"},
+                "team_id": {
+                    "type": "string",
+                    "description": '이슈를 생성할 Linear 팀 ID. 팀 설정 > General에서 확인. 예: "a1b2c3d4-..."',
+                },
+                "title": {"type": "string", "description": "이슈 제목"},
+                "description": {"type": "string", "description": "이슈 본문(Markdown 지원, 선택)"},
+                "priority": {
+                    "type": "integer",
+                    "enum": [0, 1, 2, 3, 4],
+                    "default": 0,
+                    "description": "우선순위. 0=없음, 1=긴급, 2=높음, 3=보통, 4=낮음. 기본값 0",
+                },
+                "assignee_id": {"type": ["string", "null"], "description": "담당자 사용자 ID(선택)"},
+                "label_ids": {"type": "array", "items": {"type": "string"}, "description": "적용할 라벨 ID 목록(선택)"},
+                "project_id": {"type": ["string", "null"], "description": "연결할 프로젝트 ID(선택)"},
+                "state_id": {"type": ["string", "null"], "description": "초기 상태(워크플로우 단계) ID(선택)"},
+                "due_date": {
+                    "type": ["string", "null"],
+                    "format": "date",
+                    "description": '마감일(YYYY-MM-DD, 선택). 예: "2026-06-30"',
+                },
             },
             "required": ["team_id", "title"],
         },

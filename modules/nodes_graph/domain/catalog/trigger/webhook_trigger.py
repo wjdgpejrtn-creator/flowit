@@ -62,10 +62,13 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "payload": {"type": "object"},
-                "headers": {"type": "object"},
-                "method": {"type": "string", "default": "POST"},
-                "path": {"type": "string"},
+                "payload": {
+                    "type": "object",
+                    "description": "수신한 웹훅 본문(실행 엔진이 주입). 테스트 시 예상 페이로드 입력",
+                },
+                "headers": {"type": "object", "description": "수신한 HTTP 헤더(실행 엔진이 주입)"},
+                "method": {"type": "string", "default": "POST", "description": "허용할 HTTP 메서드. 기본값 POST"},
+                "path": {"type": "string", "description": '웹훅을 수신할 경로. 예: "/hooks/order-created"'},
             },
             "required": ["payload"],
         },
