@@ -435,10 +435,12 @@ class SkeletonAssembler:
         self, entities: ExtractedEntities, grounding: tuple[str, ...] = (),
         resolved: ResolvedSlots | None = None,
     ) -> AssembledDraft | None:
-        """fan_out_map — splitter(loop_list)→worker(ai)→merger(merge_branch)→sink.
+        """fan_out_map — splitter(loop_list)→worker(ai)→sink (merger optional, 기본 미삽입).
 
-        출력 채널(sink)을 발화에서 못 채우면 토막 골격 대신 LLM bail. loop_list/merge_branch
-        출력은 list/int라 selector 없음 → 엣지 전부 live(BranchEvaluator degrade), 순수 DAG.
+        단일채널 per-item 루프는 합류가 불필요해 기본은 worker→sink 직결이다(merge_branch는
+        branches required라 미충전 시 검증 실패). merger는 발화/앙상블이 명시할 때만 worker→
+        merger→sink. 출력 채널(sink)을 발화에서 못 채우면 토막 골격 대신 LLM bail. loop_list
+        출력은 list라 selector 없음 → 엣지 전부 live(BranchEvaluator degrade), 순수 DAG.
         """
         if not entities.sinks:
             return None
