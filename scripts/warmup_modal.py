@@ -40,23 +40,23 @@ DEFAULT_TIMEOUT = 180.0  # llm-base cold boot ≈ 3 min (Gemma mmap + BGE load)
 APP_DEFAULTS: dict[str, tuple[str, str]] = {
     "orchestrator": (
         "ORCHESTRATOR_URL",
-        "https://flowit--orchestrator-orchestratoragent-fastapi.modal.run",
+        "https://flowit02--orchestrator-orchestratoragent-fastapi.modal.run",
     ),
     "agent-composer": (
         "COMPOSER_URL",
-        "https://flowit--agent-composer-agentcomposer-fastapi.modal.run",
+        "https://flowit02--agent-composer-agentcomposer-fastapi.modal.run",
     ),
     "agent-skills-builder": (
         "SKILLS_BUILDER_URL",
-        "https://flowit--agent-skills-builder-agentskillsbuilder-fastapi.modal.run",
+        "https://flowit02--agent-skills-builder-skillsbuilderagent-fastapi.modal.run",
     ),
     "agent-personalization": (
         "PERSONALIZATION_URL",
-        "https://flowit--agent-personalization-agentpersonalization-fastapi.modal.run",
+        "https://flowit02--agent-personalization-personalizationagent-fastapi.modal.run",
     ),
     "llm-base": (
         "LLM_BASE_URL",
-        "https://flowit--llm-base-llmbase-fastapi.modal.run",
+        "https://flowit02--llm-base-llmbase-fastapi.modal.run",
     ),
 }
 
