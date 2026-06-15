@@ -33,44 +33,72 @@ def rewrite_refs(value: Any, id_by_token: dict[str, UUID]) -> Any:
     return value
 
 
-def ground_ref_fields(value: Any, outputs_by_instance: dict[UUID, list[str]]) -> Any:
-    """``${<instance_id>.<field>}`` 참조의 ``<field>``를 상류 노드의 실제 출력 필드에 grounding.
+# nested 필드 접근(.subfield)이 불가능한 출력 타입 — 객체가 아니므로 키 접근 불가.
+# object/미정의(공백)는 깊은 경로 검증(Phase 2, 스키마 properties 보강) 영역이라 보수적 보존.
+_NON_OBJECT_TYPES = frozenset({"array", "string", "integer", "number", "boolean"})
 
-    `rewrite_refs` 이후(토큰이 이미 instance_id로 치환된 상태) 호출한다. LLM이 존재하지 않는
-    출력 필드를 환각하는 것(예: 출력이 ``[scheduled_at, ...]``인데 ``.values`` 참조)을 방어:
 
-    - 참조 노드의 출력 필드 집합에 ``<field>``가 있으면 그대로 둔다.
-    - 없고 그 노드의 출력이 **정확히 1개**면 그 단일 필드로 보정한다(거의 확실히 의도한 필드).
-    - 없고 출력이 0개 또는 2개 이상이면(어느 필드인지 결정 불가) 원본을 보존하고 경고만 남긴다
-      — 런타임 ReferenceResolver가 미해결로 graceful degrade한다. 잘못된 **소스 노드 선택**은
-      의미 판단이라 결정론적으로 고칠 수 없으므로 로그로만 노출한다.
-    - 토큰이 instance_id가 아니거나(미해결 토큰) 맵에 없는 노드면 손대지 않는다.
+def ground_ref_fields(value: Any, fields_by_instance: dict[UUID, dict[str, str]]) -> Any:
+    """``${<instance_id>.<path>}`` 참조 경로를 상류 노드 출력 스키마에 grounding(compose 시점).
+
+    `rewrite_refs` 이후(토큰이 instance_id로 치환된 상태) 호출한다. ``fields_by_instance``는
+    instance_id → {출력필드명: JSON타입} 맵. LLM이 환각한 출력 경로를 **첫 세그먼트(head)** 기준
+    으로 방어한다 (깊은 nested 검증은 Phase 2 — 62종 output_schema properties 보강 후):
+
+    - head가 출력에 있고 단일 필드(rest 없음) → 그대로.
+    - head가 출력에 없고 출력이 **정확히 1개** → 그 단일 필드로 보정(환각한 nested suffix 제거).
+    - head가 출력에 없고 0/2개↑ → 보정 불가, 원본 보존 + 경고(런타임 degrade; validator가 reject).
+    - head가 있으나 **array/primitive인데 .subfield 접근**(rest 존재) → 객체가 아니라 필드접근
+      불가 → head까지 절단(``${id.head}``)해 값 자체를 전달 + 경고. (예: ``sheets.values.email``
+      → ``sheets.values`` — to=None 환각 차단)
+    - head 타입이 object/미정의이고 rest 존재 → 깊은 경로 검증은 Phase 2 → 보수적 보존.
+    - 토큰이 instance_id 아님/맵에 없는 노드면 손대지 않는다.
     """
     if isinstance(value, str):
         def _sub(m: re.Match[str]) -> str:
-            token, field = m.group(1), m.group(2)
+            token, path = m.group(1), m.group(2)
             try:
                 inst = UUID(token)
             except ValueError:
                 return m.group(0)
-            outs = outputs_by_instance.get(inst)
-            if outs is None or field in outs:
+            fields = fields_by_instance.get(inst)
+            if fields is None:
                 return m.group(0)
-            if len(outs) == 1:
-                _logger.warning("ref 필드 보정: %s.%s → %s.%s", token, field, token, outs[0])
-                return f"${{{token}.{outs[0]}}}"
+            head, _, rest = path.partition(".")
+            if head in fields:
+                if rest and fields.get(head) in _NON_OBJECT_TYPES:
+                    _logger.warning(
+                        "ref 비객체 필드접근 절단: %s.%s (%s=%s) → %s.%s",
+                        token, path, head, fields.get(head), token, head,
+                    )
+                    return f"${{{token}.{head}}}"
+                return m.group(0)  # 유효 단일 필드 또는 object/미정의 nested(Phase 2 보존)
+            if len(fields) == 1:
+                only = next(iter(fields))
+                _logger.warning("ref 필드 보정: %s.%s → %s.%s", token, path, token, only)
+                return f"${{{token}.{only}}}"
             _logger.warning(
-                "ref 필드 미존재(보정 불가, graceful degrade): %s.%s (outputs=%s)", token, field, outs
+                "ref 경로 head 미존재(보정 불가, graceful degrade): %s.%s (outputs=%s)",
+                token, path, list(fields),
             )
             return m.group(0)
         return _REF_TOKEN_RE.sub(_sub, value)
     if isinstance(value, list):
-        return [ground_ref_fields(v, outputs_by_instance) for v in value]
+        return [ground_ref_fields(v, fields_by_instance) for v in value]
     if isinstance(value, dict):
-        return {k: ground_ref_fields(v, outputs_by_instance) for k, v in value.items()}
+        return {k: ground_ref_fields(v, fields_by_instance) for k, v in value.items()}
     return value
 
 
 def outputs_of(nc: NodeConfig) -> list[str]:
-    """NodeConfig의 출력 필드명 목록 (output_schema.properties 키)."""
+    """NodeConfig의 출력 필드명 목록 (output_schema.properties 키) — LLM 출력 힌트용."""
     return list((nc.output_schema or {}).get("properties", {}).keys())
+
+
+def output_field_types(nc: NodeConfig) -> dict[str, str]:
+    """NodeConfig 출력 필드명 → JSON 타입 맵 (ground_ref_fields 첫 세그먼트/타입 검증용).
+
+    타입 미선언 필드는 빈 문자열("") — ground_ref_fields가 보수적으로(보존) 처리한다.
+    """
+    props = (nc.output_schema or {}).get("properties", {}) or {}
+    return {name: (spec or {}).get("type", "") for name, spec in props.items()}
