@@ -10,7 +10,7 @@ URL resolution order per app:
     1. `--<app>-url` CLI flag (highest priority)
     2. matching env var (e.g. LLM_BASE_URL, COMPOSER_URL, ...)
     3. value parsed from `--env-file` (default: <repo root>/.env)
-    4. hardcoded default for workspace `flowit`
+    4. default built from the WORKSPACE constant + per-app Modal slug
 
 Usage:
     python scripts/warmup_modal.py
@@ -34,30 +34,21 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENV_FILE = REPO_ROOT / ".env"
 DEFAULT_TIMEOUT = 180.0  # llm-base cold boot ≈ 3 min (Gemma mmap + BGE load)
 
-# (env_var, default URL for workspace flowit). Defaults are last-resort
-# fallbacks — staging operator changes workspace? override via env var or
-# --<app>-url flag.
+# Modal workspace prefix — single source. Change this one line on workspace
+# migration (keep in sync with .github/workflows/modal-deploy.yml
+# EXPECTED_MODAL_WORKSPACE). Default URLs are built as
+# https://{WORKSPACE}--{slug}-fastapi.modal.run.
+WORKSPACE = "flowit02"
+
+# (env_var, Modal app slug = "{app}-{class_lower}"). Defaults are last-resort
+# fallbacks — staging operator changes workspace? bump WORKSPACE above, or
+# override per-app via env var or --<app>-url flag.
 APP_DEFAULTS: dict[str, tuple[str, str]] = {
-    "orchestrator": (
-        "ORCHESTRATOR_URL",
-        "https://flowit02--orchestrator-orchestratoragent-fastapi.modal.run",
-    ),
-    "agent-composer": (
-        "COMPOSER_URL",
-        "https://flowit02--agent-composer-agentcomposer-fastapi.modal.run",
-    ),
-    "agent-skills-builder": (
-        "SKILLS_BUILDER_URL",
-        "https://flowit02--agent-skills-builder-skillsbuilderagent-fastapi.modal.run",
-    ),
-    "agent-personalization": (
-        "PERSONALIZATION_URL",
-        "https://flowit02--agent-personalization-personalizationagent-fastapi.modal.run",
-    ),
-    "llm-base": (
-        "LLM_BASE_URL",
-        "https://flowit02--llm-base-llmbase-fastapi.modal.run",
-    ),
+    "orchestrator": ("ORCHESTRATOR_URL", "orchestrator-orchestratoragent"),
+    "agent-composer": ("COMPOSER_URL", "agent-composer-agentcomposer"),
+    "agent-skills-builder": ("SKILLS_BUILDER_URL", "agent-skills-builder-skillsbuilderagent"),
+    "agent-personalization": ("PERSONALIZATION_URL", "agent-personalization-personalizationagent"),
+    "llm-base": ("LLM_BASE_URL", "llm-base-llmbase"),
 }
 
 
@@ -93,7 +84,8 @@ def resolve_url(
     if cli_override:
         return cli_override.rstrip("/")
 
-    env_var, default = APP_DEFAULTS[app]
+    env_var, slug = APP_DEFAULTS[app]
+    default = f"https://{WORKSPACE}--{slug}-fastapi.modal.run"
     return (
         os.environ.get(env_var)
         or env_file_values.get(env_var)
