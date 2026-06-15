@@ -22,12 +22,12 @@ _TIMEOUT_SECONDS = 120  # BigQuery 쿼리 — 넉넉히
 @dataclass
 class BigqueryQueryInput:
     project_id: str
-    query: str                                                  # Standard SQL
+    query: str  # Standard SQL
     parameters: list[dict[str, Any]] = field(default_factory=list)  # [{"name": ..., "value": ..., "type": ...}]
-    location: str = "US"                                        # asia-northeast3 등
-    dry_run: bool = False                                       # True이면 비용 추정만, 실행 안 함
+    location: str = "US"  # asia-northeast3 등
+    dry_run: bool = False  # True이면 비용 추정만, 실행 안 함
     use_legacy_sql: bool = False
-    maximum_bytes_billed: int | None = None                     # 비용 상한 (바이트)
+    maximum_bytes_billed: int | None = None  # 비용 상한 (바이트)
 
 
 @dataclass
@@ -36,7 +36,7 @@ class BigqueryQueryOutput:
     rows: list[dict[str, Any]]
     total_rows: int
     total_bytes_processed: int
-    schema: list[dict[str, str]]                                # [{"name": ..., "type": ...}, ...]
+    schema: list[dict[str, str]]  # [{"name": ..., "type": ...}, ...]
 
 
 class BigqueryQueryNode(BaseNode[BigqueryQueryInput, BigqueryQueryOutput]):
@@ -84,9 +84,7 @@ class BigqueryQueryNode(BaseNode[BigqueryQueryInput, BigqueryQueryOutput]):
             response = await client.post(url, json=body, headers=headers)
 
         if response.status_code >= 400:
-            raise ExecutionError(
-                f"BigQuery API 오류 {response.status_code}: {response.text[:200]}"
-            )
+            raise ExecutionError(f"BigQuery API 오류 {response.status_code}: {response.text[:200]}")
 
         data = response.json()
         schema_fields = data.get("schema", {}).get("fields", [])
@@ -95,9 +93,7 @@ class BigqueryQueryNode(BaseNode[BigqueryQueryInput, BigqueryQueryOutput]):
         rows: list[dict[str, Any]] = []
         for record in data.get("rows", []):
             cells = record.get("f", [])
-            rows.append(
-                {field_names[i]: cells[i].get("v") for i in range(min(len(field_names), len(cells)))}
-            )
+            rows.append({field_names[i]: cells[i].get("v") for i in range(min(len(field_names), len(cells)))})
         return BigqueryQueryOutput(
             job_id=data.get("jobReference", {}).get("jobId", ""),
             rows=rows,
@@ -117,13 +113,32 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "project_id": {"type": "string"},
+                "project_id": {"type": "string", "description": '쿼리를 실행할 GCP 프로젝트 ID. 예: "my-project-123"'},
                 "query": {"type": "string", "description": "Standard SQL"},
-                "parameters": {"type": "array", "items": {"type": "object"}},
-                "location": {"type": "string", "default": "US"},
-                "dry_run": {"type": "boolean", "default": False},
-                "use_legacy_sql": {"type": "boolean", "default": False},
-                "maximum_bytes_billed": {"type": ["integer", "null"]},
+                "parameters": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "쿼리 파라미터 목록(named/positional 바인딩)",
+                },
+                "location": {
+                    "type": "string",
+                    "default": "US",
+                    "description": '데이터셋 리전. 예: "US", "asia-northeast3". 기본값 US',
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "true면 실제 실행 없이 비용·유효성만 확인. 기본값 false",
+                },
+                "use_legacy_sql": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Legacy SQL 사용 여부. 기본값 false(Standard SQL)",
+                },
+                "maximum_bytes_billed": {
+                    "type": ["integer", "null"],
+                    "description": "과금 허용 최대 바이트(초과 시 쿼리 거부, 선택)",
+                },
             },
             "required": ["project_id", "query"],
         },

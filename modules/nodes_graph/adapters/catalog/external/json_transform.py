@@ -62,8 +62,8 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "data": {"type": "object"},
-                "expression": {"type": "string"},
+                "data": {"type": "object", "description": "변환할 대상 JSON 데이터"},
+                "expression": {"type": "string", "description": 'JMESPath 표현식. 예: "items[?price > `100`].name"'},
             },
             "required": ["data", "expression"],
         },

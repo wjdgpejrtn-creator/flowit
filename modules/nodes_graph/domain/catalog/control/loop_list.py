@@ -52,7 +52,7 @@ def get_node_definition() -> NodeDefinition:
         version="1.0.0",
         input_schema={
             "type": "object",
-            "properties": {"items": {"type": "array"}},
+            "properties": {"items": {"type": "array", "description": "각 항목마다 하위 노드를 반복 실행할 리스트"}},
             "required": ["items"],
         },
         output_schema={

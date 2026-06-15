@@ -66,7 +66,7 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "data": {"type": "object"},
+                "data": {"type": "object", "description": "값을 추출할 대상 JSON 객체"},
                 "path": {"type": "string", "description": "점(.) 구분 경로 (예: user.profile.name)"},
             },
             "required": ["data", "path"],

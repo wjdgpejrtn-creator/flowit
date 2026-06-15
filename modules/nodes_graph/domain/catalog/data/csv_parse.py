@@ -65,9 +65,17 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "csv_string": {"type": "string"},
-                "delimiter": {"type": "string", "default": ","},
-                "has_header": {"type": "boolean", "default": True},
+                "csv_string": {"type": "string", "description": '파싱할 CSV 형식 문자열. 예: "name,age\\nAlice,30"'},
+                "delimiter": {
+                    "type": "string",
+                    "default": ",",
+                    "description": '열 구분 문자. 기본값 쉼표(,). 탭 구분이면 "\\t"',
+                },
+                "has_header": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "첫 줄을 헤더(열 이름)로 사용할지 여부. 기본값 true",
+                },
             },
             "required": ["csv_string"],
         },

@@ -81,11 +81,20 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "url": {"type": "string"},
-                "payload": {"type": "object"},
-                "headers": {"type": "object"},
-                "secret": {"type": "string"},
-                "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 60, "default": 10},
+                "url": {"type": "string", "description": "웹훅을 보낼 대상 URL"},
+                "payload": {"type": "object", "description": "전송할 본문(JSON)"},
+                "headers": {"type": "object", "description": "추가 HTTP 헤더 객체"},
+                "secret": {
+                    "type": "string",
+                    "description": "HMAC-SHA256 서명에 사용할 비밀키(선택). 제공 시 서명 헤더 추가",
+                },
+                "timeout_seconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 60,
+                    "default": 10,
+                    "description": "응답 대기 제한 시간(초). 기본값 10",
+                },
             },
             "required": ["url", "payload"],
         },

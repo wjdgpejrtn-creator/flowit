@@ -19,14 +19,14 @@ _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
 @dataclass
 class IfConditionInput:
     left: Any
-    operator: str   # eq | ne | gt | lt | gte | lte | in | not_in | is_none | is_not_none | contains
+    operator: str  # eq | ne | gt | lt | gte | lte | in | not_in | is_none | is_not_none | contains
     right: Any = None
     value: Any = None  # 다음 노드로 전달할 pass-through 값
 
 
 @dataclass
 class IfConditionOutput:
-    branch: str    # "true" | "false"
+    branch: str  # "true" | "false"
     value: Any
     condition_result: bool
 
@@ -85,16 +85,29 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "left": {},
+                "left": {"description": "비교할 왼쪽 값(피연산자)"},
                 "operator": {
                     "type": "string",
                     "enum": [
-                        "eq", "ne", "gt", "lt", "gte", "lte",
-                        "in", "not_in", "is_none", "is_not_none", "contains",
+                        "eq",
+                        "ne",
+                        "gt",
+                        "lt",
+                        "gte",
+                        "lte",
+                        "in",
+                        "not_in",
+                        "is_none",
+                        "is_not_none",
+                        "contains",
                     ],
+                    "description": (
+                        "비교 연산자. eq=같음, ne=다름, gt=초과, lt=미만, gte=이상, lte=이하, "
+                        "in=포함됨, not_in=포함안됨, is_none=값없음, is_not_none=값있음, contains=포함"
+                    ),
                 },
-                "right": {},
-                "value": {},
+                "right": {"description": "비교할 오른쪽 값. is_none/is_not_none에서는 불필요"},
+                "value": {"description": "조건이 참일 때 다음 노드로 전달할 값. 비우면 left를 전달"},
             },
             "required": ["left", "operator"],
         },

@@ -19,7 +19,7 @@ _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
 @dataclass
 class FileWatchTriggerInput:
     file_path: str
-    event_type: str              # created | modified | deleted | moved
+    event_type: str  # created | modified | deleted | moved
     payload: dict[str, Any] = field(default_factory=dict)
 
 
@@ -59,9 +59,16 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "file_path": {"type": "string"},
-                "event_type": {"type": "string", "enum": ["created", "modified", "deleted", "moved"]},
-                "payload": {"type": "object"},
+                "file_path": {
+                    "type": "string",
+                    "description": '변경을 감시할 파일 또는 디렉터리 경로. 예: "/data/incoming"',
+                },
+                "event_type": {
+                    "type": "string",
+                    "enum": ["created", "modified", "deleted", "moved"],
+                    "description": "감지할 이벤트. created=생성, modified=수정, deleted=삭제, moved=이동",
+                },
+                "payload": {"type": "object", "description": "이벤트 발생 시 전달되는 데이터(실행 엔진이 주입)"},
             },
             "required": ["file_path", "event_type"],
         },

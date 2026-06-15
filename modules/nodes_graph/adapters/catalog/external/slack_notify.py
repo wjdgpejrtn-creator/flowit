@@ -50,9 +50,7 @@ class SlackNotifyNode(BaseNode[SlackNotifyInput, SlackNotifyOutput]):
         # connection_token = Slack Incoming Webhook URL (credential.value).
         webhook_url = context.connection_token
         if not webhook_url:
-            raise ValidationError(
-                "slack_notify는 credential(Slack Incoming Webhook URL)이 필요하다"
-            )
+            raise ValidationError("slack_notify는 credential(Slack Incoming Webhook URL)이 필요하다")
         await validate_outbound_url(webhook_url)
 
         payload: dict[str, Any] = {"text": input.message}
@@ -81,11 +79,20 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "message": {"type": "string"},
-                "channel": {"type": "string"},
-                "username": {"type": "string"},
-                "icon_emoji": {"type": "string"},
-                "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 30, "default": 10},
+                "message": {"type": "string", "description": "전송할 메시지 텍스트"},
+                "channel": {
+                    "type": "string",
+                    "description": '전송할 채널(선택). Webhook에 기본 채널이 설정돼 있으면 생략 가능. 예: "#general"',
+                },
+                "username": {"type": "string", "description": "메시지를 보낼 표시 이름(선택)"},
+                "icon_emoji": {"type": "string", "description": '봇 아이콘 이모지(선택). 예: ":robot_face:"'},
+                "timeout_seconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 30,
+                    "default": 10,
+                    "description": "전송 대기 제한 시간(초). 기본값 10",
+                },
             },
             "required": ["message"],
         },

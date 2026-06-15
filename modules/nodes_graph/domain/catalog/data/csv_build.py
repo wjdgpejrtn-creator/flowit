@@ -62,8 +62,12 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "rows": {"type": "array", "items": {"type": "object"}},
-                "delimiter": {"type": "string", "default": ","},
+                "rows": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "CSV로 변환할 행 데이터 목록. 각 행은 객체 또는 값 배열",
+                },
+                "delimiter": {"type": "string", "default": ",", "description": "열 구분 문자. 기본값 쉼표(,)"},
             },
             "required": ["rows"],
         },

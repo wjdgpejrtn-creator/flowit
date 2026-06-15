@@ -25,8 +25,8 @@ _SUPPORTED_FORMATS = {"csv", "json"}
 class FileTransformInput:
     source_path: str
     target_path: str
-    source_format: str                                          # csv | json
-    target_format: str                                          # csv | json
+    source_format: str  # csv | json
+    target_format: str  # csv | json
     encoding: str = "utf-8"
 
 
@@ -87,11 +87,19 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "source_path": {"type": "string"},
-                "target_path": {"type": "string"},
-                "source_format": {"type": "string", "enum": ["csv", "json"]},
-                "target_format": {"type": "string", "enum": ["csv", "json"]},
-                "encoding": {"type": "string", "default": "utf-8"},
+                "source_path": {"type": "string", "description": "변환할 원본 파일 경로"},
+                "target_path": {"type": "string", "description": "변환 결과를 저장할 파일 경로"},
+                "source_format": {
+                    "type": "string",
+                    "enum": ["csv", "json"],
+                    "description": "원본 파일 형식. csv 또는 json",
+                },
+                "target_format": {
+                    "type": "string",
+                    "enum": ["csv", "json"],
+                    "description": "변환할 대상 형식. csv 또는 json",
+                },
+                "encoding": {"type": "string", "default": "utf-8", "description": "파일 인코딩. 기본값 utf-8"},
             },
             "required": ["source_path", "target_path", "source_format", "target_format"],
         },

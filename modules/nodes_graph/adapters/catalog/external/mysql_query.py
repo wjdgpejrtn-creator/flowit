@@ -28,9 +28,9 @@ def _jsonable(row: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class MysqlQueryInput:
-    query: str                                                  # SQL 문 (`%s` 파라미터 placeholder)
+    query: str  # SQL 문 (`%s` 파라미터 placeholder)
     parameters: list[Any] = field(default_factory=list)
-    fetch_mode: str = "all"                                     # all | one | none
+    fetch_mode: str = "all"  # all | one | none
     timeout_seconds: float = 30.0
 
 
@@ -98,9 +98,14 @@ def get_node_definition() -> NodeDefinition:
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "SQL 문 (%s placeholder 사용)"},
-                "parameters": {"type": "array"},
-                "fetch_mode": {"type": "string", "enum": ["all", "one", "none"], "default": "all"},
-                "timeout_seconds": {"type": "number", "default": 30.0},
+                "parameters": {"type": "array", "description": "쿼리의 %s 자리에 바인딩할 값 목록(SQL 인젝션 방지)"},
+                "fetch_mode": {
+                    "type": "string",
+                    "enum": ["all", "one", "none"],
+                    "default": "all",
+                    "description": "결과 반환 방식. all=전체 행, one=첫 행, none=결과 없음(INSERT 등). 기본값 all",
+                },
+                "timeout_seconds": {"type": "number", "default": 30.0, "description": "쿼리 제한 시간(초). 기본값 30"},
             },
             "required": ["query"],
         },
