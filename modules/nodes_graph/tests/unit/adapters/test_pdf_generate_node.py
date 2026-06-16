@@ -9,6 +9,7 @@ FPDFUnicodeEncodingException). 본 테스트는 다음 회귀를 고정한다.
 """
 from __future__ import annotations
 
+import base64
 from uuid import uuid4
 
 import pytest
@@ -26,8 +27,10 @@ NODE_CTX = NodeContext(execution_id=uuid4(), user_id=uuid4())
 
 
 def _assert_pdf(output) -> None:
-    assert isinstance(output.pdf_bytes, bytes)
-    assert output.pdf_bytes.startswith(b"%PDF"), "유효한 PDF 헤더가 아님"
+    # pdf_bytes는 base64 인코딩 문자열(#535: node_results JSONB 직렬화 위해 str로 반환)
+    assert isinstance(output.pdf_bytes, str)
+    raw = base64.b64decode(output.pdf_bytes)
+    assert raw.startswith(b"%PDF"), "유효한 PDF 헤더가 아님"
     assert output.page_count >= 1
 
 

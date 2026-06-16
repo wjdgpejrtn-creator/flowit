@@ -145,7 +145,10 @@ def get_node_definition() -> NodeDefinition:
                 "pdf_bytes": {
                     "type": "string",
                     "format": "binary",
-                    "description": "생성된 PDF(base64 인코딩 문자열). 이메일 첨부 등 하류 노드가 ${...pdf_bytes} 참조로 받는다.",
+                    "description": (
+                        "생성된 PDF(base64 인코딩 문자열). 이메일 첨부 등 하류 노드가 "
+                        "${...pdf_bytes} 참조로 받는다."
+                    ),
                 },
                 "page_count": {"type": "integer"},
             },
