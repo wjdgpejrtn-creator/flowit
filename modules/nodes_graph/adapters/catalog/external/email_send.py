@@ -96,14 +96,16 @@ class EmailSendNode(BaseNode[EmailSendInput, EmailSendOutput]):
         return EmailSendOutput(sent=True, recipients_count=len(input.to_addresses))
 
     @staticmethod
-    def _attach_file(msg: MIMEMultipart, att: dict) -> None:
-        """첨부 1건을 메시지에 추가. content는 base64 문자열(상류 산출물 ${...} 참조 결과).
+    def _attach_file(msg: MIMEMultipart, att: dict | str) -> None:
+        """첨부 1건을 메시지에 추가. content_base64는 상류 산출물 ${...} 참조 해소 결과(base64).
 
-        필수 키: ``content``(base64). ``filename`` 미지정 시 'attachment'. ``mimetype``는
-        'maintype/subtype' 형식(미지정 시 application/octet-stream). content가 비었거나
-        base64 디코드 실패면 ValidationError(조용한 누락 방지 — 첨부 의도가 명시됐는데 빠지면
-        QA·사용자 기대와 어긋남).
+        정규형은 ``{"filename", "content_base64", "mimetype"}`` dict. 단 견고성을 위해 **bare
+        문자열**(LLM이 attachments=["${...}"]로 채운 경우 런타임 해소 시 base64 문자열)도 허용 —
+        filename='attachment', octet-stream으로 첨부. content가 비었거나 base64 디코드 실패면
+        ValidationError(조용한 누락 방지 — 첨부 의도가 명시됐는데 빠지면 QA·사용자 기대와 어긋남).
         """
+        if isinstance(att, str):
+            att = {"content_base64": att}
         content = att.get("content_base64")
         if not content:
             raise ValidationError("email_send attachment에 content_base64가 없습니다")

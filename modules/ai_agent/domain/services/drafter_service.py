@@ -395,8 +395,11 @@ class DrafterService:
 
         "PDF 생성하고 이메일 발송"에서 체인 엣지(pdf_generate→email_send)는 #532가 만들지만,
         이메일이 PDF를 **첨부**하려면 attachments에 ``${<pdf instance>.pdf_bytes}`` 참조가 필요하다
-        (email_send는 본문만으론 PDF를 안 실음). 이미 attachments가 채워진 노드는 건드리지 않는다
-        (drafter/사용자 지정 우선). node_type 미상(맵 누락)은 안전하게 skip.
+        (email_send는 본문만으론 PDF를 안 실음). **산출물 엣지가 있으면 결정적 구조로 override**한다 —
+        스키마 노출 후 drafter LLM이 attachments를 잘못된 형식(예: `["${...}"]` 문자열 리스트)으로
+        채우면 런타임 실행기(att["content_base64"])가 깨지므로, 코드가 ``[{filename, content_base64,
+        mimetype}]`` 정규형으로 확정한다. 산출물 소스 엣지가 없으면 기존 값을 건드리지 않는다.
+        node_type 미상(맵 누락)은 안전하게 skip.
         """
         type_by_inst = {
             n.instance_id: node_type_by_id.get(n.node_id) for n in workflow.nodes
@@ -406,8 +409,6 @@ class DrafterService:
         for i, node in enumerate(workflow.nodes):
             if type_by_inst.get(node.instance_id) not in cls._ATTACHMENT_SINKS:
                 continue
-            if node.parameters.get("attachments"):
-                continue  # 이미 지정됨 — 보존
             atts: list[dict] = []
             for edge in workflow.connections:
                 if edge.to_instance_id != node.instance_id:
