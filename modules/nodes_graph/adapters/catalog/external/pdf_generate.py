@@ -117,67 +117,77 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
         lines = (text or "").split("\n")
         i = 0
         while i < len(lines):
-            raw = lines[i].rstrip()
-            line = raw.strip()
-            if not line:
-                pdf.ln(2)
-                i += 1
-                continue
-
-            mh = cls._RE_HEADING.match(line)
-            if mh:
-                level = len(mh.group(1))
-                pdf.set_font(_FONT_FAMILY, "B", size=font_size + max(1, 4 - level))
-                pdf.multi_cell(0, 7, mh.group(2), markdown=True, new_x="LMARGIN", new_y="NEXT")
-                pdf.ln(1)
-                i += 1
-                continue
-
-            # 표 블록: 연속된 '|' 줄 수집
-            if line.startswith("|"):
-                rows: list[list[str]] = []
-                while i < len(lines) and lines[i].strip().startswith("|"):
-                    cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+            # 줄 단위 렌더를 전부 try/except로 감싼다 — 좁은 가용폭에서 공백 없는 초장문
+            # 토큰(URL 등)이 multi_cell "Not enough horizontal space"로 raise해도 그 줄만
+            # 건너뛰고 노드 전체는 죽지 않게 한다(표 경로와 크래시 불변식 동등). i는 항상 전진.
+            try:
+                raw = lines[i].rstrip()
+                line = raw.strip()
+                if not line:
+                    pdf.ln(2)
                     i += 1
-                    # 구분선(| :--- | :--- |) 스킵
-                    if cells and all(c == "" or cls._RE_TABLE_SEP.match(c) for c in cells):
-                        continue
-                    rows.append([cls._RE_BOLD_STRIP.sub(r"\1", c) for c in cells])
-                if rows:
-                    try:
-                        pdf.set_font(_FONT_FAMILY, "", size=max(_MIN_FONT_SIZE, font_size - 1))
-                        ncol = max(len(r) for r in rows)
-                        with pdf.table(borders_layout="SINGLE_TOP_LINE", first_row_as_headings=True) as table:
+                    continue
+
+                mh = cls._RE_HEADING.match(line)
+                if mh:
+                    level = len(mh.group(1))
+                    pdf.set_font(_FONT_FAMILY, "B", size=font_size + max(1, 4 - level))
+                    pdf.multi_cell(0, 7, mh.group(2), markdown=True, new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(1)
+                    i += 1
+                    continue
+
+                # 표 블록: 연속된 '|' 줄 수집
+                if line.startswith("|"):
+                    rows: list[list[str]] = []
+                    while i < len(lines) and lines[i].strip().startswith("|"):
+                        cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                        i += 1
+                        # 구분선(| :--- | :--- |) 스킵
+                        if cells and all(c == "" or cls._RE_TABLE_SEP.match(c) for c in cells):
+                            continue
+                        rows.append([cls._RE_BOLD_STRIP.sub(r"\1", c) for c in cells])
+                    if rows:
+                        try:
+                            pdf.set_font(_FONT_FAMILY, "", size=max(_MIN_FONT_SIZE, font_size - 1))
+                            ncol = max(len(r) for r in rows)
+                            with pdf.table(
+                                borders_layout="SINGLE_TOP_LINE", first_row_as_headings=True
+                            ) as table:
+                                for r in rows:
+                                    row = table.row()
+                                    for ci in range(ncol):
+                                        row.cell(r[ci] if ci < len(r) else "")
+                            pdf.ln(2)
+                        except Exception:
+                            # 표 렌더 실패 시 평문 폴백
+                            pdf.set_font(_FONT_FAMILY, "", size=font_size)
                             for r in rows:
-                                row = table.row()
-                                for ci in range(ncol):
-                                    row.cell(r[ci] if ci < len(r) else "")
-                        pdf.ln(2)
-                    except Exception:
-                        # 표 렌더 실패 시 평문 폴백
-                        pdf.set_font(_FONT_FAMILY, "", size=font_size)
-                        for r in rows:
-                            pdf.multi_cell(0, 6, " | ".join(r), new_x="LMARGIN", new_y="NEXT")
-                continue
+                                pdf.multi_cell(0, 6, " | ".join(r), new_x="LMARGIN", new_y="NEXT")
+                    continue
 
-            mb = cls._RE_BULLET.match(raw)
-            if mb:
+                mb = cls._RE_BULLET.match(raw)
+                if mb:
+                    pdf.set_font(_FONT_FAMILY, "", size=font_size)
+                    pdf.multi_cell(0, 6, "·  " + mb.group(1), markdown=True, new_x="LMARGIN", new_y="NEXT")
+                    i += 1
+                    continue
+
+                # 인용(blockquote) — 선두 '>' 제거하고 평문 렌더(리터럴 '>' 노출 방지)
+                mq = re.match(r"^>+\s?(.*)$", line)
+                if mq:
+                    pdf.set_font(_FONT_FAMILY, "", size=font_size)
+                    pdf.multi_cell(0, 6, mq.group(1), markdown=True, new_x="LMARGIN", new_y="NEXT")
+                    i += 1
+                    continue
+
                 pdf.set_font(_FONT_FAMILY, "", size=font_size)
-                pdf.multi_cell(0, 6, "·  " + mb.group(1), markdown=True, new_x="LMARGIN", new_y="NEXT")
+                pdf.multi_cell(0, 6, line, markdown=True, new_x="LMARGIN", new_y="NEXT")
+                i += 1
+            except Exception:
+                # 어떤 줄이든 렌더 실패 시 그 줄만 스킵(노드 크래시 금지). i 전진 보장(무한루프 방지).
                 i += 1
                 continue
-
-            # 인용(blockquote) — 선두 '>' 제거하고 평문 렌더(리터럴 '>' 노출 방지)
-            mq = re.match(r"^>+\s?(.*)$", line)
-            if mq:
-                pdf.set_font(_FONT_FAMILY, "", size=font_size)
-                pdf.multi_cell(0, 6, mq.group(1), markdown=True, new_x="LMARGIN", new_y="NEXT")
-                i += 1
-                continue
-
-            pdf.set_font(_FONT_FAMILY, "", size=font_size)
-            pdf.multi_cell(0, 6, line, markdown=True, new_x="LMARGIN", new_y="NEXT")
-            i += 1
 
     async def process(self, input: PdfGenerateInput, context: NodeContext) -> PdfGenerateOutput:
         font_size = max(_MIN_FONT_SIZE, min(_MAX_FONT_SIZE, self._coerce_int(input.font_size, 12)))

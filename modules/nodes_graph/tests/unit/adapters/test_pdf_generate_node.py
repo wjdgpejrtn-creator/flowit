@@ -235,3 +235,15 @@ async def test_malformed_table_does_not_crash() -> None:
         NODE_CTX,
     )
     _assert_pdf(out)
+
+
+@pytest.mark.asyncio
+async def test_long_token_narrow_width_does_not_crash() -> None:
+    """좁은 가용폭 + 공백 없는 초장문 토큰(URL 등)에서도 노드가 죽지 않는다(크래시 불변식)."""
+    node = PdfGenerateNode()
+    body = "참고: " + "x" * 4000 + "\n## 제목\n정상 문단"
+    out = await node.process(
+        PdfGenerateInput(title="엣지", sections=[{"body": body}], margin=90),
+        NODE_CTX,
+    )
+    _assert_pdf(out)
