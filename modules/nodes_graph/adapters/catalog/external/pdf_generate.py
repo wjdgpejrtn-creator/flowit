@@ -85,13 +85,16 @@ class _ReportPDF(FPDF):
         org = self._style.get("org_name")
         if not org:
             return
+        # full-bleed accent 밴드 — rect로 페이지 좌우 끝까지(cell(0,..)은 우측 마진에서 멈춤).
+        band_h = 14
         self.set_fill_color(*self._accent)
+        self.rect(0, 0, self.w, band_h, style="F")
         self.set_text_color(255, 255, 255)
         self.set_font(_FONT_FAMILY, "B", size=12)
-        self.set_x(0)
-        self.cell(0, 13, "   " + str(org), fill=True, new_x="LMARGIN", new_y="NEXT")
+        self.set_xy(self.l_margin, 4)
+        self.cell(0, 6, str(org), new_x="LMARGIN", new_y="NEXT")
         self.set_text_color(0, 0, 0)
-        self.ln(5)
+        self.set_y(band_h + 5)
 
     def footer(self) -> None:
         ft = self._style.get("footer")
@@ -256,6 +259,9 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
         accent = _hex_to_rgb(style.get("accent_color")) if style else None
         title_size = self._coerce_int(style.get("title_size"), font_size + 6) if style else font_size + 4
         heading_size = self._coerce_int(style.get("heading_size"), font_size + 2) if style else font_size + 1
+        # body_size를 style이 지정하면 본문 글자 크기로 사용(미지정 시 font_size). 클램프 적용.
+        if style and style.get("body_size") is not None:
+            font_size = max(_MIN_FONT_SIZE, min(_MAX_FONT_SIZE, self._coerce_int(style.get("body_size"), font_size)))
 
         # style 지정 시 헤더 밴드·푸터를 그리는 서브클래스 사용(미지정=기존 평문 FPDF, 하위호환).
         pdf: FPDF = _ReportPDF(style=style) if style else FPDF()
