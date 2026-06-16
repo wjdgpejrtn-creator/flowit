@@ -276,9 +276,27 @@ class SkeletonAssembler:
         edges: list[DraftEdge] = []
 
         def fan_sinks(source_ref: str, handle: str = "output") -> None:
-            # 복수 sink는 직렬(sink→sink)이 아니라 마지막 처리 노드에서 **병렬 분기**.
-            for s in sinks:
-                edges.append(DraftEdge(from_ref=source_ref, to_ref=s.ref, from_handle=handle))
+            # 산출물 sink(pdf_generate/file_write 등 _ARTIFACT_SINKS)는 delivery sink가 그것을
+            # **전달**하므로 병렬이 아니라 직렬 체인한다: source → 산출물 → delivery. "PDF를
+            # 생성하고 이메일을 발송"은 이메일이 원본 텍스트가 아니라 **PDF를 첨부**해야 하므로
+            # 산출물이 delivery의 입력이 돼야 한다(병렬 형제면 이메일이 PDF를 안 실어 QA가
+            # "PDF 첨부 누락"으로 거부 → E_QA_EXHAUSTED). 산출물이 없으면 모든 sink를 source에서
+            # **병렬 분기**(기존 동작 — 순수 delivery 다채널 "슬랙이랑 이메일 둘 다"). 이 직렬화는
+            # sink-only 경로(_assemble_content_delivery)의 producer→artifact→delivery와 동일 시맨틱.
+            artifacts = [s for s in sinks if s.node_type in self._ARTIFACT_SINKS]
+            deliveries = [s for s in sinks if s.node_type not in self._ARTIFACT_SINKS]
+            if not artifacts:
+                for s in sinks:
+                    edges.append(DraftEdge(from_ref=source_ref, to_ref=s.ref, from_handle=handle))
+                return
+            # 산출물 직렬 체인: source → artifact_0 → artifact_1 → …
+            up_ref, up_handle = source_ref, handle
+            for a in artifacts:
+                edges.append(DraftEdge(from_ref=up_ref, to_ref=a.ref, from_handle=up_handle))
+                up_ref, up_handle = a.ref, "output"
+            # delivery 채널은 마지막 산출물에서 분기(산출물을 전달).
+            for d in deliveries:
+                edges.append(DraftEdge(from_ref=up_ref, to_ref=d.ref, from_handle="output"))
 
         if gate and transforms:
             # 검증 루프: spine 선형 → scorer(점수화) → gate, gate→generator back-edge(재생성),

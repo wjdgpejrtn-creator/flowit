@@ -431,10 +431,14 @@ def test_ensemble_single_sink_pick_does_not_drop_explicit_sinks() -> None:
     sink_types = {n.node_type for n in d.nodes if n.role == SlotRole.SINK}
     # 앙상블 단일 픽에도 두 출력 채널이 모두 보존된다.
     assert sink_types == {"pdf_generate", "email_send"}
+    # 산출물(pdf_generate)은 delivery(email_send)에 **체인**된다(병렬 아님) — 이메일이 PDF를
+    # 첨부해 발송해야 QA "PDF 첨부 누락"을 피한다: transform → pdf_generate → email_send.
+    ref_of = {n.node_type: n.ref for n in d.nodes}
     transform = next(n for n in d.nodes if n.role == SlotRole.TRANSFORM)
-    sinks = [n for n in d.nodes if n.role == SlotRole.SINK]
-    for s in sinks:  # 둘 다 마지막 처리 노드에서 병렬 분기
-        assert any(e.from_ref == transform.ref and e.to_ref == s.ref for e in d.edges)
+    assert any(e.from_ref == transform.ref and e.to_ref == ref_of["pdf_generate"] for e in d.edges)
+    assert any(e.from_ref == ref_of["pdf_generate"] and e.to_ref == ref_of["email_send"] for e in d.edges)
+    # 산출물 sink는 delivery 외 다른 곳으로 새지 않는다(email_send는 transform 직속이 아님).
+    assert not any(e.from_ref == transform.ref and e.to_ref == ref_of["email_send"] for e in d.edges)
 
 
 # ── 의미검색 후보 그라운딩 (#453, ADR-0026 §6.6) ─────────────────────────────
