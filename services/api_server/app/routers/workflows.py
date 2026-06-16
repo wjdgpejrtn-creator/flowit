@@ -4,21 +4,24 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from celery import Celery
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-from storage.repositories.pg_execution_repository import PgExecutionRepository
-
+from ai_agent.application.agents.workflow_composer import AutobindConnectionsUseCase
 from ai_agent.domain.ports.workflow_repository import WorkflowRepository
+from celery import Celery
 from common_schemas import PermissionSource, ValidationErrorResponse, WorkflowSchema
 from common_schemas.broker_tasks import QUEUE_DEFAULT, TASK_EXECUTE_WORKFLOW
 from common_schemas.enums import ExecutionStatus
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from nodes_graph.application.use_cases.validate_graph_use_case import ValidateGraphUseCase
+from pydantic import BaseModel, Field
+from storage.repositories.pg_execution_repository import PgExecutionRepository
 
 from app.dependencies.celery_client import get_celery
 from app.dependencies.permission import get_permission_source
 from app.dependencies.repositories import get_execution_repository, get_workflow_repository
-from app.dependencies.use_cases import get_validate_graph_use_case
+from app.dependencies.use_cases import (
+    get_autobind_connections_use_case,
+    get_validate_graph_use_case,
+)
 from app.services.workflow_service import WorkflowService
 
 router = APIRouter(prefix="/api/v1/workflows", tags=["workflows"])
@@ -52,8 +55,11 @@ class WorkflowLatestExecutionResponse(BaseModel):
     node_results: list[dict[str, Any]]
 
 
-def _service(repo: WorkflowRepository = Depends(get_workflow_repository)) -> WorkflowService:
-    return WorkflowService(repo=repo)
+def _service(
+    repo: WorkflowRepository = Depends(get_workflow_repository),
+    autobinder: AutobindConnectionsUseCase = Depends(get_autobind_connections_use_case),
+) -> WorkflowService:
+    return WorkflowService(repo=repo, autobinder=autobinder)
 
 
 @router.get("", response_model=list[WorkflowSchema])
@@ -134,11 +140,17 @@ async def update_workflow(
 @router.post("/{workflow_id}/validate", response_model=ValidationErrorResponse)
 async def validate_workflow(
     workflow_id: UUID,
-    _permission: PermissionSource = Depends(get_permission_source),
+    permission: PermissionSource = Depends(get_permission_source),
     service: WorkflowService = Depends(_service),
     use_case: ValidateGraphUseCase = Depends(get_validate_graph_use_case),
+    autobinder: AutobindConnectionsUseCase = Depends(get_autobind_connections_use_case),
 ) -> ValidationErrorResponse:
     workflow = await service.get(workflow_id)
+    # 검증은 저장 없이 호출될 수 있어(편집 페이지 "검증") 저장본을 읽는다. 사용자가 통합에서
+    # 나중에 연결한 connection이 저장본 노드에 아직 안 박혀 있으면 E_MISSING_CONNECTION 오탐이
+    # 난다 — in-memory 선바인딩으로 현재 active connection을 반영해 검증한다(영속화는 save가 담당,
+    # 동일 active 상태라 불일치 없음).
+    workflow = await autobinder.execute(workflow, permission.user_id)
     return await use_case.execute(workflow)
 
 

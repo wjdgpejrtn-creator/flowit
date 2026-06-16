@@ -6,23 +6,36 @@ from uuid import uuid4
 
 import jwt as pyjwt
 import pytest
-from fastapi.testclient import TestClient
-
 from app.config import Settings
 from app.dependencies.permission import get_permission_source
 from app.dependencies.repositories import get_workflow_repository
-from app.dependencies.use_cases import get_validate_graph_use_case
+from app.dependencies.use_cases import (
+    get_autobind_connections_use_case,
+    get_validate_graph_use_case,
+)
 from app.main import create_app
 from common_schemas import (
     PermissionSource,
     ValidationErrorResponse,
     WorkflowSchema,
 )
+from fastapi.testclient import TestClient
+
+
+class _PassthroughAutobinder:
+    """노드 connection 선바인딩 no-op 페이크 — 단위 테스트에서 DB 의존 회피."""
+
+    async def execute(self, workflow: WorkflowSchema, user_id) -> WorkflowSchema:
+        return workflow
 
 
 @pytest.fixture
 def app(env_minimum: None):
-    return create_app(Settings())  # type: ignore[call-arg]
+    _app = create_app(Settings())  # type: ignore[call-arg]
+    # _service·validate가 autobinder를 주입받으며, 실 구현은 oauth/node_def repo(→DB)를 탄다.
+    # 라우터 단위 테스트는 DB state가 없으므로 passthrough로 기본 오버라이드(개별 테스트가 필요 시 교체).
+    _app.dependency_overrides[get_autobind_connections_use_case] = lambda: _PassthroughAutobinder()
+    return _app
 
 
 def _override_permission(app, user_id) -> PermissionSource:
@@ -67,7 +80,7 @@ def _empty_workflow(workflow_id=None) -> dict:
 def test_create_workflow_injects_owner_user_id(app) -> None:
     """PR #66 v0.3.0 — owner_user_id 명시 주입 검증."""
     user_id = uuid4()
-    perm = _override_permission(app, user_id)
+    _override_permission(app, user_id)
 
     repo = MagicMock()
     saved_workflows: dict = {}
@@ -96,6 +109,52 @@ def test_create_workflow_injects_owner_user_id(app) -> None:
     saved_call = repo.save.await_args
     saved_wf: WorkflowSchema = saved_call.args[0]
     assert saved_wf.owner_user_id == user_id
+
+    app.dependency_overrides.clear()
+
+
+def test_save_applies_autobinder_result(app) -> None:
+    """save가 autobinder.execute 결과(선바인딩된 워크플로우)를 repo에 저장하는지 검증.
+
+    편집 페이지에서 추가/변경한 노드의 미바인딩 connection을 저장 시점에 자동 선바인딩 →
+    E_MISSING_CONNECTION 방지. autobinder가 credential_ids를 채운 결과가 그대로 영속화돼야 한다.
+    """
+    user_id = uuid4()
+    _override_permission(app, user_id)
+
+    repo = MagicMock()
+    repo.save = AsyncMock(side_effect=lambda wf: wf.workflow_id)
+    repo.find_by_id = AsyncMock(side_effect=lambda wid: WorkflowSchema(
+        workflow_id=wid, owner_user_id=user_id, name="x", scope="private",
+        is_draft=True, nodes=[], connections=[],
+    ))
+    app.dependency_overrides[get_workflow_repository] = lambda: repo
+
+    class _SpyAutobinder:
+        def __init__(self) -> None:
+            self.called_with = None
+
+        async def execute(self, workflow: WorkflowSchema, uid) -> WorkflowSchema:
+            self.called_with = (workflow, uid)
+            # credential_ids를 채워 반환 — 이 결과가 저장돼야 함
+            return workflow.model_copy(update={"name": "bound"})
+
+    spy = _SpyAutobinder()
+    app.dependency_overrides[get_autobind_connections_use_case] = lambda: spy
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/v1/workflows", json=_empty_workflow(),
+        headers={"Authorization": f"Bearer {_bearer()}"},
+    )
+
+    assert resp.status_code == 201
+    # autobinder가 user_id와 함께 호출됨
+    assert spy.called_with is not None
+    assert spy.called_with[1] == user_id
+    # repo.save가 autobinder 결과(name="bound")를 받음
+    saved_wf: WorkflowSchema = repo.save.await_args.args[0]
+    assert saved_wf.name == "bound"
 
     app.dependency_overrides.clear()
 
