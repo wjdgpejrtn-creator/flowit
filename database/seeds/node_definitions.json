@@ -1571,14 +1571,23 @@
             "type": "object",
             "properties": {
               "filename": {
-                "type": "string"
+                "type": "string",
+                "description": "첨부 파일명. 예: report.pdf"
               },
               "content_base64": {
-                "type": "string"
+                "type": "string",
+                "description": "base64 인코딩 파일 내용(상류 산출물 ${...} 참조)"
+              },
+              "mimetype": {
+                "type": "string",
+                "description": "MIME 타입(선택). 예: application/pdf"
               }
-            }
+            },
+            "required": [
+              "content_base64"
+            ]
           },
-          "description": "첨부파일 목록(선택)"
+          "description": "첨부 파일 목록(선택). 상류 산출물을 첨부하려면 content_base64에 그 출력 참조를 둔다. 예: PDF 첨부 = [{\"filename\": \"report.pdf\", \"content_base64\": \"${<pdf_generate instance_id>.pdf_bytes}\", \"mimetype\": \"application/pdf\"}]"
         }
       },
       "required": [
@@ -1687,7 +1696,7 @@
       "properties": {
         "spreadsheet_id": {
           "type": "string",
-          "description": "스프레드시트 ID. 시트 URL의 /d/ 뒤 문자열. 예: \"1AbC...xyz\""
+          "description": "스프레드시트 ID(시트 URL의 /d/ 뒤 문자열, 예: \"1AbC...xyz\"). 전체 URL을 붙여넣어도 ID만 자동 추출됨. 대상은 네이티브 Google Sheets여야 함(업로드된 .xlsx Office 파일은 'Google Sheets로 저장'으로 변환 필요)"
         },
         "range_a1": {
           "type": "string",
@@ -2518,7 +2527,8 @@
       "type": "object",
       "properties": {
         "spreadsheet_id": {
-          "type": "string"
+          "type": "string",
+          "description": "스프레드시트 ID. 전체 URL을 붙여넣어도 ID만 자동 추출됨"
         },
         "range_a1": {
           "type": "string",
