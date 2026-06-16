@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,7 +43,10 @@ class PdfGenerateInput:
 
 @dataclass
 class PdfGenerateOutput:
-    pdf_bytes: bytes
+    # base64 인코딩된 PDF 바이트(ASCII 문자열). 노드 출력은 node_results(JSONB)에 json.dumps로
+    # 저장되므로 raw bytes는 직렬화 불가 → base64 문자열로 낸다(output_schema도 string/binary).
+    # 하류 노드(email_send attachments 등)가 ${...pdf_bytes} 참조로 받아 base64 디코드해 사용.
+    pdf_bytes: str
     page_count: int
 
 
@@ -107,7 +111,8 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
             pdf.ln(2)
 
         pdf_bytes = bytes(pdf.output())
-        return PdfGenerateOutput(pdf_bytes=pdf_bytes, page_count=pdf.page)
+        pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+        return PdfGenerateOutput(pdf_bytes=pdf_b64, page_count=pdf.page)
 
 
 def get_node_definition() -> NodeDefinition:
@@ -137,7 +142,11 @@ def get_node_definition() -> NodeDefinition:
         output_schema={
             "type": "object",
             "properties": {
-                "pdf_bytes": {"type": "string", "format": "binary"},
+                "pdf_bytes": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "생성된 PDF(base64 인코딩 문자열). 이메일 첨부 등 하류 노드가 ${...pdf_bytes} 참조로 받는다.",
+                },
                 "page_count": {"type": "integer"},
             },
         },

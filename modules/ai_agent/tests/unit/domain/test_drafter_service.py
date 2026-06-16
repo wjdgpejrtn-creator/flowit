@@ -881,3 +881,78 @@ class TestScaffoldParamFill:
         # 일반 LLM draft로 폴백 — 두 번째 응답이 반영됨.
         assert wf.name == "fallback"
         assert llm.generate_structured.await_count == 2
+
+
+class TestWireArtifactAttachments:
+    """산출물(pdf_generate)→발송(email_send) 연결 시 attachments 결정적 배선 (2026-06-16 데모)."""
+
+    def _wf(self, pdf_type="pdf_generate", email_type="email_send", existing=None):
+        import uuid as _uuid
+        from common_schemas import NodeInstance, Position, WorkflowSchema
+        from common_schemas.workflow import Edge
+        self._pdf_nid, self._email_nid = _uuid.uuid4(), _uuid.uuid4()
+        pi, ei = _uuid.uuid4(), _uuid.uuid4()
+        self._email_inst = ei
+        eparams = {"subject": "s", "body": "b"}
+        if existing is not None:
+            eparams["attachments"] = existing
+        wf = WorkflowSchema(
+            workflow_id=_uuid.uuid4(), name="T", scope="private", is_draft=True,
+            owner_user_id=_uuid.uuid4(),
+            nodes=[
+                NodeInstance(instance_id=pi, node_id=self._pdf_nid, parameters={"title": "r"},
+                             position=Position(x=0, y=0)),
+                NodeInstance(instance_id=ei, node_id=self._email_nid, parameters=eparams,
+                             position=Position(x=1, y=0)),
+            ],
+            connections=[Edge(from_instance_id=pi, to_instance_id=ei,
+                              from_handle="output", to_handle="input")],
+        )
+        self._pdf_inst = pi
+        return wf, {self._pdf_nid: pdf_type, self._email_nid: email_type}
+
+    def _email_node(self, wf):
+        return next(n for n in wf.nodes if n.node_id == self._email_nid)
+
+    def test_pdf_to_email_wires_attachment(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf()
+        out = DrafterService.wire_artifact_attachments(wf, tmap)
+        atts = self._email_node(out).parameters["attachments"]
+        assert atts == [{
+            "filename": "report.pdf",
+            "content_base64": f"${{{self._pdf_inst}.pdf_bytes}}",
+            "mimetype": "application/pdf",
+        }]
+
+    def test_artifact_edge_overrides_llm_attachments(self):
+        # 산출물 엣지가 있으면 LLM이 채운 잘못된 형식(예: 문자열 리스트)을 결정적 구조로 override.
+        # 스키마 노출 후 drafter가 attachments=["${...}"] 처럼 채우면 런타임 실행기가 깨지므로 교정.
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(existing=[f"${{{uuid4()}.pdf_bytes}}"])  # LLM 오형식(문자열 리스트)
+        out = DrafterService.wire_artifact_attachments(wf, tmap)
+        atts = self._email_node(out).parameters["attachments"]
+        assert atts == [{
+            "filename": "report.pdf",
+            "content_base64": f"${{{self._pdf_inst}.pdf_bytes}}",
+            "mimetype": "application/pdf",
+        }]
+
+    def test_non_artifact_source_preserves_existing(self):
+        # 산출물 소스 엣지가 없으면 기존 attachments를 건드리지 않는다.
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(pdf_type="gmail_read", existing=[{"content_base64": "X"}])
+        out = DrafterService.wire_artifact_attachments(wf, tmap)
+        assert self._email_node(out).parameters["attachments"] == [{"content_base64": "X"}]
+
+    def test_non_artifact_source_no_attachment(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(pdf_type="gmail_read")  # 산출물 아님
+        out = DrafterService.wire_artifact_attachments(wf, tmap)
+        assert "attachments" not in self._email_node(out).parameters
+
+    def test_non_email_sink_skipped(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(email_type="slack_post_message")  # 발송 sink 아님
+        out = DrafterService.wire_artifact_attachments(wf, tmap)
+        assert "attachments" not in self._email_node(out).parameters

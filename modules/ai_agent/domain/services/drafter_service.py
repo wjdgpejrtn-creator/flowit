@@ -378,6 +378,58 @@ class DrafterService:
             raise ExecutionError(f"WorkflowSchema 파싱 실패: {e}", code="E_DRAFT_PARSE")
         return self._build(draft_resp, candidates, owner_user_id, dropped_sink=dropped_node_types)
 
+    # 산출물 producer node_type → (출력 필드, MIME, 기본 파일명). 발송 노드가 이 산출물을
+    # 첨부로 받을 때 결정적으로 배선한다. LLM 파라미터 채움에 맡기지 않고 코드가 확정 —
+    # 중첩 array-of-object + 크로스노드 참조는 Gemma 신뢰도가 낮아 누락되기 쉽다.
+    _ARTIFACT_ATTACHMENT: dict[str, tuple[str, str, str]] = {
+        "pdf_generate": ("pdf_bytes", "application/pdf", "report.pdf"),
+    }
+    _ATTACHMENT_SINKS: frozenset[str] = frozenset({"email_send", "gmail_send"})
+
+    @classmethod
+    def wire_artifact_attachments(
+        cls, workflow: WorkflowSchema, node_type_by_id: dict
+    ) -> WorkflowSchema:
+        """산출물 노드(pdf_generate 등)→발송 노드(email_send/gmail_send) 연결이 있으면 발송 노드의
+        ``attachments`` 파라미터를 상류 산출물 출력 참조로 결정적으로 채운다.
+
+        "PDF 생성하고 이메일 발송"에서 체인 엣지(pdf_generate→email_send)는 #532가 만들지만,
+        이메일이 PDF를 **첨부**하려면 attachments에 ``${<pdf instance>.pdf_bytes}`` 참조가 필요하다
+        (email_send는 본문만으론 PDF를 안 실음). **산출물 엣지가 있으면 결정적 구조로 override**한다 —
+        스키마 노출 후 drafter LLM이 attachments를 잘못된 형식(예: `["${...}"]` 문자열 리스트)으로
+        채우면 런타임 실행기(att["content_base64"])가 깨지므로, 코드가 ``[{filename, content_base64,
+        mimetype}]`` 정규형으로 확정한다. 산출물 소스 엣지가 없으면 기존 값을 건드리지 않는다.
+        node_type 미상(맵 누락)은 안전하게 skip.
+        """
+        type_by_inst = {
+            n.instance_id: node_type_by_id.get(n.node_id) for n in workflow.nodes
+        }
+        new_nodes = list(workflow.nodes)
+        changed = False
+        for i, node in enumerate(workflow.nodes):
+            if type_by_inst.get(node.instance_id) not in cls._ATTACHMENT_SINKS:
+                continue
+            atts: list[dict] = []
+            for edge in workflow.connections:
+                if edge.to_instance_id != node.instance_id:
+                    continue
+                src_type = type_by_inst.get(edge.from_instance_id)
+                spec = cls._ARTIFACT_ATTACHMENT.get(src_type or "")
+                if spec is None:
+                    continue
+                field_name, mimetype, filename = spec
+                atts.append({
+                    "filename": filename,
+                    "content_base64": f"${{{edge.from_instance_id}.{field_name}}}",
+                    "mimetype": mimetype,
+                })
+            if atts:
+                new_nodes[i] = node.model_copy(
+                    update={"parameters": {**node.parameters, "attachments": atts}}
+                )
+                changed = True
+        return workflow.model_copy(update={"nodes": new_nodes}) if changed else workflow
+
     async def _fill_scaffold_params(
         self,
         scaffold: AssembledDraft,
