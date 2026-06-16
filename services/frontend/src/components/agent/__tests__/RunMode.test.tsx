@@ -202,4 +202,29 @@ describe('RunMode', () => {
     await userEvent.click(screen.getByText('▶ 실행'));
     expect(mockExecute).toHaveBeenCalledWith('wf-1');
   });
+
+  it('카드 순서를 nodes 배열이 아닌 connections 기반 실행 순서로 렌더한다', async () => {
+    // nodes 배열은 [Slack(n-b), Google Sheets(n-a)] 순이지만 엣지는 n-a → n-b.
+    // 화면 순서는 위상 정렬을 따라 Google Sheets가 Slack보다 먼저 와야 한다.
+    const wf = makeWorkflow();
+    wf.nodes = [wf.nodes[1], wf.nodes[0]]; // 배열 순서를 일부러 뒤집음
+    wf.connections = [
+      {
+        from_instance_id: 'n-a',
+        to_instance_id: 'n-b',
+        from_handle: 'output',
+        to_handle: 'input',
+        condition: null,
+      } as WorkflowSchema['connections'][number],
+    ];
+    useWorkflowStore.setState({ workflow: wf, activeExecutionId: null });
+    mockGetLatest.mockResolvedValue(null);
+
+    render(<RunMode />);
+
+    const sheets = await screen.findByText('Google Sheets');
+    const slack = screen.getByText('Slack 알림');
+    // Google Sheets 카드가 DOM 상 Slack 카드보다 앞에 위치(엣지 순서 반영)
+    expect(sheets.compareDocumentPosition(slack) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

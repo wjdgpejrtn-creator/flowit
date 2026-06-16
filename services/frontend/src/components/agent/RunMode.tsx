@@ -122,6 +122,46 @@ function nowTs(): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/**
+ * 노드를 connections(엣지) 기반 위상 순서로 정렬한다 — 실행 화면 카드 나열 순서를 실제
+ * 실행 순서(execution_engine TopologicalScheduler)와 일치시키기 위함. `workflow.nodes` 배열은
+ * 삽입 순서라 편집으로 엣지를 재배선해도 안 바뀌어, 정렬 없이는 화면 순서가 그래프와 어긋난다.
+ *
+ * Kahn 알고리즘. 동순위(병렬 분기·복수 루트)는 원본 배열 순서로 안정 정렬. 사이클/고립 노드
+ * (control-flow 루프 등 위상 정렬 불가분)는 원본 순서로 뒤에 덧붙여 항상 전 노드를 표시한다.
+ */
+function topoOrderInstanceIds(
+  nodeIds: string[],
+  connections: { from_instance_id: string; to_instance_id: string }[],
+): string[] {
+  const rank = new Map(nodeIds.map((id, i) => [id, i]));
+  const indeg = new Map(nodeIds.map((id) => [id, 0]));
+  const adj = new Map<string, string[]>(nodeIds.map((id) => [id, []]));
+  for (const c of connections) {
+    if (!adj.has(c.from_instance_id) || !indeg.has(c.to_instance_id)) continue;
+    adj.get(c.from_instance_id)!.push(c.to_instance_id);
+    indeg.set(c.to_instance_id, (indeg.get(c.to_instance_id) ?? 0) + 1);
+  }
+  // 원본 순서 기준 안정 처리를 위해 매 step rank가 가장 작은 in-degree 0 노드를 꺼낸다.
+  const ready = nodeIds.filter((id) => (indeg.get(id) ?? 0) === 0);
+  const order: string[] = [];
+  const seen = new Set<string>();
+  while (ready.length) {
+    ready.sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
+    const id = ready.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    order.push(id);
+    for (const nb of adj.get(id) ?? []) {
+      const d = (indeg.get(nb) ?? 0) - 1;
+      indeg.set(nb, d);
+      if (d <= 0 && !seen.has(nb)) ready.push(nb);
+    }
+  }
+  for (const id of nodeIds) if (!seen.has(id)) order.push(id); // 사이클/고립 — 원본 순서로 덧붙임
+  return order;
+}
+
 const NODE_STATE_LOG: Partial<Record<NodeState, [string, string]>> = {
   running: ['◑ Node "%s" 실행 중...', 'text-hl'],
   succeeded: ['✓ Node "%s" 실행 완료 (succeeded)', 'text-emerald-400'],
@@ -308,7 +348,14 @@ export default function RunMode() {
 
   const nodes: DisplayNode[] = useMemo(() => {
     if (!workflow) return [];
-    return workflow.nodes.map((n) => {
+    // 카드 나열 순서를 connections 기반 실행 순서와 일치시킨다(배열 순서 아님).
+    const order = topoOrderInstanceIds(
+      workflow.nodes.map((n) => n.instance_id),
+      workflow.connections ?? [],
+    );
+    const byId = new Map(workflow.nodes.map((n) => [n.instance_id, n]));
+    return order.map((id) => {
+      const n = byId.get(id)!;
       const meta = metaByInstanceId.get(n.instance_id);
       const st = statusByInstanceId.get(n.instance_id);
       return {
