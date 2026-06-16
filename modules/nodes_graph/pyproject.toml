@@ -26,3 +26,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["nodes_graph*"]
+
+[tool.setuptools.package-data]
+# pdf_generate 노드가 번들 유니코드 폰트(한글 지원)를 런타임에 로드하므로
+# wheel 빌드에 .ttf/라이선스 파일이 포함되어야 한다.
+nodes_graph = ["adapters/catalog/external/assets/fonts/*.ttf", "adapters/catalog/external/assets/fonts/*.txt"]
