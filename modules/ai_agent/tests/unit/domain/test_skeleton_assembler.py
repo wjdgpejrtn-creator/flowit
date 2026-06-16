@@ -416,6 +416,27 @@ def test_multiple_sinks_fan_out_in_parallel() -> None:
     assert not any(e.from_ref in sink_refs and e.to_ref in sink_refs for e in d.edges)
 
 
+def test_ensemble_single_sink_pick_does_not_drop_explicit_sinks() -> None:
+    # 회귀(시연 디버깅 2026-06-16): 발화가 출력 채널을 둘 명시(PDF 생성 + 이메일 발송)했는데
+    # 앙상블(EnsembleSlotResolver)이 SINK를 단일 승자(pdf_generate)로 좁히면, 기존엔 `mats=ens`
+    # 가 렉시컬 복수 sink를 통째로 덮어써 email_send가 증발 → 워크플로우가 PDF에서 끝나
+    # QA "이메일 발송 누락" 무한재시도 → E_QA_EXHAUSTED. SINK는 union 보존이어야 한다.
+    resolved = ResolvedSlots(by_role={SlotRole.SINK: ("pdf_generate",)})
+    d = _A.assemble(
+        "전일 매출 데이터를 집계하여 리포트 양식에 맞는 pdf를 생성하고, "
+        "경영진에게 핵심 지표를 포함한 이메일을 발송하여 매출 현황을 공유하는 워크플로우",
+        resolved_slots=resolved,
+    )
+    assert d is not None
+    sink_types = {n.node_type for n in d.nodes if n.role == SlotRole.SINK}
+    # 앙상블 단일 픽에도 두 출력 채널이 모두 보존된다.
+    assert sink_types == {"pdf_generate", "email_send"}
+    transform = next(n for n in d.nodes if n.role == SlotRole.TRANSFORM)
+    sinks = [n for n in d.nodes if n.role == SlotRole.SINK]
+    for s in sinks:  # 둘 다 마지막 처리 노드에서 병렬 분기
+        assert any(e.from_ref == transform.ref and e.to_ref == s.ref for e in d.edges)
+
+
 # ── 의미검색 후보 그라운딩 (#453, ADR-0026 §6.6) ─────────────────────────────
 # 렉시컬이 비운 source/sink 슬롯을 retriever 후보(BGE-M3 의미매칭, rank 순)로 채운다 —
 # 어휘 갭(스펠링 변형·신규 표현)을 손 사전 대신 의미검색 결과로 닫는다.

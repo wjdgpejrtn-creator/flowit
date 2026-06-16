@@ -143,7 +143,17 @@ class SkeletonAssembler:
             if resolved is not None and resolved.has_pick(slot.role):
                 ens = [nt for nt in resolved.for_role(slot.role) if nt in slot.candidates]
                 if ens:
-                    mats = ens
+                    # SINK는 앙상블 픽을 우선하되 발화에 **명시된** 렉시컬 출력 채널을 드롭하지
+                    # 않도록 union한다. 앙상블이 SINK를 단일 승자로 좁히면("PDF 생성하고 이메일
+                    # 발송"에서 pdf_generate만 픽) 두 번째 sink(email_send)가 통째로 증발해
+                    # 워크플로우가 한 채널에서 끝나던 multi-sink collapse 회귀를 차단(사용자가
+                    # 복수 출력 채널을 명시하면 전부 honor). SOURCE 등 다른 역할은 기존 replace
+                    # 의미(앙상블이 어휘 오인식한 단일 슬롯을 교정)를 유지 — 출력 채널만 다채널이
+                    # 정당하고, 입력/가공 슬롯의 교체 시맨틱은 앙상블 재설계 소관이라 보존한다.
+                    if slot.role == SlotRole.SINK:
+                        mats = ens + [m for m in mats if m not in ens]
+                    else:
+                        mats = ens
             if not mats and grounding and slot.role in self._GROUNDABLE_ROLES:
                 mats = [t for t in grounding if t in slot.candidates][:1]
             if slot.cardinality == "one":
