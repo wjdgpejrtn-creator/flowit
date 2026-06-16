@@ -69,6 +69,15 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
         pdf.add_font(_FONT_FAMILY, "B", str(_FONT_BOLD))
 
     @staticmethod
+    def _coerce_int(value: Any, default: int) -> int:
+        """업스트림(LLM 등)이 숫자를 문자열("12") 등으로 줘도 클램프 비교에서
+        TypeError가 나지 않도록 int로 강제. 변환 불가 시 기본값."""
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
     def _normalize_sections(sections: Any) -> list[tuple[str, str]]:
         """sections 원소가 dict가 아닌 경우(문자열/None/기타)에도 크래시하지 않도록 정규화.
         업스트림(LLM 등)이 형식을 어긋나게 줘도 노드가 죽지 않게 방어한다."""
@@ -88,8 +97,8 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
         return normalized
 
     async def process(self, input: PdfGenerateInput, context: NodeContext) -> PdfGenerateOutput:
-        font_size = max(_MIN_FONT_SIZE, min(_MAX_FONT_SIZE, input.font_size))
-        margin = max(0, min(_MAX_MARGIN_MM, input.margin))
+        font_size = max(_MIN_FONT_SIZE, min(_MAX_FONT_SIZE, self._coerce_int(input.font_size, 12)))
+        margin = max(0, min(_MAX_MARGIN_MM, self._coerce_int(input.margin, 10)))
 
         pdf = FPDF()
         self._register_fonts(pdf)

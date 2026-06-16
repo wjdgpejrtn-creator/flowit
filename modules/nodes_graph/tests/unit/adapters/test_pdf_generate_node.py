@@ -103,6 +103,22 @@ async def test_extreme_font_size_clamped() -> None:
 
 
 @pytest.mark.asyncio
+async def test_string_typed_numeric_params_do_not_crash() -> None:
+    """LLM이 font_size/margin을 문자열로 줘도(JSON 숫자→문자열 흔함) 크래시하지 않는다."""
+    node = PdfGenerateNode()
+    out = await node.process(
+        PdfGenerateInput(
+            title="제목",
+            sections=[{"heading": "H", "body": "본문"}],
+            font_size="14",  # type: ignore[arg-type]
+            margin="20",  # type: ignore[arg-type]
+        ),
+        NODE_CTX,
+    )
+    _assert_pdf(out)
+
+
+@pytest.mark.asyncio
 async def test_malformed_sections_do_not_crash() -> None:
     """업스트림이 dict가 아닌 section(문자열/None/기타)을 줘도 방어적으로 처리한다."""
     node = PdfGenerateNode()
