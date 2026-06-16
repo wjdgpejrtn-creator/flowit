@@ -40,6 +40,24 @@ class PdfGenerateInput:
     sections: list[dict[str, str]]  # [{"heading": "...", "body": "..."}, ...]
     font_size: int = 12
     margin: int = 10
+    # 회사 문서 템플릿(선택) — 스킬이 강제하는 시각 양식. 미지정 시 기존 평문 렌더(하위호환).
+    # 키: org_name(헤더 밴드 회사명) / accent_color(#hex, 헤더밴드·제목·섹션) /
+    #     footer(푸터 문구) / title_size / heading_size / body_size.
+    style: dict[str, Any] | None = None
+
+
+_DEFAULT_ACCENT = (43, 92, 138)  # #2B5C8A
+
+
+def _hex_to_rgb(value: Any, default: tuple[int, int, int] = _DEFAULT_ACCENT) -> tuple[int, int, int]:
+    """'#RRGGBB' → (r,g,b). 형식 오류 시 default(노드 크래시 방지)."""
+    try:
+        s = str(value).lstrip("#")
+        if len(s) == 3:
+            s = "".join(c * 2 for c in s)
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except (TypeError, ValueError, IndexError):
+        return default
 
 
 @dataclass
@@ -49,6 +67,44 @@ class PdfGenerateOutput:
     # 하류 노드(email_send attachments 등)가 ${...pdf_bytes} 참조로 받아 base64 디코드해 사용.
     pdf_bytes: str
     page_count: int
+
+
+class _ReportPDF(FPDF):
+    """회사 템플릿용 FPDF 서브클래스 — accent 헤더 밴드(회사명) + 푸터(문구·페이지).
+
+    header()/footer()는 fpdf2가 add_page·페이지 분기마다 자동 호출 → 모든 페이지에 일관 적용.
+    style에 org_name/footer가 없으면 각각 그리지 않아 평문 모드와 호환.
+    """
+
+    def __init__(self, *args: Any, style: dict[str, Any] | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._style = style or {}
+        self._accent = _hex_to_rgb(self._style.get("accent_color"))
+
+    def header(self) -> None:
+        org = self._style.get("org_name")
+        if not org:
+            return
+        # full-bleed accent 밴드 — rect로 페이지 좌우 끝까지(cell(0,..)은 우측 마진에서 멈춤).
+        band_h = 14
+        self.set_fill_color(*self._accent)
+        self.rect(0, 0, self.w, band_h, style="F")
+        self.set_text_color(255, 255, 255)
+        self.set_font(_FONT_FAMILY, "B", size=12)
+        self.set_xy(self.l_margin, 4)
+        self.cell(0, 6, str(org), new_x="LMARGIN", new_y="NEXT")
+        self.set_text_color(0, 0, 0)
+        self.set_y(band_h + 5)
+
+    def footer(self) -> None:
+        ft = self._style.get("footer")
+        if not ft:
+            return
+        self.set_y(-13)
+        self.set_font(_FONT_FAMILY, "", size=8)
+        self.set_text_color(140, 140, 140)
+        self.cell(0, 8, f"{ft}    |    p.{self.page_no()}", align="C")
+        self.set_text_color(0, 0, 0)
 
 
 class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
@@ -108,11 +164,14 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
     _RE_BOLD_STRIP = re.compile(r"\*\*(.+?)\*\*")
 
     @classmethod
-    def _render_markdown_body(cls, pdf: FPDF, text: str, font_size: int) -> None:
+    def _render_markdown_body(
+        cls, pdf: FPDF, text: str, font_size: int, accent: tuple[int, int, int] | None = None
+    ) -> None:
         """본문 markdown을 실제 서식으로 렌더 — 제목(#)·표(|)·불릿(*,-)·인라인 볼드(**).
 
         fpdf2 코어 기능만 사용: heading은 bold 큰 글씨, 표는 ``pdf.table()``, 인라인 볼드는
         ``multi_cell(markdown=True)``. 파싱 불가/예외 시 해당 줄을 평문으로 폴백(절대 크래시 금지).
+        accent 지정 시 markdown 제목(#)을 그 색으로 강조(회사 템플릿).
         """
         lines = (text or "").split("\n")
         i = 0
@@ -132,7 +191,11 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
                 if mh:
                     level = len(mh.group(1))
                     pdf.set_font(_FONT_FAMILY, "B", size=font_size + max(1, 4 - level))
+                    if accent:
+                        pdf.set_text_color(*accent)
                     pdf.multi_cell(0, 7, mh.group(2), markdown=True, new_x="LMARGIN", new_y="NEXT")
+                    if accent:
+                        pdf.set_text_color(0, 0, 0)
                     pdf.ln(1)
                     i += 1
                     continue
@@ -192,25 +255,46 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
     async def process(self, input: PdfGenerateInput, context: NodeContext) -> PdfGenerateOutput:
         font_size = max(_MIN_FONT_SIZE, min(_MAX_FONT_SIZE, self._coerce_int(input.font_size, 12)))
         margin = max(0, min(_MAX_MARGIN_MM, self._coerce_int(input.margin, 10)))
+        style = input.style if isinstance(input.style, dict) else None
+        accent = _hex_to_rgb(style.get("accent_color")) if style else None
+        title_size = self._coerce_int(style.get("title_size"), font_size + 6) if style else font_size + 4
+        heading_size = self._coerce_int(style.get("heading_size"), font_size + 2) if style else font_size + 1
+        # body_size를 style이 지정하면 본문 글자 크기로 사용(미지정 시 font_size). 클램프 적용.
+        if style and style.get("body_size") is not None:
+            font_size = max(_MIN_FONT_SIZE, min(_MAX_FONT_SIZE, self._coerce_int(style.get("body_size"), font_size)))
 
-        pdf = FPDF()
+        # style 지정 시 헤더 밴드·푸터를 그리는 서브클래스 사용(미지정=기존 평문 FPDF, 하위호환).
+        pdf: FPDF = _ReportPDF(style=style) if style else FPDF()
         self._register_fonts(pdf)
         pdf.set_margin(margin)
         pdf.add_page()
 
         # 제목 — 길어도 줄바꿈되도록 multi_cell 사용(cell은 가로 오버플로우)
-        pdf.set_font(_FONT_FAMILY, "B", size=font_size + 4)
+        pdf.set_font(_FONT_FAMILY, "B", size=title_size)
+        if accent:
+            pdf.set_text_color(*accent)
         pdf.multi_cell(0, 10, str(input.title or ""), new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(4)
+        if accent:
+            # 제목 하단 accent 구분선
+            y = pdf.get_y() + 1
+            pdf.set_draw_color(*accent)
+            pdf.set_line_width(0.6)
+            pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
+            pdf.set_text_color(0, 0, 0)
+        pdf.ln(5)
 
         for heading, body in self._normalize_sections(input.sections):
             if heading:
-                pdf.set_font(_FONT_FAMILY, "B", size=font_size + 1)
+                pdf.set_font(_FONT_FAMILY, "B", size=heading_size)
+                if accent:
+                    pdf.set_text_color(*accent)
                 pdf.multi_cell(0, 8, heading, new_x="LMARGIN", new_y="NEXT")
+                if accent:
+                    pdf.set_text_color(0, 0, 0)
             if body:
                 # 본문 markdown을 실제 서식(제목/표/볼드/불릿)으로 렌더 — LLM 산출물의
                 # 마크다운이 날것 텍스트로 박히던 문제 해소.
-                self._render_markdown_body(pdf, body, font_size)
+                self._render_markdown_body(pdf, body, font_size, accent)
             pdf.ln(2)
 
         pdf_bytes = bytes(pdf.output())
