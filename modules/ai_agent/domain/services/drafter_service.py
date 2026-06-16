@@ -419,7 +419,7 @@ class DrafterService:
                 field_name, mimetype, filename = spec
                 atts.append({
                     "filename": filename,
-                    "content": f"${{{edge.from_instance_id}.{field_name}}}",
+                    "content_base64": f"${{{edge.from_instance_id}.{field_name}}}",
                     "mimetype": mimetype,
                 })
             if atts:

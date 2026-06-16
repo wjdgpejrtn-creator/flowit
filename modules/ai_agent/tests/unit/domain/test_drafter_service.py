@@ -921,7 +921,7 @@ class TestWireArtifactAttachments:
         atts = self._email_node(out).parameters["attachments"]
         assert atts == [{
             "filename": "report.pdf",
-            "content": f"${{{self._pdf_inst}.pdf_bytes}}",
+            "content_base64": f"${{{self._pdf_inst}.pdf_bytes}}",
             "mimetype": "application/pdf",
         }]
 

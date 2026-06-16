@@ -35,8 +35,9 @@ class EmailSendInput:
     smtp_port: int = 587
     body_type: str = "plain"  # plain | html
     use_tls: bool = True
-    # 첨부 파일 목록. 각 항목: {"filename": str, "content": base64 문자열, "mimetype": "a/b"(선택)}.
-    # 상류 산출물(예: pdf_generate.pdf_bytes)을 ${...} 참조로 content에 받아 첨부한다.
+    # 첨부 파일 목록. 각 항목: {"filename": str, "content_base64": str, "mimetype": "a/b"(선택)}.
+    # 상류 산출물(예: pdf_generate.pdf_bytes)을 ${...} 참조로 content_base64에 받아 첨부한다.
+    # 키 이름은 gmail_send와 정합(content_base64) — 드래프터 배선이 두 발송 노드 공통.
     attachments: list[dict] = field(default_factory=list)
 
 
@@ -103,9 +104,9 @@ class EmailSendNode(BaseNode[EmailSendInput, EmailSendOutput]):
         base64 디코드 실패면 ValidationError(조용한 누락 방지 — 첨부 의도가 명시됐는데 빠지면
         QA·사용자 기대와 어긋남).
         """
-        content = att.get("content")
+        content = att.get("content_base64")
         if not content:
-            raise ValidationError("email_send attachment에 content(base64)가 없습니다")
+            raise ValidationError("email_send attachment에 content_base64가 없습니다")
         try:
             raw = base64.b64decode(content, validate=True)
         except (binascii.Error, ValueError) as exc:
@@ -150,17 +151,17 @@ def get_node_definition() -> NodeDefinition:
                 "attachments": {
                     "type": "array",
                     "description": (
-                        "첨부 파일 목록(선택). 상류 산출물을 첨부하려면 content에 그 출력 참조를 둔다. "
-                        '예: PDF 첨부 = [{"filename": "report.pdf", "content": "${<pdf_generate instance_id>.pdf_bytes}", "mimetype": "application/pdf"}]'
+                        "첨부 파일 목록(선택). 상류 산출물을 첨부하려면 content_base64에 그 출력 참조를 둔다. "
+                        '예: PDF 첨부 = [{"filename": "report.pdf", "content_base64": "${<pdf_generate instance_id>.pdf_bytes}", "mimetype": "application/pdf"}]'
                     ),
                     "items": {
                         "type": "object",
                         "properties": {
                             "filename": {"type": "string", "description": "첨부 파일명. 예: report.pdf"},
-                            "content": {"type": "string", "description": "base64 인코딩 파일 내용(상류 산출물 ${...} 참조)"},
+                            "content_base64": {"type": "string", "description": "base64 인코딩 파일 내용(상류 산출물 ${...} 참조)"},
                             "mimetype": {"type": "string", "description": 'MIME 타입. 예: "application/pdf"'},
                         },
-                        "required": ["content"],
+                        "required": ["content_base64"],
                     },
                 },
             },
