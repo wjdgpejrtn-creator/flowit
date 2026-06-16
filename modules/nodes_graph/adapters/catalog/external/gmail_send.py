@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import base64
+import binascii
 from dataclasses import dataclass, field
-from email import encoders
-from email.mime.base import MIMEBase
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
@@ -68,11 +68,7 @@ class GmailSendNode(BaseNode[GmailSendInput, GmailSendOutput]):
             msg["Bcc"] = ", ".join(input.bcc)
         msg.attach(MIMEText(input.body, "html" if input.is_html else "plain", "utf-8"))
         for att in input.attachments:
-            part = MIMEBase("application", "octet-stream")
-            part.set_payload(base64.b64decode(att["content_base64"]))
-            encoders.encode_base64(part)
-            part.add_header("Content-Disposition", f'attachment; filename="{att.get("filename", "file")}"')
-            msg.attach(part)
+            self._attach_file(msg, att)
 
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
         headers = {
@@ -91,6 +87,32 @@ class GmailSendNode(BaseNode[GmailSendInput, GmailSendOutput]):
             thread_id=data.get("threadId", ""),
             label_ids=data.get("labelIds", []),
         )
+
+    @staticmethod
+    def _attach_file(msg: MIMEMultipart, att: dict | str) -> None:
+        """첨부 1건을 메시지에 추가. content_base64는 상류 산출물 ${...} 참조 해소 결과(base64).
+
+        정규형은 ``{"filename", "content_base64", "mimetype"}`` dict. 견고성을 위해 **bare
+        문자열**(LLM이 attachments=["${...}"]로 채운 경우 런타임 해소 시 base64 문자열)도 허용한다.
+        content가 없거나 base64 디코드 실패면 명확한 ValidationError(조용한 누락·KeyError/디코드
+        크래시 방지 — email_send._attach_file와 동일 계약, PR #537 견고화를 gmail_send에도 적용).
+        """
+        if isinstance(att, str):
+            att = {"content_base64": att}
+        content = att.get("content_base64")
+        if not content:
+            raise ValidationError("gmail_send attachment에 content_base64가 없습니다")
+        try:
+            raw = base64.b64decode(content, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValidationError(f"gmail_send attachment content가 유효한 base64가 아닙니다: {exc}")
+        mimetype = att.get("mimetype") or "application/octet-stream"
+        _, _, subtype = mimetype.partition("/")
+        part = MIMEApplication(raw, _subtype=subtype or "octet-stream")
+        part.add_header(
+            "Content-Disposition", "attachment", filename=att.get("filename") or "attachment"
+        )
+        msg.attach(part)
 
 
 def get_node_definition() -> NodeDefinition:
@@ -130,9 +152,21 @@ def get_node_definition() -> NodeDefinition:
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {"filename": {"type": "string"}, "content_base64": {"type": "string"}},
+                        "properties": {
+                            "filename": {"type": "string", "description": "첨부 파일명. 예: report.pdf"},
+                            "content_base64": {
+                                "type": "string",
+                                "description": "base64 인코딩 파일 내용(상류 산출물 ${...} 참조)",
+                            },
+                            "mimetype": {"type": "string", "description": "MIME 타입(선택). 예: application/pdf"},
+                        },
+                        "required": ["content_base64"],
                     },
-                    "description": "첨부파일 목록(선택)",
+                    "description": (
+                        "첨부 파일 목록(선택). 상류 산출물을 첨부하려면 content_base64에 그 출력 참조를 둔다. "
+                        '예: PDF 첨부 = [{"filename": "report.pdf", "content_base64": '
+                        '"${<pdf_generate instance_id>.pdf_bytes}", "mimetype": "application/pdf"}]'
+                    ),
                 },
             },
             "required": ["to", "subject", "body"],

@@ -30,6 +30,10 @@ from nodes_graph.adapters.catalog.external.google_drive_upload import (
     GoogleDriveUploadInput,
     GoogleDriveUploadNode,
 )
+from nodes_graph.adapters.catalog.external.google_sheets_read import (
+    GoogleSheetsReadInput,
+    GoogleSheetsReadNode,
+)
 from nodes_graph.adapters.catalog.external.google_sheets_write import (
     GoogleSheetsWriteInput,
     GoogleSheetsWriteNode,
@@ -139,6 +143,46 @@ async def test_sheets_write_missing_credential_raises(fake_http):
     with pytest.raises(ValidationError, match="credential"):
         await GoogleSheetsWriteNode().process(
             GoogleSheetsWriteInput(spreadsheet_id="s", range_a1="A1", values=[[1]]), NODE_CTX
+        )
+
+
+# ----------------------------------------------------------------------
+# google_sheets_read — spreadsheet_id URL 정규화 + Office 파일 친절 오류
+# ----------------------------------------------------------------------
+
+_SS_ID = "14Uy8TTECR1XdjeY19jxqoRXFRnEMgBh5"
+
+
+@pytest.mark.asyncio
+async def test_sheets_read_normalizes_pasted_url(fake_http):
+    """사용자가 시트 URL 전체를 spreadsheet_id에 붙여넣어도 순수 ID로 호출(붙여넣기 → 404 방지)."""
+    fake_http.responses = [_FakeResponse(200, {"range": "Sheet1!A1:B1", "values": [[1, 2]]})]
+    await GoogleSheetsReadNode().process(
+        GoogleSheetsReadInput(
+            spreadsheet_id=f"https://docs.google.com/spreadsheets/d/{_SS_ID}/edit#gid=1061769880",
+            range_a1="Sheet1!A1:B1",
+        ),
+        _ctx("ya29.token"),
+    )
+    url = fake_http.requests[0]["url"]
+    assert f"/spreadsheets/{_SS_ID}/values/" in url
+    assert "/edit" not in url and "#gid" not in url
+
+
+@pytest.mark.asyncio
+async def test_sheets_read_office_file_friendly_error(fake_http):
+    """업로드된 .xlsx Office 파일이면 google 400 → 원인·해법 명시 한국어 메시지로 변환."""
+    fake_http.responses = [_FakeResponse(
+        400,
+        text=(
+            '{"error": {"message": "This operation is not supported for this document. '
+            'The document must not be an Office file."}}'
+        ),
+    )]
+    with pytest.raises(ExecutionError, match="Office 파일"):
+        await GoogleSheetsReadNode().process(
+            GoogleSheetsReadInput(spreadsheet_id=_SS_ID, range_a1="Sheet1!A:Z"),
+            _ctx("ya29.token"),
         )
 
 

@@ -7,6 +7,8 @@ category="action" (DB CHECK 영문 8종 매핑).
 """
 from __future__ import annotations
 
+import base64
+from email.mime.multipart import MIMEMultipart
 from uuid import uuid4
 
 import pytest
@@ -87,6 +89,48 @@ async def test_gmail_process_requires_credential():
     node = GmailSendNode()
     with pytest.raises(ValidationError, match="credential"):
         await node.process(GmailSendInput(to=["a@b.com"], subject="s", body="b"), NODE_CTX)
+
+
+# ----------------------------------------------------------------------
+# Gmail 첨부 견고화 (_attach_file) — email_send와 동일 계약 (PR #537 이식)
+# ----------------------------------------------------------------------
+
+
+def _multipart() -> MIMEMultipart:
+    return MIMEMultipart()
+
+
+def test_gmail_attach_dict_valid():
+    msg = _multipart()
+    content = base64.b64encode(b"%PDF-1.4 fake").decode()
+    GmailSendNode._attach_file(
+        msg, {"filename": "report.pdf", "content_base64": content, "mimetype": "application/pdf"}
+    )
+    parts = msg.get_payload()
+    assert len(parts) == 1
+    assert parts[0].get_filename() == "report.pdf"
+    assert parts[0].get_content_subtype() == "pdf"
+
+
+def test_gmail_attach_bare_string_allowed():
+    """LLM이 attachments=["${...}"]로 채워 런타임 해소 시 bare base64 문자열도 허용."""
+    msg = _multipart()
+    GmailSendNode._attach_file(msg, base64.b64encode(b"data").decode())
+    parts = msg.get_payload()
+    assert len(parts) == 1
+    assert parts[0].get_filename() == "attachment"
+
+
+def test_gmail_attach_missing_content_raises():
+    msg = _multipart()
+    with pytest.raises(ValidationError, match="content_base64가 없습니다"):
+        GmailSendNode._attach_file(msg, {"filename": "x.pdf"})
+
+
+def test_gmail_attach_invalid_base64_raises():
+    msg = _multipart()
+    with pytest.raises(ValidationError, match="유효한 base64가 아닙니다"):
+        GmailSendNode._attach_file(msg, {"filename": "x.pdf", "content_base64": "/path/to/file.pdf"})
 
 
 # ----------------------------------------------------------------------
