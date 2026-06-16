@@ -84,9 +84,7 @@ class GoogleSheetsWriteNode(BaseNode[GoogleSheetsWriteInput, GoogleSheetsWriteOu
                 )
 
         if response.status_code >= 400:
-            raise ExecutionError(
-                friendly_sheets_error(_NODE_TYPE, response.status_code, response.text)
-            )
+            raise ExecutionError(friendly_sheets_error(response.status_code, response.text))
 
         data = response.json()
         # append는 updates 하위에, update는 최상위에 갱신 통계를 둔다.

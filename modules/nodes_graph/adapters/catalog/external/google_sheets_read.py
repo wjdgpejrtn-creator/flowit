@@ -70,9 +70,7 @@ class GoogleSheetsReadNode(BaseNode[GoogleSheetsReadInput, GoogleSheetsReadOutpu
             response = await client.get(url, params=params, headers=headers)
 
         if response.status_code >= 400:
-            raise ExecutionError(
-                friendly_sheets_error(_NODE_TYPE, response.status_code, response.text)
-            )
+            raise ExecutionError(friendly_sheets_error(response.status_code, response.text))
 
         data = response.json()
         values: list[list[Any]] = data.get("values", [])

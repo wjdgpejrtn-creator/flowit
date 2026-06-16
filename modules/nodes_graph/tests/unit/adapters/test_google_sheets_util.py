@@ -36,12 +36,12 @@ def test_friendly_error_office_file():
         '{"error": {"code": 400, "message": "This operation is not supported for this '
         'document. The document must not be an Office file."}}'
     )
-    msg = friendly_sheets_error("google_sheets_read", 400, body)
+    msg = friendly_sheets_error(400, body)
     assert "Office 파일" in msg
     assert "Google Sheets로 저장" in msg
 
 
 def test_friendly_error_generic_passthrough():
-    msg = friendly_sheets_error("google_sheets_read", 404, "Requested entity was not found.")
+    msg = friendly_sheets_error(404, "Requested entity was not found.")
     assert "404" in msg
     assert "Requested entity was not found" in msg

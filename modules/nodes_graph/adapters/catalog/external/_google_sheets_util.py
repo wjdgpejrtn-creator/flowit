@@ -36,7 +36,7 @@ def extract_spreadsheet_id(raw: str) -> str:
     return m.group(0) if m else s
 
 
-def friendly_sheets_error(node_type: str, status_code: int, body_text: str) -> str:
+def friendly_sheets_error(status_code: int, body_text: str) -> str:
     """Sheets API 오류 응답을 사용자 친화 메시지로 변환.
 
     가장 흔한 함정인 'Office 파일을 시트로 읽으려 함'(400)은 원인·해법을 명시한 한국어로,
