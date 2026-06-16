@@ -1669,8 +1669,23 @@ class LangGraphOrchestrator:
         spec = state["draft_spec"]
         if workflow is None or spec is None:
             return {}
+        # node_id → node_type 맵(node_candidates 우선, 누락분만 registry 조회) — QA LLM이 노드
+        # 종류를 파라미터로 추론하지 않고 직접 인식하도록 직렬화에 주입(pdf_generate false-negative
+        # 차단). bind_skill의 category_by_node_id와 동일 패턴.
+        node_type_by_id: dict[str, str] = {
+            str(c.node_id): c.node_type for c in state.get("node_candidates") or []
+        }
+        for node in workflow.nodes:
+            if str(node.node_id) not in node_type_by_id:
+                try:
+                    schema = await self._node_registry.get_schema(node.node_id)
+                    nt = getattr(schema, "node_type", None)
+                    if nt:
+                        node_type_by_id[str(node.node_id)] = nt
+                except Exception:
+                    pass
         try:
-            result = await self._qa_evaluator.evaluate(workflow, spec)
+            result = await self._qa_evaluator.evaluate(workflow, spec, node_types=node_type_by_id)
         except Exception as exc:
             return {"error": f"qa_evaluator 실패: {exc}"}
         elapsed = int((time.monotonic() - t0) * 1000)

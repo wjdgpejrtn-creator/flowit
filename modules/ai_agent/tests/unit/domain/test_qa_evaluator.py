@@ -118,3 +118,44 @@ class TestQAEvaluatorService:
         with pytest.raises(ExecutionError) as exc_info:
             await svc.evaluate(_empty_workflow(), _spec())
         assert exc_info.value.code == "E_QA_PARSE"
+
+
+class TestNodeTypeInjection:
+    """node_id→node_type 주입 — QA LLM이 노드 종류를 파라미터 추론 대신 직접 인식(2026-06-16 데모
+    디버깅: pdf_generate({title,sections})를 'PDF 생성'으로 못 알아보고 누락 오판하던 false-negative)."""
+
+    def _workflow_one_node(self, node_id):
+        from common_schemas import NodeInstance, Position
+        return WorkflowSchema(
+            workflow_id=uuid4(), name="T", scope="private", is_draft=True,
+            nodes=[NodeInstance(instance_id=uuid4(), node_id=node_id,
+                                parameters={"title": "리포트", "sections": []},
+                                position=Position(x=0.0, y=0.0))],
+            connections=[], owner_user_id=uuid4(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_node_type_injected_into_prompt(self):
+        nid = uuid4()
+        llm = _mock_llm(9.0)
+        svc = QAEvaluatorService(llm)
+        await svc.evaluate(self._workflow_one_node(nid), _spec(),
+                           node_types={nid: "pdf_generate"})
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "pdf_generate" in prompt  # 직렬화에 node_type 라벨이 들어가 Gemma가 인식
+
+    @pytest.mark.asyncio
+    async def test_str_keyed_map_also_works(self):
+        nid = uuid4()
+        llm = _mock_llm(9.0)
+        svc = QAEvaluatorService(llm)
+        await svc.evaluate(self._workflow_one_node(nid), _spec(),
+                           node_types={str(nid): "pdf_generate"})  # str 키도 매칭
+        assert "pdf_generate" in llm.generate_structured.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_no_map_is_backward_compatible(self):
+        """node_types 미지정이면 기존 동작 — 예외 없이 평가."""
+        svc = QAEvaluatorService(_mock_llm(9.0))
+        result = await svc.evaluate(self._workflow_one_node(uuid4()), _spec())
+        assert result.pass_flag is True

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from uuid import UUID
 
 from common_schemas import DraftSpec, EvaluationResult, WorkflowSchema
 from common_schemas.exceptions import ExecutionError
@@ -46,6 +47,15 @@ corresponding node in the workflow. If `missing_capabilities` is non-empty the w
 incomplete: score it below 8 and DO NOT contradict yourself by passing while telling the user to
 add nodes.
 
+Each workflow node carries a `node_type` field — the catalog identifier of the node's capability
+(e.g. `pdf_generate` produces a PDF file, `email_send`/`gmail_send` send email, `gmail_read` reads
+Gmail, `slack_post_message` posts to Slack, `gemma_chat` summarizes/generates text,
+`google_drive_upload` uploads a file). Identify each node's capability BY ITS `node_type`, never by
+guessing from parameters. If a requested action/channel is fulfilled by a node whose `node_type`
+matches, it is COVERED — you MUST NOT list it in `missing_capabilities`. When a producer node feeds
+a delivery node via a connection (e.g. `pdf_generate` → `email_send`), treat the produced artifact
+as delivered by that downstream node (the connection carries the artifact).
+
 pass_flag must be true if and only if score >= 8 AND missing_capabilities is empty.
 """
 
@@ -63,11 +73,31 @@ class QAEvaluatorService:
     def __init__(self, llm: LLMPort) -> None:
         self._llm = llm
 
-    async def evaluate(self, workflow: WorkflowSchema, spec: DraftSpec) -> EvaluationResult:
+    async def evaluate(
+        self,
+        workflow: WorkflowSchema,
+        spec: DraftSpec,
+        node_types: dict[str, str] | dict[UUID, str] | None = None,
+    ) -> EvaluationResult:
+        """워크플로우 품질을 평가한다.
+
+        ``node_types``(node_id→node_type)가 주어지면 직렬화에 각 노드의 node_type을 주입한다 —
+        `NodeInstance`는 node_type을 안 들고 node_id(UUID)·parameters만 가지므로, 미주입 시 QA
+        LLM이 노드 종류를 파라미터로 추론해야 해 `pdf_generate`({title,sections})를 "PDF 생성"으로
+        못 알아보고 누락으로 오판하던 false-negative가 발생한다(데모 디버깅 2026-06-16). 키는
+        str/UUID 혼용 허용(model_dump는 node_id를 str로 직렬화).
+        """
+        wf_dump = workflow.model_dump(mode="json")
+        if node_types:
+            lookup = {str(k): v for k, v in node_types.items()}
+            for node in wf_dump.get("nodes", []):
+                nt = lookup.get(str(node.get("node_id")))
+                if nt:
+                    node["node_type"] = nt
         prompt = (
             _SYSTEM_PROMPT
             + f"\nDraftSpec intent: {spec.natural_language_intent}"
-            + f"\nWorkflow: {json.dumps(workflow.model_dump(mode='json'), ensure_ascii=False)}"
+            + f"\nWorkflow: {json.dumps(wf_dump, ensure_ascii=False)}"
         )
         try:
             result = await self._llm.generate_structured(prompt, _EvalResponse)
