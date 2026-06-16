@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -80,12 +81,17 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
     @staticmethod
     def _normalize_sections(sections: Any) -> list[tuple[str, str]]:
         """sections 원소가 dict가 아닌 경우(문자열/None/기타)에도 크래시하지 않도록 정규화.
-        업스트림(LLM 등)이 형식을 어긋나게 줘도 노드가 죽지 않게 방어한다."""
+        업스트림(LLM 등)이 형식을 어긋나게 줘도 노드가 죽지 않게 방어한다.
+
+        body 키는 ``body`` 정규형 외에 LLM/드래퍼가 흔히 쓰는 ``content``·``text``도 허용한다
+        (드래퍼가 `${...}` 참조를 `content` 키로 매핑해 본문이 통째로 누락되던 빈 PDF 버그 방어).
+        heading도 ``heading``·``title`` 모두 허용.
+        """
         normalized: list[tuple[str, str]] = []
         for item in sections or []:
             if isinstance(item, dict):
-                heading = str(item.get("heading", "") or "")
-                body = str(item.get("body", "") or "")
+                heading = str(item.get("heading") or item.get("title") or "")
+                body = str(item.get("body") or item.get("content") or item.get("text") or "")
             elif item is None:
                 continue
             elif isinstance(item, str):
@@ -95,6 +101,93 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
             if heading or body:
                 normalized.append((heading, body))
         return normalized
+
+    _RE_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+    _RE_BULLET = re.compile(r"^\s*[\*\-]\s+(.*)$")
+    _RE_TABLE_SEP = re.compile(r"^:?-{2,}:?$")
+    _RE_BOLD_STRIP = re.compile(r"\*\*(.+?)\*\*")
+
+    @classmethod
+    def _render_markdown_body(cls, pdf: FPDF, text: str, font_size: int) -> None:
+        """본문 markdown을 실제 서식으로 렌더 — 제목(#)·표(|)·불릿(*,-)·인라인 볼드(**).
+
+        fpdf2 코어 기능만 사용: heading은 bold 큰 글씨, 표는 ``pdf.table()``, 인라인 볼드는
+        ``multi_cell(markdown=True)``. 파싱 불가/예외 시 해당 줄을 평문으로 폴백(절대 크래시 금지).
+        """
+        lines = (text or "").split("\n")
+        i = 0
+        while i < len(lines):
+            # 줄 단위 렌더를 전부 try/except로 감싼다 — 좁은 가용폭에서 공백 없는 초장문
+            # 토큰(URL 등)이 multi_cell "Not enough horizontal space"로 raise해도 그 줄만
+            # 건너뛰고 노드 전체는 죽지 않게 한다(표 경로와 크래시 불변식 동등). i는 항상 전진.
+            try:
+                raw = lines[i].rstrip()
+                line = raw.strip()
+                if not line:
+                    pdf.ln(2)
+                    i += 1
+                    continue
+
+                mh = cls._RE_HEADING.match(line)
+                if mh:
+                    level = len(mh.group(1))
+                    pdf.set_font(_FONT_FAMILY, "B", size=font_size + max(1, 4 - level))
+                    pdf.multi_cell(0, 7, mh.group(2), markdown=True, new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(1)
+                    i += 1
+                    continue
+
+                # 표 블록: 연속된 '|' 줄 수집
+                if line.startswith("|"):
+                    rows: list[list[str]] = []
+                    while i < len(lines) and lines[i].strip().startswith("|"):
+                        cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                        i += 1
+                        # 구분선(| :--- | :--- |) 스킵
+                        if cells and all(c == "" or cls._RE_TABLE_SEP.match(c) for c in cells):
+                            continue
+                        rows.append([cls._RE_BOLD_STRIP.sub(r"\1", c) for c in cells])
+                    if rows:
+                        try:
+                            pdf.set_font(_FONT_FAMILY, "", size=max(_MIN_FONT_SIZE, font_size - 1))
+                            ncol = max(len(r) for r in rows)
+                            with pdf.table(
+                                borders_layout="SINGLE_TOP_LINE", first_row_as_headings=True
+                            ) as table:
+                                for r in rows:
+                                    row = table.row()
+                                    for ci in range(ncol):
+                                        row.cell(r[ci] if ci < len(r) else "")
+                            pdf.ln(2)
+                        except Exception:
+                            # 표 렌더 실패 시 평문 폴백
+                            pdf.set_font(_FONT_FAMILY, "", size=font_size)
+                            for r in rows:
+                                pdf.multi_cell(0, 6, " | ".join(r), new_x="LMARGIN", new_y="NEXT")
+                    continue
+
+                mb = cls._RE_BULLET.match(raw)
+                if mb:
+                    pdf.set_font(_FONT_FAMILY, "", size=font_size)
+                    pdf.multi_cell(0, 6, "·  " + mb.group(1), markdown=True, new_x="LMARGIN", new_y="NEXT")
+                    i += 1
+                    continue
+
+                # 인용(blockquote) — 선두 '>' 제거하고 평문 렌더(리터럴 '>' 노출 방지)
+                mq = re.match(r"^>+\s?(.*)$", line)
+                if mq:
+                    pdf.set_font(_FONT_FAMILY, "", size=font_size)
+                    pdf.multi_cell(0, 6, mq.group(1), markdown=True, new_x="LMARGIN", new_y="NEXT")
+                    i += 1
+                    continue
+
+                pdf.set_font(_FONT_FAMILY, "", size=font_size)
+                pdf.multi_cell(0, 6, line, markdown=True, new_x="LMARGIN", new_y="NEXT")
+                i += 1
+            except Exception:
+                # 어떤 줄이든 렌더 실패 시 그 줄만 스킵(노드 크래시 금지). i 전진 보장(무한루프 방지).
+                i += 1
+                continue
 
     async def process(self, input: PdfGenerateInput, context: NodeContext) -> PdfGenerateOutput:
         font_size = max(_MIN_FONT_SIZE, min(_MAX_FONT_SIZE, self._coerce_int(input.font_size, 12)))
@@ -115,8 +208,9 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
                 pdf.set_font(_FONT_FAMILY, "B", size=font_size + 1)
                 pdf.multi_cell(0, 8, heading, new_x="LMARGIN", new_y="NEXT")
             if body:
-                pdf.set_font(_FONT_FAMILY, "", size=font_size)
-                pdf.multi_cell(0, 6, body)
+                # 본문 markdown을 실제 서식(제목/표/볼드/불릿)으로 렌더 — LLM 산출물의
+                # 마크다운이 날것 텍스트로 박히던 문제 해소.
+                self._render_markdown_body(pdf, body, font_size)
             pdf.ln(2)
 
         pdf_bytes = bytes(pdf.output())
