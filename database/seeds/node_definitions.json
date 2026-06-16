@@ -1419,12 +1419,12 @@
         "font_size": {
           "type": "integer",
           "default": 12,
-          "description": "본문 글자 크기(pt). 기본값 12"
+          "description": "본문 글자 크기(pt). 기본값 12 (6~72pt로 제한)"
         },
         "margin": {
           "type": "integer",
           "default": 10,
-          "description": "페이지 여백(mm). 기본값 10"
+          "description": "페이지 여백(mm). 기본값 10 (0~90mm로 제한)"
         }
       },
       "required": [

@@ -107,7 +107,7 @@ class PdfGenerateNode(BaseNode[PdfGenerateInput, PdfGenerateOutput]):
 
         # 제목 — 길어도 줄바꿈되도록 multi_cell 사용(cell은 가로 오버플로우)
         pdf.set_font(_FONT_FAMILY, "B", size=font_size + 4)
-        pdf.multi_cell(0, 10, input.title or "", new_x="LMARGIN", new_y="NEXT")
+        pdf.multi_cell(0, 10, str(input.title or ""), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
 
         for heading, body in self._normalize_sections(input.sections):
@@ -143,8 +143,16 @@ def get_node_definition() -> NodeDefinition:
                     },
                     "description": "문서를 구성할 섹션 목록(각 섹션은 제목·본문 포함)",
                 },
-                "font_size": {"type": "integer", "default": 12, "description": "본문 글자 크기(pt). 기본값 12"},
-                "margin": {"type": "integer", "default": 10, "description": "페이지 여백(mm). 기본값 10"},
+                "font_size": {
+                    "type": "integer",
+                    "default": 12,
+                    "description": "본문 글자 크기(pt). 기본값 12 (6~72pt로 제한)",
+                },
+                "margin": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "페이지 여백(mm). 기본값 10 (0~90mm로 제한)",
+                },
             },
             "required": ["title", "sections"],
         },

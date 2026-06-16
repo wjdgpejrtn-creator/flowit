@@ -133,6 +133,18 @@ async def test_malformed_sections_do_not_crash() -> None:
 
 
 @pytest.mark.asyncio
+async def test_non_string_title_does_not_crash() -> None:
+    """title이 str이 아니어도(업스트림이 dict/숫자 등으로 줘도) 크래시하지 않는다."""
+    node = PdfGenerateNode()
+    for bad_title in ({"x": 1}, 12345, ["a", "b"]):
+        out = await node.process(
+            PdfGenerateInput(title=bad_title, sections=[{"heading": "H", "body": "본문"}]),  # type: ignore[arg-type]
+            NODE_CTX,
+        )
+        _assert_pdf(out)
+
+
+@pytest.mark.asyncio
 async def test_empty_sections() -> None:
     node = PdfGenerateNode()
     out = await node.process(PdfGenerateInput(title="제목만", sections=[]), NODE_CTX)
