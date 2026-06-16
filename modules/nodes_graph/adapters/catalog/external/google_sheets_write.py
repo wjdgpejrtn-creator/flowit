@@ -14,6 +14,7 @@ from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
+from ._google_sheets_util import extract_spreadsheet_id, friendly_sheets_error
 
 _NODE_TYPE = "google_sheets_write"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -55,8 +56,10 @@ class GoogleSheetsWriteNode(BaseNode[GoogleSheetsWriteInput, GoogleSheetsWriteOu
         if input.mode not in ("update", "append"):
             raise ValidationError(f"mode는 update/append만 허용: {input.mode!r}")
 
+        # 사용자가 시트 URL 전체/꼬리를 붙여넣어도 순수 ID로 정규화(read 노드와 동일).
+        spreadsheet_id = extract_spreadsheet_id(input.spreadsheet_id)
         base = (
-            f"https://sheets.googleapis.com/v4/spreadsheets/{input.spreadsheet_id}"
+            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}"
             f"/values/{quote(input.range_a1, safe='')}"
         )
         headers = {
@@ -81,9 +84,7 @@ class GoogleSheetsWriteNode(BaseNode[GoogleSheetsWriteInput, GoogleSheetsWriteOu
                 )
 
         if response.status_code >= 400:
-            raise ExecutionError(
-                f"Google Sheets API 오류 {response.status_code}: {response.text[:200]}"
-            )
+            raise ExecutionError(friendly_sheets_error(response.status_code, response.text))
 
         data = response.json()
         # append는 updates 하위에, update는 최상위에 갱신 통계를 둔다.
@@ -106,7 +107,10 @@ def get_node_definition() -> NodeDefinition:
         input_schema={
             "type": "object",
             "properties": {
-                "spreadsheet_id": {"type": "string"},
+                "spreadsheet_id": {
+                    "type": "string",
+                    "description": "스프레드시트 ID. 전체 URL을 붙여넣어도 ID만 자동 추출됨",
+                },
                 "range_a1": {"type": "string", "description": "A1 표기법 (Sheet1!A1)"},
                 "values": {"type": "array", "items": {"type": "array"}, "description": "2D 행렬(행 우선)"},
                 "mode": {"type": "string", "enum": ["update", "append"], "default": "update"},

@@ -14,6 +14,7 @@ from ....domain.catalog._catalog_ns import _CATALOG_NS
 from ....domain.entities.base_node import BaseNode
 from ....domain.entities.node_definition import NodeDefinition
 from ....domain.entities.node_metadata import NodeMetadata
+from ._google_sheets_util import extract_spreadsheet_id, friendly_sheets_error
 
 _NODE_TYPE = "google_sheets_read"
 _NODE_ID = uuid5(_CATALOG_NS, _NODE_TYPE)
@@ -53,8 +54,10 @@ class GoogleSheetsReadNode(BaseNode[GoogleSheetsReadInput, GoogleSheetsReadOutpu
         if not context.connection_token:
             raise ValidationError("google_sheets_read는 credential(Google OAuth 토큰)이 필요하다")
 
+        # 사용자가 시트 URL 전체/꼬리를 붙여넣어도 순수 ID로 정규화(붙여넣기 실수 → 404 방지).
+        spreadsheet_id = extract_spreadsheet_id(input.spreadsheet_id)
         url = (
-            f"https://sheets.googleapis.com/v4/spreadsheets/{input.spreadsheet_id}"
+            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}"
             f"/values/{quote(input.range_a1, safe='')}"
         )
         params = {
@@ -67,7 +70,7 @@ class GoogleSheetsReadNode(BaseNode[GoogleSheetsReadInput, GoogleSheetsReadOutpu
             response = await client.get(url, params=params, headers=headers)
 
         if response.status_code >= 400:
-            raise ExecutionError(f"Google Sheets API 오류 {response.status_code}: {response.text[:200]}")
+            raise ExecutionError(friendly_sheets_error(response.status_code, response.text))
 
         data = response.json()
         values: list[list[Any]] = data.get("values", [])
@@ -91,7 +94,11 @@ def get_node_definition() -> NodeDefinition:
             "properties": {
                 "spreadsheet_id": {
                     "type": "string",
-                    "description": '스프레드시트 ID. 시트 URL의 /d/ 뒤 문자열. 예: "1AbC...xyz"',
+                    "description": (
+                        '스프레드시트 ID(시트 URL의 /d/ 뒤 문자열, 예: "1AbC...xyz"). '
+                        "전체 URL을 붙여넣어도 ID만 자동 추출됨. 대상은 네이티브 Google Sheets여야 함"
+                        "(업로드된 .xlsx Office 파일은 'Google Sheets로 저장'으로 변환 필요)"
+                    ),
                 },
                 "range_a1": {"type": "string", "description": "A1 표기법 (Sheet1!A1:D100)"},
                 "value_render_option": {
