@@ -247,3 +247,55 @@ async def test_long_token_narrow_width_does_not_crash() -> None:
         NODE_CTX,
     )
     _assert_pdf(out)
+
+
+# ── 회사 템플릿(style) — 스킬이 강제하는 시각 양식 ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_style_template_renders() -> None:
+    """style(회사명/accent/푸터/크기) 지정 시 헤더밴드·accent·푸터 적용, 크래시 없음."""
+    node = PdfGenerateNode()
+    style = {
+        "org_name": "FLOWIT TELECOM (주)",
+        "accent_color": "#1F6F54",
+        "footer": "대외비 · 경영기획팀",
+        "title_size": 20,
+        "heading_size": 13,
+    }
+    body = "## 지표\n* **총매출:** 100원\n| A | B |\n| :--- | :--- |\n| 1 | 2 |"
+    out = await node.process(
+        PdfGenerateInput(
+            title="전일 매출 리포트",
+            sections=[{"heading": "요약", "body": body}],
+            style=style,
+        ),
+        NODE_CTX,
+    )
+    _assert_pdf(out)
+
+
+@pytest.mark.asyncio
+async def test_style_bad_accent_color_falls_back() -> None:
+    """accent_color 형식 오류여도 기본색으로 폴백하고 크래시하지 않는다."""
+    node = PdfGenerateNode()
+    out = await node.process(
+        PdfGenerateInput(
+            title="리포트",
+            sections=[{"body": "본문"}],
+            style={"org_name": "회사", "accent_color": "not-a-color"},
+        ),
+        NODE_CTX,
+    )
+    _assert_pdf(out)
+
+
+@pytest.mark.asyncio
+async def test_no_style_backward_compatible() -> None:
+    """style 미지정 시 기존 평문 렌더(하위호환)."""
+    node = PdfGenerateNode()
+    out = await node.process(
+        PdfGenerateInput(title="평문", sections=[{"body": "본문 내용"}]),
+        NODE_CTX,
+    )
+    _assert_pdf(out)
