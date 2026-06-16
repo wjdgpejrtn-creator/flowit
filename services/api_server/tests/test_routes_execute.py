@@ -6,19 +6,30 @@ from uuid import uuid4
 
 import jwt as pyjwt
 import pytest
-from fastapi.testclient import TestClient
-
 from app.config import Settings
 from app.dependencies.celery_client import get_celery
 from app.dependencies.permission import get_permission_source
 from app.dependencies.repositories import get_execution_repository, get_workflow_repository
+from app.dependencies.use_cases import get_autobind_connections_use_case
 from app.main import create_app
 from common_schemas import PermissionSource, WorkflowSchema
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
 def app(env_minimum: None):
-    return create_app(Settings())  # type: ignore[call-arg]
+    _app = create_app(Settings())  # type: ignore[call-arg]
+    # execute 라우트도 _service(→autobinder→oauth/node_def repo→DB)를 주입받으므로, DB state 없는
+    # 단위 테스트에서는 passthrough autobinder로 기본 오버라이드한다.
+    _app.dependency_overrides[get_autobind_connections_use_case] = (
+        lambda: _PassthroughAutobinder()
+    )
+    return _app
+
+
+class _PassthroughAutobinder:
+    async def execute(self, workflow: WorkflowSchema, user_id) -> WorkflowSchema:
+        return workflow
 
 
 def _override_permission(app, user_id):
@@ -63,6 +74,7 @@ def test_execute_dispatches_celery_task_with_context(app) -> None:
 
     repo = MagicMock()
     repo.find_by_id = AsyncMock(return_value=_fake_workflow(wf_id))
+    repo.save = AsyncMock(side_effect=lambda wf: wf.workflow_id)  # 실행 직전 선바인딩 영속화
     app.dependency_overrides[get_workflow_repository] = lambda: repo
 
     fake_async = MagicMock(id="celery-task-id-123")

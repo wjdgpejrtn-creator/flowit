@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 
+from ai_agent.adapters.connection_resolver_adapter import OAuthConnectionResolver
+from ai_agent.application.agents.workflow_composer import AutobindConnectionsUseCase
+from auth.domain.ports.oauth_connection_repository import OAuthConnectionRepository
 from fastapi import Depends
 from nodes_graph.application.use_cases.validate_graph_use_case import ValidateGraphUseCase
 from nodes_graph.domain.ports.node_definition_repository import NodeDefinitionRepository
@@ -28,11 +31,27 @@ from skills_marketplace.application.use_cases import (
 from skills_marketplace.domain.ports.skill_document_store import SkillDocumentStore
 from skills_marketplace.domain.ports.skill_repository import SkillRepository
 
+from app.dependencies.auth import get_oauth_repository
 from app.dependencies.repositories import (
     get_marketplace_skill_repository,
     get_node_definition_repository,
 )
 from app.dependencies.storage import get_skill_document_store
+
+
+def get_autobind_connections_use_case(
+    node_def_repo: NodeDefinitionRepository = Depends(get_node_definition_repository),
+    oauth_repo: OAuthConnectionRepository = Depends(get_oauth_repository),
+) -> AutobindConnectionsUseCase:
+    """노드의 미바인딩 required_connections를 사용자 active connection으로 선바인딩.
+
+    save·validate 경로에서 호출 — 편집 페이지에서 추가/변경한 노드도 compose처럼 자동
+    바인딩되도록 한다(E_MISSING_CONNECTION 방지). resolver는 auth OAuth 저장소 Facade.
+    """
+    return AutobindConnectionsUseCase(
+        resolver=OAuthConnectionResolver(oauth_repo),
+        node_def_repo=node_def_repo,
+    )
 
 
 def get_graph_validator(
