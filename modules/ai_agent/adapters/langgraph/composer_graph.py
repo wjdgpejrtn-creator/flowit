@@ -1364,6 +1364,12 @@ class LangGraphOrchestrator:
         workflow, bound_services = await self._autobind_connections(
             workflow, candidates, state["user_id"]
         )
+        # 산출물(pdf_generate)→발송(email_send/gmail_send) 연결이 있으면 발송 노드 attachments에
+        # 산출물 출력 참조를 결정적으로 주입 — 체인 엣지(#532)만으론 이메일이 PDF를 안 실으므로
+        # QA "첨부 누락"·런타임 미첨부를 차단. 이미 지정된 attachments는 보존.
+        workflow = DrafterService.wire_artifact_attachments(
+            workflow, {c.node_id: c.node_type for c in candidates}
+        )
         elapsed = int((time.monotonic() - t0) * 1000)
         nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
         connections_data = [c.model_dump(mode="json") for c in workflow.connections]
