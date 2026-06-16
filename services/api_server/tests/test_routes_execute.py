@@ -74,6 +74,7 @@ def test_execute_dispatches_celery_task_with_context(app) -> None:
 
     repo = MagicMock()
     repo.find_by_id = AsyncMock(return_value=_fake_workflow(wf_id))
+    repo.save = AsyncMock(side_effect=lambda wf: wf.workflow_id)  # 실행 직전 선바인딩 영속화
     app.dependency_overrides[get_workflow_repository] = lambda: repo
 
     fake_async = MagicMock(id="celery-task-id-123")

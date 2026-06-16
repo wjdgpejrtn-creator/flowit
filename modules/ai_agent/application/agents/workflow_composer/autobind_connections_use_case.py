@@ -39,7 +39,13 @@ class AutobindConnectionsUseCase:
         self._node_def_repo = node_def_repo
 
     async def execute(self, workflow: WorkflowSchema, user_id: UUID) -> WorkflowSchema:
-        """미바인딩 provider를 채운 새 WorkflowSchema 반환. 변경 없으면 원본 그대로.
+        """미바인딩·stale provider를 현재 active connection으로 동기화한 새 WorkflowSchema 반환.
+
+        provider당 active connection은 ``get_active_for_user``가 **1개**만 반환한다
+        (oauth_connections active partial unique index). 따라서 노드에 바인딩된 credential_id가
+        그 active id와 다르면 **stale**(과거 연결 해제로 죽은 id)이라 교정 대상이고, 같으면 보존한다
+        — 즉 "사용자 선택 보존"과 "stale 재바인딩"이 충돌하지 않는다(선택지가 단일 active 하나뿐).
+        active connection이 없으면(미연결) 기존 바인딩을 보존한다(해소 불가 — 실행 시 정확히 실패).
 
         조회 실패(resolver/repo 예외)는 비치명적 — 해당 provider 바인딩만 생략하고 진행한다.
         """
@@ -56,18 +62,19 @@ class AutobindConnectionsUseCase:
             required = definition.required_connections
             if not required:
                 continue
-            already = set(node.resolve_credentials(required).keys())
+            current = node.resolve_credentials(required)  # 현재 바인딩(credential_ids + legacy)
             new_binding = dict(node.credential_ids)
             for service in required:
-                if service in already:
-                    continue  # 이미 바인딩됨(사용자 선택/refine/legacy) — 보존
                 try:
-                    cid = await self._resolver.resolve(user_id, service)
+                    active_cid = await self._resolver.resolve(user_id, service)
                 except Exception as exc:  # connection 조회 실패는 비치명적 — 바인딩만 생략
                     _logger.warning("connection 자동 바인딩 조회 실패 (%s): %s", service, exc)
-                    cid = None
-                if cid is not None:
-                    new_binding[service] = cid
+                    active_cid = None
+                if active_cid is None:
+                    continue  # 미연결 — 해소 불가, 기존 바인딩 보존
+                if current.get(service) != active_cid:
+                    # 미바인딩(키 없음) 또는 stale(active와 불일치) → 현재 active connection으로 교정
+                    new_binding[service] = active_cid
             if new_binding != node.credential_ids:
                 nodes[i] = node.model_copy(update={"credential_ids": new_binding})
                 changed = True

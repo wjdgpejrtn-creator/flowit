@@ -73,29 +73,64 @@ async def test_binds_unresolved_provider():
 
 
 @pytest.mark.asyncio
-async def test_preserves_existing_user_binding():
-    node_id, user_id = uuid4(), uuid4()
-    chosen = uuid4()  # 사용자가 명시 선택한 connection
-    auto = uuid4()    # resolver가 줄 다른 connection
-    wf = _wf(_node(node_id, credential_ids={"google": chosen}))
+async def test_preserves_binding_matching_active():
+    """바인딩된 id가 현재 active connection과 같으면 보존(불필요한 변경 없음)."""
+    node_id, user_id, active = uuid4(), uuid4(), uuid4()
+    wf = _wf(_node(node_id, credential_ids={"google": active}))
     uc = AutobindConnectionsUseCase(
-        resolver=_FakeResolver({"google": auto}),
+        resolver=_FakeResolver({"google": active}),
         node_def_repo=_FakeNodeDefRepo({node_id: ["google"]}),
     )
 
     out = await uc.execute(wf, user_id)
 
-    # 이미 바인딩된 provider는 덮어쓰지 않는다
-    assert out.nodes[0].credential_ids == {"google": chosen}
+    assert out is wf  # 변경 없음
+    assert out.nodes[0].credential_ids == {"google": active}
 
 
 @pytest.mark.asyncio
-async def test_multi_provider_binds_only_missing():
+async def test_rebinds_stale_credential_to_active():
+    """과거 연결 해제로 죽은 id가 박혀 있으면 현재 active connection으로 교정(MED 리뷰 #1)."""
+    node_id, user_id = uuid4(), uuid4()
+    stale = uuid4()   # 재연결 전 죽은 credential_id (저장본에 잔존)
+    active = uuid4()  # 재연결 후 현재 active connection
+    wf = _wf(_node(node_id, credential_ids={"google": stale}))
+    uc = AutobindConnectionsUseCase(
+        resolver=_FakeResolver({"google": active}),
+        node_def_repo=_FakeNodeDefRepo({node_id: ["google"]}),
+    )
+
+    out = await uc.execute(wf, user_id)
+
+    assert out.nodes[0].credential_ids == {"google": active}
+
+
+@pytest.mark.asyncio
+async def test_rebinds_stale_legacy_credential_id():
+    """legacy 단일 credential_id가 stale이면 credential_ids[provider]로 교정(precedence)."""
+    node_id, user_id = uuid4(), uuid4()
+    stale_legacy = uuid4()
+    active = uuid4()
+    wf = _wf(_node(node_id, credential_id=stale_legacy))
+    uc = AutobindConnectionsUseCase(
+        resolver=_FakeResolver({"google": active}),
+        node_def_repo=_FakeNodeDefRepo({node_id: ["google"]}),
+    )
+
+    out = await uc.execute(wf, user_id)
+
+    # credential_ids가 legacy credential_id보다 우선하므로 active로 해소된다
+    assert out.nodes[0].resolve_credentials(["google"]) == {"google": active}
+
+
+@pytest.mark.asyncio
+async def test_multi_provider_binds_only_unsynced():
     node_id, user_id = uuid4(), uuid4()
     slack_cred, google_cred = uuid4(), uuid4()
+    # slack은 이미 active와 일치(보존), google은 미바인딩(채움)
     wf = _wf(_node(node_id, credential_ids={"slack": slack_cred}))
     uc = AutobindConnectionsUseCase(
-        resolver=_FakeResolver({"google": google_cred, "slack": uuid4()}),
+        resolver=_FakeResolver({"google": google_cred, "slack": slack_cred}),
         node_def_repo=_FakeNodeDefRepo({node_id: ["slack", "google"]}),
     )
 
@@ -131,6 +166,22 @@ async def test_resolver_returns_none_leaves_unbound():
     out = await uc.execute(wf, user_id)
 
     assert out.nodes[0].credential_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_no_active_preserves_existing_binding():
+    """active connection이 없으면(미연결) 기존 바인딩은 건드리지 않는다(해소 불가)."""
+    node_id, user_id, existing = uuid4(), uuid4(), uuid4()
+    wf = _wf(_node(node_id, credential_ids={"google": existing}))
+    uc = AutobindConnectionsUseCase(
+        resolver=_FakeResolver({}),  # 미연결
+        node_def_repo=_FakeNodeDefRepo({node_id: ["google"]}),
+    )
+
+    out = await uc.execute(wf, user_id)
+
+    assert out is wf
+    assert out.nodes[0].credential_ids == {"google": existing}
 
 
 @pytest.mark.asyncio

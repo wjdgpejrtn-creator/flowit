@@ -167,7 +167,11 @@ async def execute_workflow(
     workflow 존재 확인 → execution_id 생성 → task name 문자열로 send_task.
     실제 실행은 execution_engine Celery worker가 처리. 본 라우터는 dispatch만.
     """
-    await service.get(workflow_id)  # 미존재 시 NotFoundError → 404
+    workflow = await service.get(workflow_id)  # 미존재 시 NotFoundError → 404
+    # 실행 직전 현재 active connection으로 선바인딩 후 영속화 — 워커는 DB에서 워크플로우를
+    # 재로드하므로, 저장 없이 실행하는 경로(validate만 통과 후 execute)에서도 바인딩이 반영되도록
+    # 한다(save가 autobind+persist 담당, 동일 active 상태라 in-memory validate와 불일치 없음).
+    await service.save(workflow, permission)
     execution_id = uuid4()
     context_data = {
         "execution_id": str(execution_id),
