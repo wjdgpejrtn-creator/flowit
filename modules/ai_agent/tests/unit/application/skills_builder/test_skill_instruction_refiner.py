@@ -129,9 +129,13 @@ async def test_refine_empty_instructions_falls_back_to_draft():
 
 def test_prompt_builders_carry_rubric_and_structure():
     crit = build_critique_prompt("환불 알림", _DRAFT)
-    # 8개 루브릭 + 초안이 채점 프롬프트에 있다
+    # 9개 루브릭 + 초안이 채점 프롬프트에 있다
     assert "채점" in crit and "환각" in crit and _DRAFT in crit
+    # 데이터 소스/획득 루브릭(9번째 축)이 채점 기준에 포함된다
+    assert "데이터 소스" in crit
     ref = build_refine_prompt("환불 알림", _DRAFT, "섹션 보강")
     # 9섹션 구조 + 비평 + JSON 출력 지시
     assert "## 처리 절차" in ref and "## 판단 규칙" in ref
     assert "섹션 보강" in ref and "JSON" in ref
+    # 데이터 소스 명시 + 1단계 데이터 획득 요구가 구조/원칙에 들어간다
+    assert "데이터 소스" in ref and "데이터 획득" in ref
