@@ -1484,6 +1484,29 @@ class LangGraphOrchestrator:
             existing_ids.add(node.node_id)
         return merged
 
+    async def _resolve_configs_for_nodes(
+        self, candidates: list[NodeConfig], workflow: WorkflowSchema
+    ) -> list[NodeConfig]:
+        """워크플로우 전 노드의 NodeConfig를 보장한다(후보 우선, 누락분 registry 복원).
+
+        explain/검증 상세가 노드를 이름으로 표기하려면 모든 노드의 NodeConfig가 필요한데,
+        retriever 후보엔 스킬/스켈레톤 주입 노드가 빠질 수 있다. 누락분만 get_schema로 채워
+        explain이 instance_id로 폴백(노드 코드 노출)하지 않게 한다. 조회 실패는 graceful skip.
+        """
+        existing_ids = {c.node_id for c in candidates}
+        merged = list(candidates)
+        for node in workflow.nodes:
+            if node.node_id in existing_ids:
+                continue
+            try:
+                cfg = await self._node_registry.get_schema(node.node_id)
+            except Exception as exc:
+                _logger.warning("explain: 노드 스키마 조회 실패 node_id=%s: %s", node.node_id, exc)
+                continue
+            merged.append(cfg)
+            existing_ids.add(node.node_id)
+        return merged
+
     # ---- refine 전용 서브그래프 (op 기반 결정적 편집, PR-2) ----
 
     async def _load_prior_for_refine(self, state: _State) -> WorkflowSchema | None:
@@ -1939,11 +1962,18 @@ class LangGraphOrchestrator:
         spec = state.get("draft_spec")
         if workflow is None or spec is None:
             return {}
+        # node_candidates 우선 + 워크플로우에 있으나 후보에 없는 node_id는 registry로 복원
+        # (스킬/스켈레톤 주입 노드는 retriever 후보에 안 잡힐 수 있어, 그대로면 explain이
+        # 이름 대신 instance_id.hex[:8]로 폴백 — "검증 상세"에 노드 코드 노출. 동일 패턴이
+        # _augment_candidates_with_prior / bind_skill / qa에 이미 존재).
+        node_configs = await self._resolve_configs_for_nodes(
+            state.get("node_candidates") or [], workflow
+        )
         try:
             explanation = self._workflow_explanation_svc.explain(
                 workflow=workflow,
                 spec=spec,
-                node_configs=state.get("node_candidates") or [],
+                node_configs=node_configs,
             )
         except Exception as exc:
             _logger.warning("explain_node 실패 (non-fatal): %s", exc)

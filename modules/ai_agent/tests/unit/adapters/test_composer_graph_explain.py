@@ -182,6 +182,33 @@ class TestExplainNode:
         perms = result["workflow_explanation"].permissions
         assert any(p.connection == "slack" for p in perms)
 
+    @pytest.mark.asyncio
+    async def test_node_missing_from_candidates_resolved_via_registry(self):
+        """후보에 없는 노드(스킬/스켈레톤 주입)는 registry로 이름 복원 — instance_id 폴백 금지."""
+        cfg = _make_node_config(name="pdf_generate")
+        inst = _make_instance(cfg.node_id)
+        workflow = _make_workflow([inst])
+        oc = _build_orchestrator()
+        oc._node_registry.get_schema = AsyncMock(return_value=cfg)
+        # node_candidates를 비워 후보 미포함 상황 재현
+        result = await oc._explain_node(_make_state(workflow=workflow, node_candidates=[]))
+        step = result["workflow_explanation"].steps[0]
+        assert step.node_name == "pdf_generate"
+        assert step.node_name != inst.instance_id.hex[:8]
+        oc._node_registry.get_schema.assert_awaited_once_with(cfg.node_id)
+
+    @pytest.mark.asyncio
+    async def test_registry_failure_falls_back_gracefully(self):
+        """registry 조회 실패 시에도 explain은 죽지 않고 진행(graceful skip)."""
+        cfg = _make_node_config()
+        inst = _make_instance(cfg.node_id)
+        workflow = _make_workflow([inst])
+        oc = _build_orchestrator()
+        oc._node_registry.get_schema = AsyncMock(side_effect=RuntimeError("registry down"))
+        result = await oc._explain_node(_make_state(workflow=workflow, node_candidates=[]))
+        assert isinstance(result.get("workflow_explanation"), WorkflowExplanation)
+        assert len(result["workflow_explanation"].steps) == 1
+
 
 # ------------------------------------------------------------------ _user_confirm_node tests
 
