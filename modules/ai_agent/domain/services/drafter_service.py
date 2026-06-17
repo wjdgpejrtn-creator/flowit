@@ -430,6 +430,52 @@ class DrafterService:
                 changed = True
         return workflow.model_copy(update={"nodes": new_nodes}) if changed else workflow
 
+    # sections가 객체 배열([{heading, body}])인 노드 — bare 스칼라 원소를 {"body": ...}로 감쌀 대상.
+    _SECTION_OBJECT_NODES: frozenset[str] = frozenset({"pdf_generate"})
+
+    @classmethod
+    def wrap_pdf_sections(
+        cls, workflow: WorkflowSchema, node_type_by_id: dict
+    ) -> WorkflowSchema:
+        """``pdf_generate.sections``의 bare 스칼라/참조 원소를 ``{"body": <원소>}`` 객체로 결정적 래핑.
+
+        ``sections`` 계약은 ``[{heading, body}]`` **객체 배열**인데, drafter LLM이 상류 LLM 출력
+        참조를 ``["${x.content}"]``처럼 **스칼라 원소**로 바로 꽂는 일이 잦다. 런타임
+        ``PdfGenerateNode._normalize_sections``는 문자열도 body로 받아주지만, ``GraphValidator``는
+        ``E_NODE_TYPE_MISMATCH``(scalar≠object)로 compose 게이트에서 사전 차단해 워크플로우가 막힌다.
+
+        이 결정적 override는 비-dict 원소(문자열/숫자 등 — ``${...}`` 참조 포함)를 ``{"body": str화}``
+        객체로 감싸 계약을 만족시킨다. ``${...}`` 참조는 body 값으로 보존되어 런타임
+        ``ReferenceResolver``가 그대로 해소한다(``wire_artifact_attachments``의 content_base64와 동일).
+        이미 dict인 원소·None은 보존하고, sections가 리스트가 아니거나 비어 있으면 건드리지 않는다.
+        node_type 미상(맵 누락)은 안전하게 skip — ``wire_artifact_attachments``와 동일 패턴.
+        """
+        type_by_inst = {
+            n.instance_id: node_type_by_id.get(n.node_id) for n in workflow.nodes
+        }
+        new_nodes = list(workflow.nodes)
+        changed = False
+        for i, node in enumerate(workflow.nodes):
+            if type_by_inst.get(node.instance_id) not in cls._SECTION_OBJECT_NODES:
+                continue
+            sections = node.parameters.get("sections")
+            if not isinstance(sections, list) or not sections:
+                continue
+            node_changed = False
+            wrapped: list = []
+            for el in sections:
+                if isinstance(el, dict) or el is None:
+                    wrapped.append(el)
+                else:
+                    wrapped.append({"body": el if isinstance(el, str) else str(el)})
+                    node_changed = True
+            if node_changed:
+                new_nodes[i] = node.model_copy(
+                    update={"parameters": {**node.parameters, "sections": wrapped}}
+                )
+                changed = True
+        return workflow.model_copy(update={"nodes": new_nodes}) if changed else workflow
+
     async def _fill_scaffold_params(
         self,
         scaffold: AssembledDraft,
