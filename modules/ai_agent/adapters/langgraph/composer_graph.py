@@ -1161,20 +1161,21 @@ class LangGraphOrchestrator:
                 ]
             }
 
-        # node_id → category 맵 (node_candidates 우선, 누락분만 registry 조회)
-        category_by_node_id = {c.node_id: c.category for c in state.get("node_candidates") or []}
+        # node_id → NodeConfig 맵 (node_candidates 우선, 누락분만 registry 조회) — category 판정 + 노드명 표기.
+        config_by_node_id = {c.node_id: c for c in state.get("node_candidates") or []}
 
         target_idx: int | None = None
+        target_name = "LLM"
         for i, node in enumerate(workflow.nodes):
-            category = category_by_node_id.get(node.node_id)
-            if category is None:
+            cfg = config_by_node_id.get(node.node_id)
+            if cfg is None:
                 try:
-                    schema = await self._node_registry.get_schema(node.node_id)
-                    category = getattr(schema, "category", None)
+                    cfg = await self._node_registry.get_schema(node.node_id)
                 except Exception:
-                    category = None
-            if category == "ai":
+                    cfg = None
+            if cfg is not None and cfg.category == "ai":
                 target_idx = i
+                target_name = cfg.name or "LLM"
                 break
 
         if target_idx is None:
@@ -1190,7 +1191,8 @@ class LangGraphOrchestrator:
         return {
             "workflow_draft": bound,
             "collected_frames": [
-                RationaleDeltaFrame(delta=f"🔗 스킬 지침서 바인딩 완료 — LLM 노드에 skill_id={sel} 주입"),
+                # 라이브 스트림 가독성 — raw skill_id UUID 대신 대상 노드명으로 표기(#550 후속).
+                RationaleDeltaFrame(delta=f"🔗 스킬 지침서 바인딩 완료 — '{target_name}' 노드에 선택한 사내 SOP 지침서 주입"),
             ],
         }
 
@@ -1370,6 +1372,12 @@ class LangGraphOrchestrator:
         workflow = DrafterService.wire_artifact_attachments(
             workflow, {c.node_id: c.node_type for c in candidates}
         )
+        # pdf_generate.sections를 객체 배열 계약([{heading, body}])으로 결정적 정규화 — drafter가
+        # 상류 LLM 출력을 ["${x.content}"]처럼 스칼라 원소로 꽂으면 validator가 E_NODE_TYPE_MISMATCH
+        # (scalar≠object)로 막으므로, bare 원소를 {"body": ...}로 감싼다(런타임은 어차피 tolerant).
+        workflow = DrafterService.wrap_pdf_sections(
+            workflow, {c.node_id: c.node_type for c in candidates}
+        )
         elapsed = int((time.monotonic() - t0) * 1000)
         nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
         connections_data = [c.model_dump(mode="json") for c in workflow.connections]
@@ -1479,6 +1487,29 @@ class LangGraphOrchestrator:
                 cfg = await self._node_registry.get_schema(node.node_id)
             except Exception as exc:
                 _logger.warning("refine: 노드 스키마 조회 실패 node_id=%s: %s", node.node_id, exc)
+                continue
+            merged.append(cfg)
+            existing_ids.add(node.node_id)
+        return merged
+
+    async def _resolve_configs_for_nodes(
+        self, candidates: list[NodeConfig], workflow: WorkflowSchema
+    ) -> list[NodeConfig]:
+        """워크플로우 전 노드의 NodeConfig를 보장한다(후보 우선, 누락분 registry 복원).
+
+        explain/검증 상세가 노드를 이름으로 표기하려면 모든 노드의 NodeConfig가 필요한데,
+        retriever 후보엔 스킬/스켈레톤 주입 노드가 빠질 수 있다. 누락분만 get_schema로 채워
+        explain이 instance_id로 폴백(노드 코드 노출)하지 않게 한다. 조회 실패는 graceful skip.
+        """
+        existing_ids = {c.node_id for c in candidates}
+        merged = list(candidates)
+        for node in workflow.nodes:
+            if node.node_id in existing_ids:
+                continue
+            try:
+                cfg = await self._node_registry.get_schema(node.node_id)
+            except Exception as exc:
+                _logger.warning("explain: 노드 스키마 조회 실패 node_id=%s: %s", node.node_id, exc)
                 continue
             merged.append(cfg)
             existing_ids.add(node.node_id)
@@ -1939,11 +1970,18 @@ class LangGraphOrchestrator:
         spec = state.get("draft_spec")
         if workflow is None or spec is None:
             return {}
+        # node_candidates 우선 + 워크플로우에 있으나 후보에 없는 node_id는 registry로 복원
+        # (스킬/스켈레톤 주입 노드는 retriever 후보에 안 잡힐 수 있어, 그대로면 explain이
+        # 이름 대신 instance_id.hex[:8]로 폴백 — "검증 상세"에 노드 코드 노출. 동일 패턴이
+        # _augment_candidates_with_prior / bind_skill / qa에 이미 존재).
+        node_configs = await self._resolve_configs_for_nodes(
+            state.get("node_candidates") or [], workflow
+        )
         try:
             explanation = self._workflow_explanation_svc.explain(
                 workflow=workflow,
                 spec=spec,
-                node_configs=state.get("node_candidates") or [],
+                node_configs=node_configs,
             )
         except Exception as exc:
             _logger.warning("explain_node 실패 (non-fatal): %s", exc)

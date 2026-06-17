@@ -411,6 +411,21 @@ class TestBindSkill:
         )
         assert result["workflow_draft"].nodes[0].skill_id == sel
 
+    @pytest.mark.asyncio
+    async def test_rationale_names_target_node_not_raw_skill_id(self):
+        """라이브 스트림 rationale — raw skill_id UUID 대신 대상 노드명 표기 (#550 후속)."""
+        sel = uuid4()
+        ai_node_id = uuid4()
+        wf = _workflow([_node_instance(ai_node_id)])
+        candidates = [_node_config(node_id=ai_node_id, name="Gemma Chat", category="ai")]
+        oc = _build_orchestrator()
+        result = await oc._bind_skill_node(
+            _state(selected_skill_id=sel, workflow_draft=wf, node_candidates=candidates, offered_skill_ids=[str(sel)])
+        )
+        deltas = " ".join(getattr(f, "delta", "") for f in result["collected_frames"])
+        assert "Gemma Chat" in deltas       # 노드명 표기
+        assert str(sel) not in deltas       # raw skill_id UUID 미노출
+
 
 # ---------------------------------------------------------------- routers
 
