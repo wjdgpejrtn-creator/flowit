@@ -1161,20 +1161,21 @@ class LangGraphOrchestrator:
                 ]
             }
 
-        # node_id → category 맵 (node_candidates 우선, 누락분만 registry 조회)
-        category_by_node_id = {c.node_id: c.category for c in state.get("node_candidates") or []}
+        # node_id → NodeConfig 맵 (node_candidates 우선, 누락분만 registry 조회) — category 판정 + 노드명 표기.
+        config_by_node_id = {c.node_id: c for c in state.get("node_candidates") or []}
 
         target_idx: int | None = None
+        target_name = "LLM"
         for i, node in enumerate(workflow.nodes):
-            category = category_by_node_id.get(node.node_id)
-            if category is None:
+            cfg = config_by_node_id.get(node.node_id)
+            if cfg is None:
                 try:
-                    schema = await self._node_registry.get_schema(node.node_id)
-                    category = getattr(schema, "category", None)
+                    cfg = await self._node_registry.get_schema(node.node_id)
                 except Exception:
-                    category = None
-            if category == "ai":
+                    cfg = None
+            if cfg is not None and cfg.category == "ai":
                 target_idx = i
+                target_name = cfg.name or "LLM"
                 break
 
         if target_idx is None:
@@ -1190,7 +1191,8 @@ class LangGraphOrchestrator:
         return {
             "workflow_draft": bound,
             "collected_frames": [
-                RationaleDeltaFrame(delta=f"🔗 스킬 지침서 바인딩 완료 — LLM 노드에 skill_id={sel} 주입"),
+                # 라이브 스트림 가독성 — raw skill_id UUID 대신 대상 노드명으로 표기(#550 후속).
+                RationaleDeltaFrame(delta=f"🔗 스킬 지침서 바인딩 완료 — '{target_name}' 노드에 선택한 사내 SOP 지침서 주입"),
             ],
         }
 
