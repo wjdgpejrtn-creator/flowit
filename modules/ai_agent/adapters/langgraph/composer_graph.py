@@ -1370,6 +1370,12 @@ class LangGraphOrchestrator:
         workflow = DrafterService.wire_artifact_attachments(
             workflow, {c.node_id: c.node_type for c in candidates}
         )
+        # pdf_generate.sections를 객체 배열 계약([{heading, body}])으로 결정적 정규화 — drafter가
+        # 상류 LLM 출력을 ["${x.content}"]처럼 스칼라 원소로 꽂으면 validator가 E_NODE_TYPE_MISMATCH
+        # (scalar≠object)로 막으므로, bare 원소를 {"body": ...}로 감싼다(런타임은 어차피 tolerant).
+        workflow = DrafterService.wrap_pdf_sections(
+            workflow, {c.node_id: c.node_type for c in candidates}
+        )
         elapsed = int((time.monotonic() - t0) * 1000)
         nodes_data = [n.model_dump(mode="json") for n in workflow.nodes]
         connections_data = [c.model_dump(mode="json") for c in workflow.connections]

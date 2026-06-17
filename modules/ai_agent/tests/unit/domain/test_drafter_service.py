@@ -956,3 +956,60 @@ class TestWireArtifactAttachments:
         wf, tmap = self._wf(email_type="slack_post_message")  # 발송 sink 아님
         out = DrafterService.wire_artifact_attachments(wf, tmap)
         assert "attachments" not in self._email_node(out).parameters
+
+
+class TestWrapPdfSections:
+    """pdf_generate.sections의 bare 스칼라 원소 → {body} 객체 결정적 래핑 (E_NODE_TYPE_MISMATCH 차단)."""
+
+    def _wf(self, sections, pdf_type="pdf_generate"):
+        import uuid as _uuid
+        nid, inst = _uuid.uuid4(), _uuid.uuid4()
+        self._pdf_node_id = nid
+        wf = WorkflowSchema(
+            workflow_id=_uuid.uuid4(), name="T", scope="private", is_draft=True,
+            owner_user_id=_uuid.uuid4(),
+            nodes=[NodeInstance(instance_id=inst, node_id=nid,
+                                parameters={"title": "r", "sections": sections},
+                                position=Position(x=0, y=0))],
+            connections=[],
+        )
+        return wf, {nid: pdf_type}
+
+    def _pdf(self, wf):
+        return next(n for n in wf.nodes if n.node_id == self._pdf_node_id)
+
+    def test_bare_ref_wrapped_into_body_object(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        ref = "${" + str(uuid4()) + ".content}"
+        wf, tmap = self._wf([ref])
+        out = DrafterService.wrap_pdf_sections(wf, tmap)
+        # 스칼라 참조가 {"body": ref}로 감싸지고 ${...} 참조는 보존(런타임 ReferenceResolver가 해소)
+        assert self._pdf(out).parameters["sections"] == [{"body": ref}]
+
+    def test_object_elements_preserved_no_change(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        secs = [{"heading": "H", "body": "B"}]
+        wf, tmap = self._wf(secs)
+        out = DrafterService.wrap_pdf_sections(wf, tmap)
+        assert self._pdf(out).parameters["sections"] == secs
+        assert out is wf  # 변경 없음 → 원본 그대로 반환
+
+    def test_mixed_wraps_only_scalars(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(["스칼라 본문", {"heading": "H", "body": "B"}, None])
+        out = DrafterService.wrap_pdf_sections(wf, tmap)
+        assert self._pdf(out).parameters["sections"] == [
+            {"body": "스칼라 본문"}, {"heading": "H", "body": "B"}, None,
+        ]
+
+    def test_non_pdf_node_untouched(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(["x"], pdf_type="gmail_send")  # sections 객체배열 노드 아님
+        out = DrafterService.wrap_pdf_sections(wf, tmap)
+        assert self._pdf(out).parameters["sections"] == ["x"]
+
+    def test_non_list_sections_untouched(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf("리스트 아님")
+        out = DrafterService.wrap_pdf_sections(wf, tmap)
+        assert self._pdf(out).parameters["sections"] == "리스트 아님"
