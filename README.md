@@ -5,6 +5,10 @@
 자연어 요청을 AI 에이전트가 62종 노드 카탈로그에서 조합하여 워크플로우를 자동 생성·검증·실행하는 멀티에이전트 플랫폼.
 업무 문서(SOP)를 올리면 AI가 재사용 가능한 Skill로 변환하고, 온톨로지 GraphRAG로 노드 선택 품질을 보장합니다.
 
+**5인 팀 · 4 Sprint (2026.05–06)**
+
+담당: **PM · 백엔드 · 프론트엔드** — 스프린트 일정·협업 주도, 아키텍처 설계, AI Native 하니스 엔지니어링, 멀티에이전트 오케스트레이션
+
 [![Portfolio](https://img.shields.io/badge/Portfolio-dhwang0803--glitch.vercel.app-000000?style=flat-square&logo=vercel&logoColor=white)](https://dhwang0803-glitch.vercel.app/projects/flowit)
 
 ---
