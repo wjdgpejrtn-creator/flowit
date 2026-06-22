@@ -1,0 +1,278 @@
+# Modal deploy (sub-agents) — CD #2.
+#
+# release 브랜치 push 즉시 변경된 Modal sub-agent만 자동 재배포.
+# Modal workspace 단일(flowit02)이라 staging/prod env 구분 없음 — sub-agent matrix만.
+#
+# 5 agents (workspace=flowit02, Q&A §4.2 실측 — 전부 이미 배포돼 있음 → 갈아끼우기):
+#   - agent-composer        (services/agents/agent-composer/main.py)
+#   - orchestrator          (services/agents/orchestrator/main.py)    ← app prefix 없음
+#   - agent-skills-builder  (services/agents/agent-skills-builder/main.py)
+#   - agent-personalization (services/agents/agent-personalization/main.py)
+#   - llm-base              (services/agents/llm-base/main.py)        ← Dockerfile + GPU + Modal Volume
+#
+# Modal secret은 본 워크플로우에서 생성/관리 안 함 (Q&A §4.1 정정):
+#   각 main.py의 `modal.Secret.from_name(...)` 선언으로 deploy 시 자동 mount.
+#   기존 5종(cloudsql-iam-sa / agent-bearer-token / agent-personalization-secret /
+#   huggingface-token / langsmith-api-key)은 황대원이 사전 등록 완료.
+#
+# Modal token 의존:
+#   secrets.MODAL_TOKEN_ID
+#   secrets.MODAL_TOKEN_SECRET
+#   둘 다 flowit02 workspace 토큰이어야 sub-agent 간 RPC lookup 정상.
+
+name: Modal deploy (sub-agents)
+
+on:
+  push:
+    branches: [release]
+    paths:
+      - "services/agents/**"
+      - "modules/ai_agent/**"
+      - "modules/skills_marketplace/**"
+      - "modules/nodes_graph/**"
+      - "packages/common_schemas/python/**"
+      - "services/common/**"  # services.common.gcp_secrets — composer/orchestrator boot import
+  # 수동 trigger — Modal 측 상태 확인용 강제 갈아끼우기 또는 paths 미매칭 release sync 시.
+  workflow_dispatch:
+
+concurrency:
+  # workflow + ref 단위 group — 같은 run 내 5 job 병렬은 그대로 동작(서로 다른 app),
+  # 같은 ref의 modal-deploy run 폭주는 직렬화. cancel-in-progress: false로 in-flight 보호.
+  # (app별 분리가 필요하면 group에 ${{ matrix.app }} 추가 — 본 PR scope 밖)
+  group: modal-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # PR #232 황대원 LOW #3 — workspace 이름 8곳 하드코딩 → env 단일 정의로 drift 방지.
+  # 변경 시 본 라인 1곳만 수정.
+  # 2026-06-15: flowit($30 크레딧 소진) → flowit02 워크스페이스 이전. GitHub secret
+  # MODAL_TOKEN_ID/SECRET도 flowit02 토큰으로 동시 교체됨.
+  EXPECTED_MODAL_WORKSPACE: flowit02
+
+jobs:
+  # 변경 경로 보고 어떤 sub-agent deploy 돌릴지 분기.
+  detect-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      composer: ${{ steps.filter.outputs.composer }}
+      orchestrator: ${{ steps.filter.outputs.orchestrator }}
+      skills_builder: ${{ steps.filter.outputs.skills_builder }}
+      personalization: ${{ steps.filter.outputs.personalization }}
+      llm_base: ${{ steps.filter.outputs.llm_base }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            composer:
+              - 'services/agents/agent-composer/**'
+              - 'modules/ai_agent/**'
+              - 'modules/skills_marketplace/**'
+              - 'modules/nodes_graph/**'
+              - 'packages/common_schemas/python/**'
+              - 'services/common/**'
+            orchestrator:
+              - 'services/agents/orchestrator/**'
+              - 'modules/ai_agent/**'
+              - 'packages/common_schemas/python/**'
+              - 'services/common/**'
+            skills_builder:
+              - 'services/agents/agent-skills-builder/**'
+              - 'modules/ai_agent/**'
+              - 'modules/skills_marketplace/**'
+              - 'packages/common_schemas/python/**'
+              - 'services/common/**'
+            personalization:
+              - 'services/agents/agent-personalization/**'
+              - 'modules/ai_agent/**'
+              - 'packages/common_schemas/python/**'
+              - 'services/common/**'
+            llm_base:
+              - 'services/agents/llm-base/**'
+
+  deploy-composer:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.composer == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # composer image build + push 평균 ~5분
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Modal CLI
+        run: pip install modal
+
+      - name: Verify Modal workspace
+        # 잘못된 workspace 토큰일 경우 다른 workspace로 silent 배포 위험 방지.
+        # PR #217 황대원 리뷰 follow-up #17 + PR #232 황대원 LOW #2/#3 반영:
+        # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
+        # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
+        run: |
+          # 토큰-env 인증(MODAL_TOKEN_ID/SECRET)만으로는 named profile이 없어
+          # `modal profile current`=default → verify가 항상 실패(5/28 이후 Modal CD 전면 중단 원인).
+          # 토큰으로 '$EXPECTED_MODAL_WORKSPACE' 프로필을 생성·활성화(--verify 기본 ON = 실 워크스페이스 인증).
+          modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "$EXPECTED_MODAL_WORKSPACE" >/dev/null
+          ACTUAL=$(modal profile current | tr -d '[:space:]')
+          if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
+            echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
+            exit 1
+          fi
+          echo "✓ Modal workspace: $ACTUAL"
+      - name: Deploy agent-composer
+        # PYTHONUTF8=1: Modal Image 빌드 시 일부 파일 UTF-8 BOM 안전망.
+        run: PYTHONUTF8=1 modal deploy services/agents/agent-composer/main.py
+
+  deploy-orchestrator:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.orchestrator == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Modal CLI
+        run: pip install modal
+
+      - name: Verify Modal workspace
+        # 잘못된 workspace 토큰일 경우 다른 workspace로 silent 배포 위험 방지.
+        # PR #217 황대원 리뷰 follow-up #17 + PR #232 황대원 LOW #2/#3 반영:
+        # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
+        # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
+        run: |
+          # 토큰-env 인증(MODAL_TOKEN_ID/SECRET)만으로는 named profile이 없어
+          # `modal profile current`=default → verify가 항상 실패(5/28 이후 Modal CD 전면 중단 원인).
+          # 토큰으로 '$EXPECTED_MODAL_WORKSPACE' 프로필을 생성·활성화(--verify 기본 ON = 실 워크스페이스 인증).
+          modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "$EXPECTED_MODAL_WORKSPACE" >/dev/null
+          ACTUAL=$(modal profile current | tr -d '[:space:]')
+          if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
+            echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
+            exit 1
+          fi
+          echo "✓ Modal workspace: $ACTUAL"
+      - name: Deploy orchestrator
+        run: PYTHONUTF8=1 modal deploy services/agents/orchestrator/main.py
+
+  deploy-skills-builder:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.skills_builder == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Modal CLI
+        run: pip install modal
+
+      - name: Verify Modal workspace
+        # 잘못된 workspace 토큰일 경우 다른 workspace로 silent 배포 위험 방지.
+        # PR #217 황대원 리뷰 follow-up #17 + PR #232 황대원 LOW #2/#3 반영:
+        # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
+        # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
+        run: |
+          # 토큰-env 인증(MODAL_TOKEN_ID/SECRET)만으로는 named profile이 없어
+          # `modal profile current`=default → verify가 항상 실패(5/28 이후 Modal CD 전면 중단 원인).
+          # 토큰으로 '$EXPECTED_MODAL_WORKSPACE' 프로필을 생성·활성화(--verify 기본 ON = 실 워크스페이스 인증).
+          modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "$EXPECTED_MODAL_WORKSPACE" >/dev/null
+          ACTUAL=$(modal profile current | tr -d '[:space:]')
+          if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
+            echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
+            exit 1
+          fi
+          echo "✓ Modal workspace: $ACTUAL"
+      - name: Deploy agent-skills-builder
+        run: PYTHONUTF8=1 modal deploy services/agents/agent-skills-builder/main.py
+
+  deploy-personalization:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.personalization == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Modal CLI
+        run: pip install modal
+
+      - name: Verify Modal workspace
+        # 잘못된 workspace 토큰일 경우 다른 workspace로 silent 배포 위험 방지.
+        # PR #217 황대원 리뷰 follow-up #17 + PR #232 황대원 LOW #2/#3 반영:
+        # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
+        # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
+        run: |
+          # 토큰-env 인증(MODAL_TOKEN_ID/SECRET)만으로는 named profile이 없어
+          # `modal profile current`=default → verify가 항상 실패(5/28 이후 Modal CD 전면 중단 원인).
+          # 토큰으로 '$EXPECTED_MODAL_WORKSPACE' 프로필을 생성·활성화(--verify 기본 ON = 실 워크스페이스 인증).
+          modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "$EXPECTED_MODAL_WORKSPACE" >/dev/null
+          ACTUAL=$(modal profile current | tr -d '[:space:]')
+          if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
+            echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
+            exit 1
+          fi
+          echo "✓ Modal workspace: $ACTUAL"
+      - name: Deploy agent-personalization
+        run: PYTHONUTF8=1 modal deploy services/agents/agent-personalization/main.py
+
+  deploy-llm-base:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.llm_base == 'true'
+    runs-on: ubuntu-latest
+    # CUDA 12.8 image + llama.cpp binary copy → 첫 deploy ~10~15분. 갈아끼우기는 더 짧음.
+    timeout-minutes: 45
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Modal CLI
+        run: pip install modal
+
+      - name: Verify Modal workspace
+        # 잘못된 workspace 토큰일 경우 다른 workspace로 silent 배포 위험 방지.
+        # PR #217 황대원 리뷰 follow-up #17 + PR #232 황대원 LOW #2/#3 반영:
+        # - tr -d '[:space:]' 안전망: profile 출력에 trailing whitespace/개행 가능성
+        # - EXPECTED_MODAL_WORKSPACE env 단일 정의 (workflow 최상단)
+        run: |
+          # 토큰-env 인증(MODAL_TOKEN_ID/SECRET)만으로는 named profile이 없어
+          # `modal profile current`=default → verify가 항상 실패(5/28 이후 Modal CD 전면 중단 원인).
+          # 토큰으로 '$EXPECTED_MODAL_WORKSPACE' 프로필을 생성·활성화(--verify 기본 ON = 실 워크스페이스 인증).
+          modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "$EXPECTED_MODAL_WORKSPACE" >/dev/null
+          ACTUAL=$(modal profile current | tr -d '[:space:]')
+          if [ "$ACTUAL" != "$EXPECTED_MODAL_WORKSPACE" ]; then
+            echo "::error::Modal workspace '$EXPECTED_MODAL_WORKSPACE' expected, got '$ACTUAL' — sub-agent RPC lookup 깨질 위험"
+            exit 1
+          fi
+          echo "✓ Modal workspace: $ACTUAL"
+      - name: Deploy llm-base
+        # llm-base는 Modal Volume(llm-base-models)에서 Gemma 4 GGUF 로드.
+        # 모델 가중치 변경 없는 한 download_model 재실행 불필요 — image rebuild만.
+        run: PYTHONUTF8=1 modal deploy services/agents/llm-base/main.py

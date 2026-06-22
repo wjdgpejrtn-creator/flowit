@@ -1,0 +1,57 @@
+{
+  "code": "ecommerce",
+  "name": "이커머스",
+  "kind": "industry",
+  "description": "이커머스 표준 업무 자동화 — 주문/배송 알림, 환불 승인, 장바구니 이탈 회복, 구매 후 리뷰",
+  "rules": [
+    {"kind": "required", "node_type": "gmail_send", "rationale": "이커머스 고객 커뮤니케이션의 기본 채널은 이메일"},
+    {"kind": "forbidden", "node_type": "postgresql_query", "rationale": "쇼핑몰 운영 DB 직접 접근 금지 — 반드시 API/연동 노드 경유"},
+    {"kind": "focus", "statement": "회복·리뷰·환불 메일은 항상 캠페인/주문 추적 ID를 남겨 성과 측정이 가능해야 한다", "severity": "high"},
+    {"kind": "caution", "statement": "고객 이메일·주문번호는 PII — 로그/메시지 본문에 불필요한 평문 노출 금지", "severity": "high"},
+    {"kind": "format", "statement": "금액은 KRW 정수, 시각은 ISO 8601(date-time), 날짜는 YYYY-MM-DD"}
+  ],
+  "playbooks": [
+    {
+      "id": "ecom.refund_approval",
+      "name": "환불 승인 프로세스",
+      "intent": "환불|반품|refund|return",
+      "summary": "환불 요청을 금액 임계로 자동/수동 승인 분기하고 매니저 승인·고객 통지까지 잇는다",
+      "rules": [
+        {"kind": "required", "statement": "자동 승인 임계 금액을 초과하면 반드시 사람(매니저) 승인 단계를 거친다", "severity": "high"},
+        {"kind": "focus", "statement": "환불 사유(불량/오배송/단순변심)를 분류해 정책별로 다르게 처리한다"}
+      ],
+      "stages": [
+        {"order": 1, "role": "trigger", "purpose": "환불 요청 수신", "key_points": ["요청ID·주문ID·금액·사유가 모두 있어야 진행"], "allowed_node_types": ["webhook_trigger", "manual_trigger"]},
+        {"order": 2, "role": "gate", "purpose": "임계 금액 기준 자동/수동 승인 분기", "key_points": ["기본 임계 50000원, 사용자 오버라이드 허용", "임계 이하=자동 승인, 초과=매니저 대기"], "allowed_node_types": ["if_condition"]},
+        {"order": 3, "role": "sink", "purpose": "임계 초과 시 매니저 승인 요청", "key_points": ["High risk — 승인 채널 명시 필수"], "allowed_node_types": ["slack_post_message"]},
+        {"order": 4, "role": "sink", "purpose": "환불 결과 고객 통지", "key_points": ["승인/반려 사유를 명확히, 추적 ID 포함"], "allowed_node_types": ["gmail_send"]}
+      ]
+    },
+    {
+      "id": "ecom.cart_recovery",
+      "name": "장바구니 이탈 회복",
+      "intent": "장바구니|이탈|회복|abandon|cart",
+      "summary": "이탈 N시간 후 할인 코드를 포함한 회복 메일을 발송하고 캠페인을 추적한다",
+      "rules": [
+        {"kind": "caution", "statement": "동일 장바구니에 회복 메일은 1회만 — 중복 발송 방지", "severity": "high"}
+      ],
+      "stages": [
+        {"order": 1, "role": "trigger", "purpose": "이탈 후 지연 트리거", "key_points": ["기본 4시간 후, 1~168시간 범위"], "allowed_node_types": ["schedule_trigger", "event_trigger"]},
+        {"order": 2, "role": "source", "purpose": "장바구니 상품·고객 정보 조회", "allowed_node_types": ["google_sheets_read", "http_request"]},
+        {"order": 3, "role": "transform", "purpose": "회복 메일 본문 생성(상품 목록·할인 코드)", "key_points": ["할인 코드는 선택 — 없으면 할인 없이 발송"], "allowed_node_types": ["anthropic_chat"]},
+        {"order": 4, "role": "sink", "purpose": "회복 메일 발송", "allowed_node_types": ["gmail_send"]}
+      ]
+    },
+    {
+      "id": "ecom.review_request",
+      "name": "구매 후 리뷰 요청",
+      "intent": "리뷰|후기|review",
+      "summary": "배송 완료 N일 후 인센티브 코드를 포함한 리뷰 요청 메일을 1회 발송한다",
+      "stages": [
+        {"order": 1, "role": "trigger", "purpose": "배송 완료 후 지연 트리거", "key_points": ["기본 3일 후, 1~30일 범위"], "allowed_node_types": ["schedule_trigger"]},
+        {"order": 2, "role": "transform", "purpose": "리뷰 요청 메일 본문 생성", "key_points": ["리뷰 페이지 URL 필수, 인센티브 코드는 선택"], "allowed_node_types": ["anthropic_chat"]},
+        {"order": 3, "role": "sink", "purpose": "리뷰 요청 메일 발송", "key_points": ["already_sent 플래그로 1회 보장"], "allowed_node_types": ["gmail_send"]}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,536 @@
+# REQ-003 Nodes-Graph — 구현 명세
+
+- **담당자**: 박아름
+- **작성일**: 2026-05-05
+- **참조**: `docs/class_diagram_resolution_proposal.md` (H-1, H-4 확정), `modules/nodes_graph/README.md`
+
+---
+
+## common_schemas에서 import할 클래스
+
+| 클래스 | 소스 모듈 | 용도 |
+|--------|-----------|------|
+| `WorkflowSchema` | `common_schemas.workflow` | 워크플로우 전체 구조 (노드 + 엣지). GraphValidator 입력 타입 |
+| `NodeInstance` | `common_schemas.workflow` | 워크플로우 내 노드 인스턴스. WorkflowSchema.nodes의 요소 |
+| `NodeConfig` | `common_schemas.workflow` | 노드 설정 스키마. NodeDefinition의 상위 구조 참조 |
+| `Edge` | `common_schemas.workflow` | 노드 간 연결. WorkflowSchema.connections의 요소 |
+| `Position` | `common_schemas.workflow` | 캔버스 좌표 (x, y). NodeInstance.position 타입 |
+| `NodeContext` | `common_schemas.node` | 노드 1회 실행 컨텍스트 (connection 토큰 + 실행 메타). `BaseNode.process()` 인자 (ADR-0018) |
+| `RiskLevel` | `common_schemas.enums` | 노드 위험 등급 (Low/Medium/High/Restricted) |
+| `ErrorCode` | `common_schemas.enums` | 그래프 검증 에러 코드 (E_CYCLE_DETECTED, E_ISOLATED_NODE 등) |
+| `ValidationError` | `common_schemas.exceptions` | 스키마 검증 실패 시 raise |
+| `NotFoundError` | `common_schemas.exceptions` | 노드 미발견 시 raise |
+| `ValidationErrorItem` | `common_schemas.validation` | 개별 검증 에러 항목 |
+| `ValidationErrorResponse` | `common_schemas.validation` | 검증 에러 응답 (items 리스트) |
+
+```python
+from common_schemas import (
+    WorkflowSchema, NodeInstance, NodeConfig, NodeContext, Edge, Position,
+    ValidationErrorItem, ValidationErrorResponse,
+)
+from common_schemas.enums import RiskLevel, ErrorCode
+from common_schemas.exceptions import ValidationError, NotFoundError
+```
+
+**중요 (H-1 합의)**: 이 모듈은 WorkflowSchema, NodeInstance, Edge를 자체 정의하지 않는다. 반드시 common_schemas에서 import한다.
+
+---
+
+## 이 모듈에서 구현할 클래스
+
+### Domain Layer (`modules/nodes_graph/domain/`)
+
+#### entities/node_definition.py — `NodeDefinition`
+
+```python
+from dataclasses import dataclass, field
+from typing import Any, Optional
+from uuid import UUID
+from common_schemas.enums import RiskLevel
+
+@dataclass
+class NodeDefinition:
+    """62종 노드 타입의 카탈로그 엔티티 (gemma_chat #68 / llm_judge #438 / read·write 8종 #438).
+    
+    NodeConfig(REQ-012)의 필드를 모두 포함하며,
+    추가로 embedding, service_type 등 REQ-003 전용 필드를 확장한다.
+    
+    H-4 합의: REQ-002 CredentialInjectionService가 get_by_id() 후
+    이 객체의 risk_level, required_connections, service_type을 필드 접근으로 사용한다.
+    """
+    # === NodeConfig 동일 필드 (REQ-012 참조) ===
+    node_id: UUID
+    node_type: str                          # e.g. "gmail_send", "slack_post", "llm_generate"
+    name: str                               # 사람이 읽을 수 있는 이름
+    category: str                           # DB CHECK 영문 8종: "trigger"|"action"|"condition"|"transform"|"ai"|"integration"|"utility"|"output"
+    version: str                            # semver e.g. "1.0.0"
+    input_schema: dict[str, Any]            # JSON Schema
+    output_schema: dict[str, Any]           # JSON Schema
+    parameter_schema: dict[str, Any]        # JSON Schema (사용자 설정 파라미터)
+    risk_level: RiskLevel                   # REQ-002가 참조하는 필드
+    required_connections: list[str]         # REQ-002가 참조 (e.g. ["google", "slack"])
+    description: str                        # 노드 설명
+    is_mvp: bool                            # MVP 62종 여부 (gemma_chat·llm_judge·read/write 포함)
+    
+    # === REQ-003 확장 필드 ===
+    service_type: Optional[str] = None      # REQ-002가 참조 (e.g. "google_workspace")
+    embedding: Optional[list[float]] = None # BGE-M3 벡터 (768차원) — 검색용
+
+    # === ADR-0020 (i) scope 격리 ===
+    owner_user_id: Optional[UUID] = None    # None=company 전역(기존 62종) / 값=personal 스킬 소유자
+    team_id: Optional[UUID] = None          # None=비team / 값=team 스킬
+```
+
+| 필드 | 타입 | REQ-002 참조 | 설명 |
+|------|------|:---:|------|
+| `node_id` | `UUID` | | 노드 정의 PK |
+| `node_type` | `str` | | 고유 타입 식별자 |
+| `name` | `str` | | 표시 이름 |
+| `category` | `str` | | 카테고리 분류 |
+| `version` | `str` | | 버전 (semver) |
+| `input_schema` | `dict[str, Any]` | | 입력 JSON Schema |
+| `output_schema` | `dict[str, Any]` | | 출력 JSON Schema |
+| `parameter_schema` | `dict[str, Any]` | | 파라미터 JSON Schema |
+| `risk_level` | `RiskLevel` | YES | 위험 등급 |
+| `required_connections` | `list[str]` | YES | 필수 외부 서비스 연결 |
+| `description` | `str` | | 노드 설명 |
+| `is_mvp` | `bool` | | MVP 포함 여부 |
+| `service_type` | `Optional[str]` | YES | 외부 서비스 유형 |
+| `embedding` | `Optional[list[float]]` | | BGE-M3 임베딩 벡터 |
+| `owner_user_id` | `Optional[UUID]` | | ADR-0020 (i) scope: None=company 전역 / 값=personal 소유자 |
+| `team_id` | `Optional[UUID]` | | ADR-0020 (i) scope: None=비team / 값=team |
+
+---
+
+#### entities/node_metadata.py — `NodeMetadata`
+
+```python
+@dataclass(frozen=True)
+class NodeMetadata:
+    """BaseNode 추상 클래스의 메타데이터."""
+    node_id: UUID
+    name: str
+    category: str
+    risk_level: RiskLevel
+    is_mvp: bool
+```
+
+---
+
+#### entities/base_node.py — `BaseNode` (ABC, Generic)
+
+```python
+from abc import ABC, abstractmethod
+from typing import Generic, TypeVar
+
+from common_schemas import NodeContext
+
+TInput = TypeVar("TInput")
+TOutput = TypeVar("TOutput")
+
+class BaseNode(Generic[TInput, TOutput], ABC):
+    """모든 노드의 추상 기본 클래스.
+    
+    62종 노드가 이 클래스를 상속하여 process()를 구현한다.
+    """
+    metadata: NodeMetadata
+    input_schema: type[TInput]
+    output_schema: type[TOutput]
+    
+    @abstractmethod
+    async def process(self, input: TInput, context: NodeContext) -> TOutput:
+        """노드 로직 실행. Input → Output 변환.
+        
+        context — 실행 컨텍스트(connection 토큰 + 실행 메타, ADR-0018).
+        connection이 필요 없는 노드는 무시. connection_token을 소비하는
+        노드 범위는 ADR-0018 Decision 4 참조.
+        """
+        ...
+```
+
+---
+
+#### services/graph_validator.py — `GraphValidator`
+
+```python
+class GraphValidator:
+    """워크플로우 그래프 무결성 검증 서비스.
+    
+    검증 항목:
+    1. 사이클 감지 (Kahn's algorithm 기반 위상 정렬)
+    2. 고립 노드 검출 (연결 없는 노드)
+    3. 노드 타입 불일치 (표현식 경로 ${inst.field} 출력 shape ↔ 소비 파라미터 기대 shape;
+       edge handle은 제어 분기 라벨이라 검증 대상 아님 — 전수조사 2026-06-15)
+       Phase 2b: nested 경로(field.sub / field.0.sub)를 output_schema properties·items로 walk —
+       head 미존재/scalar 초과접근은 경로 환각 거부, 내부 미정의(동적 노드)는 보수적 통과
+    4. 중복 instance_id 검출
+    5. 필수 연결 누락 (required_connections 확인)
+    6. 비실재 노드 (node_id가 카탈로그에 없음 = 실행 불가, E_UNKNOWN_NODE_TYPE,
+       ADR-0026 §6.6 — 가장 먼저 검사; 다른 검사는 정의 미존재를 skip하므로)
+    """
+    
+    def __init__(self, node_def_repo: NodeDefinitionRepository):
+        ...
+    
+    async def validate(self, workflow: WorkflowSchema) -> ValidationErrorResponse:
+        """
+        전체 검증 수행 후 ValidationErrorResponse 반환.
+        errors가 비어있으면 유효한 그래프.
+        
+        반환 예시:
+        ValidationErrorResponse(errors=[
+            ValidationErrorItem(field="connections[0]", message="Cycle detected", code="E_CYCLE_DETECTED"),
+        ])
+        """
+        ...
+    
+    def _detect_cycles(self, nodes: list[NodeInstance], edges: list[Edge]) -> list[ValidationErrorItem]:
+        """Kahn's algorithm으로 위상 정렬. 정렬 불가 시 사이클."""
+        ...
+    
+    def _detect_isolated_nodes(self, nodes: list[NodeInstance], edges: list[Edge]) -> list[ValidationErrorItem]:
+        """연결이 하나도 없는 노드 검출."""
+        ...
+    
+    async def _check_type_compatibility(self, workflow: WorkflowSchema) -> list[ValidationErrorItem]:
+        """parameters의 ${inst.field} 표현식 출력 shape ↔ 소비 파라미터 기대 shape 호환 검증.
+
+        str 파라미터 + list 원소 표현식 모두 검증. Phase 2b: nested 경로(field.sub)를
+        output_schema properties·items로 walk — head 미존재/scalar 초과접근은 경로 환각 거부,
+        내부 미정의(동적 노드)·ANY·문자열 보간·미해결 토큰은 보수적 통과(false positive 방지).
+        grounding(#524, compose)과 역할 분담: validator는 compose+execute 공통 게이트.
+        """
+        ...
+    
+    def _check_duplicate_ids(self, nodes: list[NodeInstance]) -> list[ValidationErrorItem]:
+        """instance_id 중복 검출."""
+        ...
+```
+
+---
+
+#### services/graph_serializer.py — `GraphSerializer`
+
+```python
+class GraphSerializer:
+    """워크플로우 직렬화/역직렬화 서비스."""
+    
+    def serialize(self, workflow: WorkflowSchema) -> dict:
+        """WorkflowSchema → JSON-serializable dict.
+        Pydantic model_dump() 래핑 + 커스텀 직렬화 로직."""
+        ...
+    
+    def deserialize(self, data: dict) -> WorkflowSchema:
+        """dict → WorkflowSchema.
+        Pydantic model_validate() 래핑 + 추가 검증."""
+        ...
+```
+
+---
+
+#### ports/node_definition_repository.py — `NodeDefinitionRepository` (ABC)
+
+```python
+from abc import ABC, abstractmethod
+from typing import Optional
+from uuid import UUID
+
+class NodeDefinitionRepository(ABC):
+    """노드 정의 카탈로그 저장소 인터페이스.
+    
+    구현은 REQ-008(storage) / REQ-001(database)이 담당.
+    
+    H-4 합의: REQ-002가 필요한 risk_level, required_connections, service_type은
+    get_by_id() 반환값인 NodeDefinition 객체의 필드로 접근한다.
+    별도 get_risk_level(), get_service_type() 등의 메서드를 추가하지 않는다.
+    """
+    
+    @abstractmethod
+    async def upsert(self, definition: NodeDefinition) -> NodeDefinition:
+        """노드 정의 생성 또는 갱신. 
+        Plugin discovery 시 62종 노드를 일괄 등록할 때 사용."""
+        ...
+    
+    @abstractmethod
+    async def list_all(self, mvp_only: bool = False) -> list[NodeDefinition]:
+        """전체 노드 목록 조회.
+        mvp_only=True면 is_mvp=True인 노드만 반환."""
+        ...
+    
+    @abstractmethod
+    async def get_by_id(self, node_id: UUID) -> Optional[NodeDefinition]:
+        """node_id로 단일 노드 정의 조회.
+        REQ-002 CredentialInjectionService가 이 메서드를 사용한다."""
+        ...
+    
+    @abstractmethod
+    async def search_by_embedding(
+        self,
+        query_embedding: list[float],
+        limit: int = 10,
+        viewer_user_id: Optional[UUID] = None,
+        viewer_team_ids: Optional[list[UUID]] = None,
+    ) -> list[NodeDefinition]:
+        """벡터 유사도 기반 노드 검색.
+        AI Agent(REQ-004)의 노드 추천에 사용.
+        pgvector cosine similarity 활용.
+
+        ADR-0020 (i) scope 격리: viewer 지정 시 가시 노드만 반환.
+        필터 = (owner IS NULL AND team IS NULL) OR owner=viewer_user_id OR team IN viewer_team_ids.
+        둘 다 None이면 전역 노드만(비침습 기본). 필터 SQL은 storage 구현."""
+        ...
+```
+
+---
+
+### Application Layer (`modules/nodes_graph/application/`)
+
+#### use_cases/validate_graph_use_case.py — `ValidateGraphUseCase`
+
+```python
+class ValidateGraphUseCase:
+    """워크플로우 그래프 무결성 검증 유스케이스."""
+    
+    def __init__(self, validator: GraphValidator):
+        ...
+    
+    async def execute(self, workflow: WorkflowSchema) -> ValidationErrorResponse:
+        """
+        1. workflow.validate_graph() — 기본 참조 무결성 (common_schemas 내장)
+        2. GraphValidator.validate() — 정적/의미적 검증
+        3. ValidationErrorResponse 반환
+        """
+        ...
+```
+
+---
+
+#### use_cases/search_nodes_use_case.py — `SearchNodesUseCase`
+
+```python
+class SearchNodesUseCase:
+    """벡터 임베딩 기반 노드 검색 유스케이스."""
+    
+    def __init__(self, node_def_repo: NodeDefinitionRepository, embedder: EmbedderPort):
+        ...
+    
+    async def execute(
+        self,
+        query: str,
+        limit: int = 10,
+        viewer_user_id: Optional[UUID] = None,
+        viewer_team_ids: Optional[list[UUID]] = None,
+    ) -> list[NodeDefinition]:
+        """
+        1. embedder.embed(query) → query_embedding (768차원)
+        2. node_def_repo.search_by_embedding(query_embedding, limit, viewer scope)
+        3. 결과 반환
+
+        ADR-0020 (i): viewer scope 전달 시 가시 노드만(전역+본인 personal+소속 team).
+        """
+        ...
+```
+
+---
+
+#### use_cases/register_nodes_use_case.py — `RegisterNodesUseCase`
+
+```python
+class RegisterNodesUseCase:
+    """Plugin discovery로 노드를 일괄 등록하는 유스케이스."""
+    
+    def __init__(self, node_def_repo: NodeDefinitionRepository, embedder: EmbedderPort):
+        ...
+    
+    async def execute(self, nodes: list[NodeDefinition]) -> int:
+        """
+        1. 각 노드에 대해 embedding 생성 (없는 경우)
+        2. node_def_repo.upsert(definition) 호출
+        3. 등록된 건수 반환
+        """
+        ...
+```
+
+---
+
+#### application/catalog_registry.py — `CatalogRegistry`
+
+```python
+class CatalogRegistry:
+    """카탈로그 전체 NodeDefinition 조립 클래스.
+
+    domain/catalog/* 개별 노드 + adapters/catalog/external/* 노드를
+    application 레이어에서 조립한다.
+    domain/__init__.py에서 adapter를 import하면 Clean Architecture 위반이므로
+    반드시 이 클래스를 통해 조립한다 (PR #30 리뷰 확정, PR #34 spec 반영).
+    """
+
+    def get_all_node_definitions(self) -> list[NodeDefinition]:
+        """카탈로그 전체 62종 NodeDefinition 반환.
+        RegisterNodesUseCase.execute()의 입력으로 사용."""
+        ...
+```
+
+---
+
+### Infrastructure/Adapter Layer (`modules/nodes_graph/adapters/`)
+
+> **`tool_to_node_wrapper.py` (ToolToNodeWrapper) 제거 — 2026-05-19 박아름 toolset 정리 PR**
+> 
+> 5/15 햄햄·박아름 합의 + 5/19 조장 안 반영. toolset 14종(http_request_tool/conditional/loop 중복 3종 제외)
+> 모두 `adapters/catalog/external/`에 개별 BaseNode 파일로 등록. 실행 흐름은 ADR-0018에 따라
+> `services/execution_engine.CatalogNodeExecutor`가 `node_type`으로 `BaseNode.process()`를 직접
+> 호출한다 (`ToolsetExecutor` 경로 폐기). **external 34종 + domain 28종 = 62종
+> 전부 `process()` 실구현** — `NotImplementedError` 스텁은 남아 있지 않다.
+
+#### 노드별 `connection_token` 기대 형식 (ADR-0018)
+
+`CredentialInjectionService`가 해결한 `NodeContext.connection_token`(`Optional[str]`)을
+노드가 해석하는 규약. 작성자가 노드에 맞지 않는 credential을 연결하면 노드의
+입력 검증(`ValidationError`)이 안전망으로 동작한다. `credential_kind`는 REQ-002
+`Credential`(`api_key`/`oauth_token`/`password`/`certificate`/`custom`) 기준.
+
+| 노드 | `connection_token` 기대 형식 | 권장 `credential_kind` |
+|------|------------------------------|------------------------|
+| `slack_post_message` | Slack Bot OAuth 토큰 (`xoxb-…`) → `Authorization: Bearer` | `oauth_token` |
+| `gmail_send`·`google_calendar_create_event`·`google_docs_write`·`google_drive_read`·`google_sheets_read`·`bigquery_query` | Google OAuth access token → `Authorization: Bearer` | `oauth_token` |
+| `slack_notify` | Slack Incoming Webhook URL | `api_key` |
+| `email_send` | `username:password` (SMTP 인증) | `password` |
+| `rest_api`·`graphql`·`webhook` | Bearer 토큰 (선택 — 있으면 `Authorization: Bearer`) | `api_key` |
+| `anthropic_chat` | Anthropic API key → `x-api-key` 헤더 | `api_key` |
+| `linear_create_issue` | Linear API key → `Authorization` 헤더 (Bearer 접두사 없음) | `api_key` |
+| `postgresql_query` | PostgreSQL 연결 DSN (`postgresql://user:pass@host:port/db`) | `custom` (단일 비밀번호가 아닌 복합 연결 문자열) |
+| `mysql_query` | MySQL 연결 URL (`mysql://user:pass@host:port/db`) | `custom` (단일 비밀번호가 아닌 복합 연결 문자열) |
+| `gemma_chat` | (불필요 — 시스템 내장 LLM, `LLM_BASE_URL` 기반 호출) | — |
+| `file_read`·`file_write`·`file_transform` | (불필요 — `NODE_FILE_BASE_DIR` 샌드박스 로컬 FS) | — |
+
+#### ports/embedder_port.py — `EmbedderPort` (ABC)
+
+```python
+from abc import ABC, abstractmethod
+
+class EmbedderPort(ABC):
+    """텍스트 → 벡터 임베딩 변환 인터페이스.
+    구현체: BGE-M3 모델 (768차원) — modules/ai_agent 또는 외부 서비스.
+    ⚠️ 임베딩 차원 변경 시 storage ORM의 Vector 컬럼도 반드시 동기화 (REQ-008)."""
+    
+    @abstractmethod
+    async def embed(self, text: str) -> list[float]:
+        """텍스트를 768차원 벡터로 변환."""
+        ...
+    
+    @abstractmethod
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """배치 임베딩. Plugin discovery 시 62종 노드 일괄 임베딩에 사용."""
+        ...
+```
+
+---
+
+## 합의된 변경사항 (클래스 다이어그램 교차분석)
+
+| 이슈 ID | 합의 내용 | 이 모듈에 미치는 영향 |
+|---------|-----------|---------------------|
+| **H-1** | REQ-003의 자체 WorkflowSchema/NodeInstance/Edge 정의 삭제 → REQ-012 import | 자체 정의 전면 삭제. `from common_schemas import WorkflowSchema, NodeInstance, Edge, Position` 사용 |
+| **H-1** | REQ-012 WorkflowSchema에 `description: Optional[str]` 추가 | 이 모듈은 description 필드를 활용 가능 (추가 작업 불필요) |
+| **H-1** | NodeInstance.instance_id `str→UUID`, position `dict→Position` 통일 | 이 모듈의 코드가 UUID, Position 타입 기준으로 작성됨 |
+| **H-4** | NodeDefinitionRepository에 get_service_type/get_risk_level/get_required_connections 메서드 추가 안 함 | `get_by_id()` 반환값인 NodeDefinition에 해당 필드가 존재함을 명시 |
+| **H-4** | REQ-002가 `get_by_id()` 후 필드 접근으로 사용 | NodeDefinition에 `risk_level`, `required_connections`, `service_type` 필드 필수 포함 확인 |
+
+---
+
+## 의존성 관계
+
+```
+Upstream (이 모듈이 의존):
+  ├── packages/common_schemas (REQ-012)
+  │     └── WorkflowSchema, NodeInstance, NodeConfig, Edge, Position
+  │     └── RiskLevel, ErrorCode
+  │     └── ValidationErrorItem, ValidationErrorResponse
+  └── modules/toolset (REQ-005) — 직접 import 없음 (nodes_graph→toolset 역의존 금지).
+        catalog/external/* 의 BaseNode.process()는 ADR-0018에 따라 execution_engine.
+        CatalogNodeExecutor가 직접 호출. toolset BaseTool 로직은 nodes_graph로 포팅(Phase 3a~).
+
+Downstream (이 모듈에 의존):
+  ├── modules/auth (REQ-002)
+  │     └── NodeDefinitionRepository ABC import
+  │     └── CredentialInjectionService가 get_by_id() → NodeDefinition 필드 접근
+  ├── modules/ai_agent (REQ-004) — Workflow Composer
+  │     └── GraphValidator 호출 (워크플로우 생성/수정 시 검증)
+  │     └── SearchNodesUseCase (노드 추천)
+  ├── modules/ai_agent (REQ-004) — Skills Builder
+  │     └── NodeDefinitionRepository.upsert() 호출 — SOP 문서/산업 default에서 추출한
+  │        SkillNode를 NodeDefinition으로 변환해 카탈로그에 등록
+  │        (BuildFromSOPUseCase, BuildFromIndustryDefaultUseCase)
+  ├── services/execution_engine (REQ-007)
+  │     └── 위상 정렬로 실행 순서 결정
+  ├── services/api_server (REQ-009)
+  │     └── 노드 목록 조회, 그래프 검증 엔드포인트
+  └── modules/storage (REQ-008) / database (REQ-001)
+        └── NodeDefinitionRepository 구현체 제공
+```
+
+---
+
+## 환경 변수
+
+| 변수명 | 필수 | 설명 |
+|--------|------|------|
+| 없음 | — | 순수 도메인 로직 모듈. 환경 변수 불필요. 임베딩 모델 설정은 EmbedderPort 구현체(별도 모듈)가 관리 |
+
+---
+
+## 디렉토리 구조 (목표)
+
+```
+modules/nodes_graph/
+├── __init__.py
+├── domain/
+│   ├── entities/
+│   │   ├── node_definition.py      # NodeDefinition
+│   │   ├── node_metadata.py        # NodeMetadata
+│   │   └── base_node.py            # BaseNode (ABC, Generic)
+│   ├── services/
+│   │   ├── graph_validator.py      # GraphValidator
+│   │   └── graph_serializer.py     # GraphSerializer
+│   └── ports/
+│       ├── node_definition_repository.py  # NodeDefinitionRepository (ABC)
+│       └── embedder_port.py        # EmbedderPort (ABC)
+├── application/
+│   └── use_cases/
+│       ├── validate_graph_use_case.py
+│       ├── search_nodes_use_case.py
+│       └── register_nodes_use_case.py
+├── adapters/
+│   └── catalog/
+│       ├── external/                # 34종 NodeDefinition (기존 14 + REQ-005 11 + llm_judge + read/write 8, #438)
+│       └── registry.py              # Plugin discovery
+└── tests/
+    ├── test_graph_validator.py
+    ├── test_node_definition.py
+    └── test_search_nodes.py
+```
+
+---
+
+## 노드 카탈로그 요약 (Sprint 3 2주차 — 62종)
+
+> 카테고리는 DB `node_definitions.category` CHECK 제약(영문 8종: `trigger`, `action`, `condition`, `transform`, `ai`, `integration`, `utility`, `output`)에 맞춤. Microsoft(Outlook/Teams/OneDrive), Notion, OpenAI는 데모 버전 후속 개발로 보류 (2026-05-11 조장 결정).
+>
+> 박아름 1주차 작업분 41종(28 domain + 13 external) + 박아름 5/14 야간 추가 `gemma_chat` 1종 (PR #68) + 박아름 5/19 toolset 정리 PR로 REQ-005 toolset 연동 11종을 `adapters/catalog/external/`로 이전 + #438 §6.6 품질 루프 scorer `llm_judge` 1종 + #438 §6.6 read/write 비대칭 해소 8종 = **합계 62종**.
+>
+> 5/15 햄햄·박아름 합의 + 5/19 조장 안: toolset 14 중 중복 3종(`http_request_tool` ↔ `external/http_request`, `conditional` ↔ `domain/control/if_condition`, `loop` ↔ `domain/control/loop_list`)은 양쪽 제거. 나머지 11종은 `external/`에 개별 NodeDefinition 파일로 등록.
+
+| 카테고리 | 종수 | 박아름 1주차 (42, gemma_chat 포함) | + 5/19 toolset 연동 (11) |
+|---------|:---:|------|------|
+| `trigger` | 6 | `schedule_trigger`, `webhook_trigger`, `manual_trigger`, `event_trigger`, `api_poll_trigger`, `file_watch_trigger` | — |
+| `condition` | 8 | `if_condition`, `switch_case`, `loop_count`, `loop_list`, `retry`, `merge_branch`, `stop_workflow`, `delay` | — |
+| `transform` | 18 | `text_transform`, `json_extract`, `json_merge`, `csv_parse`, `csv_build`, `number_calc`, `date_format`, `list_filter`, `list_map`, `string_template`, `regex_extract`, `regex_replace`, `base64_encode`, `base64_decode` | + `file_transform`, `json_transform`, `text_template`, `data_mapping` |
+| `ai` | 3 (+후속) | `anthropic_chat` (외부 LLM, API key 자격증명), `gemma_chat` (시스템 내장 Gemma 4, 자격증명 불필요 — 5/14 야간 추가) — `openai_chat`은 데모 후속 보류 | + `llm_judge` (#438 §6.6 scorer — 콘텐츠+기준→score:number, 품질 루프 게이트) |
+| `integration` | 18 | `http_request`, `google_drive_read`, `google_sheets_read`, `postgresql_query`, `mysql_query`, `bigquery_query`, `google_calendar_create_event`, `linear_create_issue` | + `rest_api`, `graphql` / **+ #438 §6.6 read/write 8**: `google_sheets_write`, `google_calendar_read`, `google_docs_read`, `google_drive_upload`, `gmail_read`, `slack_read`, `linear_read`, `linear_update` |
+| `output` | 2 | `pdf_generate`, `google_docs_write` | — |
+| `action` | 5 (+후속) | `slack_post_message`, `gmail_send` (Microsoft `outlook_send`/`teams_post_message` 후속 보류) | + `webhook`, `slack_notify`, `email_send` |
+| `utility` | 2 | (박아름 1주차엔 utility 분류 없음) | + `file_read`, `file_write` |
+| **합계** | **62** | **42** (28 domain + 14 external, gemma_chat 포함) | **+11** (toolset 연동) + **1** (#438 llm_judge) + **8** (#438 read/write) |
+
+각 노드는 `BaseNode`를 상속하고, Plugin discovery 시 자동으로 `NodeDefinition` + BGE-M3 임베딩이 생성되어 `node_definitions` 테이블에 UPSERT된다. 신규 11종은 `modules/nodes_graph/adapters/catalog/external/` 아래 개별 파일로 등록된다. `BaseNode.process()` 실행은 ADR-0018에 따라 `services/execution_engine.CatalogNodeExecutor`가 `node_type`으로 직접 호출한다 (`ToolsetExecutor`·`toolset.execute_tool()` 경로 폐기). `process()` 실구현은 external 34종 전부 끝났다 (DB 3종은 asyncpg/aiomysql, Google R/W·bigquery는 REST httpx, file 3종은 샌드박스 로컬 FS, `llm_judge`는 Anthropic REST httpx, #438 read/write 8종은 Google/Slack/Linear REST·GraphQL httpx).

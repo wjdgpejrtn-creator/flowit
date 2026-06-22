@@ -1,0 +1,44 @@
+# Cloud Build config for frontend image.
+#
+# Build context = repo root (Dockerfile COPY가 packages/common_schemas/typescript + services/frontend 사용).
+# 빌드 명령 (repo root에서):
+#   gcloud builds submit \
+#     --config=services/frontend/cloudbuild.yaml \
+#     --substitutions=_TAG=req-010-1 \
+#     .
+
+substitutions:
+  _AR_LOCATION: asia-northeast3
+  _AR_REPOSITORY: workflow-staging
+  _IMAGE: frontend
+  _TAG: latest
+  _API_PROXY_TARGET: https://<API_SERVICE_URL>
+
+# Org policy `constraints/cloudbuild.useBuildServiceAccount`가 enforce되면 SA 미명시 build는
+# `forbidden from accessing the bucket [_cloudbuild]` 에러로 거부된다 (2026-05-28 가원 frontend
+# 배포 함정). 본 SA는 terraform staging main.tf:89~96에서 storage.objectAdmin / logging.logWriter
+# / artifactregistry.writer를 이미 보유. submit 사용자는 본 SA에 대한 iam.serviceAccountUser 필요.
+#
+# project id/number 하드코딩 — top-level serviceAccount 필드에서 $PROJECT_ID / $PROJECT_NUMBER
+# 치환 동작이 공식 문서에 명시 안 됨(PR #213 리뷰 반영). staging 단일 환경이라 재사용성 손실 0.
+serviceAccount: projects/<GCP_PROJECT_ID>/serviceAccounts/<GCP_PROJECT_NUMBER>-compute@developer.gserviceaccount.com
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - --tag
+      - ${_AR_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE}:${_TAG}
+      - --file
+      - services/frontend/Dockerfile
+      - --build-arg
+      - API_PROXY_TARGET=${_API_PROXY_TARGET}
+      - .
+
+images:
+  - ${_AR_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE}:${_TAG}
+
+options:
+  # user-provided serviceAccount 사용 시 default LEGACY logging은 거부 — CLOUD_LOGGING_ONLY 필수.
+  logging: CLOUD_LOGGING_ONLY

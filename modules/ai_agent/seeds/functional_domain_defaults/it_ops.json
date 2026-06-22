@@ -1,0 +1,151 @@
+{
+  "domain_code": "it_ops",
+  "domain_name": "IT 운영",
+  "description": "IT 운영 자동화 — 배포 승인·권한 요청·장애·비밀번호·미팅룸",
+  "version": "1.0.0",
+  "skill_nodes": [
+    {
+      "node_type": "it_ops_deploy_approval",
+      "name": "배포 승인 워크플로우",
+      "category": "condition",
+      "description": "프로덕션 배포 요청 시 환경/시간/영향도 기준 자동/수동 승인 분기",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "service_name": {"type": "string", "description": "배포할 서비스 이름. 예: 'api-server'"},
+          "environment": {"type": "string", "enum": ["staging", "production"], "description": "배포 대상 환경. staging(스테이징) 또는 production(운영)"},
+          "commit_sha": {"type": "string", "description": "배포할 커밋의 git SHA(전체 또는 앞 7자리). 예: '32bfd7b'"},
+          "deployer_id": {"type": "string", "description": "배포를 요청한 사람의 ID(사번 또는 계정명). 예: 'dhwang' 또는 EMP-1042"},
+          "auto_approve_in_business_hours": {"type": "boolean", "default": true, "description": "업무 시간 내 배포를 자동 승인할지 여부(기본 true). false면 항상 수동 승인"},
+          "approval_channel": {"type": "string", "description": "(선택) 수동 승인 요청을 보낼 Slack 채널명/채널 ID. 예: '#deploy-approval'"}
+        },
+        "required": ["service_name", "environment", "commit_sha", "deployer_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "approval_status": {"type": "string", "enum": ["auto_approved", "pending_manual", "rejected"]},
+          "approver_id": {"type": ["string", "null"]},
+          "decided_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["slack"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "it_ops_access_request",
+      "name": "권한 부여 요청 처리",
+      "category": "condition",
+      "description": "권한 요청 → 책임자 승인 → 자동 권한 부여 + 만료 일자 등록",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "requester_id": {"type": "string", "description": "권한을 요청하는 사람의 ID(사번 또는 계정명). 예: 'kim' 또는 EMP-1042"},
+          "resource": {"type": "string", "description": "권한을 받을 대상 리소스 이름. 예: 'prod-db', 'github:billionaireahreum/Workflow_Automation'"},
+          "permission_level": {"type": "string", "enum": ["read", "write", "admin"], "description": "요청 권한 수준. read(읽기)·write(쓰기)·admin(관리)"},
+          "reason": {"type": "string", "description": "권한이 필요한 사유. 승인자가 판단 근거로 봅니다"},
+          "expires_in_days": {"type": "integer", "default": 30, "minimum": 1, "maximum": 365, "description": "부여된 권한의 유효 기간(일). 만료 시 자동 회수. 기본 30일"},
+          "approver_id": {"type": "string", "description": "이 요청을 승인할 책임자의 ID(사번 또는 계정명). 예: 'lee' 또는 EMP-2001"}
+        },
+        "required": ["requester_id", "resource", "permission_level", "reason", "approver_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "request_id": {"type": "string"},
+          "approval_status": {"type": "string", "enum": ["approved", "denied", "pending"]},
+          "expires_at": {"type": ["string", "null"], "format": "date-time"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["slack"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "it_ops_incident_pager",
+      "name": "장애 알림 통합 페이저",
+      "category": "action",
+      "description": "장애 감지 시 PagerDuty/Slack/Linear 동시 알림 + 인시던트 채널 자동 생성",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "service_name": {"type": "string", "description": "장애가 발생한 서비스 이름. 예: 'payment-api'"},
+          "severity": {"type": "string", "enum": ["sev1", "sev2", "sev3"], "description": "장애 심각도. sev1(가장 심각/전면 장애)·sev2(주요 기능 영향)·sev3(경미)"},
+          "summary": {"type": "string", "description": "장애 요약 설명. 예: '결제 API 5xx 급증, 결제 불가'"},
+          "detected_at": {"type": "string", "format": "date-time", "description": "(선택) 장애 감지 시각(ISO 8601). 미지정 시 현재 시각. 예: '2026-06-03T11:20:00+09:00'"},
+          "oncall_user_id": {"type": "string", "description": "호출(페이지)할 온콜 담당자의 Slack 사용자 ID(U로 시작). Slack 프로필 > 멤버 ID에서 확인. 예: U012ABC"},
+          "linear_team_id": {"type": "string", "description": "(선택) 인시던트 이슈를 생성할 Linear 팀 ID. Linear 팀 설정에서 확인. 예: TEAM-OPS"}
+        },
+        "required": ["service_name", "severity", "summary", "oncall_user_id"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "incident_channel": {"type": "string"},
+          "linear_issue_url": {"type": "string"},
+          "pager_dispatched": {"type": "boolean"}
+        }
+      },
+      "risk_level": "High",
+      "required_connections": ["slack", "linear"],
+      "service_type": "slack"
+    },
+    {
+      "node_type": "it_ops_password_reset",
+      "name": "비밀번호 초기화 자동화",
+      "category": "action",
+      "description": "본인 인증 후 임시 비밀번호 생성 + 사내 메일/SMS 발송",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "employee_id": {"type": "string", "description": "비밀번호를 초기화할 직원의 ID(사번 또는 계정명). 예: EMP-1042"},
+          "verification_token": {"type": "string", "description": "본인 인증을 마쳤음을 증명하는 일회용 토큰. 앞선 본인 인증 단계에서 발급된 값을 넣습니다(직접 임의로 만들면 안 됨)"},
+          "delivery_channel": {"type": "string", "enum": ["email", "sms"], "description": "임시 비밀번호 전달 수단. email 또는 sms"},
+          "destination": {"type": "string", "description": "임시 비밀번호를 받을 주소. delivery_channel이 email이면 이메일, sms면 휴대폰 번호. 예: 'kim@corp.com' 또는 '010-1234-5678'"}
+        },
+        "required": ["employee_id", "verification_token", "delivery_channel", "destination"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "reset_request_id": {"type": "string"},
+          "temp_password_sent": {"type": "boolean"},
+          "expires_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "risk_level": "Restricted",
+      "required_connections": [],
+      "service_type": null
+    },
+    {
+      "node_type": "it_ops_meeting_room_provision",
+      "name": "미팅룸 예약 자동화",
+      "category": "action",
+      "description": "회의 요청자가 시간/규모 입력 → 가능한 미팅룸 자동 예약 + 캘린더 등록 + 참석자 알림",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "organizer_email": {"type": "string", "format": "email", "description": "회의 주최자(예약자) 이메일. 캘린더 일정의 소유자가 됩니다. 예: 'kim@corp.com'"},
+          "start_datetime": {"type": "string", "format": "date-time", "description": "회의 시작 일시(ISO 8601). 예: '2026-06-05T14:00:00+09:00'"},
+          "end_datetime": {"type": "string", "format": "date-time", "description": "회의 종료 일시(ISO 8601). 예: '2026-06-05T15:00:00+09:00'"},
+          "attendees": {"type": "array", "items": {"type": "string", "format": "email"}, "minItems": 1, "description": "참석자 이메일 목록(최소 1명). 예: [\"a@corp.com\", \"b@corp.com\"]"},
+          "capacity_required": {"type": "integer", "minimum": 1, "description": "필요한 최소 수용 인원(명). 이 인원 이상 들어가는 미팅룸만 예약 후보가 됩니다. 예: 6"},
+          "requires_video": {"type": "boolean", "default": false, "description": "화상 회의 장비가 있는 방만 예약할지 여부(기본 false)"}
+        },
+        "required": ["organizer_email", "start_datetime", "end_datetime", "attendees", "capacity_required"]
+      },
+      "outputs": {
+        "type": "object",
+        "properties": {
+          "room_name": {"type": "string"},
+          "calendar_event_id": {"type": "string"},
+          "invites_sent": {"type": "integer"}
+        }
+      },
+      "risk_level": "Medium",
+      "required_connections": ["google"],
+      "service_type": "google_workspace"
+    }
+  ]
+}

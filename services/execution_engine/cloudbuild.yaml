@@ -1,0 +1,31 @@
+# Cloud Build config for execution_engine worker image.
+#
+# Build context = repo root (Dockerfile COPY가 packages/common_schemas + services/execution_engine 사용).
+# 빌드 명령 (repo root에서):
+#   gcloud builds submit \
+#     --config=services/execution_engine/cloudbuild.yaml \
+#     --substitutions=_TAG=phase-f \
+#     .
+
+substitutions:
+  _AR_LOCATION: asia-northeast3
+  _AR_REPOSITORY: workflow-staging
+  _IMAGE: execution-engine-worker
+  _TAG: latest
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - --tag
+      - ${_AR_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE}:${_TAG}
+      - --file
+      - services/execution_engine/Dockerfile
+      - .
+
+images:
+  - ${_AR_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE}:${_TAG}
+
+options:
+  logging: CLOUD_LOGGING_ONLY

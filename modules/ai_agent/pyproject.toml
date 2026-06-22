@@ -1,0 +1,35 @@
+[project]
+name = "ai_agent"
+version = "0.1.0"
+description = "REQ-004: LangGraph 기반 13-노드 AI 에이전트, 워크플로우 자동 생성"
+requires-python = ">=3.12"
+dependencies = [
+    "common_schemas",
+    "pydantic>=2.0",
+    "google-cloud-storage>=2.0",
+]
+
+[project.optional-dependencies]
+gcs = [
+    "google-cloud-storage>=2.0",
+]
+ontology = [
+    # ADR-0026: Neo4j AuraDB GraphRAG. lazy import라 미설치여도 모듈 로드는 가능,
+    # 실제 Neo4jOntologyAdapter 사용 시 필요. Composer Modal app 빌드에 포함.
+    "neo4j>=5.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ai_agent*"]
+
+[tool.pytest.ini_options]
+norecursedirs = ["tests/manual"]

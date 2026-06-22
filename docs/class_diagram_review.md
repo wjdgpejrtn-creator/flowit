@@ -15,7 +15,7 @@
 | 003 Nodes-Graph | 박아름 | .drawio | 26 |
 | 004 AI Agent | 신정혜 | .png (편집 불가) | ~30 |
 | 005 Toolset | 햄햄 | .png (편집 불가) | ~15 |
-| 006 doc-parser | 김진형 | .drawio (3개 파일) | 27 |
+| 006 doc_parser | 김진형 | .drawio (3개 파일) | 27 |
 | 007 Execution Engine | 황대원 | .drawio | 21 |
 | 008 Storage | 황대원 | .drawio | 19 |
 | 009 API Server | 황대원 | .drawio | 27 |

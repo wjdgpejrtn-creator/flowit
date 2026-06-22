@@ -73,7 +73,7 @@ find modules/*/tests services/*/tests -name "test_*<module>*"
 - [ ] `domain/` 레이어에서 프레임워크 import 여부 (FastAPI, SQLAlchemy, LangGraph, Celery)
 - [ ] `application/` 레이어에서 구체 Adapter 직접 import 여부
 - [ ] ORM 모델이 도메인 경계를 넘어가는지 확인
-- [ ] 공유 타입이 common-schemas에서 import되는지 (중복 정의 금지)
+- [ ] 공유 타입이 common_schemas에서 import되는지 (중복 정의 금지)
 - [ ] `modules/` 간 교차 import 시 상대 모듈의 `domain/ports/` 또는 `domain/entities/`만 참조하는지
 - **판정 기준**: 의존성 방향 위반 → Critical, SSOT 중복 정의 → Major
 

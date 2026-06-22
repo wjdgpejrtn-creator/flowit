@@ -1,0 +1,3774 @@
+[
+  {
+    "node_type": "text_transform",
+    "name": "텍스트 변환",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "변환할 원본 텍스트. 예: \"Hello World\""
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "upper",
+            "lower",
+            "strip",
+            "title",
+            "reverse"
+          ],
+          "description": "수행할 변환. upper=대문자, lower=소문자, strip=양끝 공백 제거, title=단어 첫 글자 대문자, reverse=문자열 뒤집기"
+        }
+      },
+      "required": [
+        "text",
+        "operation"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "텍스트 대소문자 변환, 공백 제거, 역순 등 문자열 변환",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "json_extract",
+    "name": "JSON 값 추출",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "description": "값을 추출할 대상 JSON 객체"
+        },
+        "path": {
+          "type": "string",
+          "description": "점(.) 구분 경로 (예: user.profile.name)"
+        }
+      },
+      "required": [
+        "data",
+        "path"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "value": {},
+        "found": {
+          "type": "boolean"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "JSON 객체에서 점(.) 구분 경로로 값을 추출",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "json_merge",
+    "name": "JSON 병합",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "base": {
+          "type": "object",
+          "description": "기준이 되는 JSON 객체. overlay가 같은 키를 덮어씁니다"
+        },
+        "overlay": {
+          "type": "object",
+          "description": "base 위에 덮어쓸 JSON 객체"
+        },
+        "deep": {
+          "type": "boolean",
+          "default": false,
+          "description": "true면 중첩 객체까지 재귀 병합, false면 최상위 키만 병합. 기본값 false"
+        }
+      },
+      "required": [
+        "base",
+        "overlay"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "object"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "두 JSON 객체를 병합. deep=True 시 중첩 객체도 재귀 병합",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "csv_parse",
+    "name": "CSV 파싱",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "csv_string": {
+          "type": "string",
+          "description": "파싱할 CSV 형식 문자열. 예: \"name,age\\nAlice,30\""
+        },
+        "delimiter": {
+          "type": "string",
+          "default": ",",
+          "description": "열 구분 문자. 기본값 쉼표(,). 탭 구분이면 \"\\t\""
+        },
+        "has_header": {
+          "type": "boolean",
+          "default": true,
+          "description": "첫 줄을 헤더(열 이름)로 사용할지 여부. 기본값 true"
+        }
+      },
+      "required": [
+        "csv_string"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "row_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "CSV 문자열을 파싱하여 행/열 데이터 추출",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "csv_build",
+    "name": "CSV 생성",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "CSV로 변환할 행 데이터 목록. 각 행은 객체 또는 값 배열"
+        },
+        "delimiter": {
+          "type": "string",
+          "default": ",",
+          "description": "열 구분 문자. 기본값 쉼표(,)"
+        }
+      },
+      "required": [
+        "rows"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "csv_string": {
+          "type": "string"
+        },
+        "row_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "행 데이터 목록을 CSV 문자열로 변환",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "number_calc",
+    "name": "수식 계산",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "add",
+            "sub",
+            "mul",
+            "div",
+            "mod",
+            "pow",
+            "abs",
+            "round",
+            "min",
+            "max",
+            "sum",
+            "ceil",
+            "floor",
+            "sqrt"
+          ],
+          "description": "연산 종류. add=덧셈, sub=뺄셈, mul=곱셈, div=나눗셈, mod=나머지, pow=거듭제곱, abs=절댓값, round=반올림, min/max/sum=집계, ceil=올림, floor=내림, sqrt=제곱근"
+        },
+        "operands": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "description": "연산 대상 숫자 목록. 예: [10, 3]"
+        },
+        "ndigits": {
+          "type": "integer",
+          "default": 0,
+          "description": "round 연산 시 반올림할 소수점 자리수. 기본값 0"
+        }
+      },
+      "required": [
+        "operation",
+        "operands"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "number"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "사칙연산, 반올림, 집계(min/max/sum) 등 수치 계산",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "date_format",
+    "name": "날짜 포맷 변환",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "date_str": {
+          "type": "string",
+          "description": "변환할 날짜 문자열. input_format과 형식이 일치해야 합니다. 예: \"2026-06-03 14:30:00\""
+        },
+        "input_format": {
+          "type": "string",
+          "default": "%Y-%m-%d %H:%M:%S",
+          "description": "입력 날짜 문자열의 형식(strftime 코드). 기본값 \"%Y-%m-%d %H:%M:%S\""
+        },
+        "output_format": {
+          "type": "string",
+          "default": "%Y-%m-%d %H:%M:%S",
+          "description": "출력할 날짜 형식(strftime 코드). 예: \"%Y년 %m월 %d일\""
+        },
+        "add_days": {
+          "type": "integer",
+          "default": 0,
+          "description": "결과 날짜에 더할 일수(음수면 과거). 기본값 0"
+        },
+        "add_hours": {
+          "type": "integer",
+          "default": 0,
+          "description": "더할 시간 수(음수 가능). 기본값 0"
+        },
+        "add_minutes": {
+          "type": "integer",
+          "default": 0,
+          "description": "더할 분 수(음수 가능). 기본값 0"
+        }
+      },
+      "required": [
+        "date_str"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "string"
+        },
+        "iso": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "number"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "날짜 파싱/포맷 변환 및 날짜 연산 (일/시/분 가감)",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "list_filter",
+    "name": "리스트 필터",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "처리할 리스트"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "filter_none",
+            "sort",
+            "sort_desc",
+            "deduplicate",
+            "reverse",
+            "take",
+            "skip"
+          ],
+          "description": "filter_none=빈 값 제거, sort=오름차순, sort_desc=내림차순, deduplicate=중복 제거, reverse=뒤집기, take=앞 n개, skip=앞 n개 건너뛰기"
+        },
+        "n": {
+          "type": "integer",
+          "default": 0,
+          "description": "take/skip 연산에서 사용할 개수. 기본값 0"
+        },
+        "key": {
+          "type": "string",
+          "default": "",
+          "description": "객체 리스트 정렬·필터 시 기준이 될 필드명. 비우면 값 자체 기준"
+        }
+      },
+      "required": [
+        "items",
+        "operation"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "리스트 필터링, 정렬, 중복 제거, 슬라이스 등",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "list_map",
+    "name": "리스트 변환",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "변환할 리스트"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "extract_field",
+            "to_str",
+            "to_int",
+            "to_float",
+            "upper",
+            "lower",
+            "strip"
+          ],
+          "description": "각 요소에 적용할 변환. extract_field=필드 추출, to_str/to_int/to_float=타입 변환, upper/lower=대소문자, strip=공백 제거"
+        },
+        "field": {
+          "type": "string",
+          "default": "",
+          "description": "extract_field 연산 시 추출할 필드명"
+        }
+      },
+      "required": [
+        "items",
+        "operation"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "리스트 각 요소에 변환 적용 (필드 추출, 타입 변환, 문자열 변환 등)",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "string_template",
+    "name": "문자열 템플릿",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "template": {
+          "type": "string",
+          "description": "예: '안녕하세요, ${name}님' (string.Template $변수명 형식)"
+        },
+        "variables": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "템플릿의 $변수명에 채워 넣을 값 객체. 예: {\"name\": \"홍길동\"}"
+        }
+      },
+      "required": [
+        "template",
+        "variables"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "템플릿 문자열에 변수를 치환 ($변수명 형식, string.Template 사용으로 포맷 인젝션 차단)",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "regex_extract",
+    "name": "정규식 추출",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "검색 대상 텍스트"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "추출할 정규식 패턴. 예: \"\\d{3}-\\d{4}\" (전화번호 뒷자리)"
+        },
+        "ignore_case": {
+          "type": "boolean",
+          "default": false,
+          "description": "대소문자 무시 여부. 기본값 false"
+        },
+        "multiline": {
+          "type": "boolean",
+          "default": false,
+          "description": "여러 줄 모드(^,$가 각 줄에 매칭). 기본값 false"
+        }
+      },
+      "required": [
+        "text",
+        "pattern"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "matches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "groups": {
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "first_match": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "정규식 패턴으로 텍스트에서 매칭 값 추출",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "regex_replace",
+    "name": "정규식 치환",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "치환 대상 텍스트"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "찾을 정규식 패턴"
+        },
+        "replacement": {
+          "type": "string",
+          "description": "치환할 문자열. 캡처 그룹은 \\1, \\2로 참조"
+        },
+        "max_count": {
+          "type": "integer",
+          "default": 0,
+          "description": "최대 치환 횟수. 0이면 전체 치환. 기본값 0"
+        },
+        "ignore_case": {
+          "type": "boolean",
+          "default": false,
+          "description": "대소문자 무시 여부. 기본값 false"
+        }
+      },
+      "required": [
+        "text",
+        "pattern",
+        "replacement"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "string"
+        },
+        "replacements_made": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "정규식 패턴으로 텍스트 내 매칭 부분 치환",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "base64_encode",
+    "name": "Base64 인코딩",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "description": "인코딩할 원본 문자열"
+        },
+        "encoding": {
+          "type": "string",
+          "default": "utf-8",
+          "description": "원본 문자열의 문자 인코딩. 기본값 utf-8"
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "문자열을 Base64로 인코딩",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "base64_decode",
+    "name": "Base64 디코딩",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "description": "디코딩할 Base64 문자열"
+        },
+        "encoding": {
+          "type": "string",
+          "default": "utf-8",
+          "description": "복원할 문자열의 문자 인코딩. 기본값 utf-8"
+        }
+      },
+      "required": [
+        "data"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "Base64 문자열을 디코딩하여 원본 문자열 반환",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "if_condition",
+    "name": "조건 분기",
+    "category": "condition",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "left": {
+          "description": "비교할 왼쪽 값(피연산자)"
+        },
+        "operator": {
+          "type": "string",
+          "enum": [
+            "eq",
+            "ne",
+            "gt",
+            "lt",
+            "gte",
+            "lte",
+            "in",
+            "not_in",
+            "is_none",
+            "is_not_none",
+            "contains"
+          ],
+          "description": "비교 연산자. eq=같음, ne=다름, gt=초과, lt=미만, gte=이상, lte=이하, in=포함됨, not_in=포함안됨, is_none=값없음, is_not_none=값있음, contains=포함"
+        },
+        "right": {
+          "description": "비교할 오른쪽 값. is_none/is_not_none에서는 불필요"
+        },
+        "value": {
+          "description": "조건이 참일 때 다음 노드로 전달할 값. 비우면 left를 전달"
+        }
+      },
+      "required": [
+        "left",
+        "operator"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "branch": {
+          "type": "string",
+          "enum": [
+            "true",
+            "false"
+          ]
+        },
+        "value": {},
+        "condition_result": {
+          "type": "boolean"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "조건 평가 결과에 따라 true/false 브랜치로 분기",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "switch_case",
+    "name": "다중 분기",
+    "category": "condition",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "description": "분기 기준이 되는 값"
+        },
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "값과 매칭할 케이스 목록. 각 케이스는 비교값과 대상 브랜치를 지정"
+        },
+        "default_case": {
+          "type": "string",
+          "default": "default",
+          "description": "어떤 케이스에도 매칭되지 않을 때 사용할 브랜치 이름. 기본값 \"default\""
+        }
+      },
+      "required": [
+        "value",
+        "cases"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "matched_case": {
+          "type": "string"
+        },
+        "value": {}
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "값에 따라 N개 케이스 중 하나로 분기",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "loop_list",
+    "name": "리스트 순회",
+    "category": "condition",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "각 항목마다 하위 노드를 반복 실행할 리스트"
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "리스트 각 항목에 대해 하위 노드를 반복 실행 (실행 엔진 처리)",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "loop_count",
+    "name": "횟수 반복",
+    "category": "condition",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "description": "하위 노드를 반복 실행할 횟수"
+        },
+        "start": {
+          "type": "integer",
+          "default": 0,
+          "description": "반복 인덱스 시작값. 기본값 0"
+        }
+      },
+      "required": [
+        "count"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "indices": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "지정한 횟수만큼 하위 노드를 반복 실행 (실행 엔진 처리)",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "delay",
+    "name": "지연 실행",
+    "category": "condition",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "실행을 지연시킬 시간(초). 예: 5"
+        }
+      },
+      "required": [
+        "seconds"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "elapsed_seconds": {
+          "type": "number"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "지정한 초(seconds)만큼 실행을 지연",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "retry",
+    "name": "재시도",
+    "category": "condition",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "default": 3,
+          "description": "최대 시도 횟수(최초 실행 포함). 기본값 3"
+        },
+        "delay_seconds": {
+          "type": "number",
+          "default": 1.0,
+          "description": "첫 재시도 전 대기 시간(초). 기본값 1.0"
+        },
+        "backoff_multiplier": {
+          "type": "number",
+          "default": 2.0,
+          "description": "재시도마다 대기 시간에 곱할 배수(지수 백오프). 기본값 2.0"
+        },
+        "value": {
+          "description": "재시도 대상 하위 노드로 전달할 입력값"
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "value": {},
+        "config": {
+          "type": "object"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "하위 노드 실패 시 지수 백오프로 재시도 (실행 엔진 처리)",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "merge_branch",
+    "name": "브랜치 병합",
+    "category": "condition",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "branches": {
+          "type": "array",
+          "description": "병합할 병렬 브랜치 결과 목록"
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "list",
+            "first",
+            "last",
+            "dict_merge"
+          ],
+          "default": "list",
+          "description": "병합 방식. list=배열로 모음, first=첫 결과, last=마지막 결과, dict_merge=객체 병합. 기본값 list"
+        }
+      },
+      "required": [
+        "branches"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {},
+        "branch_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "병렬 브랜치 결과를 하나로 집계 (list/first/last/dict_merge 전략)",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "stop_workflow",
+    "name": "워크플로우 종료",
+    "category": "condition",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "default": "",
+          "description": "워크플로우 종료 사유(로그·결과에 기록). 기본값 빈 문자열"
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "stopped": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "워크플로우를 즉시 종료. StopWorkflowError를 발생시켜 실행 엔진이 정상 종료 처리",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "schedule_trigger",
+    "name": "스케줄 트리거",
+    "category": "trigger",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "cron": {
+          "type": "string",
+          "description": "Cron 표현식 (예: '0 9 * * 1-5')"
+        },
+        "timezone": {
+          "type": "string",
+          "default": "UTC",
+          "description": "Cron 시각을 해석할 시간대. 예: \"Asia/Seoul\". 기본값 UTC"
+        },
+        "triggered_at": {
+          "type": "string",
+          "description": "실제 트리거 시각(실행 엔진이 자동 주입, 직접 입력 불필요)"
+        }
+      },
+      "required": [
+        "cron"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "triggered_at": {
+          "type": "string"
+        },
+        "cron": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "Cron 표현식 기반 스케줄 트리거. 실행 엔진이 스케줄을 관리하고 트리거 시각을 주입",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "webhook_trigger",
+    "name": "웹훅 트리거",
+    "category": "trigger",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "type": "object",
+          "description": "수신한 웹훅 본문(실행 엔진이 주입). 테스트 시 예상 페이로드 입력"
+        },
+        "headers": {
+          "type": "object",
+          "description": "수신한 HTTP 헤더(실행 엔진이 주입)"
+        },
+        "method": {
+          "type": "string",
+          "default": "POST",
+          "description": "허용할 HTTP 메서드. 기본값 POST"
+        },
+        "path": {
+          "type": "string",
+          "description": "웹훅을 수신할 경로. 예: \"/hooks/order-created\""
+        }
+      },
+      "required": [
+        "payload"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "type": "object"
+        },
+        "headers": {
+          "type": "object"
+        },
+        "method": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "외부 HTTP 웹훅 수신. 실행 엔진이 엔드포인트를 등록하고 페이로드를 주입",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "manual_trigger",
+    "name": "수동 트리거",
+    "category": "trigger",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "type": "object",
+          "description": "수동 시작 시 전달할 초기 데이터(선택)"
+        },
+        "triggered_by": {
+          "type": "string",
+          "description": "워크플로우를 시작한 사용자 식별자(실행 엔진이 주입)"
+        },
+        "triggered_at": {
+          "type": "string",
+          "description": "수동 시작 시각(실행 엔진이 주입)"
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "payload": {
+          "type": "object"
+        },
+        "triggered_by": {
+          "type": "string"
+        },
+        "triggered_at": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "사용자가 수동으로 워크플로우를 시작. 선택적 초기 페이로드 전달 가능",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "file_watch_trigger",
+    "name": "파일 감시 트리거",
+    "category": "trigger",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "변경을 감시할 파일 또는 디렉터리 경로. 예: \"/data/incoming\""
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "created",
+            "modified",
+            "deleted",
+            "moved"
+          ],
+          "description": "감지할 이벤트. created=생성, modified=수정, deleted=삭제, moved=이동"
+        },
+        "payload": {
+          "type": "object",
+          "description": "이벤트 발생 시 전달되는 데이터(실행 엔진이 주입)"
+        }
+      },
+      "required": [
+        "file_path",
+        "event_type"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string"
+        },
+        "event_type": {
+          "type": "string"
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "파일 시스템 변경 감지 트리거. 실행 엔진이 watchdog으로 감시하고 이벤트 주입",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "event_trigger",
+    "name": "이벤트 트리거",
+    "category": "trigger",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "type": "string",
+          "description": "구독할 내부 이벤트 종류. 예: \"order.completed\""
+        },
+        "payload": {
+          "type": "object",
+          "description": "이벤트 발행 시 전달되는 데이터(실행 엔진이 주입)"
+        },
+        "source": {
+          "type": "string",
+          "description": "이벤트 발행 출처를 한정(선택). 비우면 모든 출처를 구독"
+        }
+      },
+      "required": [
+        "event_type"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "type": "string"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "source": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "내부 이벤트 버스 구독. 특정 event_type 발행 시 워크플로우 시작",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "api_poll_trigger",
+    "name": "API 폴링 트리거",
+    "category": "trigger",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "response": {
+          "type": "object",
+          "description": "폴링한 API의 현재 응답(실행 엔진이 주입)"
+        },
+        "previous_response": {
+          "type": "object",
+          "description": "직전 폴링 응답(변경 비교용, 실행 엔진이 주입)"
+        },
+        "changed": {
+          "type": "boolean",
+          "default": false,
+          "description": "응답 변경 여부(실행 엔진이 판정). 기본값 false"
+        }
+      },
+      "required": [
+        "response"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "response": {
+          "type": "object"
+        },
+        "previous_response": {
+          "type": "object"
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "diff_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "외부 API를 주기적으로 폴링하여 응답 변경 감지 시 워크플로우 시작",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "http_request",
+    "name": "HTTP 요청",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "호출할 API의 전체 URL"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "PATCH"
+          ],
+          "default": "GET",
+          "description": "HTTP 메서드(GET/POST/PUT/DELETE/PATCH). 기본값 GET"
+        },
+        "headers": {
+          "type": "object",
+          "description": "요청 HTTP 헤더 객체"
+        },
+        "body": {
+          "type": "object",
+          "description": "요청 본문(JSON)"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 30.0,
+          "description": "응답 대기 제한 시간(초). 기본값 30"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "status_code": {
+          "type": "integer"
+        },
+        "headers": {
+          "type": "object"
+        },
+        "body": {},
+        "text": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [],
+    "description": "외부 HTTP API 호출 (GET/POST/PUT/DELETE/PATCH). httpx 비동기 클라이언트 사용",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "pdf_generate",
+    "name": "PDF 생성",
+    "category": "output",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "PDF 문서 제목"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "heading": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "문서를 구성할 섹션 목록(각 섹션은 제목·본문 포함)"
+        },
+        "font_size": {
+          "type": "integer",
+          "default": 12,
+          "description": "본문 글자 크기(pt). 기본값 12 (6~72pt로 제한)"
+        },
+        "margin": {
+          "type": "integer",
+          "default": 10,
+          "description": "페이지 여백(mm). 기본값 10 (0~90mm로 제한)"
+        }
+      },
+      "required": [
+        "title",
+        "sections"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "pdf_bytes": {
+          "type": "string",
+          "format": "binary",
+          "description": "생성된 PDF(base64 인코딩 문자열). 이메일 첨부 등 하류 노드가 ${...pdf_bytes} 참조로 받는다."
+        },
+        "page_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "제목과 섹션 데이터로 PDF 파일 생성 (fpdf2 사용)",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "slack_post_message",
+    "name": "Slack 메시지 전송",
+    "category": "action",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "description": "채널 ID 또는 채널명"
+        },
+        "text": {
+          "type": "string",
+          "description": "메시지 본문"
+        },
+        "thread_ts": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "스레드 부모 메시지 ts"
+        },
+        "mrkdwn": {
+          "type": "boolean",
+          "default": true,
+          "description": "Slack 마크다운(*굵게*, _기울임_ 등) 해석 여부. 기본값 true"
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Slack Block Kit"
+        }
+      },
+      "required": [
+        "channel",
+        "text"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "raw_response": {
+          "type": "object"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "slack"
+    ],
+    "description": "Slack 채널에 메시지 전송 (chat.postMessage). OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "slack"
+  },
+  {
+    "node_type": "gmail_send",
+    "name": "Gmail 메일 전송",
+    "category": "action",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          },
+          "minItems": 1,
+          "description": "받는 사람 이메일 주소 목록. 예: [\"a@example.com\"]"
+        },
+        "subject": {
+          "type": "string",
+          "description": "이메일 제목"
+        },
+        "body": {
+          "type": "string",
+          "description": "이메일 본문"
+        },
+        "cc": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          },
+          "description": "참조(CC) 주소 목록(선택)"
+        },
+        "bcc": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          },
+          "description": "숨은참조(BCC) 주소 목록(선택)"
+        },
+        "is_html": {
+          "type": "boolean",
+          "default": false,
+          "description": "본문을 HTML로 해석할지 여부. 기본값 false"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "filename": {
+                "type": "string",
+                "description": "첨부 파일명. 예: report.pdf"
+              },
+              "content_base64": {
+                "type": "string",
+                "description": "base64 인코딩 파일 내용(상류 산출물 ${...} 참조)"
+              },
+              "mimetype": {
+                "type": "string",
+                "description": "MIME 타입(선택). 예: application/pdf"
+              }
+            },
+            "required": [
+              "content_base64"
+            ]
+          },
+          "description": "첨부 파일 목록(선택). 상류 산출물을 첨부하려면 content_base64에 그 출력 참조를 둔다. 예: PDF 첨부 = [{\"filename\": \"report.pdf\", \"content_base64\": \"${<pdf_generate instance_id>.pdf_bytes}\", \"mimetype\": \"application/pdf\"}]"
+        }
+      },
+      "required": [
+        "to",
+        "subject",
+        "body"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Gmail로 이메일 전송 (users.messages.send). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "google_drive_read",
+    "name": "Google Drive 파일 읽기",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "file_id": {
+          "type": "string",
+          "description": "다운로드할 Drive 파일 ID. 파일 URL의 /d/ 뒤 문자열. 예: \"1AbC...xyz\""
+        },
+        "as_text": {
+          "type": "boolean",
+          "default": false,
+          "description": "true면 결과를 텍스트로 반환. 기본값 false"
+        },
+        "export_mime_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Google Docs/Sheets export 포맷"
+        }
+      },
+      "required": [
+        "file_id"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "file_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "content_base64": {
+          "type": "string"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Drive에서 파일 다운로드 (files.get + media). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "google_sheets_read",
+    "name": "Google Sheets 읽기",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "spreadsheet_id": {
+          "type": "string",
+          "description": "스프레드시트 ID(시트 URL의 /d/ 뒤 문자열, 예: \"1AbC...xyz\"). 전체 URL을 붙여넣어도 ID만 자동 추출됨. 대상은 네이티브 Google Sheets여야 함(업로드된 .xlsx Office 파일은 'Google Sheets로 저장'으로 변환 필요)"
+        },
+        "range_a1": {
+          "type": "string",
+          "description": "A1 표기법 (Sheet1!A1:D100)"
+        },
+        "value_render_option": {
+          "type": "string",
+          "enum": [
+            "FORMATTED_VALUE",
+            "UNFORMATTED_VALUE",
+            "FORMULA"
+          ],
+          "default": "FORMATTED_VALUE",
+          "description": "값 표시 방식. FORMATTED_VALUE=서식 적용, UNFORMATTED_VALUE=원본값, FORMULA=수식. 기본값 FORMATTED_VALUE"
+        },
+        "date_time_render_option": {
+          "type": "string",
+          "enum": [
+            "FORMATTED_STRING",
+            "SERIAL_NUMBER"
+          ],
+          "default": "FORMATTED_STRING",
+          "description": "날짜·시간 표시 방식. FORMATTED_STRING=문자열, SERIAL_NUMBER=일련번호. 기본값 FORMATTED_STRING"
+        },
+        "major_dimension": {
+          "type": "string",
+          "enum": [
+            "ROWS",
+            "COLUMNS"
+          ],
+          "default": "ROWS",
+          "description": "데이터 방향. ROWS=행 기준, COLUMNS=열 기준. 기본값 ROWS"
+        }
+      },
+      "required": [
+        "spreadsheet_id",
+        "range_a1"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "range_resolved": {
+          "type": "string"
+        },
+        "major_dimension": {
+          "type": "string"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "array"
+          }
+        },
+        "row_count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Sheets 지정 범위(A1 표기) 값 읽기 (values.get). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "google_docs_write",
+    "name": "Google Docs 작성",
+    "category": "output",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "새 문서 생성 시 필수"
+        },
+        "content": {
+          "type": "string",
+          "description": "문서에 쓸 내용"
+        },
+        "document_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "기존 문서 수정 시 지정"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "append",
+            "replace",
+            "create_only"
+          ],
+          "default": "append",
+          "description": "append=기존 문서에 추가, replace=내용 교체, create_only=새로 생성. 기본값 append"
+        },
+        "folder_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "새 문서를 생성할 Drive 폴더 ID(선택). 폴더 URL의 마지막 문자열"
+        }
+      },
+      "required": [
+        "content"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "document_id": {
+          "type": "string"
+        },
+        "revision_id": {
+          "type": "string"
+        },
+        "web_link": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Docs 문서 생성/내용 추가·교체 (documents.create + batchUpdate). OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "postgresql_query",
+    "name": "PostgreSQL 쿼리",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "SQL 문 ($1, $2 ... placeholder 사용)"
+        },
+        "parameters": {
+          "type": "array",
+          "description": "쿼리의 $1, $2 자리에 바인딩할 값 목록(SQL 인젝션 방지)"
+        },
+        "fetch_mode": {
+          "type": "string",
+          "enum": [
+            "all",
+            "one",
+            "none"
+          ],
+          "default": "all",
+          "description": "결과 반환 방식. all=전체 행, one=첫 행, none=결과 없음(INSERT 등). 기본값 all"
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "default": 30.0,
+          "description": "쿼리 제한 시간(초). 기본값 30"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "row_count": {
+          "type": "integer"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "postgresql"
+    ],
+    "description": "PostgreSQL 데이터베이스에 SQL 쿼리 실행. asyncpg 기반 비동기 호출. DB 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "postgresql"
+  },
+  {
+    "node_type": "mysql_query",
+    "name": "MySQL 쿼리",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "SQL 문 (%s placeholder 사용)"
+        },
+        "parameters": {
+          "type": "array",
+          "description": "쿼리의 %s 자리에 바인딩할 값 목록(SQL 인젝션 방지)"
+        },
+        "fetch_mode": {
+          "type": "string",
+          "enum": [
+            "all",
+            "one",
+            "none"
+          ],
+          "default": "all",
+          "description": "결과 반환 방식. all=전체 행, one=첫 행, none=결과 없음(INSERT 등). 기본값 all"
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "default": 30.0,
+          "description": "쿼리 제한 시간(초). 기본값 30"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "row_count": {
+          "type": "integer"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "mysql"
+    ],
+    "description": "MySQL 데이터베이스에 SQL 쿼리 실행. aiomysql 기반 비동기 호출. DB 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "mysql"
+  },
+  {
+    "node_type": "bigquery_query",
+    "name": "BigQuery 쿼리",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "description": "쿼리를 실행할 GCP 프로젝트 ID. 예: \"my-project-123\""
+        },
+        "query": {
+          "type": "string",
+          "description": "Standard SQL"
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "쿼리 파라미터 목록(named/positional 바인딩)"
+        },
+        "location": {
+          "type": "string",
+          "default": "US",
+          "description": "데이터셋 리전. 예: \"US\", \"asia-northeast3\". 기본값 US"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "default": false,
+          "description": "true면 실제 실행 없이 비용·유효성만 확인. 기본값 false"
+        },
+        "use_legacy_sql": {
+          "type": "boolean",
+          "default": false,
+          "description": "Legacy SQL 사용 여부. 기본값 false(Standard SQL)"
+        },
+        "maximum_bytes_billed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "과금 허용 최대 바이트(초과 시 쿼리 거부, 선택)"
+        }
+      },
+      "required": [
+        "project_id",
+        "query"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "total_rows": {
+          "type": "integer"
+        },
+        "total_bytes_processed": {
+          "type": "integer"
+        },
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google BigQuery Standard SQL 쿼리 실행. GCP service account 또는 OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "anthropic_chat",
+    "name": "Anthropic Chat",
+    "category": "ai",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "사용할 Claude 모델 ID. 예: \"claude-opus-4-8\", \"claude-sonnet-4-6\""
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "assistant"
+                ]
+              },
+              "content": {}
+            },
+            "required": [
+              "role",
+              "content"
+            ]
+          },
+          "description": "대화 메시지 목록. 각 항목은 role(user/assistant)과 content"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "default": 1024,
+          "description": "생성할 최대 토큰 수. 기본값 1024"
+        },
+        "system": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "모델 동작을 지시하는 시스템 프롬프트(선택)"
+        },
+        "temperature": {
+          "type": "number",
+          "default": 1.0,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "출력 무작위성(0=결정적, 1=다양). 기본값 1.0"
+        },
+        "top_p": {
+          "type": "number",
+          "default": 1.0,
+          "description": "누적 확률 샘플링 기준(0~1). 기본값 1.0"
+        },
+        "stop_sequences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "생성을 중단할 문자열 목록(선택)"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "모델이 호출할 수 있는 도구 정의 목록(선택)"
+        }
+      },
+      "required": [
+        "model",
+        "messages"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "stop_reason": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object"
+        },
+        "tool_use": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "anthropic"
+    ],
+    "description": "Anthropic Messages API 호출 (Claude opus/sonnet/haiku). API key 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "anthropic"
+  },
+  {
+    "node_type": "gemma_chat",
+    "name": "Gemma Chat",
+    "category": "ai",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Gemma 모델에 보낼 입력 프롬프트"
+        },
+        "response_format": {
+          "type": "string",
+          "enum": [
+            "text",
+            "json",
+            "markdown"
+          ],
+          "default": "text",
+          "description": "응답 형식. text=일반텍스트, json=JSON, markdown=마크다운. 기본값 text"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "default": 1024,
+          "description": "생성할 최대 토큰 수. 기본값 1024"
+        },
+        "temperature": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "출력 무작위성(0=결정적, 1=다양). 기본값 0.7"
+        },
+        "system": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "모델 동작을 지시하는 시스템 프롬프트(선택)"
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "finish_reason": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "Gemma 4 LLM 추론 (시스템 내장, 자격증명 불필요). prompt → 텍스트 응답. REQ-004 ModalLLMAdapter 위임.",
+    "is_mvp": true,
+    "service_type": "gemma"
+  },
+  {
+    "node_type": "google_calendar_create_event",
+    "name": "Google Calendar 이벤트 생성",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "calendar_id": {
+          "type": "string",
+          "default": "primary",
+          "description": "이벤트를 추가할 캘린더 ID. 본인 기본 캘린더는 \"primary\". 기본값 primary"
+        },
+        "summary": {
+          "type": "string",
+          "description": "이벤트 제목"
+        },
+        "start": {
+          "type": "string",
+          "format": "date-time",
+          "description": "시작 일시(ISO 8601). 예: \"2026-06-03T14:00:00\""
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "종료 일시(ISO 8601). 예: \"2026-06-03T15:00:00\""
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "이벤트 상세 설명(선택)"
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "장소(선택)"
+        },
+        "attendees": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "email"
+          },
+          "description": "참석자 이메일 목록(선택)"
+        },
+        "timezone": {
+          "type": "string",
+          "default": "Asia/Seoul",
+          "description": "시작·종료 시각의 시간대. 기본값 Asia/Seoul"
+        },
+        "send_updates": {
+          "type": "string",
+          "enum": [
+            "all",
+            "externalOnly",
+            "none"
+          ],
+          "default": "none",
+          "description": "참석자 알림 발송 범위. all=전체, externalOnly=외부만, none=안함. 기본값 none"
+        },
+        "reminders": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "알림 설정 목록(선택)"
+        }
+      },
+      "required": [
+        "calendar_id",
+        "summary",
+        "start",
+        "end"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string"
+        },
+        "html_link": {
+          "type": "string"
+        },
+        "ical_uid": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "created": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Calendar에 이벤트 생성 (events.insert). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "linear_create_issue",
+    "name": "Linear 이슈 생성",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "team_id": {
+          "type": "string",
+          "description": "이슈를 생성할 Linear 팀 ID. 팀 설정 > General에서 확인. 예: \"a1b2c3d4-...\""
+        },
+        "title": {
+          "type": "string",
+          "description": "이슈 제목"
+        },
+        "description": {
+          "type": "string",
+          "description": "이슈 본문(Markdown 지원, 선택)"
+        },
+        "priority": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "default": 0,
+          "description": "우선순위. 0=없음, 1=긴급, 2=높음, 3=보통, 4=낮음. 기본값 0"
+        },
+        "assignee_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "담당자 사용자 ID(선택)"
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "적용할 라벨 ID 목록(선택)"
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "연결할 프로젝트 ID(선택)"
+        },
+        "state_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "초기 상태(워크플로우 단계) ID(선택)"
+        },
+        "due_date": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date",
+          "description": "마감일(YYYY-MM-DD, 선택). 예: \"2026-06-30\""
+        }
+      },
+      "required": [
+        "team_id",
+        "title"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "linear"
+    ],
+    "description": "Linear에 이슈 생성 (GraphQL issueCreate). API key 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "linear"
+  },
+  {
+    "node_type": "llm_judge",
+    "name": "LLM 채점기",
+    "category": "ai",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "평가 대상 텍스트"
+        },
+        "criteria": {
+          "type": "string",
+          "description": "평가 기준/루브릭"
+        },
+        "model": {
+          "type": "string",
+          "default": "claude-haiku-4-5"
+        },
+        "min_score": {
+          "type": "integer",
+          "default": 0
+        },
+        "max_score": {
+          "type": "integer",
+          "default": 10
+        },
+        "max_tokens": {
+          "type": "integer",
+          "default": 512
+        }
+      },
+      "required": [
+        "content",
+        "criteria"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "score": {
+          "type": "number",
+          "description": "채점 점수 (if_condition gte 등이 비교)"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "anthropic"
+    ],
+    "description": "콘텐츠를 평가 기준에 따라 채점해 score(숫자)와 근거를 반환. 품질 루프(generator→llm_judge→if_condition gte)에서 게이트 점수 산출. Anthropic API key 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "anthropic"
+  },
+  {
+    "node_type": "google_sheets_write",
+    "name": "Google Sheets 쓰기",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "spreadsheet_id": {
+          "type": "string",
+          "description": "스프레드시트 ID. 전체 URL을 붙여넣어도 ID만 자동 추출됨"
+        },
+        "range_a1": {
+          "type": "string",
+          "description": "A1 표기법 (Sheet1!A1)"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "array"
+          },
+          "description": "2D 행렬(행 우선)"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "update",
+            "append"
+          ],
+          "default": "update"
+        },
+        "value_input_option": {
+          "type": "string",
+          "enum": [
+            "USER_ENTERED",
+            "RAW"
+          ],
+          "default": "USER_ENTERED"
+        }
+      },
+      "required": [
+        "spreadsheet_id",
+        "range_a1",
+        "values"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "updated_range": {
+          "type": "string"
+        },
+        "updated_rows": {
+          "type": "integer"
+        },
+        "updated_columns": {
+          "type": "integer"
+        },
+        "updated_cells": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Sheets 지정 범위에 값 쓰기/추가 (values.update·append). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "google_calendar_read",
+    "name": "Google Calendar 이벤트 조회",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "calendar_id": {
+          "type": "string",
+          "default": "primary"
+        },
+        "time_min": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "time_max": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_results": {
+          "type": "integer",
+          "default": 10
+        }
+      },
+      "required": []
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "start": {
+                "type": "object"
+              },
+              "end": {
+                "type": "object"
+              },
+              "status": {
+                "type": "string"
+              },
+              "html_link": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Calendar 이벤트 목록 조회 (events.list). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "google_docs_read",
+    "name": "Google Docs 읽기",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "document_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "document_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "revision_id": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Docs 문서 본문 평문 읽기 (documents.get). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "google_drive_upload",
+    "name": "Google Drive 업로드",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "content_base64": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": "string",
+          "default": "text/plain"
+        },
+        "folder_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "content_base64"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "file_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "web_view_link": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Google Drive에 파일 업로드 (files.create + media). Google OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "gmail_read",
+    "name": "Gmail 메일 읽기",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Gmail 검색 쿼리 (예: from:boss is:unread)"
+        },
+        "max_results": {
+          "type": "integer",
+          "default": 10
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": []
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "thread_id": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "date": {
+                "type": "string"
+              },
+              "snippet": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "google"
+    ],
+    "description": "Gmail 인박스 메일 조회 (messages.list + metadata.get). Google OAuth(readonly) 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "google_workspace"
+  },
+  {
+    "node_type": "slack_read",
+    "name": "Slack 메시지 조회",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "description": "채널 ID"
+        },
+        "limit": {
+          "type": "integer",
+          "default": 20
+        },
+        "oldest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "이 ts 이후"
+        },
+        "latest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "이 ts 이전"
+        }
+      },
+      "required": [
+        "channel"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ts": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "count": {
+          "type": "integer"
+        },
+        "raw_response": {
+          "type": "object"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "slack"
+    ],
+    "description": "Slack 채널 메시지 이력 조회 (conversations.history). OAuth 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "slack"
+  },
+  {
+    "node_type": "linear_read",
+    "name": "Linear 이슈 조회",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "team_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assignee_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "first": {
+          "type": "integer",
+          "default": 20
+        }
+      },
+      "required": []
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "identifier": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "priority": {
+                "type": "integer"
+              },
+              "state": {
+                "type": "string"
+              },
+              "assignee": {
+                "type": "string"
+              },
+              "created_at": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [
+      "linear"
+    ],
+    "description": "Linear 이슈 목록 조회 (GraphQL issues). API key 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "linear"
+  },
+  {
+    "node_type": "linear_update",
+    "name": "Linear 이슈 수정",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priority": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "enum": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            null
+          ]
+        },
+        "assignee_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "issue_id"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "issue_id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "linear"
+    ],
+    "description": "Linear 이슈 수정 (GraphQL issueUpdate — state/담당자/우선순위 등). API key 자격증명 필요",
+    "is_mvp": true,
+    "service_type": "linear"
+  },
+  {
+    "node_type": "rest_api",
+    "name": "REST API",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "description": "API 기본 URL. 예: \"https://api.example.com\""
+        },
+        "path": {
+          "type": "string",
+          "default": "",
+          "description": "base_url에 이어붙일 경로. 예: \"/v1/users\". 기본값 빈 문자열"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ],
+          "default": "GET",
+          "description": "HTTP 메서드(GET/POST/PUT/PATCH/DELETE). 기본값 GET"
+        },
+        "query_params": {
+          "type": "object",
+          "description": "URL 쿼리 파라미터 객체. 예: {\"page\": 1}"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "요청 HTTP 헤더 객체. 인증 토큰은 연결(credential)로 주입 권장"
+        },
+        "body": {
+          "type": "object",
+          "description": "POST/PUT/PATCH 요청 본문(JSON)"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300,
+          "default": 30,
+          "description": "응답 대기 제한 시간(초). 기본값 30"
+        }
+      },
+      "required": [
+        "base_url"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "status_code": {
+          "type": "integer"
+        },
+        "data": {},
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "status_code",
+        "data",
+        "ok"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [],
+    "description": "REST API 호출 및 JSON 응답 파싱. base_url + path 조합, credential 선택적 지원",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "graphql",
+    "name": "GraphQL",
+    "category": "integration",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "description": "GraphQL 엔드포인트 URL. 예: \"https://api.example.com/graphql\""
+        },
+        "query": {
+          "type": "string",
+          "description": "실행할 GraphQL 쿼리 또는 뮤테이션 문자열"
+        },
+        "variables": {
+          "type": "object",
+          "description": "쿼리 변수 객체"
+        },
+        "headers": {
+          "type": "object",
+          "description": "요청 HTTP 헤더 객체"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300,
+          "default": 30,
+          "description": "응답 대기 제한 시간(초). 기본값 30"
+        }
+      },
+      "required": [
+        "endpoint",
+        "query"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "data": {},
+        "errors": {
+          "type": "array"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "data",
+        "ok"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [],
+    "description": "GraphQL 쿼리/뮤테이션 실행",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "webhook",
+    "name": "웹훅 발송",
+    "category": "action",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "웹훅을 보낼 대상 URL"
+        },
+        "payload": {
+          "type": "object",
+          "description": "전송할 본문(JSON)"
+        },
+        "headers": {
+          "type": "object",
+          "description": "추가 HTTP 헤더 객체"
+        },
+        "secret": {
+          "type": "string",
+          "description": "HMAC-SHA256 서명에 사용할 비밀키(선택). 제공 시 서명 헤더 추가"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 10,
+          "description": "응답 대기 제한 시간(초). 기본값 10"
+        }
+      },
+      "required": [
+        "url",
+        "payload"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "status_code": {
+          "type": "integer"
+        },
+        "delivered": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "status_code",
+        "delivered"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [],
+    "description": "웹훅 발송 (fire-and-forget). secret 제공 시 HMAC-SHA256 서명 헤더 자동 추가",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "email_send",
+    "name": "이메일 발송",
+    "category": "action",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "smtp_host": {
+          "type": "string",
+          "description": "SMTP 서버 주소. 예: \"smtp.gmail.com\""
+        },
+        "smtp_port": {
+          "type": "integer",
+          "default": 587,
+          "description": "SMTP 포트. 기본값 587(TLS)"
+        },
+        "from_address": {
+          "type": "string",
+          "description": "보내는 사람 이메일 주소"
+        },
+        "to_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "받는 사람 이메일 주소 목록. 예: [\"a@example.com\"]"
+        },
+        "subject": {
+          "type": "string",
+          "description": "이메일 제목"
+        },
+        "body": {
+          "type": "string",
+          "description": "이메일 본문"
+        },
+        "body_type": {
+          "type": "string",
+          "enum": [
+            "plain",
+            "html"
+          ],
+          "default": "plain",
+          "description": "본문 형식. plain=일반텍스트, html=HTML. 기본값 plain"
+        },
+        "use_tls": {
+          "type": "boolean",
+          "default": true,
+          "description": "TLS 암호화 사용 여부. 기본값 true"
+        },
+        "attachments": {
+          "type": "array",
+          "description": "첨부 파일 목록(선택). 상류 산출물을 첨부하려면 content_base64에 그 출력 참조를 둔다. 예: PDF 첨부 = [{\"filename\": \"report.pdf\", \"content_base64\": \"${<pdf_generate instance_id>.pdf_bytes}\", \"mimetype\": \"application/pdf\"}]",
+          "items": {
+            "type": "object",
+            "properties": {
+              "filename": {
+                "type": "string",
+                "description": "첨부 파일명. 예: report.pdf"
+              },
+              "content_base64": {
+                "type": "string",
+                "description": "base64 인코딩 파일 내용(상류 산출물 ${...} 참조)"
+              },
+              "mimetype": {
+                "type": "string",
+                "description": "MIME 타입. 예: \"application/pdf\""
+              }
+            },
+            "required": [
+              "content_base64"
+            ]
+          }
+        }
+      },
+      "required": [
+        "smtp_host",
+        "from_address",
+        "to_addresses",
+        "subject",
+        "body"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "sent": {
+          "type": "boolean"
+        },
+        "recipients_count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sent",
+        "recipients_count"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [],
+    "description": "SMTP 이메일 발송 (비가역적). credential.value 형식: 'username:password'",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "slack_notify",
+    "name": "Slack 알림",
+    "category": "action",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": "전송할 메시지 텍스트"
+        },
+        "channel": {
+          "type": "string",
+          "description": "전송할 채널(선택). Webhook에 기본 채널이 설정돼 있으면 생략 가능. 예: \"#general\""
+        },
+        "username": {
+          "type": "string",
+          "description": "메시지를 보낼 표시 이름(선택)"
+        },
+        "icon_emoji": {
+          "type": "string",
+          "description": "봇 아이콘 이모지(선택). 예: \":robot_face:\""
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 10,
+          "description": "전송 대기 제한 시간(초). 기본값 10"
+        }
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "sent": {
+          "type": "boolean"
+        },
+        "status_code": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sent",
+        "status_code"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "High",
+    "required_connections": [
+      "slack"
+    ],
+    "description": "Slack Incoming Webhook으로 메시지 전송. Webhook URL은 credential.value로 주입",
+    "is_mvp": true,
+    "service_type": "slack"
+  },
+  {
+    "node_type": "text_template",
+    "name": "텍스트 템플릿",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "template": {
+          "type": "string",
+          "description": "{변수} 자리를 치환할 템플릿 문자열. 예: \"안녕하세요 {name}님\""
+        },
+        "variables": {
+          "type": "object",
+          "description": "{변수}에 채워 넣을 값 객체. 예: {\"name\": \"홍길동\"}"
+        }
+      },
+      "required": [
+        "template",
+        "variables"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "rendered": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "rendered"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "Python str.format_map() 기반 텍스트 템플릿 렌더링. {variable} 문법 사용",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "json_transform",
+    "name": "JSON 변환 (JMESPath)",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "description": "변환할 대상 JSON 데이터"
+        },
+        "expression": {
+          "type": "string",
+          "description": "JMESPath 표현식. 예: \"items[?price > `100`].name\""
+        }
+      },
+      "required": [
+        "data",
+        "expression"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {},
+        "matched": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "result",
+        "matched"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "JMESPath 표현식으로 JSON 데이터 추출/변환. wildcard([*]), filter([?field]) 지원",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "data_mapping",
+    "name": "데이터 매핑",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "description": "필드명을 바꿀 원본 객체"
+        },
+        "mapping": {
+          "type": "object",
+          "description": "변경 규칙 {기존필드명: 새필드명}. 예: {\"user_name\": \"name\"}"
+        },
+        "drop_unmapped": {
+          "type": "boolean",
+          "default": false,
+          "description": "true면 mapping에 없는 필드를 제거. 기본값 false"
+        }
+      },
+      "required": [
+        "data",
+        "mapping"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "object"
+        },
+        "mapped_count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "result",
+        "mapped_count"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "필드명 리매핑. drop_unmapped=true 시 매핑 미정의 필드 제거",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "file_read",
+    "name": "파일 읽기",
+    "category": "utility",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "읽을 파일 경로. 예: \"/data/report.txt\""
+        },
+        "encoding": {
+          "type": "string",
+          "default": "utf-8",
+          "description": "텍스트 디코딩 인코딩. 기본값 utf-8"
+        },
+        "binary": {
+          "type": "boolean",
+          "default": false,
+          "description": "true면 바이너리를 hex 문자열로 읽음. 기본값 false"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "content": {},
+        "size_bytes": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "size_bytes",
+        "path"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "파일 텍스트/바이너리 읽기. binary=true 시 hex 문자열 반환",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "file_write",
+    "name": "파일 쓰기",
+    "category": "utility",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "쓸 파일 경로"
+        },
+        "content": {
+          "type": "string",
+          "description": "파일에 쓸 내용"
+        },
+        "encoding": {
+          "type": "string",
+          "default": "utf-8",
+          "description": "텍스트 인코딩. 기본값 utf-8"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "w",
+            "a"
+          ],
+          "default": "w",
+          "description": "w=덮어쓰기, a=기존 파일에 추가. 기본값 w"
+        },
+        "create_parents": {
+          "type": "boolean",
+          "default": false,
+          "description": "true면 상위 디렉터리를 자동 생성. 기본값 false"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "bytes_written": {
+          "type": "integer"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "bytes_written",
+        "success"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "Medium",
+    "required_connections": [],
+    "description": "파일 쓰기/추가. mode=a 시 기존 파일에 append. create_parents=true 시 중간 디렉토리 생성",
+    "is_mvp": true,
+    "service_type": null
+  },
+  {
+    "node_type": "file_transform",
+    "name": "파일 형식 변환",
+    "category": "transform",
+    "version": "1.0.0",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "source_path": {
+          "type": "string",
+          "description": "변환할 원본 파일 경로"
+        },
+        "target_path": {
+          "type": "string",
+          "description": "변환 결과를 저장할 파일 경로"
+        },
+        "source_format": {
+          "type": "string",
+          "enum": [
+            "csv",
+            "json"
+          ],
+          "description": "원본 파일 형식. csv 또는 json"
+        },
+        "target_format": {
+          "type": "string",
+          "enum": [
+            "csv",
+            "json"
+          ],
+          "description": "변환할 대상 형식. csv 또는 json"
+        },
+        "encoding": {
+          "type": "string",
+          "default": "utf-8",
+          "description": "파일 인코딩. 기본값 utf-8"
+        }
+      },
+      "required": [
+        "source_path",
+        "target_path",
+        "source_format",
+        "target_format"
+      ]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "target_path": {
+          "type": "string"
+        },
+        "rows_processed": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "target_path",
+        "rows_processed"
+      ]
+    },
+    "parameter_schema": {},
+    "risk_level": "Low",
+    "required_connections": [],
+    "description": "CSV ↔ JSON 파일 형식 변환",
+    "is_mvp": true,
+    "service_type": null
+  }
+]

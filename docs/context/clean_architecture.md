@@ -22,7 +22,7 @@
 
 | 원칙 | 출처 | Clean Architecture 매핑 |
 |------|------|------------------------|
-| SSOT | 교차분석 확정 | `packages/common-schemas/`가 공유 Entity·VO·Enum의 단일 정의 |
+| SSOT | 교차분석 확정 | `packages/common_schemas/`가 공유 Entity·VO·Enum의 단일 정의 |
 | 도메인 소유권 | 교차분석 확정 | 각 모듈 `domain/ports/`에서 ABC를 정의, 소유 모듈이 인터페이스를 결정 |
 | 합집합 확장 | 교차분석 확정 | SSOT 엔티티에 Optional 필드로 합집합 반영 |
 | import 규칙 | ADR-0001 | `services/* → modules/* → packages/*` (Clean Architecture 의존성 방향과 일치) |
@@ -44,20 +44,20 @@
 ├─────────────────────────────────────────────────────────────────────┤
 │  Interface Adapters                                                 │
 │                                                                     │
-│  services/api-server/         REQ-009  Inbound (HTTP → Use Case)   │
-│  services/execution-engine/   REQ-007  Inbound (Celery → Use Case) │
+│  services/api_server/         REQ-009  Inbound (HTTP → Use Case)   │
+│  services/execution_engine/   REQ-007  Inbound (Celery → Use Case) │
 │  modules/storage/             REQ-008  Outbound (Use Case → DB)    │
 │  modules/*/adapters/          각 REQ   외부 SDK·프레임워크 래핑      │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Application (Use Cases)                                            │
 │                                                                     │
 │  modules/*/application/       REQ-002~006  유스케이스 오케스트레이션 │
-│  services/execution-engine/   REQ-007      워크플로우 실행 유스케이스 │
+│  services/execution_engine/   REQ-007      워크플로우 실행 유스케이스 │
 │       src/application/                                              │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Domain (Entities)                                                  │
 │                                                                     │
-│  packages/common-schemas/     REQ-012  공유 Entity·VO·Enum (SSOT)  │
+│  packages/common_schemas/     REQ-012  공유 Entity·VO·Enum (SSOT)  │
 │  modules/*/domain/            각 REQ   모듈 전용 도메인 로직         │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -67,13 +67,13 @@
 ```
                     ┌──────────────────────┐
                     │ packages/            │
-                    │   common-schemas/    │  ← 최내곽: 아무것도 import하지 않음
+                    │   common_schemas/    │  ← 최내곽: 아무것도 import하지 않음
                     │   (REQ-012 SSOT)     │     (Pydantic v2만 예외 허용)
                     └──────────┬───────────┘
                                │ import
               ┌────────────────┼────────────────┐
               ▼                ▼                ▼
-    modules/auth/      modules/ai-agent/   modules/doc-parser/
+    modules/auth/      modules/ai_agent/   modules/doc_parser/
       domain/            domain/              domain/
       ├── ports/  ◄──── 안쪽이 인터페이스 정의
       ├── entities/
@@ -87,8 +87,8 @@
     modules/storage/             ← Repository 구현체 제공
               │ import
               ▼
-    services/api-server/         ← DI로 조립, HTTP 라우팅
-    services/execution-engine/   ← DI로 조립, Celery 디스패치
+    services/api_server/         ← DI로 조립, HTTP 라우팅
+    services/execution_engine/   ← DI로 조립, Celery 디스패치
               │ import
               ▼
     database/ (SQL)
@@ -103,19 +103,19 @@
 | `modules/*/domain/` → SQLAlchemy, FastAPI, Celery | 도메인이 프레임워크에 의존하면 안 됨 |
 | `modules/*/domain/` → `modules/*/adapters/` | 안쪽이 바깥을 모른다 |
 | `modules/*/application/` → 구현체 직접 import | Port 인터페이스로만 참조 |
-| `packages/common-schemas/` → `modules/*` | Foundation은 독립적 |
+| `packages/common_schemas/` → `modules/*` | Foundation은 독립적 |
 | `modules/*` → `services/*` | 순환 의존 방지 |
 
 ---
 
-## 3. Foundation — packages/common-schemas/ (REQ-012)
+## 3. Foundation — packages/common_schemas/ (REQ-012)
 
 Clean Architecture의 **최내곽 원**. 모든 모듈이 공유하는 Entity·VO·Enum의 SSOT.
 
 ### 3.1 디렉토리 구조
 
 ```
-packages/common-schemas/
+packages/common_schemas/
 ├── python/
 │   ├── common_schemas/
 │   │   ├── __init__.py
@@ -124,13 +124,16 @@ packages/common-schemas/
 │   │   ├── agent.py                # AgentState, DraftSpec, IntentResult,
 │   │   │                           # SlotFillingState, UnresolvedNode
 │   │   ├── document.py             # DocumentBlock, ContentBlock, FileMeta,
-│   │   │                           # SourceRef, BBox, ParserMeta, AnalysisResult
+│   │   │                           # SourceRef, BBox, ParserMeta, AnalysisResult,
+│   │   │                           # Chunk, ChunkingStrategy,
+│   │   │                           # QualityGateResult, QualityMetrics, WarningInfo
 │   │   ├── security.py             # PermissionSource, PlaintextCredential
 │   │   ├── validation.py           # ValidationErrorResponse, ValidationErrorItem
 │   │   ├── transport.py            # SSEFrame, SessionFrame, AgentNodeFrame,
 │   │   │                           # RationaleDeltaFrame, SlotFillQuestionFrame,
 │   │   │                           # DraftSpecDeltaFrame, ResultFrame, ErrorFrame
 │   │   ├── handoff.py              # HandoffPayload, EvaluationResult
+│   │   ├── types.py                # UtcDatetime (naive→UTC 자동 변환 타입, ADR-0009)
 │   │   ├── enums.py                # AgentMode, ExecutionStatus, RiskLevel, ErrorCode
 │   │   └── exceptions.py           # 공유 도메인 예외 (DomainError 베이스 클래스)
 │   └── pyproject.toml
@@ -154,7 +157,7 @@ packages/common-schemas/
 
 ### 4.1 모듈 내부 표준 템플릿
 
-모든 도메인 모듈(`modules/auth/`, `modules/ai-agent/` 등)은 아래 3계층 구조를 따른다.
+모든 도메인 모듈(`modules/auth/`, `modules/ai_agent/` 등)은 아래 3계층 구조를 따른다.
 
 ```
 modules/{module_name}/
@@ -188,13 +191,13 @@ modules/{module_name}/
 
 ```
 domain/
-  ├── entities/     ← common-schemas import만 허용
-  ├── value_objects/← common-schemas import만 허용
-  ├── services/     ← entities + value_objects + ports + common-schemas
-  └── ports/        ← entities + value_objects + common-schemas (ABC만 정의)
+  ├── entities/     ← common_schemas import만 허용
+  ├── value_objects/← common_schemas import만 허용
+  ├── services/     ← entities + value_objects + ports + common_schemas
+  └── ports/        ← entities + value_objects + common_schemas (ABC만 정의)
 
 application/
-  └── use_cases/    ← domain/* + common-schemas (ports를 통해서만 외부 접근)
+  └── use_cases/    ← domain/* + common_schemas (ports를 통해서만 외부 접근)
 
 adapters/
   └── ...           ← domain/ports 구현 + 외부 라이브러리 자유 사용
@@ -220,7 +223,8 @@ modules/auth/
 │   │   │                               #   입력: user_id, role, department
 │   │   │                               #   출력: PermissionSource (REQ-012)
 │   │   └── credential_injection.py     # CredentialInjectionService
-│   │                                   #   NodeInstance.credential_id → PlaintextCredential
+│   │                                   #   inject(credential_id: UUID, node_id: UUID) → PlaintextCredential
+│   │                                   #   node_id: 감사 추적·스코프 제한용 (PR #31 확정)
 │   │                                   #   메모리 내 복호화, 사용 후 wipe()
 │   └── ports/
 │       ├── session_repository.py       # SessionRepository (ABC)
@@ -273,14 +277,29 @@ modules/auth/
 ### 5.2 REQ-003 Nodes-Graph
 
 ```
-modules/nodes-graph/
+modules/nodes_graph/
 ├── __init__.py
 ├── domain/
 │   ├── entities/
 │   │   └── node_definition.py          # NodeDefinition
 │   │       # NodeConfig(REQ-012) 확장
 │   │       # 추가 필드: service_type, required_connections (H-4 확정)
-│   │       # 54종 노드 정의의 도메인 표현
+│   │       # 56종 노드 정의의 도메인 표현 (gemma_chat 추가, PR #68 5/15 머지)
+│   ├── catalog/                        # 노드 카탈로그 (30종 구현, PR #30)
+│   │   ├── __init__.py                 # ⚠️ get_all_node_definitions()는 여기 두지 않음
+│   │   │                               #   → application/catalog_registry.py에서 조립
+│   │   ├── data/                       # 데이터 처리 노드
+│   │   │   ├── google_drive.py         # GoogleDriveNode
+│   │   │   ├── google_sheets.py        # GoogleSheetsNode
+│   │   │   └── ...                     # gmail, pdf, http_request 등
+│   │   ├── control/                    # 흐름 제어 노드
+│   │   │   ├── condition.py            # ConditionNode
+│   │   │   ├── delay.py               # DelayNode
+│   │   │   └── ...                     # loop, merge, split 등
+│   │   └── trigger/                    # 트리거 노드
+│   │       ├── webhook.py              # WebhookTriggerNode
+│   │       ├── schedule.py             # ScheduleTriggerNode
+│   │       └── ...
 │   ├── services/
 │   │   ├── graph_validator.py          # GraphValidator (SchemaValidation)
 │   │   │   # WorkflowSchema → ValidationErrorResponse
@@ -294,90 +313,96 @@ modules/nodes-graph/
 │           # search_by_embedding(query, k) → list[NodeDefinition]
 │           # upsert(node_def) → NodeDefinition
 ├── application/
-│   └── use_cases/
-│       ├── validate_graph.py           # ValidateGraphUseCase
-│       │   # WorkflowSchema → ValidationErrorResponse
-│       └── search_nodes.py             # SearchNodesUseCase
-│           # query → list[NodeDefinition] (임베딩 기반)
+│   ├── use_cases/
+│   │   ├── validate_graph.py           # ValidateGraphUseCase
+│   │   │   # WorkflowSchema → ValidationErrorResponse
+│   │   └── search_nodes.py             # SearchNodesUseCase
+│   │       # query → list[NodeDefinition] (임베딩 기반)
+│   └── catalog_registry.py            # CatalogRegistry
+│       # get_all_node_definitions() → list[NodeDefinition]
+│       # domain/catalog/* 개별 노드를 조립하여 반환
+│       # ⚠️ domain/__init__.py에서 adapters import 금지 — 여기서 조립
 └── adapters/
-    └── tool_to_node_wrapper.py         # ToolToNodeWrapper
-        # REQ-005 BaseTool → REQ-003 NodeDefinition 변환
-        # risk_level 매핑 (RiskLevel Enum, M-8 확정)
+    ├── tool_to_node_wrapper.py         # ToolToNodeWrapper
+    │   # REQ-005 BaseTool → REQ-003 NodeDefinition 변환
+    │   # risk_level 매핑 (RiskLevel Enum, M-8 확정)
+    └── catalog/
+        └── external/                   # 외부 서비스 연동 노드 어댑터
+            ├── http_request.py         # HttpRequestAdapter (외부 API 호출)
+            └── pdf_generate.py         # PdfGenerateAdapter (PDF 렌더링)
 ```
 
 **핵심 결정 (교차분석 확정 반영):**
 - WorkflowSchema, NodeInstance, Edge → 자체 정의 삭제, REQ-012 import (H-1)
 - NodeDefinition은 NodeConfig(REQ-012)를 확장하되 모듈 전용 엔티티로 유지 (H-4)
+- `get_all_node_definitions()`는 `domain/catalog/__init__.py`가 아닌 `application/catalog_registry.py`에 배치 (Clean Architecture 위반 방지, PR #30 리뷰 확정)
 
 ---
 
 ### 5.3 REQ-004 AI Agent
 
 ```
-modules/ai-agent/
+modules/ai_agent/                       # Sprint 3 멀티 에이전트 구조 (REQ-004)
 ├── __init__.py
 ├── domain/
 │   ├── entities/
-│   │   ├── memory_entry.py             # MemoryEntry
-│   │   │   # user_id, memory_type, content, source_session_id (M-10)
-│   │   │   # ORM 전용 필드(confidence, usage_count) 미포함
-│   │   └── correction_pattern.py       # CorrectionPattern
-│   │       # 에이전트 자기교정 패턴
+│   │   ├── memory_entry.py             # MemoryEntry (RDB 대화 메모리)
+│   │   ├── conversation_message.py     # ConversationMessage
+│   │   ├── personal_skill.py           # PersonalSkill (Sprint 3 신규)
+│   │   └── skill_node.py               # SkillNode (Sprint 3 신규)
 │   ├── value_objects/
-│   │   └── evaluation_result.py        # EvaluationResult
-│   │       # score, pass_flag, reason, feedback
+│   │   ├── turn_limit.py               # TurnLimit (MAX=25)
+│   │   └── quality_threshold.py        # QualityThreshold (MIN_SCORE=8.0)
 │   ├── services/
-│   │   ├── intent_analyzer.py          # IntentAnalyzerService
-│   │   │   # messages → IntentResult (clarify/draft/refine/propose)
-│   │   │   # importance_score 계산 담당 (M-7 확정)
-│   │   ├── qa_evaluator.py             # QAEvaluatorService
-│   │   │   # LLM-as-a-Judge, score ≥ 8 통과
-│   │   │   # WorkflowSchema → EvaluationResult
-│   │   ├── drafter.py                  # DrafterService
-│   │   │   # IntentResult + NodeCandidates → WorkflowSchema 초안
-│   │   └── onboarding_consultant.py    # OnboardingConsultant (Skills Wizard)
-│   │       # 신규 사용자 온보딩 대화 관리
+│   │   ├── intent_analyzer_service.py  # IntentAnalyzerService
+│   │   ├── drafter_service.py          # DrafterService
+│   │   ├── qa_evaluator_service.py     # QAEvaluatorService (score ≥ 8)
+│   │   └── slot_filling_service.py     # SlotFillingService
 │   └── ports/
-│       ├── agent_memory_repository.py  # AgentMemoryRepository (ABC)
-│       │   # save(entry) → MemoryEntry
-│       │   # search(user_id, query, k) → list[MemoryEntry]
-│       │   # delete(memory_id) → None
-│       ├── node_registry.py            # NodeRegistry (Facade, M-11 확정)
-│       │   # NodeDefinitionRepository를 주입받는 어댑터
-│       │   # search(query, k) → list[NodeConfig]
-│       │   # get_schema(node_type) → dict
-│       └── llm_port.py                 # LLMPort (ABC)
-│           # generate(messages, tools?) → response
-│           # embed(text) → vector
+│       ├── llm_port.py                 # LLMPort (ABC, Gemma 4)
+│       │                               # (EmbedderPort는 nodes_graph/domain/ports에 있음 — ai_agent는 import만, PR #30 5/12 결정)
+│       ├── agent_memory_repository.py  # AgentMemoryRepository (RDB)
+│       ├── personal_memory_store.py    # PersonalMemoryStore (Sprint 3 신규, GCS)
+│       ├── workflow_repository.py      # WorkflowRepository
+│       ├── node_registry.py            # NodeRegistry (Facade)
+│       └── sub_agent_client.py         # SubAgentClient (선택, orchestrator HTTP)
 ├── application/
-│   └── use_cases/
-│       ├── compose_workflow.py         # ComposeWorkflowUseCase
-│       │   # 메인 LangGraph 오케스트레이션 진입점
-│       │   # AgentState 관리, 13 노드 그래프 실행
-│       │   # turn_count ≤ 25 제한 (H-9)
-│       └── onboarding.py              # OnboardingUseCase
-│           # Skills Wizard 세션 관리
-└── adapters/
-    ├── langgraph/
-    │   ├── graph_builder.py            # LangGraph StateGraph 정의
-    │   │   # 13개 AgentNode 연결: security → onboarding → intent
-    │   │   #   → retriever → drafter ↔ validator (max 3) → qa → propose/promote
-    │   ├── nodes/                      # 13개 AgentNode 구현
-    │   │   ├── security_node.py
-    │   │   ├── onboarding_node.py
-    │   │   ├── intent_node.py
-    │   │   ├── retriever_node.py
-    │   │   ├── drafter_node.py
-    │   │   ├── validator_node.py
-    │   │   ├── qa_evaluator_node.py
-    │   │   ├── propose_node.py
-    │   │   └── promote_node.py
-    │   └── checkpointer.py            # LangGraph Checkpointer 설정
-    │       # thread_id = f"{user_id}:{session_id}"
-    └── llm/
-        └── modal_adapter.py           # Modal L4 GPU LLM 클라이언트
-            # Gemma 4 + BGE-M3 호출
+│   └── agents/                         # ⇐ Sprint 3: sub-agent 별로 분리
+│       ├── orchestrator/               # Main Orchestrator (신정혜)
+│       │   └── route_request_use_case.py
+│       ├── workflow_composer/          # Workflow Composer (신정혜)
+│       │   ├── compose_workflow_use_case.py
+│       │   └── continue_conversation_use_case.py
+│       ├── skills_builder/             # Skills Builder (박아름)
+│       │   ├── build_from_sop_use_case.py
+│       │   └── build_from_industry_default_use_case.py
+│       └── personalization/            # Personalization (햄햄/이가원)
+│           ├── load_user_memory_use_case.py
+│           ├── update_user_memory_use_case.py
+│           ├── recall_personal_skills_use_case.py
+│           └── save_memory_use_case.py
+├── adapters/
+│   ├── supervisor.py               # Main Orchestrator — async generator (PR #221)
+│   ├── langgraph/
+│   │   └── composer_graph.py           # Workflow Composer 13-노드 StateGraph
+│   ├── llm/
+│   │   ├── modal_llm_adapter.py        # Modal Gemma 4
+│   │   └── modal_embedding_adapter.py  # Modal BGE-M3 (Sprint 3 신규)
+│   ├── memory/
+│   │   └── gcs_memory_store.py         # PersonalMemoryStore 구현 (Sprint 3 신규)
+│   ├── agent_clients/                  # Orchestrator → sub-agent HTTP (Sprint 3 신규)
+│   │   └── http_sub_agent_client.py
+│   └── node_registry_adapter.py        # nodes_graph Facade
+└── seeds/
+    └── industry_defaults/              # Skills Builder seed (Sprint 3 신규)
+        ├── manufacturing.json
+        ├── service.json
+        ├── wholesale_retail.json
+        ├── food.json
+        └── it.json
 ```
+
+> Sprint 3 (2026-05-11~05-31)에서 ai_agent는 단일 ComposeWorkflowUseCase 구조에서 **Main Orchestrator + 3 Sub-Agent** 멀티 에이전트 구조로 전환되었다. sub-agent는 별도 Modal app으로 배포되며, sub-agent 간 직접 import는 금지되고 HTTP 어댑터(`adapters/agent_clients/`)를 거친다. 상세: `docs/specs/REQ-004-ai-agent.md` §0, §2.
 
 **핵심 의존성 흐름:**
 ```
@@ -449,37 +474,75 @@ modules/toolset/
 ### 5.5 REQ-006 Doc Parser
 
 ```
-modules/doc-parser/
+modules/doc_parser/
 ├── __init__.py
 ├── domain/
 │   ├── entities/
-│   │   └── parser_meta.py              # ParserMeta
-│   │       # parser_name, parser_version, config
+│   │   ├── chunk.py                    # Chunk, ChunkingStrategy
+│   │   │   # ✅ SSOT 확정 (PR #34): common_schemas/document.py에서 import
+│   │   │   # Chunk: block, chunk_index, parent_document_id,
+│   │   │   #        importance_score=None (REQ-004 담당), embedding=None (REQ-004 담당)
+│   │   │   # ChunkingStrategy: max_tokens, overlap_tokens, token_estimator_mode
+│   │   ├── quality.py                  # QualityGateResult, QualityMetrics, QualityConfig
+│   │   │   # ✅ SSOT 확정 (PR #34): QualityGateResult, QualityMetrics → common_schemas/document.py에서 import
+│   │   │   # QualityConfig: 임계값 설정 VO (doc_parser 내부 유지)
+│   │   ├── warning.py                  # WarningInfo, ElapsedDetail
+│   │   │   # ✅ SSOT 확정 (PR #34): WarningInfo → common_schemas/document.py에서 import
+│   │   │   # ElapsedDetail: 파이프라인 단계별 처리 시간 (ms, 내부 유지)
+│   │   └── pii.py                      # PIIMaskRule
+│   │       # pattern, replacement, label (PII 마스킹 규칙)
 │   ├── services/
 │   │   ├── chunking_service.py         # ChunkingService
-│   │   │   # ContentBlock[] → Chunk[] (토큰 기반 분할)
+│   │   │   # DocumentBlock → Chunk[] (토큰 기반 분할)
 │   │   │   # importance_score=None (REQ-004가 나중에 채움, M-7 확정)
-│   │   └── quality_gate.py             # QualityGate
-│   │       # 파싱 품질 검증 (빈 블록 제거, 최소 토큰 수 등)
+│   │   ├── quality_gate.py             # QualityGate
+│   │   │   # evaluate(DocumentBlock, list[Chunk]) → QualityGateResult
+│   │   │   # 임계값은 config/parser_quality.yaml에서 로드
+│   │   ├── normalization.py            # NormalizationService
+│   │   │   # normalize_document(DocumentBlock) → DocumentBlock
+│   │   │   # 파싱 직후, PII 마스킹 이전 실행
+│   │   ├── pii_masking.py              # PIIMaskingService
+│   │   │   # mask_document(DocumentBlock) → (DocumentBlock, list[WarningInfo])
+│   │   │   # 주민번호, 전화번호, 이메일, 계좌, 카드번호 마스킹
+│   │   └── parser_factory.py           # ParserFactory
+│   │       # get(mime_type) → ParserPort (MIME 기반 파서 선택)
 │   └── ports/
-│       └── parser_port.py              # ParserPort (ABC)
-│           # parse(file_bytes, file_meta) → list[ContentBlock]
-│           # supported_types() → list[str]
+│       ├── parser_port.py              # ParserPort (ABC)
+│       │   # parse(file_path: str, file_meta: FileMeta) → DocumentBlock
+│       │   # supports(mime_type: str) → bool
+│       ├── config_port.py              # ConfigLoaderPort (ABC)
+│       │   # load_quality_config() → QualityConfig
+│       │   # load_chunking_strategy() → ChunkingStrategy
+│       │   # load_pii_rules() → list[PIIMaskRule]
+│       └── document_repository_port.py # DocumentRepositoryPort (ABC)
+│           # save(DocumentBlock) → UUID
+│           # save_chunks(list[Chunk]) → None
+│           # save_quality_log(QualityGateResult, document_id: UUID) → None
+│           # ⚠️ 구현체는 storage(REQ-008)에서 제공 — §6.3 참조
 ├── application/
 │   └── use_cases/
 │       ├── parse_document.py           # ParseDocumentUseCase
-│       │   # file → ParserPort.parse() → QualityGate → DocumentBlock
-│       └── extract_chunks.py           # ExtractChunksUseCase
-│           # DocumentBlock → ChunkingService → Chunk[]
-└── adapters/
-    └── parsers/                        # 7개 ParserPort 구현체
-        ├── pdf_parser.py               # PyMuPDF / pdfplumber
-        ├── docx_parser.py              # python-docx
-        ├── xlsx_parser.py              # openpyxl
-        ├── csv_parser.py               # csv stdlib
-        ├── pptx_parser.py              # python-pptx
-        ├── hwp_parser.py               # pyhwp / olefile
-        └── hwpx_parser.py              # lxml (OOXML)
+│       │   # file_path + FileMeta → (DocumentBlock, QualityGateResult)
+│       │   # 파이프라인: 파서 선택 → parse → normalize → PII mask → quality gate
+│       ├── extract_chunks.py           # ExtractChunksUseCase
+│       │   # DocumentBlock → ChunkingService.chunk() → list[Chunk]
+│       └── parsing_pipeline.py         # ParsingPipeline
+│           # 전체 오케스트레이션: parse → normalize → PII → chunk → quality → save
+│           # DocumentRepositoryPort 의존 — DI 시점에 storage 구현체 주입
+├── adapters/
+│   ├── parsers/                        # 8개 ParserPort 구현체
+│   │   ├── pdf_parser.py               # PyMuPDF / pdfplumber
+│   │   ├── docx_parser.py              # python-docx
+│   │   ├── xlsx_parser.py              # openpyxl
+│   │   ├── csv_parser.py               # csv stdlib
+│   │   ├── pptx_parser.py              # python-pptx
+│   │   ├── hwp_parser.py               # pyhwp / olefile
+│   │   ├── hwpx_parser.py              # lxml (OOXML)
+│   │   └── markdown_parser.py          # markdown stdlib
+│   └── config/
+│       └── yaml_config_loader.py       # YamlConfigLoader (ConfigLoaderPort 구현)
+└── config/
+    └── parser_quality.yaml             # 품질 게이트 임계값 설정
 ```
 
 ---
@@ -489,7 +552,7 @@ modules/doc-parser/
 실행 엔진은 `services/`에 위치하지만, 내부적으로 Clean Architecture를 따른다.
 
 ```
-services/execution-engine/
+services/execution_engine/
 ├── src/
 │   ├── domain/
 │   │   ├── services/
@@ -545,45 +608,72 @@ REQ-007 Celery Worker
 
 ## 6. Persistence Adapter — modules/storage/ (REQ-008)
 
-Clean Architecture에서 **Outbound Adapter** 역할. 다른 모듈이 정의한 Repository ABC를 구현한다.
+Clean Architecture에서 **Outbound Adapter** 역할. 다른 모듈이 정의한 Repository ABC를 구현하며, 동시에 파일 스토리지 자체 도메인을 소유한다. (ADR-0010)
 
 ### 6.1 디렉토리 구조
 
 ```
 modules/storage/
 ├── __init__.py
-├── orm/                                # SQLAlchemy ORM 모델 (DB 테이블 1:1)
+├── orm/                                # SQLAlchemy ORM 모델 (DB 전용, 도메인 경계 밖)
 │   ├── __init__.py
-│   ├── user_model.py
+│   ├── base.py                         # DeclarativeBase + 공통 설정
+│   ├── session_factory.py              # AsyncSession 팩토리
 │   ├── workflow_model.py
-│   ├── node_instance_model.py
 │   ├── execution_model.py
 │   ├── session_model.py                # ChatSessionModel (REQ-001)
 │   ├── oauth_connection_model.py
-│   ├── credential_model.py
-│   ├── node_definition_model.py        # 54종 노드 + embedding vector(1024)
+│   ├── node_definition_model.py        # 56종 노드 + embedding vector(768) (gemma_chat 포함, PR #68 5/15 머지)
 │   ├── agent_memory_model.py           # user_id, memory_type (M-10 필드명 통일)
 │   ├── document_model.py
 │   ├── skill_model.py
-│   ├── approval_model.py
-│   ├── notification_model.py
-│   └── audit_log_model.py
-├── repositories/                       # Repository ABC 구현체
+│   ├── storage_object_model.py         # 파일 스토리지 자체 ORM
+│   └── tool_execution_model.py
+├── repositories/                       # Repository ABC 구현체 (pg_* 네이밍)
 │   ├── __init__.py
-│   ├── session_repository.py           # → auth/domain/ports/SessionRepository
-│   ├── oauth_repository.py             # → auth/domain/ports/OAuthConnectionRepository
-│   ├── workflow_repository.py          # → 자체 + execution-engine Port
-│   ├── skill_repository.py             # → 자체 (마켓플레이스)
-│   ├── node_definition_repository.py   # → nodes-graph/domain/ports/NodeDefinitionRepository
-│   ├── agent_memory_repository.py      # → ai-agent/domain/ports/AgentMemoryRepository
-│   ├── document_repository.py          # → 자체
-│   └── execution_repository.py         # → 자체
-├── mappers/                            # ORM ↔ 도메인 엔티티 변환
+│   ├── pg_session_repository.py        # → auth/domain/ports/SessionRepository
+│   ├── pg_oauth_repository.py          # → auth/domain/ports/OAuthConnectionRepository
+│   ├── pg_workflow_repository.py       # → ai_agent/domain/ports/WorkflowRepository
+│   ├── pg_skill_repository.py          # → 자체 (마켓플레이스)
+│   ├── pg_node_definition_repository.py # → nodes_graph/domain/ports/NodeDefinitionRepository
+│   ├── pg_agent_memory_repository.py   # → ai_agent/domain/ports/AgentMemoryRepository
+│   ├── pg_tool_execution_repository.py # → toolset/domain/ports/ToolExecutionRepository
+│   ├── pg_document_repository.py       # → doc_parser (향후)
+│   └── pg_execution_repository.py      # → 자체
+├── mappers/                            # ORM ↔ 도메인 엔티티 변환 (10개 매퍼)
 │   ├── __init__.py
 │   ├── session_mapper.py               # ChatSessionModel ↔ Session
+│   ├── oauth_connection_mapper.py      # OAuthConnectionModel ↔ OAuthConnection
 │   ├── workflow_mapper.py              # WorkflowORM ↔ WorkflowSchema
-│   └── ...                             # 각 엔티티별 매퍼
-├── marketplace/                        # 마켓플레이스 도메인 (REQ-008 고유)
+│   ├── node_definition_mapper.py       # NodeDefinitionModel ↔ NodeDefinition
+│   ├── agent_memory_mapper.py          # AgentMemoryModel ↔ MemoryEntry
+│   ├── tool_execution_mapper.py        # ToolExecutionModel ↔ ToolExecutionRecord
+│   ├── execution_mapper.py             # ExecutionModel ↔ Execution
+│   ├── document_mapper.py              # DocumentModel ↔ DocumentBlock
+│   ├── skill_mapper.py                 # SkillModel ↔ Skill
+│   └── storage_object_mapper.py        # StorageObjectModel ↔ StorageObject
+├── domain/                             # Storage 자체 도메인 (파일 스토리지)
+│   ├── entities/
+│   │   ├── storage_object.py           # StorageObject (파일 메타데이터)
+│   │   ├── upload_policy.py            # UploadPolicy (파일 크기/타입 제한)
+│   │   ├── retention_policy.py         # RetentionPolicy (보관 기간)
+│   │   ├── scan_result.py              # ScanResult (바이러스 검사 결과)
+│   │   └── storage_event.py            # StorageEvent (감사 이벤트)
+│   └── ports/
+│       ├── object_storage_port.py      # ObjectStoragePort (ABC) — GCS/Local 추상화
+│       ├── virus_scan_port.py          # VirusScanPort (ABC) — ClamAV 추상화
+│       └── storage_event_port.py       # StorageEventPort (ABC) — 이벤트 발행
+├── application/                        # Storage 자체 유스케이스
+│   └── use_cases/
+│       ├── upload_file.py              # UploadFileUseCase
+│       ├── download_file.py            # DownloadFileUseCase
+│       ├── delete_file.py              # DeleteFileUseCase
+│       └── cleanup_expired.py          # CleanupExpiredUseCase
+├── adapters/                           # 외부 스토리지 어댑터
+│   ├── gcs_adapter.py                  # GCS ObjectStoragePort 구현
+│   ├── local_storage_adapter.py        # 로컬 파일시스템 (개발용)
+│   └── clamav_adapter.py               # ClamAV VirusScanPort 구현
+├── marketplace/                        # 마켓플레이스 하위 도메인 (REQ-008 고유)
 │   ├── domain/
 │   │   ├── skill_lifecycle.py          # 5-state machine (draft→review→approved→published→archived)
 │   │   └── approval_workflow.py        # 승인 워크플로우
@@ -628,6 +718,27 @@ class SessionMapper:
 - Repository 구현체는 항상 도메인 엔티티를 반환한다
 - 매퍼는 양방향(to_domain / to_orm) 정적 메서드를 제공한다
 
+### 6.3 타 모듈 Port ABC 구현 매핑 (ADR-0010)
+
+| Port (ABC) 정의 위치 | 구현체 (storage/repositories/) |
+|---------------------|-------------------------------|
+| `auth/domain/ports/SessionRepository` | `pg_session_repository.py` |
+| `auth/domain/ports/OAuthConnectionRepository` | `pg_oauth_repository.py` |
+| `nodes_graph/domain/ports/NodeDefinitionRepository` | `pg_node_definition_repository.py` |
+| `ai_agent/domain/ports/AgentMemoryRepository` | `pg_agent_memory_repository.py` |
+| `ai_agent/domain/ports/WorkflowRepository` | `pg_workflow_repository.py` |
+| `toolset/domain/ports/ToolExecutionRepository` | `pg_tool_execution_repository.py` |
+| `doc_parser/domain/ports/DocumentRepositoryPort` | `pg_document_repository.py` |
+
+### 6.4 Storage 자체 도메인
+
+Storage는 단순 Repository 구현체 모음이 아니라, 파일 스토리지 자체 도메인을 가진다:
+
+- **엔티티**: `StorageObject`, `UploadPolicy`, `RetentionPolicy`, `ScanResult`, `StorageEvent`
+- **포트**: `ObjectStoragePort` (GCS/Local 추상화), `VirusScanPort` (ClamAV), `StorageEventPort` (감사 이벤트)
+- **유스케이스**: `UploadFileUseCase`, `DownloadFileUseCase`, `DeleteFileUseCase`, `CleanupExpiredUseCase`
+- **어댑터**: `GCSAdapter` (프로덕션), `LocalStorageAdapter` (개발), `ClamAVAdapter`
+
 ---
 
 ## 7. Inbound Adapters — services/
@@ -635,7 +746,7 @@ class SessionMapper:
 ### 7.1 REQ-009 API Server
 
 ```
-services/api-server/
+services/api_server/
 ├── app/
 │   ├── main.py                         # FastAPI 엔트리포인트
 │   │   # CORS, 미들웨어, 라우터 등록
@@ -665,9 +776,11 @@ services/api-server/
 │   │   ├── cors.py                    # CORS 설정
 │   │   ├── logging.py                 # 요청 로깅
 │   │   └── error_handler.py           # DomainError → HTTP Response 매핑
+│   ├── adapters/
+│   │   └── orchestrator_client.py    # ai_agent Orchestrator Modal app HTTP 어댑터 (Sprint 3 이후)
 │   └── sse/
 │       └── handler.py                 # SSE 스트리밍 핸들러
-│           # AgentState 변경 → SSEFrame 직렬화 → 클라이언트 전송
+│           # Orchestrator Modal app의 text/event-stream을 클라이언트로 패스스루 (PR #38, #46)
 ├── tests/
 ├── Dockerfile
 └── pyproject.toml
@@ -679,7 +792,7 @@ services/api-server/
 - `Depends()`로 Use Case를 주입받아 `execute()` 호출
 
 ```python
-# services/api-server/app/routers/workflows.py 예시
+# services/api_server/app/routers/workflows.py 예시
 
 @router.post("/", response_model=WorkflowResponse)
 async def create_workflow(
@@ -744,23 +857,57 @@ services/frontend/
 
 ### 8.1 database/ (REQ-001)
 
-순수 SQL 계층. Python 코드 의존 없음.
+**순수 SQL 계층** (ADR-0012). DDL + 마이그레이션 도구 + seeds. Python ORM/Repository는 `modules/storage/`가 담당.
 
 ```
 database/
-├── schemas/                            # DDL (15개 SQL 파일)
+├── schemas/                            # DDL (000 추적 + 16 도메인, ADR-0011)
+│   ├── 000_migration_tracking.sql     # schema_migrations 추적 테이블
 │   ├── 001_core.sql                   # users, workflows, executions
 │   ├── ...
-│   └── 015_node_logs_extended.sql
-├── migrations/                         # Alembic
-│   ├── alembic.ini
-│   ├── env.py
-│   └── versions/
+│   └── 016_storage_execution_quality.sql
 ├── seeds/                              # 초기 데이터
-│   └── node_definitions.sql           # 54종 노드 정의
-├── scripts/                            # DB 유틸리티
+│   └── node_definitions.json
+├── scripts/                            # DB 유틸리티 (migrate, diagnose, seed, validate)
 └── tests/                              # SQL 테스트 (pgTAP 등)
 ```
+
+> **현재 잔존**: `database/src/`(ORM/Repository/helpers) 코드는 ADR-0012 follow-up(PR-2a~c)으로 `modules/storage/`로 통째 이전 예정. `protocols.py`(REQ-002 BaseCipher)는 위치 협의 후 결정.
+
+> **변경 이력**:
+> - ADR-0011 (2026-05-14): Alembic 미도입 — raw SQL + `schema_migrations` 추적.
+> - ADR-0012 (2026-05-14, v1→v2 갱신): 초안(v1, PR #62)은 "object storage + RDB Repository 책임 흡수"였으나 cross-module 영향 점검 결과 v2(PR #63)에서 "순수 SQL 계층" 원래 의도 복원 + `modules/storage/`가 영속화 인프라 본부 + `modules/skills_marketplace/` 신규 분리. 자세한 Revision History는 ADR 본문.
+
+### 8.1bis modules/storage/ (REQ-008)
+
+**영속화 인프라**(ADR-0012). RDB ORM/Repository/Mapper + object storage(GCS/ClamAV) adapter + 자체 도메인(`StorageObject` 등). 도메인 모듈의 Port ABC를 구현해 composition root에서 DI로 주입된다.
+
+```
+modules/storage/
+├── domain/                             # StorageObject, UploadPolicy, RetentionPolicy + Ports
+├── application/                        # UploadFileUseCase, DownloadFileUseCase 등
+├── adapters/                           # GCSAdapter, ClamAVAdapter, LocalStorageAdapter
+├── orm/                                # SQLAlchemy ORM (다른 모듈 도메인 엔티티의 RDB 매핑) — SSOT
+├── repositories/                       # 다른 모듈 Port 구현체 (PgSessionRepository 등)
+├── mappers/                            # ORM ↔ 도메인 변환
+└── tests/
+```
+
+### 8.1ter modules/skills_marketplace/ (신규, REQ-013 후보)
+
+**Skills Marketplace 도메인** (ADR-0012, 2026-05-14 신설). 사용자 자동화 스킬 노드의 3계층 lifecycle (personal → team → company 승격). Workflow Composer가 노드/스킬 후보 검토 시 호출.
+
+```
+modules/skills_marketplace/
+├── domain/
+│   ├── entities/                       # PersonalSkill(이름 미정 — 구현 시 결정), TeamSkill, CompanySkill
+│   ├── value_objects/                  # SkillTier, ApprovalDecision
+│   └── ports/                          # SkillRepository, SkillEmbedderPort
+├── application/use_cases/              # PromoteToTeamUseCase, PromoteToCompanyUseCase, SearchSkillsUseCase
+└── tests/
+```
+
+> 본 모듈은 ADR-0012 follow-up(PR-2d)으로 신설. 현재 `modules/storage/marketplace/`에 있는 코드를 분리 이전. `PersonalSkill` 이름은 PR #54의 `ai_agent.PersonalSkill`(사용자 패턴 메모리)과 충돌 — 본 모듈 측이 다른 이름 채택 (PR-2d 시점에 옵션 결정).
 
 ### 8.2 infra/ (REQ-011)
 
@@ -788,15 +935,15 @@ infra/
 ### 9.1 조립 지점 (Composition Root)
 
 DI 조립은 **애플리케이션 진입점**에서만 수행한다:
-- `services/api-server/app/dependencies/` — FastAPI `Depends()`
-- `services/execution-engine/src/dependencies/` — Celery worker 초기화
+- `services/api_server/app/dependencies/` — FastAPI `Depends()`
+- `services/execution_engine/src/dependencies/` — Celery worker 초기화
 
 **도메인과 애플리케이션 계층은 DI 프레임워크를 모른다.**
 
 ### 9.2 DI 흐름 예시
 
 ```
-┌─ services/api-server/app/dependencies/ ─────────────────────────┐
+┌─ services/api_server/app/dependencies/ ─────────────────────────┐
 │                                                                  │
 │  AsyncSession ──────────────────────────────────────┐            │
 │       │                                             │            │
@@ -814,14 +961,14 @@ DI 조립은 **애플리케이션 진입점**에서만 수행한다:
 │       │                                                          │
 │       ▼                                                          │
 │  Router.authenticate(use_case=Depends(...))                      │
-│  (services/api-server/app/routers)                               │
+│  (services/api_server/app/routers)                               │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ### 9.3 코드 예시
 
 ```python
-# services/api-server/app/dependencies/database.py
+# services/api_server/app/dependencies/database.py
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 engine = create_async_engine(os.getenv("DATABASE_URL"))
@@ -831,7 +978,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-# services/api-server/app/dependencies/repositories.py
+# services/api_server/app/dependencies/repositories.py
 from modules.auth.domain.ports.session_repository import SessionRepository
 from modules.storage.repositories.session_repository import PostgresSessionRepository
 
@@ -841,7 +988,7 @@ def get_session_repository(
     return PostgresSessionRepository(db)
 
 
-# services/api-server/app/dependencies/use_cases.py
+# services/api_server/app/dependencies/use_cases.py
 from modules.auth.application.use_cases.authenticate import AuthenticateUseCase
 
 def get_authenticate_use_case(
@@ -863,7 +1010,7 @@ def get_authenticate_use_case(
 ### 10.1 도메인 예외 계층
 
 ```python
-# packages/common-schemas/python/common_schemas/exceptions.py
+# packages/common_schemas/python/common_schemas/exceptions.py
 
 class DomainError(Exception):
     """모든 도메인 예외의 베이스"""
@@ -952,7 +1099,9 @@ ErrorHandler Middleware → DomainError → HTTP Response 매핑
     │   → DraftSpecDeltaFrame → ResultFrame
     ▼
 [5] API Server — SSE Handler (Adapter)
-    │ AgentState → SSEFrame 직렬화 → text/event-stream
+    │ Orchestrator Modal app의 text/event-stream을 클라이언트로 패스스루
+    │ (Sprint 3 PR #38·#46 이후 in-process LangGraph 호출 폐기,
+    │  AgentProtocolRequest/Response 기반 HTTP 어댑터로 분리)
     ▼
 [6] Frontend — SSE Parser
     │ SSEFrame → Zustand store 업데이트
@@ -1052,7 +1201,7 @@ class TestAuthenticateUseCase:
 Workflow_Automation/
 │
 ├── packages/
-│   └── common-schemas/                     # REQ-012 SSOT (최내곽 원)
+│   └── common_schemas/                     # REQ-012 SSOT (최내곽 원)
 │       ├── python/
 │       │   ├── common_schemas/
 │       │   │   ├── __init__.py
@@ -1102,7 +1251,7 @@ Workflow_Automation/
 │   │   │   └── middleware.py
 │   │   └── tests/
 │   │
-│   ├── nodes-graph/                        # REQ-003 Nodes-Graph
+│   ├── nodes_graph/                        # REQ-003 Nodes-Graph
 │   │   ├── __init__.py
 │   │   ├── domain/
 │   │   │   ├── entities/
@@ -1120,43 +1269,29 @@ Workflow_Automation/
 │   │   │   └── tool_to_node_wrapper.py
 │   │   └── tests/
 │   │
-│   ├── ai-agent/                           # REQ-004 AI Agent
+│   ├── ai_agent/                           # REQ-004 AI Agent (Sprint 3 멀티 에이전트)
 │   │   ├── __init__.py
 │   │   ├── domain/
-│   │   │   ├── entities/
-│   │   │   │   ├── memory_entry.py
-│   │   │   │   └── correction_pattern.py
-│   │   │   ├── value_objects/
-│   │   │   │   └── evaluation_result.py
-│   │   │   ├── services/
-│   │   │   │   ├── intent_analyzer.py
-│   │   │   │   ├── qa_evaluator.py
-│   │   │   │   ├── drafter.py
-│   │   │   │   └── onboarding_consultant.py
-│   │   │   └── ports/
-│   │   │       ├── agent_memory_repository.py
-│   │   │       ├── node_registry.py
-│   │   │       └── llm_port.py
+│   │   │   ├── entities/                   # MemoryEntry, ConversationMessage, PersonalSkill, SkillNode
+│   │   │   ├── value_objects/              # TurnLimit, QualityThreshold
+│   │   │   ├── services/                   # IntentAnalyzer, Drafter, QAEvaluator, SlotFilling
+│   │   │   └── ports/                      # LLMPort, AgentMemoryRepository, (EmbedderPort는 nodes_graph 소유),
+│   │   │                                   #   PersonalMemoryStore, WorkflowRepository, NodeRegistry,
+│   │   │                                   #   SubAgentClient(선택)
 │   │   ├── application/
-│   │   │   └── use_cases/
-│   │   │       ├── compose_workflow.py
-│   │   │       └── onboarding.py
+│   │   │   └── agents/                     # ⇐ sub-agent 별로 분리
+│   │   │       ├── orchestrator/           # 신정혜: RouteRequestUseCase
+│   │   │       ├── workflow_composer/      # 신정혜: Compose, ContinueConversation
+│   │   │       ├── skills_builder/         # 박아름: BuildFromSOP, BuildFromIndustryDefault
+│   │   │       └── personalization/        # 햄햄: Load/Update/Recall/SaveMemory
 │   │   ├── adapters/
-│   │   │   ├── langgraph/
-│   │   │   │   ├── graph_builder.py
-│   │   │   │   ├── nodes/
-│   │   │   │   │   ├── security_node.py
-│   │   │   │   │   ├── onboarding_node.py
-│   │   │   │   │   ├── intent_node.py
-│   │   │   │   │   ├── retriever_node.py
-│   │   │   │   │   ├── drafter_node.py
-│   │   │   │   │   ├── validator_node.py
-│   │   │   │   │   ├── qa_evaluator_node.py
-│   │   │   │   │   ├── propose_node.py
-│   │   │   │   │   └── promote_node.py
-│   │   │   │   └── checkpointer.py
-│   │   │   └── llm/
-│   │   │       └── modal_adapter.py
+│   │   │   ├── supervisor.py               # Main Orchestrator (PR #221 — async generator)
+│   │   │   ├── langgraph/                  # composer_graph
+│   │   │   ├── llm/                        # modal_llm_adapter, modal_embedding_adapter
+│   │   │   ├── memory/                     # gcs_memory_store (PersonalMemoryStore 구현)
+│   │   │   ├── agent_clients/              # http_sub_agent_client (orchestrator HTTP)
+│   │   │   └── node_registry_adapter.py
+│   │   ├── seeds/industry_defaults/        # Skills Builder seed (5종 산업)
 │   │   └── tests/
 │   │
 │   ├── toolset/                            # REQ-005 Toolset
@@ -1187,7 +1322,7 @@ Workflow_Automation/
 │   │   │   └── state_manager.py
 │   │   └── tests/
 │   │
-│   ├── doc-parser/                         # REQ-006 Doc Parser
+│   ├── doc_parser/                         # REQ-006 Doc Parser
 │   │   ├── __init__.py
 │   │   ├── domain/
 │   │   │   ├── entities/
@@ -1254,7 +1389,7 @@ Workflow_Automation/
 │       └── tests/
 │
 ├── services/
-│   ├── api-server/                         # REQ-009 Inbound Adapter
+│   ├── api_server/                         # REQ-009 Inbound Adapter
 │   │   ├── app/
 │   │   │   ├── main.py
 │   │   │   ├── routers/
@@ -1288,7 +1423,7 @@ Workflow_Automation/
 │   │   ├── Dockerfile
 │   │   └── pyproject.toml
 │   │
-│   ├── execution-engine/                   # REQ-007 Worker Adapter
+│   ├── execution_engine/                   # REQ-007 Worker Adapter
 │   │   ├── src/
 │   │   │   ├── domain/
 │   │   │   │   ├── services/
@@ -1372,27 +1507,33 @@ Workflow_Automation/
 | `auth/domain/ports/` | `SessionRepository` | `storage/repositories/session_repository.py` |
 | `auth/domain/ports/` | `OAuthConnectionRepository` | `storage/repositories/oauth_repository.py` |
 | `auth/domain/ports/` | `CipherPort` | `auth/adapters/cipher/aesgcm_cipher.py` |
-| `nodes-graph/domain/ports/` | `NodeDefinitionRepository` | `storage/repositories/node_definition_repository.py` |
-| `ai-agent/domain/ports/` | `AgentMemoryRepository` | `storage/repositories/agent_memory_repository.py` |
-| `ai-agent/domain/ports/` | `NodeRegistry` | `ai-agent/adapters/` (내부 Facade, REQ-003 ABC 래핑) |
-| `ai-agent/domain/ports/` | `LLMPort` | `ai-agent/adapters/llm/modal_adapter.py` |
+| `nodes_graph/domain/ports/` | `NodeDefinitionRepository` | `storage/repositories/node_definition_repository.py` |
+| `ai_agent/domain/ports/` | `AgentMemoryRepository` | `storage/repositories/agent_memory_repository.py` |
+| `ai_agent/domain/ports/` | `WorkflowRepository` | `storage/repositories/pg_workflow_repository.py` |
+| `ai_agent/domain/ports/` | `NodeRegistry` | `ai_agent/adapters/node_registry_adapter.py` (Facade, REQ-003 ABC 래핑) |
+| `ai_agent/domain/ports/` | `LLMPort` | `ai_agent/adapters/llm/modal_llm_adapter.py` (Modal Gemma 4) |
+| `nodes_graph/domain/ports/` | `EmbedderPort` | `ai_agent/adapters/llm/modal_embedding_adapter.py` (Modal BGE-M3, Sprint 3, **예외 패턴** — Port 소유 모듈(nodes_graph)이 아닌 외부 모듈(ai_agent)이 구현체 소유. PR #30 2026-05-12 결정) |
+| `ai_agent/domain/ports/` | `PersonalMemoryStore` | `ai_agent/adapters/memory/gcs_memory_store.py` (GCS, Sprint 3 — storage 모듈 경유 X) |
+| `ai_agent/domain/ports/` | `SubAgentClient` (선택) | `ai_agent/adapters/agent_clients/http_sub_agent_client.py` (orchestrator HTTP, Sprint 3) |
 | `toolset/domain/ports/` | `ToolRegistry` | `toolset/adapters/` (내부 등록) |
 | `toolset/domain/ports/` | `SecureConnectorPort` | `toolset/adapters/secure_connector.py` |
-| `doc-parser/domain/ports/` | `ParserPort` | `doc-parser/adapters/parsers/*.py` (7개) |
-| `execution-engine/domain/ports/` | `WorkflowRepositoryPort` | `storage/repositories/workflow_repository.py` |
-| `execution-engine/domain/ports/` | `NodeExecutorPort` | `execution-engine/adapters/sandbox_executor.py` |
-| `execution-engine/domain/ports/` | `TaskQueuePort` | `execution-engine/adapters/celery_adapter.py` |
+| `doc_parser/domain/ports/` | `ParserPort` | `doc_parser/adapters/parsers/*.py` (8개) |
+| `doc_parser/domain/ports/` | `DocumentRepositoryPort` | `storage/repositories/pg_document_repository.py` |
+| `doc_parser/domain/ports/` | `ConfigLoaderPort` | `doc_parser/adapters/config/yaml_config_loader.py` |
+| `execution_engine/domain/ports/` | `WorkflowRepositoryPort` | `storage/repositories/workflow_repository.py` |
+| `execution_engine/domain/ports/` | `NodeExecutorPort` | `execution_engine/adapters/sandbox_executor.py` |
+| `execution_engine/domain/ports/` | `TaskQueuePort` | `execution_engine/adapters/celery_adapter.py` |
 
 ### 14.2 모듈 간 import 방향
 
 ```
-                    common-schemas (REQ-012)
+                    common_schemas (REQ-012)
                     ┌──────┴──────┐
                     ▼             ▼
-               auth (002)    nodes-graph (003)
+               auth (002)    nodes_graph (003)
                ┌──┴──┐          │
                ▼     ▼          ▼
-          ai-agent  toolset   doc-parser
+          ai_agent  toolset   doc_parser
            (004)    (005)      (006)
                │      │         │
                ▼      ▼         ▼
@@ -1400,7 +1541,7 @@ Workflow_Automation/
                     │
           ┌────────┼────────┐
           ▼                 ▼
-    api-server (009)   execution-engine (007)
+    api_server (009)   execution_engine (007)
           │
           ▼
     frontend (010)
@@ -1410,11 +1551,11 @@ Workflow_Automation/
 
 | From → To | 허용 범위 | 예시 |
 |-----------|----------|------|
-| `ai-agent` → `auth` | `domain/ports/` + `domain/services/` | CredentialInjectionService 호출 |
-| `ai-agent` → `nodes-graph` | `domain/ports/` | NodeDefinitionRepository ABC |
-| `ai-agent` → `doc-parser` | `application/use_cases/` | ParseDocumentUseCase (청크 조회) |
-| `execution-engine` → `toolset` | `application/use_cases/` | ExecuteToolUseCase |
-| `execution-engine` → `auth` | `domain/services/` | CredentialInjectionService |
+| `ai_agent` → `auth` | `domain/ports/` + `domain/services/` | CredentialInjectionService 호출 |
+| `ai_agent` → `nodes_graph` | `domain/ports/` | NodeDefinitionRepository ABC |
+| `ai_agent` → `doc_parser` | `application/use_cases/` | ParseDocumentUseCase (청크 조회) |
+| `execution_engine` → `toolset` | `application/use_cases/` | ExecuteToolUseCase |
+| `execution_engine` → `auth` | `domain/services/` | CredentialInjectionService |
 | `storage` → 다른 모듈 `domain/ports/` | ABC만 import (구현 목적) | SessionRepository ABC |
 
 ---
@@ -1427,11 +1568,11 @@ Workflow_Automation/
 
 | 단계 | 작업 | 영향 범위 | 우선순위 |
 |------|------|----------|---------|
-| **1** | `packages/common-schemas/` 내부 파일 구조화 (현재 13개 모듈 → 정리) | REQ-012 | P0 |
+| **1** | `packages/common_schemas/` 내부 파일 구조화 (현재 13개 모듈 → 정리) | REQ-012 | P0 |
 | **2** | `modules/storage/` 에 `orm/`, `repositories/`, `mappers/` 하위 구조 생성 | REQ-008 | P0 |
 | **3** | 각 `modules/*/` 에 `domain/`, `application/`, `adapters/` 3계층 생성 | REQ-002~006 | P0 |
-| **4** | `services/api-server/` 에 `dependencies/`, `middleware/` 구조화 | REQ-009 | P0 |
-| **5** | `services/execution-engine/` 내부 Clean Architecture 적용 | REQ-007 | P0 |
+| **4** | `services/api_server/` 에 `dependencies/`, `middleware/` 구조화 | REQ-009 | P0 |
+| **5** | `services/execution_engine/` 내부 Clean Architecture 적용 | REQ-007 | P0 |
 | **6** | 기존 flat 파일을 각 계층으로 이동 + import 경로 갱신 | 전체 | P1 |
 | **7** | CI에 import 방향 검증 추가 (import-linter 등) | CI/CD | P2 |
 
@@ -1472,14 +1613,14 @@ layers = ["services", "modules", "packages"]
 
 | 용어 | 정의 | 프로젝트 내 위치 |
 |------|------|----------------|
-| **Entity** | 도메인의 핵심 비즈니스 객체 (ID 보유) | `common-schemas/` + `modules/*/domain/entities/` |
-| **Value Object (VO)** | 불변 값 객체 (ID 없음, 동등성으로 비교) | `common-schemas/` + `modules/*/domain/value_objects/` |
+| **Entity** | 도메인의 핵심 비즈니스 객체 (ID 보유) | `common_schemas/` + `modules/*/domain/entities/` |
+| **Value Object (VO)** | 불변 값 객체 (ID 없음, 동등성으로 비교) | `common_schemas/` + `modules/*/domain/value_objects/` |
 | **Domain Service** | 단일 엔티티에 속하지 않는 비즈니스 로직 | `modules/*/domain/services/` |
 | **Port** | 도메인이 정의하는 인터페이스 (ABC) | `modules/*/domain/ports/` |
 | **Adapter** | Port의 구현체 (외부 시스템 연동) | `modules/*/adapters/` + `modules/storage/` |
 | **Use Case** | 하나의 사용자 시나리오를 오케스트레이션 | `modules/*/application/use_cases/` |
 | **DI (Dependency Injection)** | 런타임에 Port에 Adapter를 주입 | `services/*/dependencies/` |
-| **SSOT** | Single Source of Truth (공유 타입 단일 정의) | `packages/common-schemas/` |
+| **SSOT** | Single Source of Truth (공유 타입 단일 정의) | `packages/common_schemas/` |
 | **Mapper** | ORM ↔ 도메인 엔티티 양방향 변환 | `modules/storage/mappers/` |
 
 ---

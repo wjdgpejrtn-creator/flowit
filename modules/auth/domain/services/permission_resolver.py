@@ -1,0 +1,37 @@
+from typing import Literal
+from uuid import UUID
+
+from common_schemas import PermissionSource
+
+from ..entities.user import UserRole
+
+
+class PermissionResolver:
+    def resolve(
+        self,
+        user_id: UUID,
+        role: UserRole,
+        department_id: UUID,
+        session_id: UUID,
+        current_workflow_id: UUID | None = None,
+        current_skill_id: UUID | None = None,
+    ) -> PermissionSource:
+        if role == "Admin":
+            risk_ceiling: Literal["High", "Restricted"] = "Restricted"
+            granted_scopes: list[Literal["Private", "Team", "Public"]] = ["Private", "Team", "Public"]
+        else:
+            # team_manager/company_manager는 스킬 승인 권한만 가지며(SkillApprovalPolicy가 role로 판정),
+            # 워크플로우 scope/risk는 일반 User와 동일하게 둔다 — 의도적 (PR #150 위임2).
+            risk_ceiling = "High"
+            granted_scopes = ["Private"]
+
+        return PermissionSource(
+            user_id=user_id,
+            role=role,
+            department_id=department_id,
+            session_id=session_id,
+            current_workflow_id=current_workflow_id,
+            current_skill_id=current_skill_id,
+            granted_scopes=granted_scopes,
+            risk_ceiling=risk_ceiling,
+        )

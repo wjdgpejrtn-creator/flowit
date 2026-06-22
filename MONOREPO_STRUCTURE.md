@@ -16,7 +16,7 @@
 
 | 항목 | 이점 |
 |---|---|
-| 스키마 일관성 | `packages/common-schemas`를 Python·TypeScript 모두 참조 — 타입 불일치 원천 차단 |
+| 스키마 일관성 | `packages/common_schemas`를 Python·TypeScript 모두 참조 — 타입 불일치 원천 차단 |
 | 원자적 변경 | API 스키마 변경 시 서버·프론트·스키마를 하나의 PR로 처리 |
 | 코드 리뷰 효율 | 서비스 간 영향도를 단일 diff로 확인 |
 | CI/CD 단순화 | 변경된 경로 기반으로 선택적 빌드·배포 |
@@ -38,7 +38,7 @@
 Workflow_Automation/
 │
 ├── packages/
-│   └── common-schemas/                     # REQ-012 SSOT (최내곽 원)
+│   └── common_schemas/                     # REQ-012 SSOT (최내곽 원)
 │       ├── python/
 │       │   ├── common_schemas/
 │       │   │   ├── __init__.py
@@ -50,7 +50,7 @@ Workflow_Automation/
 │       │   │   ├── validation.py           # ValidationErrorResponse, ...
 │       │   │   ├── transport.py            # SSEFrame 계열
 │       │   │   ├── handoff.py              # HandoffPayload, EvaluationResult
-│       │   │   ├── enums.py                # AgentMode, ExecutionStatus, RiskLevel, ErrorCode
+│       │   │   ├── enums.py                # AgentMode, ExecutionStatus, RiskLevel, ErrorCode, IntentType
 │       │   │   └── exceptions.py           # DomainError 계층
 │       │   └── pyproject.toml
 │       ├── typescript/
@@ -76,7 +76,7 @@ Workflow_Automation/
 │   │       ├── unit/{domain,application}/
 │   │       └── integration/adapters/
 │   │
-│   ├── nodes-graph/                        # REQ-003 Nodes-Graph
+│   ├── nodes_graph/                        # REQ-003 Nodes-Graph
 │   │   ├── __init__.py
 │   │   ├── domain/
 │   │   │   ├── entities/                   # NodeDefinition
@@ -90,23 +90,32 @@ Workflow_Automation/
 │   │       ├── unit/{domain,application}/
 │   │       └── integration/adapters/
 │   │
-│   ├── ai-agent/                           # REQ-004 AI Agent
+│   ├── ai_agent/                           # REQ-004 AI Agent (Sprint 3 멀티 에이전트)
 │   │   ├── __init__.py
 │   │   ├── domain/
-│   │   │   ├── entities/                   # MemoryEntry, CorrectionPattern
-│   │   │   ├── value_objects/              # EvaluationResult
-│   │   │   ├── services/                   # IntentAnalyzer, QAEvaluator, Drafter, OnboardingConsultant
-│   │   │   └── ports/                      # AgentMemoryRepository, NodeRegistry, LLMPort (ABC)
+│   │   │   ├── entities/                   # MemoryEntry, ConversationMessage, PersonalSkill, SkillNode
+│   │   │   ├── value_objects/              # TurnLimit, QualityThreshold
+│   │   │   ├── services/                   # IntentAnalyzer, Drafter, QAEvaluator, SlotFilling
+│   │   │   └── ports/                      # LLMPort, AgentMemoryRepository, (EmbedderPort는 nodes_graph 소유),
+│   │   │                                   #   PersonalMemoryStore, WorkflowRepository, NodeRegistry,
+│   │   │                                   #   SubAgentClient(선택)
 │   │   ├── application/
-│   │   │   └── use_cases/                  # ComposeWorkflow, Onboarding
+│   │   │   └── agents/                     # ⇐ sub-agent 별로 분리
+│   │   │       ├── orchestrator/           # 신정혜: RouteRequestUseCase
+│   │   │       ├── workflow_composer/      # 신정혜: Compose, ContinueConversation
+│   │   │       ├── skills_builder/         # 박아름: BuildFromSOP, BuildFromIndustryDefault
+│   │   │       └── personalization/        # 햄햄: Load/Update/Recall/SaveMemory
 │   │   ├── adapters/
-│   │   │   ├── langgraph/
-│   │   │   │   ├── nodes/                  # 13개 AgentNode 구현
-│   │   │   │   └── ...                     # GraphBuilder, Checkpointer
-│   │   │   └── llm/                        # ModalAdapter
+│   │   │   ├── supervisor.py               # Main Orchestrator (PR #221 — async generator)
+│   │   │   ├── langgraph/                  # composer_graph
+│   │   │   ├── llm/                        # modal_llm_adapter, modal_embedding_adapter
+│   │   │   ├── memory/                     # gcs_memory_store (PersonalMemoryStore 구현, GCS)
+│   │   │   ├── agent_clients/              # http_sub_agent_client (orchestrator HTTP)
+│   │   │   └── node_registry_adapter.py
+│   │   ├── seeds/industry_defaults/        # Skills Builder seed (5종 산업)
 │   │   └── tests/
 │   │       ├── conftest.py
-│   │       ├── unit/{domain,application}/
+│   │       ├── unit/{domain,application/{orchestrator,workflow_composer,skills_builder,personalization}}/
 │   │       └── integration/adapters/
 │   │
 │   ├── toolset/                            # REQ-005 Toolset
@@ -124,7 +133,7 @@ Workflow_Automation/
 │   │       ├── unit/{domain,application}/
 │   │       └── integration/adapters/
 │   │
-│   ├── doc-parser/                         # REQ-006 Doc Parser
+│   ├── doc_parser/                         # REQ-006 Doc Parser
 │   │   ├── __init__.py
 │   │   ├── domain/
 │   │   │   ├── entities/                   # ParserMeta
@@ -154,7 +163,7 @@ Workflow_Automation/
 │           └── integration/
 │
 ├── services/
-│   ├── api-server/                         # REQ-009 Inbound Adapter (HTTP → Use Case)
+│   ├── api_server/                         # REQ-009 Inbound Adapter (HTTP → Use Case)
 │   │   ├── app/
 │   │   │   ├── __init__.py
 │   │   │   ├── main.py                     # FastAPI 엔트리포인트
@@ -167,7 +176,7 @@ Workflow_Automation/
 │   │   ├── Dockerfile
 │   │   └── pyproject.toml
 │   │
-│   ├── execution-engine/                   # REQ-007 Worker Adapter (Celery → Use Case)
+│   ├── execution_engine/                   # REQ-007 Worker Adapter (Celery → Use Case)
 │   │   ├── src/
 │   │   │   ├── __init__.py
 │   │   │   ├── domain/
@@ -262,20 +271,20 @@ Workflow_Automation/
 ├─────────────────────────────────────────────────────────────────────┤
 │  Interface Adapters                                                 │
 │                                                                     │
-│  services/api-server/         REQ-009  Inbound (HTTP → Use Case)   │
-│  services/execution-engine/   REQ-007  Inbound (Celery → Use Case) │
+│  services/api_server/         REQ-009  Inbound (HTTP → Use Case)   │
+│  services/execution_engine/   REQ-007  Inbound (Celery → Use Case) │
 │  modules/storage/             REQ-008  Outbound (Use Case → DB)    │
 │  modules/*/adapters/          각 REQ   외부 SDK·프레임워크 래핑      │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Application (Use Cases)                                            │
 │                                                                     │
 │  modules/*/application/       REQ-002~006  유스케이스 오케스트레이션 │
-│  services/execution-engine/   REQ-007      워크플로우 실행 유스케이스 │
+│  services/execution_engine/   REQ-007      워크플로우 실행 유스케이스 │
 │       src/application/                                              │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Domain (Entities)                                                  │
 │                                                                     │
-│  packages/common-schemas/     REQ-012  공유 Entity·VO·Enum (SSOT)  │
+│  packages/common_schemas/     REQ-012  공유 Entity·VO·Enum (SSOT)  │
 │  modules/*/domain/            각 REQ   모듈 전용 도메인 로직         │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -288,16 +297,16 @@ Workflow_Automation/
 |---|---|---|---|
 | REQ-001 | `database/` | 황대원 | P0 |
 | REQ-002 | `modules/auth/` | 박아름 | P0 |
-| REQ-003 | `modules/nodes-graph/` | 박아름 | P0 |
-| REQ-004 | `modules/ai-agent/` | 신정혜 | P0 |
+| REQ-003 | `modules/nodes_graph/` | 박아름 | P0 |
+| REQ-004 | `modules/ai_agent/` | 신정혜 | P0 |
 | REQ-005 | `modules/toolset/` | 햄햄 | P0 |
-| REQ-006 | `modules/doc-parser/` | 김진형 | P0 |
-| REQ-007 | `services/execution-engine/` | TBD | P0 |
+| REQ-006 | `modules/doc_parser/` | 김진형 | P0 |
+| REQ-007 | `services/execution_engine/` | TBD | P0 |
 | REQ-008 | `modules/storage/` | 황대원 | P0 |
-| REQ-009 | `services/api-server/` | 황대원 | P0 |
+| REQ-009 | `services/api_server/` | 황대원 | P0 |
 | REQ-010 | `services/frontend/` | 황동환 | P0 |
 | REQ-011 | `infra/` | 황대원 | P0 |
-| REQ-012 | `packages/common-schemas/` | 황대원 | P0 |
+| REQ-012 | `packages/common_schemas/` | 황대원 | P0 |
 
 ---
 
@@ -355,14 +364,14 @@ gh pr create --base development --title "feat(auth): Google SSO + JWT 구현"
 ```
                     ┌──────────────────────┐
                     │ packages/            │
-                    │   common-schemas/    │  ← 최내곽: 아무것도 import하지 않음
+                    │   common_schemas/    │  ← 최내곽: 아무것도 import하지 않음
                     │   (REQ-012 SSOT)     │     (Pydantic v2만 예외 허용)
                     └──────────┬───────────┘
                                │ import
               ┌────────────────┼────────────────┐
               ▼                ▼                ▼
-    modules/auth/      modules/ai-agent/   modules/doc-parser/
-    modules/nodes-graph/  modules/toolset/
+    modules/auth/      modules/ai_agent/   modules/doc_parser/
+    modules/nodes_graph/  modules/toolset/
       domain/
       ├── ports/  ◄──── 안쪽이 인터페이스 정의
       ├── entities/
@@ -376,8 +385,8 @@ gh pr create --base development --title "feat(auth): Google SSO + JWT 구현"
     modules/storage/             ← Repository 구현체 제공
               │ import
               ▼
-    services/api-server/         ← DI로 조립, HTTP 라우팅
-    services/execution-engine/   ← DI로 조립, Celery 디스패치
+    services/api_server/         ← DI로 조립, HTTP 라우팅
+    services/execution_engine/   ← DI로 조립, Celery 디스패치
               │ import
               ▼
     database/ (SQL)
@@ -392,16 +401,20 @@ gh pr create --base development --title "feat(auth): Google SSO + JWT 구현"
 | `auth/domain/ports/` | `SessionRepository` | `storage/repositories/` |
 | `auth/domain/ports/` | `OAuthConnectionRepository` | `storage/repositories/` |
 | `auth/domain/ports/` | `CipherPort` | `auth/adapters/cipher/` |
-| `nodes-graph/domain/ports/` | `NodeDefinitionRepository` | `storage/repositories/` |
-| `ai-agent/domain/ports/` | `AgentMemoryRepository` | `storage/repositories/` |
-| `ai-agent/domain/ports/` | `NodeRegistry` | `ai-agent/adapters/` |
-| `ai-agent/domain/ports/` | `LLMPort` | `ai-agent/adapters/llm/` |
+| `nodes_graph/domain/ports/` | `NodeDefinitionRepository` | `storage/repositories/` |
+| `ai_agent/domain/ports/` | `AgentMemoryRepository` | `storage/repositories/` |
+| `ai_agent/domain/ports/` | `WorkflowRepository` | `storage/repositories/` |
+| `ai_agent/domain/ports/` | `NodeRegistry` | `ai_agent/adapters/node_registry_adapter.py` (Facade) |
+| `ai_agent/domain/ports/` | `LLMPort` | `ai_agent/adapters/llm/modal_llm_adapter.py` |
+| `nodes_graph/domain/ports/` | `EmbedderPort` | `ai_agent/adapters/llm/modal_embedding_adapter.py` (Sprint 3, **예외 패턴** — Port 소유 모듈(nodes_graph)이 아닌 외부 모듈(ai_agent)이 구현체 소유. PR #30 2026-05-12 결정) |
+| `ai_agent/domain/ports/` | `PersonalMemoryStore` | `ai_agent/adapters/memory/gcs_memory_store.py` (Sprint 3, GCS — storage 경유 X) |
+| `ai_agent/domain/ports/` | `SubAgentClient` (선택) | `ai_agent/adapters/agent_clients/http_sub_agent_client.py` (Sprint 3) |
 | `toolset/domain/ports/` | `ToolRegistry` | `toolset/adapters/` |
 | `toolset/domain/ports/` | `SecureConnectorPort` | `toolset/adapters/` |
-| `doc-parser/domain/ports/` | `ParserPort` | `doc-parser/adapters/parsers/` |
-| `execution-engine/domain/ports/` | `WorkflowRepositoryPort` | `storage/repositories/` |
-| `execution-engine/domain/ports/` | `NodeExecutorPort` | `execution-engine/adapters/` |
-| `execution-engine/domain/ports/` | `TaskQueuePort` | `execution-engine/adapters/` |
+| `doc_parser/domain/ports/` | `ParserPort` | `doc_parser/adapters/parsers/` |
+| `execution_engine/domain/ports/` | `WorkflowRepositoryPort` | `storage/repositories/` |
+| `execution_engine/domain/ports/` | `NodeExecutorPort` | `execution_engine/adapters/` |
+| `execution_engine/domain/ports/` | `TaskQueuePort` | `execution_engine/adapters/` |
 
 ### 6.3 import 규칙
 
@@ -422,7 +435,7 @@ gh pr create --base development --title "feat(auth): Google SSO + JWT 구현"
 | `modules/*/domain/` → SQLAlchemy, FastAPI, Celery | 도메인이 프레임워크에 의존하면 안 됨 |
 | `modules/*/domain/` → `modules/*/adapters/` | 안쪽이 바깥을 모른다 |
 | `modules/*/application/` → 구현체 직접 import | Port 인터페이스로만 참조 |
-| `packages/common-schemas/` → `modules/*` | Foundation은 독립적 |
+| `packages/common_schemas/` → `modules/*` | Foundation은 독립적 |
 | `modules/*` → `services/*` | 순환 의존 방지 |
 
 ---
@@ -456,13 +469,13 @@ modules/{module_name}/
 
 ```
 domain/
-  ├── entities/     ← common-schemas import만 허용
-  ├── value_objects/← common-schemas import만 허용
-  ├── services/     ← entities + value_objects + ports + common-schemas
-  └── ports/        ← entities + value_objects + common-schemas (ABC만 정의)
+  ├── entities/     ← common_schemas import만 허용
+  ├── value_objects/← common_schemas import만 허용
+  ├── services/     ← entities + value_objects + ports + common_schemas
+  └── ports/        ← entities + value_objects + common_schemas (ABC만 정의)
 
 application/
-  └── use_cases/    ← domain/* + common-schemas (ports를 통해서만 외부 접근)
+  └── use_cases/    ← domain/* + common_schemas (ports를 통해서만 외부 접근)
 
 adapters/
   └── ...           ← domain/ports 구현 + 외부 라이브러리 자유 사용
@@ -473,8 +486,8 @@ adapters/
 ## 8. DI (Dependency Injection) 전략
 
 DI 조립은 **애플리케이션 진입점**에서만 수행한다:
-- `services/api-server/app/dependencies/` — FastAPI `Depends()`
-- `services/execution-engine/src/dependencies/` — Celery worker 초기화
+- `services/api_server/app/dependencies/` — FastAPI `Depends()`
+- `services/execution_engine/src/dependencies/` — Celery worker 초기화
 
 **도메인과 애플리케이션 계층은 DI 프레임워크를 모른다.**
 
@@ -484,11 +497,11 @@ DI 조립은 **애플리케이션 진입점**에서만 수행한다:
 
 | 서비스 | 언어 | 프레임워크 | 빌드 | 배포 대상 |
 |---|---|---|---|---|
-| `api-server` | Python 3.11 | FastAPI | pip + Docker | Cloud Run |
-| `execution-engine` | Python 3.11 | Celery + LangGraph | pip + Docker | Cloud Run (Worker) |
+| `api_server` | Python 3.11 | FastAPI | pip + Docker | Cloud Run |
+| `execution_engine` | Python 3.11 | Celery + LangGraph | pip + Docker | Cloud Run (Worker) |
 | `frontend` | TypeScript | Next.js 14 | npm + Docker | Cloud Run |
-| `common-schemas` (Py) | Python 3.11 | Pydantic v2 | pip (editable) | 라이브러리 |
-| `common-schemas` (TS) | TypeScript | — | 자동 생성 | 라이브러리 |
+| `common_schemas` (Py) | Python 3.11 | Pydantic v2 | pip (editable) | 라이브러리 |
+| `common_schemas` (TS) | TypeScript | — | 자동 생성 | 라이브러리 |
 | `database` | SQL | PostgreSQL 16 + pgvector | Alembic | Cloud SQL |
 | `infra` | HCL | Terraform | terraform plan/apply | GCP |
 
@@ -500,8 +513,8 @@ DI 조립은 **애플리케이션 진입점**에서만 수행한다:
 |---|---|---|
 | Cloud Run (4개 서비스) | API Server / Frontend / Worker / Beat | `services/*/Dockerfile` |
 | Cloud SQL (PostgreSQL 16) | 마스터 데이터 (37 테이블) | `database/schemas/` |
-| Memorystore (Redis 7) | 세션 캐시 + Celery 브로커 | `services/execution-engine/` |
-| Modal L4 GPU | Gemma 4 + BGE-M3 호스팅 | `modules/ai-agent/` |
+| Memorystore (Redis 7) | 세션 캐시 + Celery 브로커 | `services/execution_engine/` |
+| Modal L4 GPU | Gemma 4 + BGE-M3 호스팅 | `modules/ai_agent/` |
 | GCS (5개 버킷) | uploads / policy / execution-results / tfstate / backups | `infra/terraform/modules/gcs/` |
 | Secret Manager | 9개 시크릿 (JWT/Fernet/OAuth 등) | `infra/terraform/modules/secret-manager/` |
 
@@ -529,17 +542,17 @@ cp .env.example .env  # 값 채우기
 # 3. 로컬 인프라 (PostgreSQL + Redis)
 docker compose -f infra/docker/docker-compose.dev.yml up -d postgres redis
 
-# 4. Python 환경 (api-server 예시)
+# 4. Python 환경 (api_server 예시)
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -e packages/common-schemas/python
-pip install -e services/api-server[dev]
+pip install -e packages/common_schemas/python
+pip install -e services/api_server[dev]
 
 # 5. DB 스키마 적용
 for f in database/schemas/*.sql; do psql $DATABASE_URL -f "$f"; done
 
 # 6. API 서버 실행
-uvicorn app.main:app --reload --app-dir services/api-server
+uvicorn app.main:app --reload --app-dir services/api_server
 
 # 7. 프론트엔드 (별도 터미널)
 cd services/frontend && npm install && npm run dev
@@ -554,7 +567,7 @@ cd services/frontend && npm install && npm run dev
 ```yaml
 # .github/workflows/ci.yml 에서 paths 필터 활용
 paths:
-  - "services/api-server/**"    → api-server 테스트
+  - "services/api_server/**"    → api_server 테스트
   - "services/frontend/**"      → frontend 빌드·테스트
   - "modules/**"                → 전체 Python 테스트
   - "packages/**"               → 전체 테스트
@@ -579,15 +592,15 @@ release → main       : 안정 병합 (수동)
 *                                   @dhwang0803-glitch @billionaireahreum
 
 # REQ별 소유자
-/packages/common-schemas/           @dhwang0803-glitch
-/services/api-server/               @dhwang0803-glitch
-/services/execution-engine/         # TBD
+/packages/common_schemas/           @dhwang0803-glitch
+/services/api_server/               @dhwang0803-glitch
+/services/execution_engine/         # TBD
 /services/frontend/                 # 황동환 GitHub 계정 추가 예정
 /modules/auth/                      @billionaireahreum
-/modules/nodes-graph/               @billionaireahreum
-/modules/ai-agent/                  # 신정혜 GitHub 계정 추가 예정
+/modules/nodes_graph/               @billionaireahreum
+/modules/ai_agent/                  # 신정혜 GitHub 계정 추가 예정
 /modules/toolset/                   # 햄햄 GitHub 계정 추가 예정
-/modules/doc-parser/                # 김진형 GitHub 계정 추가 예정
+/modules/doc_parser/                # 김진형 GitHub 계정 추가 예정
 /modules/storage/                   @dhwang0803-glitch
 /database/                          @dhwang0803-glitch
 /infra/                             @dhwang0803-glitch
@@ -606,7 +619,7 @@ release → main       : 안정 병합 (수동)
 - `modules/*/domain/` → `modules/*/adapters/` 방향 import 금지 (안쪽 → 바깥 금지)
 - `modules/*/application/` → 구현체 직접 import 금지 (Port 인터페이스만 참조)
 - `modules/` → `services/` 방향의 import 금지 (순환 의존)
-- `packages/common-schemas`에 비즈니스 로직 금지 (순수 데이터 모델만)
+- `packages/common_schemas`에 비즈니스 로직 금지 (순수 데이터 모델만)
 - `database/schemas/`에 Python 코드 금지 (순수 SQL만)
 - 하드코딩된 자격증명 금지 (글로벌 보안 규칙 참조)
 - `main` 브랜치 직접 push 금지

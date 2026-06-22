@@ -1,0 +1,1015 @@
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+from common_schemas import DraftSpec, Edge, NodeConfig, NodeInstance, Position, WorkflowSchema
+from common_schemas.agent import SlotFillingState
+from common_schemas.enums import RiskLevel
+from common_schemas.exceptions import ExecutionError
+
+from ai_agent.domain.ports import LLMPort
+from ai_agent.domain.services.drafter_service import (
+    _EDIT_SYSTEM_PROMPT,
+    DrafterService,
+    _DraftResponse,
+    _EdgeDraft,
+    _EditEdgeDraft,
+    _EditNodeDraft,
+    _EditResponse,
+    _NodeDraft,
+    _NodeParamFill,
+    _ParamFillResponse,
+)
+from ai_agent.domain.services.skeleton_assembler import SkeletonAssembler
+
+
+def _node_config(node_type: str) -> NodeConfig:
+    return NodeConfig(
+        node_id=uuid4(),
+        node_type=node_type,
+        name=node_type,
+        category="test",
+        version="1.0",
+        description="",
+        input_schema={},
+        output_schema={},
+        parameter_schema={},
+        risk_level=RiskLevel.LOW,
+        required_connections=[],
+        is_mvp=True,
+    )
+
+
+def _spec() -> DraftSpec:
+    return DraftSpec(
+        natural_language_intent="test intent",
+        discovered_entities={},
+        unresolved_nodes=[],
+        slot_filling_state=SlotFillingState(asked=[], pending=[], filled={}),
+        consultant_turn_count=0,
+    )
+
+
+def _mock_llm(response: _DraftResponse) -> LLMPort:
+    llm = AsyncMock(spec=LLMPort)
+    llm.generate_structured = AsyncMock(return_value=response)
+    return llm
+
+
+class TestDrafterServiceBuild:
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    def _svc(self, response: _DraftResponse) -> DrafterService:
+        return DrafterService(_mock_llm(response))
+
+    @pytest.mark.asyncio
+    async def test_edges_correctly_mapped_to_instance_ids(self):
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A"), _NodeDraft(node_type="B")],
+            connections=[_EdgeDraft(from_node_type="A", to_node_type="B")],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A"), _node_config("B")]
+        schema = await svc.draft(_spec(), candidates, self.owner_id)
+
+        assert len(schema.connections) == 1
+        edge = schema.connections[0]
+        node_ids = {n.instance_id for n in schema.nodes}
+        assert edge.from_instance_id in node_ids
+        assert edge.to_instance_id in node_ids
+        assert edge.from_instance_id != edge.to_instance_id
+
+    @pytest.mark.asyncio
+    async def test_duplicate_node_type_raises(self):
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A"), _NodeDraft(node_type="A")],
+            connections=[],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A")]
+        with pytest.raises(ExecutionError) as exc_info:
+            await svc.draft(_spec(), candidates, self.owner_id)
+        assert exc_info.value.code == "E_DUPLICATE_NODE_TYPE"
+
+    @pytest.mark.asyncio
+    async def test_unknown_edge_node_type_skipped_with_warning(self, caplog):
+        import logging
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A")],
+            connections=[_EdgeDraft(from_node_type="A", to_node_type="UNKNOWN")],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A")]
+        with caplog.at_level(logging.WARNING):
+            schema = await svc.draft(_spec(), candidates, self.owner_id)
+        assert len(schema.connections) == 0
+        assert "UNKNOWN" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_unknown_node_type_dropped_not_raised(self, caplog):
+        """후보에 없는 node_type은 하드페일(E_UNKNOWN_NODE_TYPE) 대신 drop+경고로 degrade.
+
+        #378 후속 B — 재시도 루프(retriever 재검색)가 돌 기회를 주려면 drafter가 미상
+        node_type에서 즉시 죽으면 안 된다. 해당 노드를 떨구고 진행, QA 게이트가 누락을 잡는다.
+        """
+        import logging
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A"), _NodeDraft(node_type="schedule_trigger")],
+            connections=[_EdgeDraft(from_node_type="schedule_trigger", to_node_type="A")],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A")]  # schedule_trigger는 후보에 없음
+        with caplog.at_level(logging.WARNING):
+            schema = await svc.draft(_spec(), candidates, self.owner_id)
+        # 하드페일 안 함, 알려진 노드만 남고 미상 노드 참조 엣지는 스킵
+        node_ids = {n.node_id for n in schema.nodes}
+        assert node_ids == {candidates[0].node_id}
+        assert len(schema.connections) == 0
+        assert "schedule_trigger" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_dropped_node_types_reported_to_sink(self):
+        """degrade 시 버린 node_type을 dropped_node_types sink에 기록 — 재시도 retriever가
+        그 ground-truth로 재검색하게 한다(#378 후속, QA-LLM 재인지 의존 제거)."""
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A"), _NodeDraft(node_type="email_send")],
+            connections=[],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A")]  # email_send는 후보에 없음 → drop
+        sink: list[str] = []
+        await svc.draft(_spec(), candidates, self.owner_id, dropped_node_types=sink)
+        assert sink == ["email_send"]
+
+    @pytest.mark.asyncio
+    async def test_no_drop_leaves_sink_empty(self):
+        """전부 후보에 있으면 sink는 비어 있다."""
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A")],
+            connections=[],
+        )
+        svc = self._svc(response)
+        sink: list[str] = []
+        await svc.draft(_spec(), [_node_config("A")], self.owner_id, dropped_node_types=sink)
+        assert sink == []
+
+    @pytest.mark.asyncio
+    async def test_connections_included_in_workflow_schema(self):
+        response = _DraftResponse(
+            name="W",
+            nodes=[_NodeDraft(node_type="A"), _NodeDraft(node_type="B"), _NodeDraft(node_type="C")],
+            connections=[
+                _EdgeDraft(from_node_type="A", to_node_type="B"),
+                _EdgeDraft(from_node_type="B", to_node_type="C"),
+            ],
+        )
+        svc = self._svc(response)
+        candidates = [_node_config("A"), _node_config("B"), _node_config("C")]
+        schema = await svc.draft(_spec(), candidates, self.owner_id)
+
+        assert len(schema.connections) == 2
+        assert schema.is_draft is True
+
+
+def _prior_workflow(cfg_a: NodeConfig, cfg_b: NodeConfig) -> WorkflowSchema:
+    ia, ib = uuid4(), uuid4()
+    return WorkflowSchema(
+        workflow_id=uuid4(),
+        name="Prior WF",
+        scope="private",
+        is_draft=False,
+        owner_user_id=uuid4(),
+        nodes=[
+            NodeInstance(
+                instance_id=ia, node_id=cfg_a.node_id,
+                parameters={"url": "https://old.com"}, position=Position(x=0, y=0),
+            ),
+            NodeInstance(
+                instance_id=ib, node_id=cfg_b.node_id,
+                parameters={"channel": "#general"}, position=Position(x=1, y=0),
+            ),
+        ],
+        connections=[Edge(from_instance_id=ia, to_instance_id=ib, from_handle="output", to_handle="input")],
+    )
+
+
+class TestDrafterServiceRefine:
+    """대화형 refine — prior_workflow ref 기반 편집 경로 (C)."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    @pytest.mark.asyncio
+    async def test_prior_workflow_uses_ref_based_edit_prompt(self):
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        llm = _mock_llm(_EditResponse(
+            name="W",
+            nodes=[_EditNodeDraft(ref="n0", node_type="http"), _EditNodeDraft(ref="n1", node_type="slack")],
+            connections=[_EditEdgeDraft(from_ref="n0", to_ref="n1")],
+        ))
+        svc = DrafterService(llm)
+        result = await svc.draft(_spec(), [cfg_a, cfg_b], self.owner_id, prior_workflow=prior)
+        prompt, schema = llm.generate_structured.call_args.args[0], llm.generate_structured.call_args.args[1]
+        assert schema is _EditResponse                  # 편집 경로 = ref 기반 응답 스키마
+        assert _EDIT_SYSTEM_PROMPT in prompt
+        assert "CURRENT WORKFLOW" in prompt
+        assert "https://old.com" in prompt              # 기존 파라미터 보존 컨텍스트
+        assert '"ref": "n0"' in prompt
+        assert len(result.nodes) == 2
+
+    @pytest.mark.asyncio
+    async def test_no_prior_means_fresh_draft_response(self):
+        cfg_a = _node_config("http")
+        llm = _mock_llm(_DraftResponse(name="W", nodes=[_NodeDraft(node_type="http")], connections=[]))
+        svc = DrafterService(llm)
+        await svc.draft(_spec(), [cfg_a], self.owner_id)  # prior 없음 = fresh
+        prompt, schema = llm.generate_structured.call_args.args[0], llm.generate_structured.call_args.args[1]
+        assert schema is _DraftResponse
+        assert "CURRENT WORKFLOW" not in prompt
+
+    def test_serialize_for_edit_assigns_refs_and_maps_connections(self):
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        out = DrafterService._serialize_for_edit(prior, [cfg_a, cfg_b])
+        assert out is not None
+        assert [n["ref"] for n in out["nodes"]] == ["n0", "n1"]
+        assert [n["node_type"] for n in out["nodes"]] == ["http", "slack"]
+        assert out["nodes"][0]["parameters"]["url"] == "https://old.com"
+        assert out["connections"][0]["from_ref"] == "n0"
+        assert out["connections"][0]["to_ref"] == "n1"
+
+    def test_serialize_returns_none_when_node_type_missing(self):
+        # 후보에 slack 없음 → slack node_id 역매핑 불가 → None(fresh 폴백 신호)
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        assert DrafterService._serialize_for_edit(prior, [cfg_a]) is None
+
+    @pytest.mark.asyncio
+    async def test_unmappable_prior_raises_never_regenerates(self):
+        # **편집 잠금(#369)**: prior가 주어지면 절대 fresh로 재생성하지 않는다. 직렬화 불가
+        # (기존 노드가 후보에 없음)면 fresh 폴백 대신 에러 — 사용자가 쌓은 워크플로우를 조용히
+        # 2노드로 갈아엎던 회귀 차단. (정상 경로는 composer가 prior 노드를 후보에 보강해 직렬화 성공.)
+        from common_schemas.exceptions import ExecutionError
+
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        llm = _mock_llm(_DraftResponse(name="W", nodes=[_NodeDraft(node_type="http")], connections=[]))
+        svc = DrafterService(llm)
+        # 후보에 slack 빠짐 → 직렬화 None → fresh 생성 금지, 에러
+        with pytest.raises(ExecutionError) as ei:
+            await svc.draft(_spec(), [cfg_a], self.owner_id, prior_workflow=prior)
+        assert ei.value.code == "E_REFINE_SERIALIZE"
+        llm.generate_structured.assert_not_awaited()  # fresh draft LLM 호출조차 없음
+
+    def test_duplicate_node_type_preserved_via_refs(self):
+        # 동일 node_type 노드 2개도 ref로 구분 → 직렬화/빌드 모두 모호하지 않다(LOW~MED 해소).
+        cfg = _node_config("http")
+        ia, ib = uuid4(), uuid4()
+        prior = WorkflowSchema(
+            workflow_id=uuid4(), name="dup", scope="private", is_draft=False, owner_user_id=uuid4(),
+            nodes=[
+                NodeInstance(
+                    instance_id=ia, node_id=cfg.node_id,
+                    parameters={"url": "https://a.com"}, position=Position(x=0, y=0),
+                ),
+                NodeInstance(
+                    instance_id=ib, node_id=cfg.node_id,
+                    parameters={"url": "https://b.com"}, position=Position(x=1, y=0),
+                ),
+            ],
+            connections=[],
+        )
+        out = DrafterService._serialize_for_edit(prior, [cfg])
+        assert out is not None and [n["ref"] for n in out["nodes"]] == ["n0", "n1"]  # 직렬화 OK
+
+        svc = DrafterService(AsyncMock(spec=LLMPort))
+        built = svc._build_from_edit(
+            _EditResponse(nodes=[
+                _EditNodeDraft(ref="n0", node_type="http", parameters={"url": "https://a.com"}),
+                _EditNodeDraft(ref="n1", node_type="http", parameters={"url": "https://b2.com"}),
+            ]),
+            [cfg],
+            self.owner_id,
+        )
+        assert len(built.nodes) == 2  # 중복 node_type이 raise 없이 2개 인스턴스로 빌드됨
+        assert {n.parameters["url"] for n in built.nodes} == {"https://a.com", "https://b2.com"}
+
+    def test_build_from_edit_rejects_duplicate_ref(self):
+        cfg = _node_config("http")
+        svc = DrafterService(AsyncMock(spec=LLMPort))
+        with pytest.raises(ExecutionError) as exc:
+            svc._build_from_edit(
+                _EditResponse(nodes=[
+                    _EditNodeDraft(ref="n0", node_type="http"),
+                    _EditNodeDraft(ref="n0", node_type="http"),
+                ]),
+                [cfg],
+                self.owner_id,
+            )
+        assert exc.value.code == "E_DUPLICATE_REF"
+
+
+class TestDrafterConnectionExposure:
+    """PR2-A: 후보의 required_connections가 LLM 프롬프트에 노출되는지 검증."""
+
+    @pytest.mark.asyncio
+    async def test_required_connections_passed_to_llm_prompt(self):
+        owner_id = uuid4()
+        response = _DraftResponse(
+            name="W", nodes=[_NodeDraft(node_type="gmail_send")], connections=[]
+        )
+        llm = _mock_llm(response)
+        svc = DrafterService(llm)
+        cfg = _node_config("gmail_send").model_copy(update={"required_connections": ["google"]})
+        await svc.draft(_spec(), [cfg], owner_id)
+
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "required_connections" in prompt
+        assert "google" in prompt
+
+
+class TestDrafterPersonalization:
+    """REQ-004 개인화 배선 — RAG로 회수한 personal_patterns가 drafter 프롬프트에 주입되는지."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    @pytest.mark.asyncio
+    async def test_personal_patterns_injected_into_fresh_prompt(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        svc = DrafterService(llm)
+        await svc.draft(
+            _spec(), [_node_config("slack")], self.owner_id,
+            personal_patterns=["[알림 선호] Slack 알림은 항상 #automation 채널로 보낸다"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "USER PATTERNS" in prompt
+        assert "#automation" in prompt
+
+    @pytest.mark.asyncio
+    async def test_no_patterns_leaves_prompt_unchanged(self):
+        # 개인 패턴 없음(기본값) → USER PATTERNS 블록 미삽입(개인화 미적용 시 무영향).
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "USER PATTERNS" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_personal_patterns_injected_into_edit_prompt(self):
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        llm = _mock_llm(_EditResponse(
+            name="W",
+            nodes=[_EditNodeDraft(ref="n0", node_type="http"), _EditNodeDraft(ref="n1", node_type="slack")],
+            connections=[_EditEdgeDraft(from_ref="n0", to_ref="n1")],
+        ))
+        svc = DrafterService(llm)
+        await svc.draft(
+            _spec(), [cfg_a, cfg_b], self.owner_id, prior_workflow=prior,
+            personal_patterns=["[요약 선호] 보고서는 한국어로 3줄 요약"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert _EDIT_SYSTEM_PROMPT in prompt
+        assert "USER PATTERNS" in prompt
+        assert "3줄 요약" in prompt
+
+
+class TestDrafterRequiredNodes:
+    """#502 근본 — 발화 명시 노드를 "반드시 포함" 하드 지시로 주입하는지(스켈레톤 bail 경로)."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    @pytest.mark.asyncio
+    async def test_required_nodes_present_injected_as_directive(self):
+        # 후보에 실재하는 명시 노드(pdf_generate)는 "MUST include"로 지시된다.
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="pdf_generate")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("pdf_generate"), _node_config("email_send")], self.owner_id,
+            required_node_types=["pdf_generate", "email_send"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "EXPLICITLY REQUESTED" in prompt
+        assert "pdf_generate" in prompt
+        assert "email_send" in prompt
+
+    @pytest.mark.asyncio
+    async def test_required_node_absent_from_candidates_not_instructed(self):
+        # 후보에 없는 node_type은 지시하지 않는다(지시/후보 desync→환각 차단, 스킬바인딩 동일 규칙).
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("slack")], self.owner_id,
+            required_node_types=["pdf_generate"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "EXPLICITLY REQUESTED" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_no_required_leaves_prompt_unchanged(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "EXPLICITLY REQUESTED" not in prompt
+
+
+class TestDrafterSkillBinding:
+    """#372 결함 A — skill_selected 시 LLM 노드 포함을 drafter 프롬프트에 지시하는지."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    @pytest.mark.asyncio
+    async def test_skill_selected_injects_binding_block(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("slack")], self.owner_id, skill_selected=True,
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "SKILL BINDING" in prompt
+        assert 'category is "ai"' in prompt
+
+    @pytest.mark.asyncio
+    async def test_not_selected_leaves_prompt_unchanged(self):
+        # 기본값(skill_selected=False) → SKILL BINDING 블록 미삽입.
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "SKILL BINDING" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_composer_instructions_appended_when_present(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("slack")], self.owner_id,
+            skill_selected=True,
+            skill_composer_instructions="이 스킬은 LLM 노드 + Email 노드를 순서대로 엮어야 합니다.",
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "SKILL BINDING" in prompt
+        assert "Email 노드를 순서대로" in prompt
+
+
+class TestDrafterRefGeneration:
+    """L1b — drafter가 생성한 ${node_type.field} / ${ref.field} 참조를 instance_id로 재작성."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    def _svc(self, response):
+        return DrafterService(_mock_llm(response))
+
+    @pytest.mark.asyncio
+    async def test_fresh_draft_rewrites_node_type_token_to_instance_id(self):
+        response = _DraftResponse(
+            name="W",
+            nodes=[
+                _NodeDraft(node_type="sheets"),
+                _NodeDraft(node_type="summary", parameters={"document_text": "${sheets.values}"}),
+            ],
+            connections=[_EdgeDraft(from_node_type="sheets", to_node_type="summary")],
+        )
+        candidates = [_node_config("sheets"), _node_config("summary")]
+        schema = await self._svc(response).draft(_spec(), candidates, self.owner_id)
+
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        sheets = next(n for n in schema.nodes if type_by_id[n.node_id] == "sheets")
+        summary = next(n for n in schema.nodes if type_by_id[n.node_id] == "summary")
+        assert summary.parameters["document_text"] == f"${{{sheets.instance_id}.values}}"
+
+    @pytest.mark.asyncio
+    async def test_unknown_ref_token_preserved(self):
+        response = _DraftResponse(
+            nodes=[_NodeDraft(node_type="summary", parameters={"x": "${ghost.field}"})],
+            connections=[],
+        )
+        schema = await self._svc(response).draft(_spec(), [_node_config("summary")], self.owner_id)
+        assert schema.nodes[0].parameters["x"] == "${ghost.field}"
+
+    @pytest.mark.asyncio
+    async def test_embedded_ref_rewritten(self):
+        response = _DraftResponse(
+            nodes=[
+                _NodeDraft(node_type="sheets"),
+                _NodeDraft(node_type="slack", parameters={"text": "요약:\n${sheets.summary}"}),
+            ],
+            connections=[_EdgeDraft(from_node_type="sheets", to_node_type="slack")],
+        )
+        candidates = [_node_config("sheets"), _node_config("slack")]
+        schema = await self._svc(response).draft(_spec(), candidates, self.owner_id)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        sheets = next(n for n in schema.nodes if type_by_id[n.node_id] == "sheets")
+        slack = next(n for n in schema.nodes if type_by_id[n.node_id] == "slack")
+        assert slack.parameters["text"] == f"요약:\n${{{sheets.instance_id}.summary}}"
+
+    @pytest.mark.asyncio
+    async def test_catalog_exposes_outputs_to_llm(self):
+        response = _DraftResponse(nodes=[_NodeDraft(node_type="sheets")], connections=[])
+        llm = _mock_llm(response)
+        cfg = _node_config("sheets").model_copy(
+            update={"output_schema": {"properties": {"values": {}, "rows": {}}}}
+        )
+        await DrafterService(llm).draft(_spec(), [cfg], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "outputs" in prompt and "values" in prompt
+
+    @pytest.mark.asyncio
+    async def test_valid_output_field_ref_unchanged(self):
+        # 상류 출력에 실제 존재하는 필드 참조 → 보정 없이 instance_id만 치환되어 보존.
+        response = _DraftResponse(
+            nodes=[
+                _NodeDraft(node_type="sheets"),
+                _NodeDraft(node_type="summary", parameters={"document_text": "${sheets.values}"}),
+            ],
+            connections=[_EdgeDraft(from_node_type="sheets", to_node_type="summary")],
+        )
+        sheets_cfg = _node_config("sheets").model_copy(
+            update={"output_schema": {"properties": {"values": {}, "rows": {}}}}
+        )
+        candidates = [sheets_cfg, _node_config("summary")]
+        schema = await self._svc(response).draft(_spec(), candidates, self.owner_id)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        sheets = next(n for n in schema.nodes if type_by_id[n.node_id] == "sheets")
+        summary = next(n for n in schema.nodes if type_by_id[n.node_id] == "summary")
+        assert summary.parameters["document_text"] == f"${{{sheets.instance_id}.values}}"
+
+    @pytest.mark.asyncio
+    async def test_invalid_field_remapped_when_single_output(self):
+        # 환각 필드(.output)인데 상류 출력이 단일(result) → result로 보정.
+        response = _DraftResponse(
+            nodes=[
+                _NodeDraft(node_type="gen"),
+                _NodeDraft(node_type="summary", parameters={"document_text": "${gen.output}"}),
+            ],
+            connections=[_EdgeDraft(from_node_type="gen", to_node_type="summary")],
+        )
+        gen_cfg = _node_config("gen").model_copy(
+            update={"output_schema": {"properties": {"result": {}}}}
+        )
+        candidates = [gen_cfg, _node_config("summary")]
+        schema = await self._svc(response).draft(_spec(), candidates, self.owner_id)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        gen = next(n for n in schema.nodes if type_by_id[n.node_id] == "gen")
+        summary = next(n for n in schema.nodes if type_by_id[n.node_id] == "summary")
+        assert summary.parameters["document_text"] == f"${{{gen.instance_id}.result}}"
+
+    @pytest.mark.asyncio
+    async def test_invalid_field_preserved_with_warning_when_multi_output(self, caplog):
+        # 재현 케이스: 환각 필드(.values)인데 상류 출력이 다중 → 보정 불가, 보존 + 경고.
+        import logging
+        response = _DraftResponse(
+            nodes=[
+                _NodeDraft(node_type="sched"),
+                _NodeDraft(node_type="summary", parameters={"document_text": "${sched.values}"}),
+            ],
+            connections=[_EdgeDraft(from_node_type="sched", to_node_type="summary")],
+        )
+        sched_cfg = _node_config("sched").model_copy(
+            update={"output_schema": {"properties": {"scheduled_at": {}, "channel_breakdown": {}}}}
+        )
+        candidates = [sched_cfg, _node_config("summary")]
+        with caplog.at_level(logging.WARNING):
+            schema = await self._svc(response).draft(_spec(), candidates, self.owner_id)
+        type_by_id = {c.node_id: c.node_type for c in candidates}
+        sched = next(n for n in schema.nodes if type_by_id[n.node_id] == "sched")
+        summary = next(n for n in schema.nodes if type_by_id[n.node_id] == "summary")
+        assert summary.parameters["document_text"] == f"${{{sched.instance_id}.values}}"
+        assert "보정 불가" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_prompt_drops_biasing_values_example(self):
+        # `.values` 하드코딩 예시가 프롬프트에서 제거됐는지(편향 방지) 회귀 가드.
+        response = _DraftResponse(nodes=[_NodeDraft(node_type="sheets")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("sheets")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "google_sheets_read.values" not in prompt
+        assert "VERBATIM" in prompt
+
+
+class TestDrafterMotifBlock:
+    """ADR-0026 Phase 2 — pattern_templates가 drafter 프롬프트에 모티프 블록으로 주입되는지."""
+
+    def setup_method(self):
+        self.owner_id = uuid4()
+
+    def _pattern(self, name: str, role_slots: dict):
+        from ai_agent.domain.value_objects.ontology import PatternTemplate
+
+        return PatternTemplate(name=name, intent="검증", role_slots=role_slots)
+
+    @pytest.mark.asyncio
+    async def test_loop_motif_injects_back_edge_with_handles(self):
+        """quality_gate_loop 패턴 시 BACK-EDGE + from_handle 지시가 프롬프트에 포함된다 (이슈 #406 HIGH)."""
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        patterns = [self._pattern("quality_gate_loop", {"generator": ("gemma_chat",), "evaluator": ("if_condition",)})]
+        await DrafterService(llm).draft(
+            _spec(), [_node_config("slack")], self.owner_id, pattern_templates=patterns,
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "WORKFLOW MOTIFS" in prompt
+        assert "quality_gate_loop" in prompt
+        assert "BACK-EDGE" in prompt
+        assert "LOOP" in prompt
+        # false/true handle guidance — BranchEvaluator가 handle 값으로 루프 gate 결정
+        assert "false" in prompt
+        assert "true" in prompt
+        # 단일 ai 노드 규칙 — 두 번째 gemma_chat 추가 금지 지시
+        assert "do NOT add a second" in prompt
+
+    @pytest.mark.asyncio
+    async def test_loops_section_has_handle_guidance(self):
+        """_SYSTEM_PROMPT의 LOOPS 섹션에 from_handle="false"/"true" 지시가 포함된다 (HIGH fix)."""
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "LOOPS" in prompt
+        assert "back-edge" in prompt
+        assert 'from_handle="false"' in prompt
+        assert 'from_handle="true"' in prompt
+
+    @pytest.mark.asyncio
+    async def test_no_motif_block_when_no_patterns(self):
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "WORKFLOW MOTIFS" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_edit_prompt_also_has_loops_section(self):
+        """편집 경로(_EDIT_SYSTEM_PROMPT)에도 LOOPS 섹션이 있다 (MED fix)."""
+        cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+        prior = _prior_workflow(cfg_a, cfg_b)
+        patterns = [self._pattern("quality_gate_loop", {"generator": ("gemma_chat",), "evaluator": ("if_condition",)})]
+        llm = _mock_llm(_EditResponse(
+            name="W",
+            nodes=[_EditNodeDraft(ref="n0", node_type="http"), _EditNodeDraft(ref="n1", node_type="slack")],
+            connections=[],
+        ))
+        await DrafterService(llm).draft(
+            _spec(), [cfg_a, cfg_b], self.owner_id, prior_workflow=prior, pattern_templates=patterns,
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert _EDIT_SYSTEM_PROMPT in prompt
+        assert "LOOPS" in prompt
+        assert "BACK-EDGE" in prompt
+        assert "WORKFLOW MOTIFS" in prompt
+
+    def test_parity_loop_edges_have_correct_handles(self):
+        """_motif_block()이 [false]/[true] handle을 명시한다 (parity — BranchEvaluator 계약)."""
+        from ai_agent.domain.value_objects.ontology import PatternTemplate
+
+        pt = PatternTemplate(
+            name="quality_gate_loop", intent="검증",
+            role_slots={"generator": ("gemma_chat",), "evaluator": ("if_condition",)},
+        )
+        block = DrafterService._motif_block([pt])
+        assert "[false]" in block
+        assert "[true]" in block
+        assert "BACK-EDGE" in block
+
+    def test_motif_block_static_empty_when_no_slots(self):
+        patterns = [self._pattern("no_slots_pattern", {})]
+        block = DrafterService._motif_block(patterns)
+        assert block == ""
+
+    def test_motif_block_static_empty_when_none(self):
+        assert DrafterService._motif_block(None) == ""
+
+    def test_non_loop_motif_uses_simple_slot_format(self):
+        """루프 패턴이 아닌 일반 모티프는 슬롯 목록만 출력한다."""
+        from ai_agent.domain.value_objects.ontology import PatternTemplate
+
+        pt = PatternTemplate(name="unknown_pattern", intent="기타", role_slots={"step": ("some_node",)})
+        block = DrafterService._motif_block([pt])
+        assert "BACK-EDGE" not in block
+        assert "unknown_pattern" in block
+        assert "step" in block
+
+    def test_any_generator_evaluator_pattern_treated_as_loop(self):
+        """이름에 무관하게 generator+evaluator 슬롯이 있으면 LOOP 패턴으로 취급한다 (LOW fix)."""
+        from ai_agent.domain.value_objects.ontology import PatternTemplate
+
+        pt = PatternTemplate(
+            name="some_custom_loop", intent="재시도",
+            role_slots={"generator": ("llm_node",), "evaluator": ("check_node",)},
+        )
+        block = DrafterService._motif_block([pt])
+        assert "LOOP" in block
+        assert "BACK-EDGE" in block
+        assert "some_custom_loop" in block
+
+    @pytest.mark.asyncio
+    async def test_or_condition_single_node_guidance_in_prompt(self):
+        """MULTIPLE CONDITIONS 지시가 SYSTEM_PROMPT에 있어 OR 조건 중복(if_condition 중복) 방지를 안내한다."""
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="slack")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), [_node_config("slack")], self.owner_id)
+        prompt = llm.generate_structured.call_args.args[0]
+        assert "MULTIPLE CONDITIONS" in prompt
+        assert "SINGLE" in prompt
+
+
+def _node_config_cat(node_type: str, category: str) -> NodeConfig:
+    """category를 지정할 수 있는 _node_config 변형 (캡 우선순위 테스트용)."""
+    cfg = _node_config(node_type)
+    return cfg.model_copy(update={"category": category})
+
+
+class TestDrafterCandidateCap:
+    """프롬프트 다이어트 캡(#413)이 보장 노드(ai 바인딩 대상·구조 노드)를 드롭하지 않는다 — 리뷰 MED #1."""
+
+    @pytest.mark.asyncio
+    async def test_cap_preserves_ai_and_structural_at_tail(self):
+        # 호출부(composer)는 ai/구조 노드를 후보 풀 '끝'에 덧붙인다 → 순서 무지 슬라이스면 1순위 드롭.
+        rest = [_node_config_cat(f"action{i}", "action") for i in range(25)]
+        ai_node = _node_config_cat("llm_generate", "ai")
+        trigger_node = _node_config_cat("webhook", "trigger")
+        candidates = [*rest, ai_node, trigger_node]  # 보장 노드가 맨 끝
+
+        response = _DraftResponse(name="W", nodes=[_NodeDraft(node_type="llm_generate")], connections=[])
+        llm = _mock_llm(response)
+        await DrafterService(llm).draft(_spec(), candidates, uuid4())
+
+        prompt = llm.generate_structured.call_args.args[0]
+        # 보장 노드는 캡 후에도 카탈로그(프롬프트)에 살아남는다
+        assert "llm_generate" in prompt
+        assert "webhook" in prompt
+        # 캡 초과분(rest 꼬리)은 드롭된다 — 우선 2건 보존 + rest 18건 = 20건
+        assert "action24" not in prompt
+        assert "action0" in prompt
+
+    @pytest.mark.asyncio
+    async def test_cap_preserves_prior_workflow_nodes(self):
+        # **#369 회귀**: refine 편집 시 prior 워크플로우 노드(비-우선 카테고리)가 후보 풀 '끝'에
+        # 덧붙는데, 순서 무지 캡이 1순위로 떨궜다 → _serialize_for_edit이 못 찾아 E_REFINE_SERIALIZE.
+        # 이제 prior 노드는 카테고리 무관 캡에서 보존되어 편집이 성공한다.
+        cfg_a = _node_config_cat("google_sheets_read", "integration")  # 비-우선 카테고리
+        cfg_b = _node_config_cat("slack_send", "action")               # 비-우선 카테고리
+        prior = _prior_workflow(cfg_a, cfg_b)
+        filler = [_node_config_cat(f"action{i}", "action") for i in range(25)]
+        candidates = [*filler, cfg_a, cfg_b]  # prior 노드가 맨 끝 (augment가 덧붙이는 위치)
+
+        llm = _mock_llm(_EditResponse(
+            name="W",
+            nodes=[
+                _EditNodeDraft(ref="n0", node_type="google_sheets_read"),
+                _EditNodeDraft(ref="n1", node_type="slack_send"),
+            ],
+            connections=[_EditEdgeDraft(from_ref="n0", to_ref="n1")],
+        ))
+        # 캡이 prior 노드를 떨구면 직렬화 None → E_REFINE_SERIALIZE. 보존 시 편집 성공.
+        result = await DrafterService(llm).draft(_spec(), candidates, uuid4(), prior_workflow=prior)
+        assert len(result.nodes) == 2
+        node_ids = {n.node_id for n in result.nodes}
+        assert cfg_a.node_id in node_ids and cfg_b.node_id in node_ids
+
+
+@pytest.mark.asyncio
+async def test_refine_rewrites_ref_token_to_instance_id():
+    """L1b refine 경로 — _build_from_edit가 ${<ref>.<field>}를 instance_id로 재작성."""
+    cfg_a, cfg_b = _node_config("http"), _node_config("slack")
+    prior = _prior_workflow(cfg_a, cfg_b)
+    llm = _mock_llm(_EditResponse(
+        name="W",
+        nodes=[
+            _EditNodeDraft(ref="n0", node_type="http"),
+            _EditNodeDraft(ref="n1", node_type="slack", parameters={"text": "${n0.body}"}),
+        ],
+        connections=[_EditEdgeDraft(from_ref="n0", to_ref="n1")],
+    ))
+    result = await DrafterService(llm).draft(_spec(), [cfg_a, cfg_b], uuid4(), prior_workflow=prior)
+
+    http_id = next(n.instance_id for n in result.nodes if n.node_id == cfg_a.node_id)
+    slack = next(n for n in result.nodes if n.node_id == cfg_b.node_id)
+    assert slack.parameters["text"] == f"${{{http_id}.body}}"
+
+
+class TestScaffoldParamFill:
+    """ADR-0026 §6.6: 스켈레톤 scaffold 경로 — 구조는 코드 결정, LLM은 파라미터만."""
+
+    def _scaffold_and_candidates(self, utterance: str):
+        scaffold = SkeletonAssembler().assemble(utterance)
+        assert scaffold is not None
+        node_types = list(dict.fromkeys(n.node_type for n in scaffold.nodes))
+        return scaffold, [_node_config(nt) for nt in node_types]
+
+    @pytest.mark.asyncio
+    async def test_structure_deterministic_params_from_llm(self):
+        scaffold, candidates = self._scaffold_and_candidates(
+            "매주 시트 읽어서 요약해서 슬랙으로 보내줘"
+        )
+        first_ref = scaffold.nodes[0].ref
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured = AsyncMock(
+            return_value=_ParamFillResponse(
+                name="주간요약", nodes=[_NodeParamFill(ref=first_ref, parameters={"cron": "0 9 * * 1"})]
+            )
+        )
+        wf = await DrafterService(llm).draft(_spec(), candidates, uuid4(), skeleton_scaffold=scaffold)
+
+        # 구조는 scaffold 그대로(결정적) — LLM은 파라미터만.
+        assert len(wf.nodes) == len(scaffold.nodes)
+        assert len(wf.connections) == len(scaffold.edges)
+        assert wf.name == "주간요약"
+        assert any(n.parameters.get("cron") == "0 9 * * 1" for n in wf.nodes)
+        # 파라미터 채움 전용 스키마로 호출됐는지(구조 생성 LLM 아님).
+        assert llm.generate_structured.call_args.args[1] is _ParamFillResponse
+
+    @pytest.mark.asyncio
+    async def test_personal_patterns_injected_into_scaffold_prompt(self):
+        # 회귀(데모): scaffold(param-fill) 경로도 일반 draft와 동일하게 personal_patterns를
+        # 주입해야 한다. 누락 시 "매주…요일"처럼 스켈레톤에 걸리는 발화에서 개인화(빈 파라미터
+        # 채움)가 조용히 사라진다 — flowit01 미적용 버그.
+        scaffold, candidates = self._scaffold_and_candidates(
+            "매주 월요일 9시에 광고 시트를 읽어서 요약하고 슬랙으로 보내줘"
+        )
+        first_ref = scaffold.nodes[0].ref
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured = AsyncMock(
+            return_value=_ParamFillResponse(nodes=[_NodeParamFill(ref=first_ref, parameters={})])
+        )
+        await DrafterService(llm).draft(
+            _spec(), candidates, uuid4(), skeleton_scaffold=scaffold,
+            personal_patterns=["[광고 시트 ID] spreadsheet_id는 항상 flowit01"],
+        )
+        prompt = llm.generate_structured.call_args.args[0]
+        assert llm.generate_structured.call_args.args[1] is _ParamFillResponse  # scaffold 경로 확인
+        assert "USER PATTERNS" in prompt
+        assert "flowit01" in prompt
+
+    @pytest.mark.asyncio
+    async def test_llm_cannot_alter_structure(self):
+        # LLM이 엉뚱한 ref/노드를 반환해도 구조는 불변(코드가 만든 인스턴스에만 적용).
+        scaffold, candidates = self._scaffold_and_candidates("웹훅 들어오면 분석해서 이메일로")
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured = AsyncMock(
+            return_value=_ParamFillResponse(nodes=[_NodeParamFill(ref="GHOST_ref", parameters={"x": 1})])
+        )
+        wf = await DrafterService(llm).draft(_spec(), candidates, uuid4(), skeleton_scaffold=scaffold)
+        assert len(wf.nodes) == len(scaffold.nodes)
+        assert all("x" not in n.parameters for n in wf.nodes)  # 유령 ref 무시
+
+    @pytest.mark.asyncio
+    async def test_param_fill_failure_falls_back_to_normal_draft(self):
+        scaffold, candidates = self._scaffold_and_candidates("매주 시트 읽어서 요약해서 슬랙으로")
+        candidates = [*candidates, _node_config("A")]
+        llm = AsyncMock(spec=LLMPort)
+        llm.generate_structured = AsyncMock(side_effect=[
+            RuntimeError("param-fill boom"),                       # scaffold 경로 실패
+            _DraftResponse(name="fallback", nodes=[_NodeDraft(node_type="A")], connections=[]),
+        ])
+        wf = await DrafterService(llm).draft(_spec(), candidates, uuid4(), skeleton_scaffold=scaffold)
+        # 일반 LLM draft로 폴백 — 두 번째 응답이 반영됨.
+        assert wf.name == "fallback"
+        assert llm.generate_structured.await_count == 2
+
+
+class TestWireArtifactAttachments:
+    """산출물(pdf_generate)→발송(email_send) 연결 시 attachments 결정적 배선 (2026-06-16 데모)."""
+
+    def _wf(self, pdf_type="pdf_generate", email_type="email_send", existing=None):
+        import uuid as _uuid
+        from common_schemas import NodeInstance, Position, WorkflowSchema
+        from common_schemas.workflow import Edge
+        self._pdf_nid, self._email_nid = _uuid.uuid4(), _uuid.uuid4()
+        pi, ei = _uuid.uuid4(), _uuid.uuid4()
+        self._email_inst = ei
+        eparams = {"subject": "s", "body": "b"}
+        if existing is not None:
+            eparams["attachments"] = existing
+        wf = WorkflowSchema(
+            workflow_id=_uuid.uuid4(), name="T", scope="private", is_draft=True,
+            owner_user_id=_uuid.uuid4(),
+            nodes=[
+                NodeInstance(instance_id=pi, node_id=self._pdf_nid, parameters={"title": "r"},
+                             position=Position(x=0, y=0)),
+                NodeInstance(instance_id=ei, node_id=self._email_nid, parameters=eparams,
+                             position=Position(x=1, y=0)),
+            ],
+            connections=[Edge(from_instance_id=pi, to_instance_id=ei,
+                              from_handle="output", to_handle="input")],
+        )
+        self._pdf_inst = pi
+        return wf, {self._pdf_nid: pdf_type, self._email_nid: email_type}
+
+    def _email_node(self, wf):
+        return next(n for n in wf.nodes if n.node_id == self._email_nid)
+
+    def test_pdf_to_email_wires_attachment(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf()
+        out = DrafterService.wire_artifact_attachments(wf, tmap)
+        atts = self._email_node(out).parameters["attachments"]
+        assert atts == [{
+            "filename": "report.pdf",
+            "content_base64": f"${{{self._pdf_inst}.pdf_bytes}}",
+            "mimetype": "application/pdf",
+        }]
+
+    def test_artifact_edge_overrides_llm_attachments(self):
+        # 산출물 엣지가 있으면 LLM이 채운 잘못된 형식(예: 문자열 리스트)을 결정적 구조로 override.
+        # 스키마 노출 후 drafter가 attachments=["${...}"] 처럼 채우면 런타임 실행기가 깨지므로 교정.
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(existing=[f"${{{uuid4()}.pdf_bytes}}"])  # LLM 오형식(문자열 리스트)
+        out = DrafterService.wire_artifact_attachments(wf, tmap)
+        atts = self._email_node(out).parameters["attachments"]
+        assert atts == [{
+            "filename": "report.pdf",
+            "content_base64": f"${{{self._pdf_inst}.pdf_bytes}}",
+            "mimetype": "application/pdf",
+        }]
+
+    def test_non_artifact_source_preserves_existing(self):
+        # 산출물 소스 엣지가 없으면 기존 attachments를 건드리지 않는다.
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(pdf_type="gmail_read", existing=[{"content_base64": "X"}])
+        out = DrafterService.wire_artifact_attachments(wf, tmap)
+        assert self._email_node(out).parameters["attachments"] == [{"content_base64": "X"}]
+
+    def test_non_artifact_source_no_attachment(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(pdf_type="gmail_read")  # 산출물 아님
+        out = DrafterService.wire_artifact_attachments(wf, tmap)
+        assert "attachments" not in self._email_node(out).parameters
+
+    def test_non_email_sink_skipped(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(email_type="slack_post_message")  # 발송 sink 아님
+        out = DrafterService.wire_artifact_attachments(wf, tmap)
+        assert "attachments" not in self._email_node(out).parameters
+
+
+class TestWrapPdfSections:
+    """pdf_generate.sections의 bare 스칼라 원소 → {body} 객체 결정적 래핑 (E_NODE_TYPE_MISMATCH 차단)."""
+
+    def _wf(self, sections, pdf_type="pdf_generate"):
+        import uuid as _uuid
+        nid, inst = _uuid.uuid4(), _uuid.uuid4()
+        self._pdf_node_id = nid
+        wf = WorkflowSchema(
+            workflow_id=_uuid.uuid4(), name="T", scope="private", is_draft=True,
+            owner_user_id=_uuid.uuid4(),
+            nodes=[NodeInstance(instance_id=inst, node_id=nid,
+                                parameters={"title": "r", "sections": sections},
+                                position=Position(x=0, y=0))],
+            connections=[],
+        )
+        return wf, {nid: pdf_type}
+
+    def _pdf(self, wf):
+        return next(n for n in wf.nodes if n.node_id == self._pdf_node_id)
+
+    def test_bare_ref_wrapped_into_body_object(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        ref = "${" + str(uuid4()) + ".content}"
+        wf, tmap = self._wf([ref])
+        out = DrafterService.wrap_pdf_sections(wf, tmap)
+        # 스칼라 참조가 {"body": ref}로 감싸지고 ${...} 참조는 보존(런타임 ReferenceResolver가 해소)
+        assert self._pdf(out).parameters["sections"] == [{"body": ref}]
+
+    def test_object_elements_preserved_no_change(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        secs = [{"heading": "H", "body": "B"}]
+        wf, tmap = self._wf(secs)
+        out = DrafterService.wrap_pdf_sections(wf, tmap)
+        assert self._pdf(out).parameters["sections"] == secs
+        assert out is wf  # 변경 없음 → 원본 그대로 반환
+
+    def test_mixed_wraps_only_scalars(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(["스칼라 본문", {"heading": "H", "body": "B"}, None])
+        out = DrafterService.wrap_pdf_sections(wf, tmap)
+        assert self._pdf(out).parameters["sections"] == [
+            {"body": "스칼라 본문"}, {"heading": "H", "body": "B"}, None,
+        ]
+
+    def test_non_pdf_node_untouched(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf(["x"], pdf_type="gmail_send")  # sections 객체배열 노드 아님
+        out = DrafterService.wrap_pdf_sections(wf, tmap)
+        assert self._pdf(out).parameters["sections"] == ["x"]
+
+    def test_non_list_sections_untouched(self):
+        from ai_agent.domain.services.drafter_service import DrafterService
+        wf, tmap = self._wf("리스트 아님")
+        out = DrafterService.wrap_pdf_sections(wf, tmap)
+        assert self._pdf(out).parameters["sections"] == "리스트 아님"
